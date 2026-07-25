@@ -261,3 +261,9 @@ python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb
 - [CONTRIBUTING.md](CONTRIBUTING.md)：分支模型、提交规范、PR 自查清单
 - [CHANGELOG.md](CHANGELOG.md)
 - [docs/M1-CONTRACTS.md](docs/M1-CONTRACTS.md)：M1 各仓库实现的唯一共同契约
+
+## 文档
+
+- [知识库需求文档（v1.9，唯一事实源）](docs/知识库需求文档.md)
+- [M1 开发契约](docs/M1-CONTRACTS.md) / [M2 开发契约](docs/M2-CONTRACTS.md)
+- [OpenAPI 定义](docs/openapi/)
