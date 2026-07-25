@@ -1,0 +1,111 @@
+# Every value is injected from an environment variable with a working local default, so the service
+# starts with no .env file. Variable names follow the deployment contract.
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: kb-rag-server
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:kb_rag}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USER:kbrag}
+    password: ${MYSQL_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: ${MYSQL_POOL_SIZE:10}
+      connection-timeout: 10000
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+  servlet:
+    multipart:
+      # Kept slightly above the application level limit so the upload validator, not the container,
+      # produces the error message.
+      max-file-size: ${UPLOAD_MAX_FILE_SIZE:110MB}
+      max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:110MB}
+  jackson:
+    default-property-inclusion: non_null
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    default-enum-type-handler: org.apache.ibatis.type.EnumTypeHandler
+  global-config:
+    banner: false
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+  health:
+    defaults:
+      enabled: true
+
+kb:
+  vector:
+    engine: ${VECTOR_ENGINE:es}
+  es:
+    uri: ${ES_URI:http://127.0.0.1:9200}
+    username: ${ES_USERNAME:}
+    password: ${ES_PASSWORD:}
+    content-analyzer: ${ES_CONTENT_ANALYZER:ik_max_word}
+    fallback-analyzer: standard
+    number-of-shards: ${ES_NUMBER_OF_SHARDS:1}
+    number-of-replicas: ${ES_NUMBER_OF_REPLICAS:0}
+  milvus:
+    uri: ${MILVUS_URI:}
+    token: ${MILVUS_TOKEN:}
+  minio:
+    endpoint: ${MINIO_ENDPOINT:http://127.0.0.1:9000}
+    access-key: ${MINIO_ACCESS_KEY:}
+    secret-key: ${MINIO_SECRET_KEY:}
+    bucket: ${MINIO_BUCKET:kb-files}
+    presigned-ttl-minutes: ${MINIO_PRESIGNED_TTL_MINUTES:30}
+  embedding:
+    provider: ${EMBEDDING_PROVIDER:dashscope}
+    model: ${EMBEDDING_MODEL:text-embedding-v4}
+    dimension: ${EMBEDDING_DIM:1024}
+    # Blank switches the deployment to zero key mode: embedding is skipped and retrieval runs BM25 only.
+    api-key: ${DASHSCOPE_API_KEY:}
+    base-url: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    batch-size: ${EMBEDDING_BATCH_SIZE:10}
+    timeout-ms: ${EMBEDDING_TIMEOUT_MS:30000}
+  parser:
+    base-url: ${PARSER_BASE_URL:http://127.0.0.1:8001}
+    timeout-ms: ${PARSER_TIMEOUT_MS:300000}
+  auth:
+    token-ttl-hours: ${AUTH_TOKEN_TTL_HOURS:24}
+    max-failed-attempts: ${AUTH_MAX_FAILED_ATTEMPTS:5}
+    lock-minutes: ${AUTH_LOCK_MINUTES:15}
+    bootstrap-username: ${AUTH_BOOTSTRAP_USERNAME:admin}
+  upload:
+    max-file-size-mb: ${UPLOAD_MAX_FILE_SIZE_MB:100}
+    allowed-extensions: ${UPLOAD_ALLOWED_EXTENSIONS:pdf,docx,txt,md,xlsx,csv}
+  split:
+    max-tokens: ${SPLIT_MAX_TOKENS:600}
+    overlap-tokens: ${SPLIT_OVERLAP_TOKENS:100}
+  retrieval:
+    rrf-k: ${RETRIEVAL_RRF_K:60}
+    default-recall-top-k: ${RETRIEVAL_RECALL_TOP_K:50}
+    default-top-n: ${RETRIEVAL_TOP_N:5}
+    max-recall-top-k: ${RETRIEVAL_MAX_RECALL_TOP_K:100}
+    max-top-n: ${RETRIEVAL_MAX_TOP_N:20}
+  web:
+    allowed-origins: ${WEB_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+
+logging:
+  level:
+    root: info
+    io.kbrag: info
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{requestId}] %logger{36} - %msg%n"
