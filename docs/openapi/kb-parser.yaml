@@ -1,0 +1,163 @@
+openapi: 3.0.3
+info:
+  title: kb-rag-parser API
+  description: |
+    kb-rag 文档解析服务（M1 子集）。按 docs/M1-CONTRACTS.md §6 定型。
+
+    安全约束（§4.2 解析安全约束）：defusedxml 处理一切 XML；不实现任何出站 URL 拉取；
+    zip 解包路径校验 + 总量/文件数上限；文件大小上限 100MB；worker 超时 300s。
+  version: "0.1.0-m1"
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://127.0.0.1:8001
+    description: 本地开发（kb-rag-parser 默认端口，见契约 §0）
+
+tags:
+  - name: parse
+    description: 文档解析
+  - name: system
+    description: 健康检查
+
+paths:
+  /api/v1/parse:
+    post:
+      tags: [parse]
+      summary: 解析文档
+      description: |
+        支持格式：pdf(pymupdf) / docx(python-docx) / txt / md / xlsx(openpyxl) / csv。
+        multipart 请求：`file` 为二进制文件，`file_ext` 为表单字段声明的扩展名
+        （用于分派到对应解析策略，独立于文件名后缀，避免伪造扩展名绕过策略选择）。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, file_ext]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                file_ext:
+                  $ref: "#/components/schemas/SupportedFileExt"
+      responses:
+        "200":
+          description: 解析成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseResult"
+        "400":
+          description: 参数校验失败（文件缺失/扩展名不支持/超过大小上限）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: 解析失败（PARSE_FAILED）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /health:
+    get:
+      tags: [system]
+      summary: 健康检查
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResult"
+
+components:
+  schemas:
+    SupportedFileExt:
+      type: string
+      enum: [pdf, docx, txt, md, xlsx, csv]
+
+    ErrorCode:
+      type: string
+      description: 与 kb-rag-server 共用同一错误码子集（契约 §5），parser 侧主要产生 PARSE_FAILED
+      enum:
+        - INVALID_PARAM      # 400
+        - PARSE_FAILED       # 500
+        - INTERNAL_ERROR     # 500
+
+    ErrorResponse:
+      type: object
+      description: 统一错误响应，与 kb-rag-server 一致的信封结构
+      required: [code, message, request_id]
+      properties:
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+          example: "parse document failed: unsupported file_ext"
+        request_id:
+          type: string
+          description: 透传自 kb-rag-server 的 X-Request-Id，用于跨服务日志串联
+
+    ParsePage:
+      type: object
+      properties:
+        page_no:
+          type: integer
+          minimum: 1
+        text:
+          type: string
+
+    ParseImage:
+      type: object
+      description: 解析产物中的图片引用（M1 起预留，MinerU 接入后填充，见 NOTICE）
+      properties:
+        image_id:
+          type: string
+        page_no:
+          type: integer
+          nullable: true
+        object_key:
+          type: string
+          description: MinIO 对象键，由 kb-rag-server 回传落库
+
+    ParseData:
+      type: object
+      required: [markdown, pages]
+      properties:
+        markdown:
+          type: string
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ParsePage"
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/ParseImage"
+          default: []
+
+    ParseResult:
+      type: object
+      required: [code, message, request_id, data]
+      properties:
+        code:
+          type: string
+          enum: ["OK"]
+        message:
+          type: string
+          example: "success"
+        request_id:
+          type: string
+        data:
+          $ref: "#/components/schemas/ParseData"
+
+    HealthResult:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: ["UP", "DOWN"]

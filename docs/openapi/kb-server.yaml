@@ -1,0 +1,781 @@
+openapi: 3.0.3
+info:
+  title: kb-rag-server API
+  description: |
+    kb-rag 管理台内部 API（M1 子集）。
+
+    本文件按 docs/M1-CONTRACTS.md §5 定型的端点与 DTO 编写，用于 kb-rag-server /
+    kb-rag-web 之间的接口契约测试与前端 mock。对外 API Key 网关（应用发布渠道）
+    属于 M4c 范畴，不在本文件中。
+  version: "0.1.0-m1"
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://127.0.0.1:8080
+    description: 本地开发（kb-rag-server 默认端口，见契约 §0）
+
+tags:
+  - name: auth
+    description: 登录、改密、当前用户
+  - name: knowledge-base
+    description: 知识库管理
+  - name: document
+    description: 文档上传、状态查询、分片查看、重建索引
+  - name: search
+    description: 检索调试
+  - name: system
+    description: 系统状态与健康检查
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: 管理员登录
+      description: 登录失败记入 t_kb_login_audit；连续失败 5 次锁定 15 分钟。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "400":
+          $ref: "#/components/responses/InvalidParam"
+
+  /api/v1/auth/change-password:
+    post:
+      tags: [auth]
+      summary: 修改密码（含首登强制改密场景）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: 修改成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyResult"
+        "400":
+          $ref: "#/components/responses/InvalidParam"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/auth/me:
+    get:
+      tags: [auth]
+      summary: 获取当前登录用户信息
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserInfoResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/kb:
+    post:
+      tags: [knowledge-base]
+      summary: 创建知识库
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateKbRequest"
+      responses:
+        "200":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeBaseResult"
+        "400":
+          $ref: "#/components/responses/InvalidParam"
+    get:
+      tags: [knowledge-base]
+      summary: 知识库列表
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeBaseListResult"
+
+  /api/v1/kb/{kbId}:
+    parameters:
+      - $ref: "#/components/parameters/KbId"
+    get:
+      tags: [knowledge-base]
+      summary: 知识库详情
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeBaseResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [knowledge-base]
+      summary: 删除知识库
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/kb/{kbId}/documents:
+    parameters:
+      - $ref: "#/components/parameters/KbId"
+    post:
+      tags: [document]
+      summary: 上传文档（异步进入索引管线）
+      description: |
+        multipart 上传；服务端校验扩展名 + magic number + 文件大小（≤100MB）。
+        校验通过后立即返回，文档以 UPLOADED 状态异步进入解析/切分/索引管线。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: 已接收，进入异步处理
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentResult"
+        "400":
+          $ref: "#/components/responses/InvalidParam"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    get:
+      tags: [document]
+      summary: 文档列表
+      parameters:
+        - name: process_status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ProcessStatus"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentListResult"
+
+  /api/v1/documents/{docId}/reindex:
+    parameters:
+      - $ref: "#/components/parameters/DocId"
+    post:
+      tags: [document]
+      summary: 重建索引
+      description: 幂等：按当前激活版本重建先删旧 chunk 再重建，失败可重试。
+      responses:
+        "200":
+          description: 已受理
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmptyResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/documents/{docId}/chunks:
+    parameters:
+      - $ref: "#/components/parameters/DocId"
+    get:
+      tags: [document]
+      summary: 分片列表
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChunkListResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/kb/{kbId}/search:
+    parameters:
+      - $ref: "#/components/parameters/KbId"
+    post:
+      tags: [search]
+      summary: 检索调试
+      description: |
+        有 Key：向量 + BM25 双路（lite 单引擎两次独立请求）经 RRF(k=60) 融合后取 top_n；
+        零 Key：仅 BM25 单路，`degraded` 含 `vector_route_unavailable`。
+        强制过滤 document_version_id 属于当前激活版本且 enabled=true（引擎侧 filter）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResult"
+        "400":
+          $ref: "#/components/responses/InvalidParam"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/UpstreamModelError"
+
+  /api/v1/system/model-status:
+    get:
+      tags: [system]
+      summary: 模型/向量引擎配置状态
+      description: 用于前端零 Key 场景的 banner 提示与置灰逻辑判定。
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelStatusResult"
+
+  /actuator/health:
+    get:
+      tags: [system]
+      summary: 健康检查（含 MySQL/ES/MinIO/Milvus 探活）
+      security: []
+      responses:
+        "200":
+          description: 健康或部分降级
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        自定义 Header：Authorization: Bearer <token>。服务端 token 表/内存缓存维护，
+        有效期 24h；除 /api/v1/auth/login 与 /actuator/** 外全部拦截。
+
+  parameters:
+    KbId:
+      name: kbId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 知识库业务主键（kb_id）
+    DocId:
+      name: docId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 文档业务主键（doc_id）
+
+  responses:
+    InvalidParam:
+      description: 参数校验失败
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: 未登录或 token 失效
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UpstreamModelError:
+      description: 上游模型 Provider 调用失败
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    ErrorCode:
+      type: string
+      description: M1 错误码子集，HTTP 状态码见括注
+      enum:
+        - INVALID_PARAM      # 400
+        - UNAUTHORIZED       # 401
+        - NOT_FOUND          # 404
+        - PARSE_FAILED       # 500
+        - UPSTREAM_MODEL_ERROR  # 502
+        - INTERNAL_ERROR     # 500
+
+    ErrorResponse:
+      type: object
+      description: 统一错误响应
+      required: [code, message, request_id]
+      properties:
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+          example: "invalid parameter: name is required"
+        request_id:
+          type: string
+          description: 全链路透传的请求 ID，经 X-Request-Id Header 贯穿 kb-server/kb-parser/模型 Provider 日志
+          example: "req-3f6a2e1c"
+
+    ResultEnvelope:
+      type: object
+      description: 统一成功响应外壳，具体业务负载见各接口 data 字段的组合 schema
+      required: [code, message, request_id]
+      properties:
+        code:
+          type: string
+          enum: ["OK"]
+        message:
+          type: string
+          example: "success"
+        request_id:
+          type: string
+
+    EmptyResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultEnvelope"
+        - type: object
+          properties:
+            data:
+              nullable: true
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+
+    LoginData:
+      type: object
+      properties:
+        token:
+          type: string
+        must_change_password:
+          type: boolean
+
+    LoginResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/LoginData"
+
+    ChangePasswordRequest:
+      type: object
+      required: [old_password, new_password]
+      properties:
+        old_password:
+          type: string
+          format: password
+        new_password:
+          type: string
+          format: password
+
+    UserInfo:
+      type: object
+      properties:
+        username:
+          type: string
+        must_change_password:
+          type: boolean
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    UserInfoResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/UserInfo"
+
+    CreateKbRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+
+    KnowledgeBase:
+      type: object
+      properties:
+        kb_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        current_config_fingerprint:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    KnowledgeBaseResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/KnowledgeBase"
+
+    KnowledgeBaseListResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultEnvelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items:
+                $ref: "#/components/schemas/KnowledgeBase"
+
+    ProcessStatus:
+      type: string
+      description: 文档处理状态（t_kb_document.process_status）
+      enum:
+        - UPLOADED
+        - PARSING
+        - PARSE_FAILED
+        - PARSED
+        - INDEXING
+        - INDEXED
+        - INDEX_FAILED
+
+    Document:
+      type: object
+      properties:
+        doc_id:
+          type: string
+        kb_id:
+          type: string
+        file_name:
+          type: string
+        file_ext:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+        current_version_id:
+          type: string
+          nullable: true
+        process_status:
+          $ref: "#/components/schemas/ProcessStatus"
+        config_stale:
+          type: boolean
+          description: 配置一致性标记，与处理状态正交
+        fail_reason:
+          type: string
+          nullable: true
+          maxLength: 1024
+
+    DocumentResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/Document"
+
+    DocumentListResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Document"
+                page:
+                  type: integer
+                total:
+                  type: integer
+
+    EmbeddingStatus:
+      type: string
+      enum: [PENDING, DONE, FAILED, SKIPPED]
+
+    DocumentChunk:
+      type: object
+      properties:
+        chunk_id:
+          type: string
+        kb_id:
+          type: string
+        doc_id:
+          type: string
+        document_version_id:
+          type: string
+        content:
+          type: string
+        parent_id:
+          type: string
+          nullable: true
+        seq:
+          type: integer
+        enabled:
+          type: boolean
+        embedding_status:
+          $ref: "#/components/schemas/EmbeddingStatus"
+        metadata:
+          type: object
+          additionalProperties: true
+
+    ChunkListResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultEnvelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/DocumentChunk"
+                page:
+                  type: integer
+                total:
+                  type: integer
+
+    SearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+        recall_top_k:
+          type: integer
+          default: 50
+          minimum: 1
+        top_n:
+          type: integer
+          default: 5
+          minimum: 1
+
+    ChunkType:
+      type: string
+      enum: [text, image, chat_log]
+
+    ScoreType:
+      type: string
+      description: 分数口径；M1 无 rerank，仅两种原始召回口径
+      enum: [cosine, bm25_rank]
+
+    RetrievalSource:
+      type: string
+      enum: [vector, bm25]
+
+    DegradedReason:
+      type: string
+      description: |
+        检索降级原因枚举。M1 仅定义 vector_route_unavailable（零 Key 场景，向量路不可用，
+        仅走 BM25 单路）；后续里程碑（改写/重排超时降级等）追加新枚举值。
+      enum:
+        - vector_route_unavailable
+
+    RetrievalNode:
+      type: object
+      description: 检索结果节点（契约 §5 定型结构）
+      required:
+        - doc_id
+        - document_version_id
+        - chunk_id
+        - chunk_type
+        - content
+        - score
+        - score_type
+        - retrieval_source
+      properties:
+        doc_id:
+          type: string
+        document_version_id:
+          type: string
+        chunk_id:
+          type: string
+        chunk_type:
+          $ref: "#/components/schemas/ChunkType"
+        content:
+          type: string
+        score:
+          type: number
+          format: float
+          description: 统一映射到标准 cosine [0,1] 后的分数（跨引擎一致，见契约 §4）
+        score_type:
+          $ref: "#/components/schemas/ScoreType"
+        retrieval_source:
+          $ref: "#/components/schemas/RetrievalSource"
+        metadata:
+          type: object
+          additionalProperties: true
+        image_urls:
+          type: array
+          items:
+            type: string
+          default: []
+        preview_url:
+          type: string
+          nullable: true
+          default: null
+
+    SearchData:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/RetrievalNode"
+        request_id:
+          type: string
+        degraded:
+          type: array
+          items:
+            $ref: "#/components/schemas/DegradedReason"
+          default: []
+
+    SearchResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/SearchData"
+
+    VectorEngine:
+      type: string
+      enum: [es, milvus]
+
+    ModelStatus:
+      type: object
+      properties:
+        embedding_configured:
+          type: boolean
+        vector_engine:
+          $ref: "#/components/schemas/VectorEngine"
+        provider:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+
+    ModelStatusResult:
+      allOf:
+        - $ref: "#/components/schemas/ResultEnvelope"
+        - type: object
+          properties:
+            data:
+              $ref: "#/components/schemas/ModelStatus"
+
+    ComponentHealth:
+      type: string
+      enum: [UP, DOWN, UNKNOWN]
+
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          $ref: "#/components/schemas/ComponentHealth"
+        components:
+          type: object
+          properties:
+            mysql:
+              type: object
+              properties:
+                status:
+                  $ref: "#/components/schemas/ComponentHealth"
+            elasticsearch:
+              type: object
+              properties:
+                status:
+                  $ref: "#/components/schemas/ComponentHealth"
+            minio:
+              type: object
+              properties:
+                status:
+                  $ref: "#/components/schemas/ComponentHealth"
+            milvus:
+              type: object
+              description: 仅 VECTOR_ENGINE=milvus 时探活，lite 模式可不出现
+              properties:
+                status:
+                  $ref: "#/components/schemas/ComponentHealth"
