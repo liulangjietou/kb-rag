@@ -38,6 +38,11 @@ msg_time_from, msg_time_to}
 - metadata_filter 引擎侧映射：ES bool filter / Milvus expr（字段即 M1 契约引擎固定字段集）；索引管线须把 chunk.metadata 中这些键写入引擎字段
 - 响应 nodes[].metadata 增：`norm_vector_score/norm_bm25_score/fused_score/rerank_score`（存在时）；顶层增 `applied:{rewrite_used_query, fusion_mode, threshold_applied_on}` 供调试页展示
 
+### 1.6 model-status 响应结构（定版）
+`GET /api/v1/system/model-status` 返回**扁平字段**（与 M1 既有 embedding_configured/vector_engine 命名一致，不使用嵌套子对象）：
+`{provider, model, dimension, embedding_configured, vector_engine, rerank_configured, rerank_provider, rerank_model, chat_configured, chat_provider, chat_model}`
+前端如需按能力分卡展示，自行在视图层组装，不得假定后端返回嵌套结构。
+
 ## 2. 双写一致性与补偿（server）
 - `@Scheduled`（fixedDelay 30s，可配）扫 t_kb_chunk_index_sync：status=FAILED 或 PENDING 且 updated_at 超 5min → 按 physical_index_name 分组重推（重嵌入仅当该索引需向量且原向量缺失）；retry_count≥5 停止并 error 日志；单批 ≤500
 - 删除文档/知识库时同步删引擎内 chunk（M1 已软删 MySQL；M2 补引擎删除 + sync 行清理）

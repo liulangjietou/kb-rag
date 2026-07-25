@@ -1237,6 +1237,25 @@ components:
         model:
           type: string
           nullable: true
+        dimension:
+          type: integer
+          description: embedding dimension reported by the provider
+        rerank_configured:
+          type: boolean
+        rerank_provider:
+          type: string
+          nullable: true
+        rerank_model:
+          type: string
+          nullable: true
+        chat_configured:
+          type: boolean
+        chat_provider:
+          type: string
+          nullable: true
+        chat_model:
+          type: string
+          nullable: true
     ModelStatusResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
