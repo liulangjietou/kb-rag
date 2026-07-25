@@ -38,7 +38,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
     private final AuthInterceptor authInterceptor;
 
     /** Console origins allowed to call the management API. */
-    @Value("${kb.web.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
+    @Value("${kb.web.allowed-origins:${CORS_ALLOWED_ORIGINS:http://localhost:20002,http://127.0.0.1:20002}}")
     private String[] allowedOrigins;
 
     @Override
