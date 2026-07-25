@@ -1,7 +1,9 @@
 package io.kbrag.domain.service;
 
+import io.kbrag.domain.enums.FusionMode;
 import io.kbrag.domain.enums.RetrievalSource;
 import io.kbrag.domain.model.FusedChunk;
+import io.kbrag.domain.model.FusionParams;
 import io.kbrag.domain.model.ScoredChunk;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
@@ -23,33 +25,30 @@ import java.util.Map;
  *
  * <pre>score(d) = sum over routes of 1 / (k + rank(d, route))</pre>
  *
- * <p>The constant {@code k} damps the influence of the very top positions; the contract fixes it
- * at 60, the value the original publication reports as stable across corpora. A document missing
- * from a route simply contributes nothing for that route.
+ * <p>The constant {@code k} damps the influence of the very top positions; the contract default is
+ * 60, the value the original publication reports as stable across corpora. A document missing from a
+ * route simply contributes nothing for that route.
  *
  * <p>The result is ordered by descending fusion score with the chunk id as tie breaker, so the same
  * input always produces the same output and evaluation runs stay reproducible.
  */
 @Component
-public class RrfFusion {
+public class RrfFusion implements FusionStrategy {
 
     /** Contract default damping constant. */
-    public static final int DEFAULT_K = 60;
+    public static final int DEFAULT_K = FusionParams.DEFAULT_RRF_K;
 
-    /**
-     * Fuses the candidate lists of several routes.
-     *
-     * @param routeResults candidates per route, each list ordered by descending route score
-     * @param k            damping constant, must be positive
-     * @return fused candidates ordered by descending fusion score
-     */
-    public List<FusedChunk> fuse(Map<RetrievalSource, List<ScoredChunk>> routeResults, int k) {
-        if (k <= 0) {
-            throw new IllegalArgumentException("rrf k must be positive");
-        }
+    @Override
+    public FusionMode mode() {
+        return FusionMode.RRF;
+    }
+
+    @Override
+    public List<FusedChunk> fuse(Map<RetrievalSource, List<ScoredChunk>> routeResults, FusionParams params) {
         if (MapUtils.isEmpty(routeResults)) {
             return List.of();
         }
+        int k = params.getRrfK();
 
         Map<String, Double> scoreByChunk = new LinkedHashMap<>();
         Map<String, Map<RetrievalSource, Integer>> ranksByChunk = new LinkedHashMap<>();
@@ -79,33 +78,16 @@ public class RrfFusion {
             Map<RetrievalSource, Integer> ranks = ranksByChunk.get(chunkId);
             fused.add(FusedChunk.builder()
                     .chunkId(chunkId)
-                    .rrfScore(entry.getValue())
-                    .primarySource(bestSource(ranks))
+                    .fusedScore(entry.getValue())
+                    .fusionMode(FusionMode.RRF)
+                    .primarySource(FusionSupport.bestSource(ranks))
                     .routeRanks(ranks)
                     .routeScores(routeScoresByChunk.get(chunkId))
+                    .normalizedScores(Map.of())
                     .build());
         }
-        fused.sort(Comparator.comparingDouble(FusedChunk::getRrfScore).reversed()
+        fused.sort(Comparator.comparingDouble(FusedChunk::getFusedScore).reversed()
                 .thenComparing(FusedChunk::getChunkId));
         return fused;
-    }
-
-    /**
-     * Picks the route that ranked a candidate best; ties fall to the route declared first in
-     * {@link RetrievalSource}, which is the vector route.
-     *
-     * @param ranks one based rank per contributing route
-     * @return best route
-     */
-    private RetrievalSource bestSource(Map<RetrievalSource, Integer> ranks) {
-        RetrievalSource best = null;
-        int bestRank = Integer.MAX_VALUE;
-        for (Map.Entry<RetrievalSource, Integer> entry : ranks.entrySet()) {
-            if (entry.getValue() < bestRank) {
-                bestRank = entry.getValue();
-                best = entry.getKey();
-            }
-        }
-        return best;
     }
 }

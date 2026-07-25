@@ -16,6 +16,7 @@ import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.constant.IndexFields;
 import io.kbrag.domain.model.ChunkRecord;
 import io.kbrag.domain.model.IndexSpec;
+import io.kbrag.domain.model.MetadataFilter;
 import io.kbrag.domain.model.RetrievalFilter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -108,13 +109,16 @@ public class EsIndexAdmin {
     }
 
     /**
-     * Translates the mandatory retrieval filter into Elasticsearch filter clauses.
+     * Translates the retrieval filter into Elasticsearch filter clauses.
      *
      * <p>Version isolation and the enabled switch are applied engine side, never after the fact, so
-     * a chunk of a non visible version can never be recalled.
+     * a chunk of a non visible version can never be recalled. The optional metadata predicates are
+     * appended to the same clause list rather than applied to the recalled candidates, which is what
+     * keeps {@code recall_top_k} meaningful: post filtering would return fewer candidates than the
+     * caller asked for and would bias the fusion stage towards whichever route survived the cut.
      *
-     * @param filter mandatory filter
-     * @return filter clauses
+     * @param filter retrieval filter
+     * @return filter clauses, all combined with AND semantics
      */
     public List<Query> toFilters(RetrievalFilter filter) {
         List<Query> filters = new ArrayList<>();
@@ -123,12 +127,52 @@ public class EsIndexAdmin {
             filters.add(Query.of(q -> q.term(t -> t.field(IndexFields.ENABLED).value(true))));
         }
         if (CollectionUtils.isNotEmpty(filter.getDocumentVersionIds())) {
-            List<FieldValue> values = filter.getDocumentVersionIds().stream().map(FieldValue::of).toList();
-            filters.add(Query.of(q -> q.terms(t -> t
-                    .field(IndexFields.DOCUMENT_VERSION_ID)
-                    .terms(tv -> tv.value(values)))));
+            filters.add(termsQuery(IndexFields.DOCUMENT_VERSION_ID, filter.getDocumentVersionIds()));
         }
+        appendMetadataFilters(filters, filter.getMetadataFilter());
         return filters;
+    }
+
+    /**
+     * Appends the optional caller supplied predicates.
+     *
+     * @param filters  clause list being built
+     * @param metadata caller supplied filter, {@code null} or empty adds nothing
+     */
+    private void appendMetadataFilters(List<Query> filters, MetadataFilter metadata) {
+        if (metadata == null || metadata.isEmpty()) {
+            return;
+        }
+        if (CollectionUtils.isNotEmpty(metadata.getTagIds())) {
+            filters.add(termsQuery(IndexFields.TAG_IDS, metadata.getTagIds()));
+        }
+        if (metadata.getSessionId() != null && !metadata.getSessionId().isBlank()) {
+            String sessionId = metadata.getSessionId();
+            filters.add(Query.of(q -> q.term(t -> t.field(IndexFields.SESSION_ID).value(sessionId))));
+        }
+        if (metadata.getSender() != null && !metadata.getSender().isBlank()) {
+            String sender = metadata.getSender();
+            filters.add(Query.of(q -> q.term(t -> t.field(IndexFields.SENDER).value(sender))));
+        }
+        if (metadata.getMsgTimeFrom() != null || metadata.getMsgTimeTo() != null) {
+            Long from = metadata.getMsgTimeFrom();
+            Long to = metadata.getMsgTimeTo();
+            filters.add(Query.of(q -> q.range(r -> {
+                r.field(IndexFields.MSG_TIME);
+                if (from != null) {
+                    r.gte(JsonData.of(from));
+                }
+                if (to != null) {
+                    r.lte(JsonData.of(to));
+                }
+                return r;
+            })));
+        }
+    }
+
+    private Query termsQuery(String field, List<String> values) {
+        List<FieldValue> fieldValues = values.stream().map(FieldValue::of).toList();
+        return Query.of(q -> q.terms(t -> t.field(field).terms(tv -> tv.value(fieldValues))));
     }
 
     /**
@@ -159,7 +203,9 @@ public class EsIndexAdmin {
             String fallback = properties.getEs().getFallbackAnalyzer();
             log.info("content analyzer unavailable, falling back, index={}, configured={}, fallback={}",
                     spec.getPhysicalIndexName(), configured, fallback);
-            // TODO(M2): install the ik plugin and drive the domain dictionary from t_kb_ik_dict.
+            // The fallback stays permanent rather than becoming an error once ik is available: the
+            // dictionary is served over HTTP from t_kb_ik_dict, but the plugin itself is an optional
+            // deployment step, and a cluster without it must still be able to create an index.
             doCreate(spec, fallback);
         }
     }

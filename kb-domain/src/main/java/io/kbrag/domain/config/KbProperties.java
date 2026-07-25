@@ -37,6 +37,15 @@ public class KbProperties {
     /** Embedding provider configuration. */
     private Embedding embedding = new Embedding();
 
+    /** Rerank provider configuration. */
+    private Rerank rerank = new Rerank();
+
+    /** Chat provider configuration, currently only consumed by the query rewrite stage. */
+    private Chat chat = new Chat();
+
+    /** Index synchronization compensation policy. */
+    private Sync sync = new Sync();
+
     /** Parser service connectivity. */
     private Parser parser = new Parser();
 
@@ -176,6 +185,91 @@ public class KbProperties {
     }
 
     /**
+     * Rerank provider configuration. A blank API key switches the rerank stage off.
+     */
+    @Getter
+    @Setter
+    @ToString(exclude = "apiKey")
+    public static class Rerank {
+
+        /** Provider implementation name. */
+        private String provider = "dashscope";
+
+        /** Model name. */
+        private String model = "gte-rerank";
+
+        /** Credential, blank disables the rerank stage. */
+        private String apiKey = "";
+
+        /**
+         * Full URL of the native rerank endpoint. DashScope exposes rerank outside the OpenAI
+         * compatible surface, so unlike embedding this is a complete URL rather than a base URL.
+         */
+        private String url =
+                "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank";
+
+        /** Request timeout in milliseconds, the stage degrades once it elapses. */
+        private int timeoutMs = 1500;
+
+        /** Maximum candidates submitted to one rerank call. */
+        private int candidateLimit = 50;
+    }
+
+    /**
+     * Chat provider configuration. A blank API key switches the query rewrite stage off.
+     */
+    @Getter
+    @Setter
+    @ToString(exclude = "apiKey")
+    public static class Chat {
+
+        /** Provider implementation name. */
+        private String provider = "dashscope";
+
+        /** Model name. */
+        private String model = "qwen-plus";
+
+        /** Credential, blank disables the query rewrite stage. */
+        private String apiKey = "";
+
+        /** OpenAI compatible base URL of the provider. */
+        private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+
+        /** Request timeout in milliseconds. */
+        private int timeoutMs = 3000;
+
+        /** Sampling temperature, zero keeps the rewrite reproducible. */
+        private double temperature = 0.0d;
+
+        /** Upper bound of the generated rewrite. */
+        private int maxTokens = 128;
+    }
+
+    /**
+     * Index synchronization compensation policy.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Sync {
+
+        /** {@code false} disables the scan entirely, used by tests and by read only replicas. */
+        private boolean compensationEnabled = true;
+
+        /** Delay between two scans in milliseconds. */
+        private long compensationIntervalMs = 30000L;
+
+        /** A PENDING row older than this is treated as a lost write. */
+        private int pendingTimeoutMinutes = 5;
+
+        /** Retries after which a row is abandoned and reported through an error log. */
+        private int maxRetry = 5;
+
+        /** Maximum rows picked up by a single scan. */
+        private int batchSize = 500;
+    }
+
+    /**
      * Parser service connectivity.
      */
     @Getter
@@ -184,7 +278,7 @@ public class KbProperties {
     public static class Parser {
 
         /** Base URL of the parser service. */
-        private String baseUrl = "http://127.0.0.1:8001";
+        private String baseUrl = "http://127.0.0.1:20001";
 
         /** Request timeout in milliseconds, aligned with the parser worker timeout. */
         private int timeoutMs = 300000;
@@ -240,6 +334,18 @@ public class KbProperties {
 
         /** Overlap in estimated tokens. */
         private int overlapTokens = 100;
+
+        /** Parent child splitting default of a freshly created knowledge base. */
+        private boolean parentChildEnabled = false;
+
+        /** Default maximum estimated tokens of a parent chunk. */
+        private int parentMaxTokens = 1200;
+
+        /** Default maximum estimated tokens of a child chunk. */
+        private int childMaxTokens = 400;
+
+        /** Default overlap in estimated tokens between two children. */
+        private int childOverlap = 50;
     }
 
     /**
@@ -264,5 +370,41 @@ public class KbProperties {
 
         /** Upper bound accepted for {@code top_n}. */
         private int maxTopN = 20;
+
+        /** Default fusion strategy literal, {@code rrf} or {@code weighted}. */
+        private String fusionMode = "rrf";
+
+        /** Default vector weight of the weighted strategy. */
+        private double wVec = 0.6d;
+
+        /** Query rewrite default; off because it costs a model call on every search. */
+        private boolean rewriteEnabled = false;
+
+        /** Hard timeout of the query rewrite stage in milliseconds. */
+        private long rewriteTimeoutMs = 800L;
+
+        /** Time to live of a rewrite cache entry in minutes. */
+        private int rewriteCacheTtlMinutes = 10;
+
+        /** Maximum entries kept in the rewrite cache. */
+        private int rewriteCacheMaxSize = 10000;
+
+        /** Maximum characters accepted from a rewritten query before it is discarded. */
+        private int rewriteMaxLength = 512;
+
+        /** Maximum conversation turns forwarded to the rewrite model. */
+        private int rewriteMaxHistoryTurns = 6;
+
+        /** Rerank default when a rerank model is configured. */
+        private boolean rerankEnabled = true;
+
+        /**
+         * Multiplier applied to {@code top_n} when sizing the parent candidate target of the two
+         * level pipeline; the floor below keeps a small {@code top_n} from starving the merge.
+         */
+        private int parentCandidateFactor = 3;
+
+        /** Lower bound of the parent candidate target. */
+        private int parentCandidateFloor = 20;
     }
 }

@@ -3,17 +3,27 @@ package io.kbrag.domain.enums;
 /**
  * Nature of the score carried by a retrieval node, required whenever the response is degraded.
  *
- * <p>M1 has no rerank stage, so a node always reports the score of the route that ranked it best;
- * the reciprocal rank fusion value is not a comparable absolute score and is exposed through the
- * node metadata instead of this field.
+ * <p>The value always describes the score actually reported in {@code score}. When a threshold is
+ * supplied the reported score is the one the threshold acts on, so the console can verify the
+ * filter; otherwise it is the score that ordered the final list. Rerank is the only absolute score
+ * comparable across queries, which is why it wins whenever the stage ran.
  */
 public enum ScoreType {
+
+    /** Rerank relevance normalised to [0,1] by the provider, the only absolute score. */
+    RERANK("rerank"),
 
     /** Standard cosine similarity normalised to [0,1]. */
     COSINE("cosine"),
 
     /** Rank based score, the raw BM25 value has no upper bound and is not comparable. */
-    BM25_RANK("bm25_rank");
+    BM25_RANK("bm25_rank"),
+
+    /** Reciprocal rank fusion score, ordering only. */
+    FUSED_RRF("fused_rrf"),
+
+    /** Weighted fusion of the per route min-max normalised scores, ordering only. */
+    FUSED_WEIGHTED("fused_weighted");
 
     private final String code;
 

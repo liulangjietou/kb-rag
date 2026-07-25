@@ -8,7 +8,9 @@ import io.kbrag.domain.port.VisionProvider;
 import io.kbrag.infrastructure.provider.UnconfiguredChatProvider;
 import io.kbrag.infrastructure.provider.UnconfiguredRerankProvider;
 import io.kbrag.infrastructure.provider.UnconfiguredVisionProvider;
+import io.kbrag.infrastructure.provider.chat.DashScopeChatProvider;
 import io.kbrag.infrastructure.provider.embedding.DashScopeEmbeddingProvider;
+import io.kbrag.infrastructure.provider.rerank.DashScopeRerankProvider;
 import io.kbrag.infrastructure.provider.embedding.UnconfiguredEmbeddingProvider;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
@@ -45,23 +47,41 @@ public class ModelProviderConfig {
     }
 
     /**
-     * Placeholder rerank provider until M2 wires the rerank stage.
+     * Selects the rerank provider implementation.
      *
-     * @return unconfigured rerank provider
+     * <p>The rerank credential is configured independently from the embedding one, so a deployment
+     * can rerank a BM25 only recall; a blank key simply removes the stage from the pipeline.
+     *
+     * @param properties bound configuration
+     * @return configured provider, or the unconfigured placeholder
      */
     @Bean
-    public RerankProvider rerankProvider() {
-        return new UnconfiguredRerankProvider();
+    public RerankProvider rerankProvider(KbProperties properties) {
+        KbProperties.Rerank config = properties.getRerank();
+        if (config.getApiKey() == null || config.getApiKey().isBlank()) {
+            log.info("rerank provider not configured, rerank stage disabled");
+            return new UnconfiguredRerankProvider();
+        }
+        log.info("rerank provider configured, provider={}, model={}, timeoutMs={}",
+                config.getProvider(), config.getModel(), config.getTimeoutMs());
+        return new DashScopeRerankProvider(properties);
     }
 
     /**
-     * Placeholder chat provider until M2 wires question answering.
+     * Selects the chat provider implementation, currently consumed by the query rewrite stage.
      *
-     * @return unconfigured chat provider
+     * @param properties bound configuration
+     * @return configured provider, or the unconfigured placeholder
      */
     @Bean
-    public ChatProvider chatProvider() {
-        return new UnconfiguredChatProvider();
+    public ChatProvider chatProvider(KbProperties properties) {
+        KbProperties.Chat config = properties.getChat();
+        if (config.getApiKey() == null || config.getApiKey().isBlank()) {
+            log.info("chat provider not configured, query rewrite disabled");
+            return new UnconfiguredChatProvider();
+        }
+        log.info("chat provider configured, provider={}, model={}", config.getProvider(), config.getModel());
+        return new DashScopeChatProvider(properties);
     }
 
     /**

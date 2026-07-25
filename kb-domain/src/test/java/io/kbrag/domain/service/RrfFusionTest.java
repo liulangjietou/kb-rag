@@ -1,7 +1,9 @@
 package io.kbrag.domain.service;
 
+import io.kbrag.domain.enums.FusionMode;
 import io.kbrag.domain.enums.RetrievalSource;
 import io.kbrag.domain.model.FusedChunk;
+import io.kbrag.domain.model.FusionParams;
 import io.kbrag.domain.model.ScoredChunk;
 import org.junit.jupiter.api.Test;
 
@@ -25,7 +27,7 @@ class RrfFusionTest {
 
     @Test
     void shouldReturnEmptyListWithoutRoutes() {
-        assertTrue(fusion.fuse(Map.of(), RrfFusion.DEFAULT_K).isEmpty());
+        assertTrue(fusion.fuse(Map.of(), params(RrfFusion.DEFAULT_K)).isEmpty());
     }
 
     @Test
@@ -38,14 +40,14 @@ class RrfFusionTest {
                 new ScoredChunk("b", 12.0d, RetrievalSource.BM25),
                 new ScoredChunk("c", 9.0d, RetrievalSource.BM25)));
 
-        List<FusedChunk> fused = fusion.fuse(routes, 60);
+        List<FusedChunk> fused = fusion.fuse(routes, params(60));
 
         Map<String, FusedChunk> byId = new java.util.HashMap<>();
         fused.forEach(chunk -> byId.put(chunk.getChunkId(), chunk));
         // "b" appears second in the vector route and first in the BM25 route.
-        assertEquals(1.0d / 62 + 1.0d / 61, byId.get("b").getRrfScore(), TOLERANCE);
-        assertEquals(1.0d / 61, byId.get("a").getRrfScore(), TOLERANCE);
-        assertEquals(1.0d / 62, byId.get("c").getRrfScore(), TOLERANCE);
+        assertEquals(1.0d / 62 + 1.0d / 61, byId.get("b").getFusedScore(), TOLERANCE);
+        assertEquals(1.0d / 61, byId.get("a").getFusedScore(), TOLERANCE);
+        assertEquals(1.0d / 62, byId.get("c").getFusedScore(), TOLERANCE);
     }
 
     @Test
@@ -58,7 +60,7 @@ class RrfFusionTest {
                 new ScoredChunk("shared", 4.0d, RetrievalSource.BM25),
                 new ScoredChunk("c", 1.0d, RetrievalSource.BM25)));
 
-        List<FusedChunk> fused = fusion.fuse(routes, 60);
+        List<FusedChunk> fused = fusion.fuse(routes, params(60));
 
         assertEquals("shared", fused.get(0).getChunkId());
     }
@@ -71,7 +73,7 @@ class RrfFusionTest {
                 new ScoredChunk("second", 5.0d, RetrievalSource.BM25),
                 new ScoredChunk("third", 1.0d, RetrievalSource.BM25)));
 
-        List<FusedChunk> fused = fusion.fuse(routes, RrfFusion.DEFAULT_K);
+        List<FusedChunk> fused = fusion.fuse(routes, params(RrfFusion.DEFAULT_K));
 
         assertEquals(List.of("first", "second", "third"),
                 fused.stream().map(FusedChunk::getChunkId).toList());
@@ -86,7 +88,7 @@ class RrfFusionTest {
                 new ScoredChunk("z", 8.0d, RetrievalSource.BM25),
                 new ScoredChunk("a", 3.0d, RetrievalSource.BM25)));
 
-        FusedChunk candidate = fusion.fuse(routes, 60).stream()
+        FusedChunk candidate = fusion.fuse(routes, params(60)).stream()
                 .filter(chunk -> "a".equals(chunk.getChunkId()))
                 .findFirst()
                 .orElseThrow();
@@ -106,13 +108,17 @@ class RrfFusionTest {
         routes.put(RetrievalSource.VECTOR, List.of(
                 new ScoredChunk("a", 1.0d, RetrievalSource.VECTOR)));
 
-        List<FusedChunk> fused = fusion.fuse(routes, 60);
+        List<FusedChunk> fused = fusion.fuse(routes, params(60));
 
         assertEquals(List.of("a", "b"), fused.stream().map(FusedChunk::getChunkId).toList());
     }
 
     @Test
     void shouldRejectNonPositiveK() {
-        assertThrows(IllegalArgumentException.class, () -> fusion.fuse(Map.of(), 0));
+        assertThrows(IllegalArgumentException.class, () -> params(0));
+    }
+
+    private FusionParams params(int k) {
+        return FusionParams.of(FusionMode.RRF, k, FusionParams.DEFAULT_W_VECTOR);
     }
 }

@@ -21,9 +21,15 @@ import java.util.List;
 public class WebMvcConfig implements WebMvcConfigurer {
 
     private static final String API_PATTERN = "/api/**";
+    private static final String INTERNAL_PATTERN = "/internal/**";
     private static final List<String> PUBLIC_PATHS = List.of(
             "/api/v1/auth/login",
             "/actuator/**",
+            // The ik tokenizer polls its remote dictionary from inside Elasticsearch with a plain HTTP
+            // client that cannot carry a bearer token, so this path is deliberately unauthenticated.
+            // It only serves the domain terms an operator entered on purpose: no document content, no
+            // configuration, no personal data. See InternalDictController for the full reasoning.
+            "/internal/dict/ik/**",
             "/error");
 
     private static final String[] ALLOWED_METHODS = {"GET", "POST", "PUT", "DELETE", "OPTIONS"};
@@ -37,8 +43,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        // The internal pattern is registered and then excluded rather than simply left out, so the
+        // exemption is a visible decision in this list instead of an accident of the include pattern.
         registry.addInterceptor(authInterceptor)
-                .addPathPatterns(API_PATTERN)
+                .addPathPatterns(API_PATTERN, INTERNAL_PATTERN)
                 .excludePathPatterns(PUBLIC_PATHS);
     }
 

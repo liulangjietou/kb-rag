@@ -2,12 +2,18 @@ package io.kbrag.infrastructure.provider;
 
 import io.kbrag.common.exception.ProviderErrorType;
 import io.kbrag.common.exception.ProviderException;
+import io.kbrag.domain.model.ChatMessage;
 import io.kbrag.domain.model.HealthStatus;
 import io.kbrag.domain.port.ChatProvider;
 
+import java.util.List;
+
 /**
- * Placeholder chat provider. M1 exposes no question answering endpoint, the port exists so the chat
- * pipeline of M2 can be wired without reshaping the abstraction.
+ * Placeholder chat provider selected when no chat credential is configured.
+ *
+ * <p>Callers are expected to branch on {@link #isConfigured()} and skip the stage; the throwing
+ * implementation exists so a caller that forgets to branch fails loudly instead of silently
+ * degrading the answer quality.
  */
 public class UnconfiguredChatProvider implements ChatProvider {
 
@@ -30,7 +36,7 @@ public class UnconfiguredChatProvider implements ChatProvider {
     }
 
     @Override
-    public String complete(String systemPrompt, String userPrompt) {
+    public String complete(String systemPrompt, List<ChatMessage> messages) {
         throw new ProviderException(PROVIDER_NAME, ProviderErrorType.AUTH_FAILED,
                 "no chat provider configured");
     }

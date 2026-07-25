@@ -7,10 +7,12 @@ import lombok.ToString;
 import java.util.List;
 
 /**
- * Mandatory engine side filter of every retrieval call.
+ * Engine side filter of every retrieval call.
  *
- * <p>Both predicates are enforced by the pipeline and cannot be disabled through request
- * parameters: only chunks of a visible document version and only enabled chunks may be recalled.
+ * <p>The first three predicates are mandatory: they are built by the pipeline and cannot be
+ * influenced by request parameters, so only chunks of a visible document version and only enabled
+ * chunks may ever be recalled. The optional {@link #metadataFilter} is the only caller controlled
+ * part, and it can only narrow the result further.
  */
 @Getter
 @Builder
@@ -23,6 +25,9 @@ public class RetrievalFilter {
     /** Visible document version ids, the active versions when there is no version context. */
     private final List<String> documentVersionIds;
 
-    /** Always {@code true} in M1, kept explicit so the predicate is visible at the call site. */
+    /** Always {@code true}, kept explicit so the predicate is visible at the call site. */
     private final boolean enabledOnly;
+
+    /** Caller supplied narrowing predicate, {@code null} when the caller supplied none. */
+    private final MetadataFilter metadataFilter;
 }

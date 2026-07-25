@@ -5,6 +5,22 @@
 
 ## [未发布]
 
+### 新增（M2）
+
+- `[schema]` Flyway `V2__ik_dict_and_retrieval_config.sql`：新增 `t_kb_ik_dict`（词条 UK，EXT/STOP，可停用），`t_kb_knowledge_base` 增 `retrieval_config` JSON 列
+- Query 改写：DashScope OpenAI 兼容 `chat/completions` 落地 `ChatProvider`；800ms 硬超时降级、Caffeine 缓存（key 含多轮会话）、多轮指代消解；改写结果只当检索词用，单行化 + 长度截断作为 Prompt 注入防护；超时与失败分别标注 `query_rewrite_timeout` / `query_rewrite_error`
+- 重排：DashScope 原生 `text-rerank` 端点落地 `RerankProvider`；候选 ≤50、1.5s 硬超时，超时与失败分别标注 `rerank_timeout` / `rerank_error`
+- 融合升级：新增 `weighted` 模式（每路候选集内 min-max 归一化，`w_vec` 可调，BM25 权重取补），`rrf_k` 可配；`FusionStrategy` + `FusionRouter` 组合替代分支
+- 阈值语义定型：只作用于跨查询可比的分数（重排分 > 归一化 cosine），BM25 单路时失效并返回 `threshold_inactive`；`score_type` 扩展 `rerank | fused_rrf | fused_weighted`
+- 父子分片：两级切分复用既有定长策略，引擎只索引子片、父片正文只存 MySQL；检索后按 `parent_id` 归并（max 聚合），候选按「归并后父片数达标或子片数达上限」换算
+- search API 扩展：`score_threshold`、`fusion{mode,w_vec,rrf_k}`、`rerank_enabled`、`rewrite_enabled`、`messages`、`metadata_filter`；响应增 `applied` 信息条与各路原始分 / 归一化分 / 融合分 / 重排分
+- `metadata_filter` 引擎侧下推：Elasticsearch bool filter 与 Milvus expr 双实现；索引管线把 `chunk.metadata` 的固定键写入引擎字段
+- 双写补偿：`@Scheduled` 扫 `t_kb_chunk_index_sync`，按物理索引分组重推，重试上限后放弃并打错误日志；文档 / 知识库删除同步清理引擎；检索命中但事实源缺失时异步自愈删除
+- 配置变更与重建：`PUT /api/v1/kb/{kbId}/index-config` 重算指纹并刷新 `config_stale`，`POST /api/v1/kb/{kbId}/rebuild` 在同一物理索引内先写新片再删旧片
+- ik 词典：管理 CRUD + 启停 API，`/internal/dict/ik/{ext|stop}.txt` 免登录热更新通道（`Last-Modified` / `ETag`，未变更返回 304）
+- `GET /api/v1/system/model-status` 增加重排与对话模型的配置状态
+- 端口调整：应用默认端口 8080 → 20000，parser 默认地址 → `http://127.0.0.1:20001`
+
 ### 新增（M1）
 
 - `[schema]` Flyway `V1__baseline.sql`：建立 10 张基线表（知识库、文档、文档版本、分片、分片×物理索引同步状态、索引注册表、异步任务、管理员、系统设置、登录审计）

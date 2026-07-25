@@ -40,15 +40,34 @@ kb-rag-server            # parent，统一依赖版本
 - 索引管线跳过嵌入，分片 `embedding_status=SKIPPED`
 - 只建全文索引，物理索引名的嵌入版本段取固定占位值 `none`
 - 检索退化为 BM25 单路，响应 `degraded` 数组包含 `vector_route_unavailable`
+- Query 改写与重排自动关闭。**关掉的阶段不算降级**，不会往 `degraded` 里塞标记——零 Key 是受支持的部署形态而不是故障；只有调用方显式要求某个阶段却没有对应模型时，才会返回 `query_rewrite_unavailable` / `rerank_unavailable`
+- 阈值失去可比分数（BM25 原始分无上界），自动失效并返回 `threshold_inactive`
 - `GET /api/v1/system/model-status` 返回 `embedding_configured=false`，管理台据此置灰依赖模型的功能
 
 后续配置嵌入模型时走「建新物理索引 + 全量嵌入 + 别名原子切换」升级，不是原地改索引。
+
+## 检索链路
+
+固定次序，每个阶段可关但不可换位：
+
+```
+Query 改写 → 双路召回（子片粒度）→ 库内融合（RRF | 加权）→ 重排（候选 ≤50）→ 父子归并 → 阈值过滤 → top_n
+```
+
+- **改写与重排都有硬超时**（默认 800ms / 1500ms），超时或失败一律回退，检索本身永不失败
+- **阈值只作用于跨查询可比的分数**：重排跑过时作用于重排分，否则作用于归一化 cosine，BM25 单路时失效并标注 `threshold_inactive`；`nodes[].score_type` 与顶层 `applied.threshold_applied_on` 说明这次实际作用在哪个分数上
+- **父子分片开启后引擎只索引子片**，父片正文只存 MySQL，检索按 `parent_id` 归并（父片分 = 命中子片最高分），返回父片文本 + `metadata.children` 子片明细
+
+## ik 词典热更新
+
+`/internal/dict/ik/{ext|stop}.txt` 免登录暴露词表，供 Elasticsearch 的 ik 插件轮询（`remote_ext_dict`）。ik 从 ES 进程内发起纯 HTTP 请求，无法携带 Bearer Token，所以这个路径在 `WebMvcConfig` 的拦截器排除列表里显式列出并注明理由；它只回运维手动录入的领域词，不含任何文档内容或配置。响应带 `Last-Modified` 与 `ETag`，未变更时返回 304，避免每次轮询都让所有 ES 节点重载词典。
 
 ## 配置
 
 全部配置项通过环境变量注入，`application.yml` 只做映射。除数据库口令与 `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` 外都带可用的本地默认值——对象存储凭据没有默认值是刻意的，缺失时启动阶段直接报错并指明要设哪两个变量，不会等到上传时才失败。核心变量：
 
 ```bash
+SERVER_PORT=20000                            # 应用端口，parser 为 20001
 MYSQL_HOST=127.0.0.1  MYSQL_PORT=3306  MYSQL_DB=kb_rag  MYSQL_USER=kbrag  MYSQL_PASSWORD=
 ES_URI=http://127.0.0.1:9200
 MILVUS_URI=                                  # 轻量模式留空
@@ -56,10 +75,14 @@ MINIO_ENDPOINT=http://127.0.0.1:9000  MINIO_ACCESS_KEY=<必填>  MINIO_SECRET_KE
 VECTOR_ENGINE=es                             # es | milvus
 DASHSCOPE_API_KEY=                           # 留空即零 Key 模式
 EMBEDDING_PROVIDER=dashscope  EMBEDDING_MODEL=text-embedding-v4  EMBEDDING_DIM=1024
-PARSER_BASE_URL=http://127.0.0.1:8001
+RERANK_MODEL=gte-rerank                      # 留空 RERANK_API_KEY 即关闭重排
+CHAT_MODEL=qwen-plus                         # 留空 CHAT_API_KEY 即关闭 Query 改写
+PARSER_BASE_URL=http://127.0.0.1:20001
 ```
 
-嵌入调用走 OpenAI 兼容端点（`EMBEDDING_BASE_URL` 默认 `https://dashscope.aliyuncs.com/compatible-mode/v1`），改这一个变量即可切到 Azure OpenAI、Ollama 或 vLLM。
+嵌入与对话调用走 OpenAI 兼容端点（`EMBEDDING_BASE_URL` / `CHAT_BASE_URL` 默认 `https://dashscope.aliyuncs.com/compatible-mode/v1`），改这一个变量即可切到 Azure OpenAI、Ollama 或 vLLM。重排没有 OpenAI 兼容形态，走 DashScope 原生端点，因此 `RERANK_URL` 配的是完整 URL 而不是 base URL。
+
+三类模型凭据各自独立：`RERANK_API_KEY` 与 `CHAT_API_KEY` 缺省回落到 `DASHSCOPE_API_KEY`，单独留空即可只关掉对应的那一个阶段，检索链路自动跳过它而不报错。
 
 密钥只从环境变量读取，不入代码也不入配置文件。
 

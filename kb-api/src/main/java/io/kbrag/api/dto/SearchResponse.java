@@ -15,11 +15,13 @@ import java.util.List;
  * @param nodes     ordered result list
  * @param requestId correlation id of this call
  * @param degraded  degradation markers, empty when the full pipeline ran
+ * @param applied   effective pipeline parameters
  */
 public record SearchResponse(
         List<RetrievalNodeResponse> nodes,
         @JsonProperty("request_id") String requestId,
-        List<String> degraded) {
+        List<String> degraded,
+        AppliedResponse applied) {
 
     /**
      * Maps an application outcome onto the transport shape.
@@ -31,6 +33,7 @@ public record SearchResponse(
         return new SearchResponse(
                 outcome.getNodes().stream().map(RetrievalNodeResponse::from).toList(),
                 RequestIdHolder.get(),
-                outcome.getDegraded());
+                outcome.getDegraded(),
+                AppliedResponse.from(outcome.getApplied()));
     }
 }

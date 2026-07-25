@@ -2,35 +2,45 @@ package io.kbrag.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.kbrag.domain.entity.KnowledgeBase;
+import io.kbrag.domain.model.KbIndexConfig;
 
 /**
  * Knowledge base view.
  *
- * @param kbId        business identifier
- * @param name        display name
- * @param description free text description
- * @param indexConfig split and embed parameters as raw JSON
- * @param createdAt   ISO creation timestamp
+ * <p>The index configuration is serialised as a structured object rather than as the raw column
+ * string: the console binds it straight into the configuration form, and handing over a string would
+ * force every caller to parse the column layout for itself. The fingerprint travels with it so the
+ * console can tell a form it just submitted from one another operator changed underneath it.
+ *
+ * @param kbId                    business identifier
+ * @param name                    display name
+ * @param description             free text description
+ * @param indexConfig             split and parent child parameters
+ * @param currentConfigFingerprint fingerprint driving the document {@code config_stale} flag
+ * @param createdAt               ISO creation timestamp
  */
 public record KnowledgeBaseResponse(
         @JsonProperty("kb_id") String kbId,
         String name,
         String description,
-        @JsonProperty("index_config") String indexConfig,
+        @JsonProperty("index_config") KbIndexConfig indexConfig,
+        @JsonProperty("current_config_fingerprint") String currentConfigFingerprint,
         @JsonProperty("created_at") String createdAt) {
 
     /**
      * Maps an entity onto its view.
      *
-     * @param entity knowledge base entity
+     * @param entity      knowledge base entity
+     * @param indexConfig resolved index configuration
      * @return view
      */
-    public static KnowledgeBaseResponse from(KnowledgeBase entity) {
+    public static KnowledgeBaseResponse from(KnowledgeBase entity, KbIndexConfig indexConfig) {
         return new KnowledgeBaseResponse(
                 entity.getKbId(),
                 entity.getName(),
                 entity.getDescription(),
-                entity.getIndexConfig(),
+                indexConfig,
+                entity.getCurrentConfigFingerprint(),
                 entity.getCreatedAt() == null ? null : entity.getCreatedAt().toString());
     }
 }

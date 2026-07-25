@@ -8,6 +8,8 @@ import io.kbrag.domain.enums.VectorEngine;
 import io.kbrag.domain.model.ChunkRecord;
 import io.kbrag.domain.model.HealthStatus;
 import io.kbrag.domain.model.IndexSpec;
+import io.kbrag.domain.model.MetadataFilter;
+import io.kbrag.domain.model.RetrievalFilter;
 import io.kbrag.domain.model.ScoredChunk;
 import io.kbrag.domain.model.VectorQuery;
 import io.kbrag.domain.port.VectorStore;
@@ -276,24 +278,84 @@ public class MilvusVectorStore implements VectorStore {
         checkResponse(altered, "alter alias");
     }
 
+    /**
+     * Builds the boolean expression Milvus evaluates before the kNN search.
+     *
+     * <p>The mandatory version and enabled predicates come first, the optional caller supplied
+     * predicates are appended with AND semantics, mirroring what the Elasticsearch adapter does with
+     * its filter clause list so both engines narrow the candidate set identically.
+     *
+     * @param query kNN request
+     * @return Milvus filter expression
+     */
     private String buildFilterExpression(VectorQuery query) {
+        RetrievalFilter filter = query.getFilter();
         List<String> predicates = new ArrayList<>();
-        predicates.add(IndexFields.KB_ID + " == \"" + query.getFilter().getKbId() + "\"");
-        if (query.getFilter().isEnabledOnly()) {
+        predicates.add(equalsExpression(IndexFields.KB_ID, filter.getKbId()));
+        if (filter.isEnabledOnly()) {
             predicates.add(IndexFields.ENABLED + " == true");
         }
-        if (CollectionUtils.isNotEmpty(query.getFilter().getDocumentVersionIds())) {
-            predicates.add(inExpression(IndexFields.DOCUMENT_VERSION_ID,
-                    query.getFilter().getDocumentVersionIds()));
+        if (CollectionUtils.isNotEmpty(filter.getDocumentVersionIds())) {
+            predicates.add(inExpression(IndexFields.DOCUMENT_VERSION_ID, filter.getDocumentVersionIds()));
         }
+        appendMetadataPredicates(predicates, filter.getMetadataFilter());
         return String.join(" && ", predicates);
     }
 
+    /**
+     * Appends the optional caller supplied predicates.
+     *
+     * @param predicates predicate list being built
+     * @param metadata   caller supplied filter, {@code null} or empty adds nothing
+     */
+    private void appendMetadataPredicates(List<String> predicates, MetadataFilter metadata) {
+        if (metadata == null || metadata.isEmpty()) {
+            return;
+        }
+        if (CollectionUtils.isNotEmpty(metadata.getTagIds())) {
+            // tag_ids is an array field, so membership is expressed with array_contains_any.
+            predicates.add("array_contains_any(" + IndexFields.TAG_IDS + ", "
+                    + arrayLiteral(metadata.getTagIds()) + ")");
+        }
+        if (metadata.getSessionId() != null && !metadata.getSessionId().isBlank()) {
+            predicates.add(equalsExpression(IndexFields.SESSION_ID, metadata.getSessionId()));
+        }
+        if (metadata.getSender() != null && !metadata.getSender().isBlank()) {
+            predicates.add(equalsExpression(IndexFields.SENDER, metadata.getSender()));
+        }
+        if (metadata.getMsgTimeFrom() != null) {
+            predicates.add(IndexFields.MSG_TIME + " >= " + metadata.getMsgTimeFrom());
+        }
+        if (metadata.getMsgTimeTo() != null) {
+            predicates.add(IndexFields.MSG_TIME + " <= " + metadata.getMsgTimeTo());
+        }
+    }
+
+    private String equalsExpression(String field, String value) {
+        return field + " == " + quote(value);
+    }
+
     private String inExpression(String field, List<String> values) {
-        String literals = values.stream()
-                .map(value -> "\"" + value + "\"")
-                .collect(Collectors.joining(", "));
-        return field + " in [" + literals + "]";
+        return field + " in " + arrayLiteral(values);
+    }
+
+    private String arrayLiteral(List<String> values) {
+        return values.stream().map(this::quote).collect(Collectors.joining(", ", "[", "]"));
+    }
+
+    /**
+     * Quotes a literal for the Milvus expression language.
+     *
+     * <p>Identifiers reaching this method are generated business ids, but tag ids and session ids
+     * arrive from the caller, so the escaping is applied unconditionally rather than trusting the
+     * source of each value.
+     *
+     * @param value literal value
+     * @return quoted and escaped literal
+     */
+    private String quote(String value) {
+        String escaped = value.replace("\\", "\\\\").replace("\"", "\\\"");
+        return "\"" + escaped + "\"";
     }
 
     private FieldType varchar(String name) {

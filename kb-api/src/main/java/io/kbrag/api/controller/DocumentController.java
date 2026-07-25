@@ -10,6 +10,7 @@ import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.enums.ProcessStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -106,6 +107,18 @@ public class DocumentController {
     @PostMapping("/api/v1/documents/{docId}/reindex")
     public Result<Map<String, String>> reindex(@PathVariable String docId) {
         return Result.success(Map.of(FIELD_VERSION_ID, documentService.reindex(docId)));
+    }
+
+    /**
+     * Removes a document, its versions and its chunks, including the engine copies.
+     *
+     * @param docId document business id
+     * @return empty success envelope
+     */
+    @DeleteMapping("/api/v1/documents/{docId}")
+    public Result<Void> delete(@PathVariable String docId) {
+        documentService.delete(docId);
+        return Result.success(null);
     }
 
     private ProcessStatus parseStatus(String value) {

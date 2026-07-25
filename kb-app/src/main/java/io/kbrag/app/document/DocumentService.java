@@ -172,6 +172,26 @@ public class DocumentService {
     }
 
     /**
+     * Soft deletes a document together with its versions and chunks, and clears the search engines.
+     *
+     * <p>The engine documents are removed inside the same transaction as the MySQL rows. Leaving them
+     * behind would keep a deleted document searchable, and the retrieval self healing path would only
+     * notice it once a query happened to recall it.
+     *
+     * @param docId document business id
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void delete(String docId) {
+        Document document = require(docId);
+        knowledgeBaseService.removeChunks(document.getKbId(),
+                new LambdaQueryWrapper<Chunk>().eq(Chunk::getDocId, docId));
+        documentVersionMapper.delete(new LambdaQueryWrapper<DocumentVersion>()
+                .eq(DocumentVersion::getDocId, docId));
+        documentMapper.deleteById(document.getId());
+        log.info("document deleted, docId={}, kbId={}", docId, document.getKbId());
+    }
+
+    /**
      * Loads a document or fails.
      *
      * @param docId document business id

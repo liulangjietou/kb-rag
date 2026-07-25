@@ -3,35 +3,33 @@ package io.kbrag.app.index;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import io.kbrag.app.config.AsyncConfig;
+import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
-import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.Chunk;
-import io.kbrag.domain.entity.ChunkIndexSync;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.DocumentVersion;
 import io.kbrag.domain.entity.KbTask;
 import io.kbrag.domain.enums.ChunkType;
 import io.kbrag.domain.enums.DocumentVersionStatus;
 import io.kbrag.domain.enums.EmbeddingStatus;
-import io.kbrag.domain.enums.IndexSyncStatus;
 import io.kbrag.domain.enums.ProcessStatus;
 import io.kbrag.domain.enums.TaskStatus;
 import io.kbrag.domain.enums.TaskType;
-import io.kbrag.domain.mapper.ChunkIndexSyncMapper;
 import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.mapper.DocumentVersionMapper;
 import io.kbrag.domain.mapper.KbTaskMapper;
-import io.kbrag.domain.model.ChunkRecord;
+import io.kbrag.domain.model.KbIndexConfig;
+import io.kbrag.domain.model.ParentChunk;
 import io.kbrag.domain.model.ParsedDocument;
 import io.kbrag.domain.model.SplitChunk;
-import io.kbrag.domain.model.SplitParams;
 import io.kbrag.domain.port.DocumentParserClient;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.ObjectStorage;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.ChunkTextHasher;
+import io.kbrag.domain.service.ParentChildSplitter;
 import io.kbrag.domain.service.TextSplitter;
 import io.kbrag.domain.service.VersionFingerprintFactory;
 import lombok.RequiredArgsConstructor;
@@ -59,6 +57,11 @@ import java.util.Map;
  * <p>Zero key deployments skip the embedding stage entirely: chunks are stored with
  * {@code embedding_status=SKIPPED} and only the full text target is written, which is what lets the
  * service run end to end without any model credential.
+ *
+ * <p><b>Two level splitting.</b> When the knowledge base asks for it, the document is cut twice and
+ * both levels are persisted, but only the children are indexed. Parents exist purely to be returned:
+ * indexing them too would make the same text match twice and would force the fusion stage to compare
+ * scores computed over passages of very different length.
  */
 @Slf4j
 @Service
@@ -73,23 +76,24 @@ public class IndexPipelineService {
     private static final int PROGRESS_INDEXED = 90;
     private static final int PROGRESS_DONE = 100;
     private static final int ACTIVE_FLAG = 1;
-    private static final int WRITE_BATCH_SIZE = 200;
+    private static final int NOT_STALE = 0;
+    private static final int DELETE_BATCH_SIZE = 500;
     private static final int FAIL_REASON_MAX_LENGTH = 1024;
 
     private final DocumentMapper documentMapper;
     private final DocumentVersionMapper documentVersionMapper;
     private final ChunkMapper chunkMapper;
-    private final ChunkIndexSyncMapper chunkIndexSyncMapper;
     private final KbTaskMapper kbTaskMapper;
     private final ObjectStorage objectStorage;
     private final DocumentParserClient parserClient;
     private final TextSplitter textSplitter;
+    private final ParentChildSplitter parentChildSplitter;
     private final ChunkTextHasher chunkTextHasher;
     private final EmbeddingProvider embeddingProvider;
-    private final IndexAliasManager indexAliasManager;
+    private final ChunkIndexWriter chunkIndexWriter;
+    private final KnowledgeBaseService knowledgeBaseService;
     private final BizIdGenerator bizIdGenerator;
     private final VersionFingerprintFactory fingerprintFactory;
-    private final KbProperties properties;
 
     /**
      * Queues a document version for indexing.
@@ -102,6 +106,16 @@ public class IndexPipelineService {
     }
 
     /**
+     * Queues a document version for a rebuild under the current knowledge base configuration.
+     *
+     * @param versionId document version business id
+     */
+    @Async(AsyncConfig.INDEX_EXECUTOR)
+    public void submitRebuild(String versionId) {
+        rebuild(versionId);
+    }
+
+    /**
      * Runs the pipeline synchronously; every failure is translated into a persisted state instead of
      * propagating, because the caller is an executor thread with nobody to report to.
      *
@@ -110,10 +124,13 @@ public class IndexPipelineService {
     public void execute(String versionId) {
         DocumentVersion version = requireVersion(versionId);
         Document document = requireDocument(version.getDocId());
-        KbTask task = startTask(versionId);
+        KbTask task = startTask(versionId, TaskType.INDEX);
         try {
             ParsedDocument parsed = parse(document, version, task);
-            List<Chunk> chunks = split(document, version, parsed, task);
+            KbIndexConfig config = knowledgeBaseService.indexConfigOf(document.getKbId());
+            updateProcessStatus(document, ProcessStatus.INDEXING, null);
+            deleteExistingChunks(document.getKbId(), version.getVersionId());
+            List<Chunk> chunks = split(document, version, parsed.getMarkdown(), config, task);
             index(document, chunks, task);
             activate(document, version);
             completeTask(task);
@@ -129,6 +146,52 @@ public class IndexPipelineService {
         } catch (Exception e) {
             fail(document, version, task, ProcessStatus.INDEX_FAILED, e.getMessage());
             log.error("index pipeline failed, errorCode={}, docId={}, versionId={}",
+                    ErrorCode.INTERNAL_ERROR, document.getDocId(), versionId, e);
+        }
+    }
+
+    /**
+     * Rebuilds the active version of a document under the current knowledge base configuration.
+     *
+     * <p>The parse artifact is reused whenever it is still in object storage, because a configuration
+     * change only affects how the text is cut, not how it was extracted; re-parsing would be the most
+     * expensive stage of the pipeline and would produce byte identical output.
+     *
+     * <p><b>Replacement order: write the new chunks first, delete the old ones second.</b> The window
+     * where both exist can return a duplicate passage; the opposite order would open a window where
+     * the document is not searchable at all. A duplicate is a cosmetic defect for a few seconds, a
+     * hole is a wrong answer, so the overlap is the deliberate choice.
+     *
+     * @param versionId document version business id
+     */
+    public void rebuild(String versionId) {
+        DocumentVersion version = requireVersion(versionId);
+        Document document = requireDocument(version.getDocId());
+        KbTask task = startTask(versionId, TaskType.REBUILD);
+        try {
+            KbIndexConfig config = knowledgeBaseService.indexConfigOf(document.getKbId());
+            String markdown = readParsedMarkdown(document, version, task);
+            updateProcessStatus(document, ProcessStatus.INDEXING, null);
+
+            List<String> obsolete = chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
+                            .eq(Chunk::getDocumentVersionId, versionId))
+                    .stream().map(Chunk::getChunkId).toList();
+
+            List<Chunk> chunks = split(document, version, markdown, config, task);
+            index(document, chunks, task);
+            removeObsolete(document.getKbId(), versionId, obsolete);
+
+            documentMapper.update(null, new LambdaUpdateWrapper<Document>()
+                    .set(Document::getProcessStatus, ProcessStatus.INDEXED.name())
+                    .set(Document::getConfigStale, NOT_STALE)
+                    .set(Document::getFailReason, null)
+                    .eq(Document::getDocId, document.getDocId()));
+            completeTask(task);
+            log.info("rebuild finished, docId={}, versionId={}, newChunks={}, removedChunks={}",
+                    document.getDocId(), versionId, chunks.size(), obsolete.size());
+        } catch (Exception e) {
+            fail(document, version, task, ProcessStatus.INDEX_FAILED, e.getMessage());
+            log.error("rebuild failed, errorCode={}, docId={}, versionId={}",
                     ErrorCode.INTERNAL_ERROR, document.getDocId(), versionId, e);
         }
     }
@@ -153,52 +216,114 @@ public class IndexPipelineService {
         return parsed;
     }
 
-    private List<Chunk> split(Document document, DocumentVersion version, ParsedDocument parsed, KbTask task) {
-        updateProcessStatus(document, ProcessStatus.INDEXING, null);
-        deleteExistingChunks(document.getKbId(), version.getVersionId());
-
-        SplitParams params = SplitParams.of(properties.getSplit().getMaxTokens(),
-                properties.getSplit().getOverlapTokens());
-        List<SplitChunk> splitChunks = textSplitter.split(parsed.getMarkdown(), params);
-        boolean embeddingConfigured = embeddingProvider.isConfigured();
-
-        List<Chunk> chunks = new ArrayList<>(splitChunks.size());
-        for (SplitChunk splitChunk : splitChunks) {
-            Chunk chunk = new Chunk();
-            chunk.setChunkId(bizIdGenerator.chunkId());
-            chunk.setKbId(document.getKbId());
-            chunk.setDocId(document.getDocId());
-            chunk.setDocumentVersionId(version.getVersionId());
-            chunk.setContent(splitChunk.getContent());
-            chunk.setChunkTextHash(chunkTextHasher.hash(splitChunk.getContent()));
-            chunk.setSeq(splitChunk.getSeq());
-            chunk.setChunkType(ChunkType.TEXT);
-            chunk.setEnabled(ENABLED);
-            chunk.setEmbeddingStatus(embeddingConfigured ? EmbeddingStatus.PENDING : EmbeddingStatus.SKIPPED);
-            chunkMapper.insert(chunk);
-            chunks.add(chunk);
+    /**
+     * Reads the stored parse artifact, falling back to a fresh parse when it is gone.
+     *
+     * @param document document record
+     * @param version  version being rebuilt
+     * @param task     rebuild task
+     * @return parsed markdown
+     */
+    private String readParsedMarkdown(Document document, DocumentVersion version, KbTask task) {
+        if (version.getParsedObject() != null && !version.getParsedObject().isBlank()) {
+            try {
+                return new String(readAll(objectStorage.get(version.getParsedObject())), StandardCharsets.UTF_8);
+            } catch (Exception e) {
+                log.info("parse artifact unreadable, re-parsing, versionId={}", version.getVersionId());
+            }
         }
+        return parse(document, version, task).getMarkdown();
+    }
 
-        version.setChunkFingerprint(fingerprintFactory.chunkFingerprint(
-                textSplitter.strategy(), params.getMaxTokens(), params.getOverlapTokens()));
+    /**
+     * Cuts the text according to the knowledge base configuration and persists the chunks.
+     *
+     * @param document document record
+     * @param version  version being built
+     * @param markdown parsed text
+     * @param config   knowledge base index configuration
+     * @param task     running task
+     * @return chunks that have to reach the engines, parents excluded
+     */
+    private List<Chunk> split(Document document, DocumentVersion version, String markdown,
+                              KbIndexConfig config, KbTask task) {
+        boolean embeddingConfigured = embeddingProvider.isConfigured();
+        List<Chunk> indexable = config.parentChildEnabled()
+                ? splitTwoLevel(document, version, markdown, config, embeddingConfigured)
+                : splitSingleLevel(document, version, markdown, config, embeddingConfigured);
+
+        version.setChunkFingerprint(fingerprintFactory.chunkFingerprint(config));
         version.setEmbeddingVersion(embeddingProvider.model());
         documentVersionMapper.updateById(version);
         updateProgress(task, PROGRESS_CHUNKED);
-        log.info("chunks persisted, docId={}, versionId={}, count={}, embeddingConfigured={}",
-                document.getDocId(), version.getVersionId(), chunks.size(), embeddingConfigured);
+        log.info("chunks persisted, docId={}, versionId={}, indexable={}, parentChild={}, embeddingConfigured={}",
+                document.getDocId(), version.getVersionId(), indexable.size(),
+                config.parentChildEnabled(), embeddingConfigured);
+        return indexable;
+    }
+
+    private List<Chunk> splitSingleLevel(Document document, DocumentVersion version, String markdown,
+                                         KbIndexConfig config, boolean embeddingConfigured) {
+        List<SplitChunk> splitChunks = textSplitter.split(markdown, config.splitParams());
+        List<Chunk> chunks = new ArrayList<>(splitChunks.size());
+        for (SplitChunk splitChunk : splitChunks) {
+            chunks.add(persistChunk(document, version, splitChunk, null, embeddingConfigured));
+        }
         return chunks;
     }
 
+    /**
+     * Persists both levels and returns only the children.
+     *
+     * <p>Parents are stored with {@code embedding_status=SKIPPED} because they are never embedded and
+     * never written to an engine; marking them PENDING would make the compensation scan chase a write
+     * that is not supposed to happen.
+     *
+     * @param document            document record
+     * @param version             version being built
+     * @param markdown            parsed text
+     * @param config              knowledge base index configuration
+     * @param embeddingConfigured {@code true} when the vector route is available
+     * @return child chunks
+     */
+    private List<Chunk> splitTwoLevel(Document document, DocumentVersion version, String markdown,
+                                      KbIndexConfig config, boolean embeddingConfigured) {
+        List<ParentChunk> groups = parentChildSplitter.split(markdown, config.parentChildOrDisabled());
+        List<Chunk> children = new ArrayList<>();
+        for (ParentChunk group : groups) {
+            Chunk parent = persistChunk(document, version, group.getParent(), null, false);
+            for (SplitChunk child : group.getChildren()) {
+                children.add(persistChunk(document, version, child, parent.getChunkId(), embeddingConfigured));
+            }
+        }
+        return children;
+    }
+
+    private Chunk persistChunk(Document document, DocumentVersion version, SplitChunk splitChunk,
+                               String parentId, boolean embeddingConfigured) {
+        Chunk chunk = new Chunk();
+        chunk.setChunkId(bizIdGenerator.chunkId());
+        chunk.setKbId(document.getKbId());
+        chunk.setDocId(document.getDocId());
+        chunk.setDocumentVersionId(version.getVersionId());
+        chunk.setContent(splitChunk.getContent());
+        chunk.setChunkTextHash(chunkTextHasher.hash(splitChunk.getContent()));
+        chunk.setParentId(parentId);
+        chunk.setSeq(splitChunk.getSeq());
+        chunk.setChunkType(ChunkType.TEXT);
+        chunk.setEnabled(ENABLED);
+        chunk.setEmbeddingStatus(embeddingConfigured ? EmbeddingStatus.PENDING : EmbeddingStatus.SKIPPED);
+        chunkMapper.insert(chunk);
+        return chunk;
+    }
+
     private void index(Document document, List<Chunk> chunks, KbTask task) {
-        List<IndexTarget> targets = indexAliasManager.ensureIndexes(document.getKbId());
         if (CollectionUtils.isEmpty(chunks)) {
             updateProgress(task, PROGRESS_INDEXED);
             return;
         }
         Map<String, float[]> vectors = embed(chunks);
-        for (IndexTarget target : targets) {
-            writeTarget(target, chunks, vectors);
-        }
+        chunkIndexWriter.write(document.getKbId(), chunks, vectors);
         updateProgress(task, PROGRESS_INDEXED);
     }
 
@@ -229,65 +354,6 @@ public class IndexPipelineService {
         return vectors;
     }
 
-    private void writeTarget(IndexTarget target, List<Chunk> chunks, Map<String, float[]> vectors) {
-        for (int start = 0; start < chunks.size(); start += WRITE_BATCH_SIZE) {
-            List<Chunk> batch = chunks.subList(start, Math.min(chunks.size(), start + WRITE_BATCH_SIZE));
-            List<ChunkRecord> records = new ArrayList<>(batch.size());
-            for (Chunk chunk : batch) {
-                registerSync(chunk.getChunkId(), target, IndexSyncStatus.PENDING);
-                records.add(toRecord(chunk, target.carriesVector() ? vectors.get(chunk.getChunkId()) : null));
-            }
-            indexAliasManager.write(target, records);
-            for (Chunk chunk : batch) {
-                registerSync(chunk.getChunkId(), target, IndexSyncStatus.SYNCED);
-            }
-        }
-        log.info("target written, engine={}, index={}, chunks={}",
-                target.engine().code(), target.physicalIndexName(), chunks.size());
-    }
-
-    private ChunkRecord toRecord(Chunk chunk, float[] vector) {
-        return ChunkRecord.builder()
-                .chunkId(chunk.getChunkId())
-                .kbId(chunk.getKbId())
-                .docId(chunk.getDocId())
-                .documentVersionId(chunk.getDocumentVersionId())
-                .parentId(chunk.getParentId())
-                .chunkType(chunk.getChunkType().code())
-                .enabled(chunk.getEnabled() != null && chunk.getEnabled() == ENABLED)
-                .tagIds(List.of())
-                .chunkSeq(chunk.getSeq())
-                .content(chunk.getContent())
-                .vector(vector)
-                .build();
-    }
-
-    /**
-     * Upserts the synchronization record of one chunk against one physical index.
-     *
-     * @param chunkId chunk business id
-     * @param target  write target
-     * @param status  new synchronization state
-     */
-    private void registerSync(String chunkId, IndexTarget target, IndexSyncStatus status) {
-        ChunkIndexSync existing = chunkIndexSyncMapper.selectOne(new LambdaQueryWrapper<ChunkIndexSync>()
-                .eq(ChunkIndexSync::getChunkId, chunkId)
-                .eq(ChunkIndexSync::getPhysicalIndexName, target.physicalIndexName())
-                .last("limit 1"));
-        if (existing == null) {
-            ChunkIndexSync record = new ChunkIndexSync();
-            record.setChunkId(chunkId);
-            record.setPhysicalIndexName(target.physicalIndexName());
-            record.setEngine(target.engine().code());
-            record.setStatus(status);
-            record.setRetryCount(0);
-            chunkIndexSyncMapper.insert(record);
-            return;
-        }
-        existing.setStatus(status);
-        chunkIndexSyncMapper.updateById(existing);
-    }
-
     /**
      * Removes the chunks of a version from MySQL and from every engine, making a rerun idempotent.
      *
@@ -295,18 +361,31 @@ public class IndexPipelineService {
      * @param versionId document version business id
      */
     private void deleteExistingChunks(String kbId, String versionId) {
-        List<Chunk> existing = chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
-                .eq(Chunk::getDocumentVersionId, versionId));
-        if (CollectionUtils.isEmpty(existing)) {
+        knowledgeBaseService.removeChunks(kbId,
+                new LambdaQueryWrapper<Chunk>().eq(Chunk::getDocumentVersionId, versionId));
+    }
+
+    /**
+     * Removes the chunk generation the rebuild replaced.
+     *
+     * <p>The identifiers are deleted in batches rather than in one predicate: a long document produces
+     * thousands of chunks and a single {@code IN} list of that size is rejected outright by some MySQL
+     * configurations, which would leave the rebuild with two live generations.
+     *
+     * @param kbId      knowledge base business id
+     * @param versionId document version business id
+     * @param chunkIds  chunk ids of the previous generation
+     */
+    private void removeObsolete(String kbId, String versionId, List<String> chunkIds) {
+        if (CollectionUtils.isEmpty(chunkIds)) {
             return;
         }
-        List<String> chunkIds = existing.stream().map(Chunk::getChunkId).toList();
-        indexAliasManager.deleteEverywhere(kbId, chunkIds);
-        chunkIndexSyncMapper.delete(new LambdaQueryWrapper<ChunkIndexSync>()
-                .in(ChunkIndexSync::getChunkId, chunkIds));
-        chunkMapper.delete(new LambdaQueryWrapper<Chunk>()
-                .eq(Chunk::getDocumentVersionId, versionId));
-        log.info("previous chunks removed, versionId={}, count={}", versionId, chunkIds.size());
+        for (int start = 0; start < chunkIds.size(); start += DELETE_BATCH_SIZE) {
+            List<String> batch = chunkIds.subList(start, Math.min(chunkIds.size(), start + DELETE_BATCH_SIZE));
+            knowledgeBaseService.removeChunks(kbId, new LambdaQueryWrapper<Chunk>()
+                    .eq(Chunk::getDocumentVersionId, versionId)
+                    .in(Chunk::getChunkId, batch));
+        }
     }
 
     /**
@@ -339,19 +418,26 @@ public class IndexPipelineService {
         documentVersionMapper.updateById(version);
 
         document.setCurrentVersionId(version.getVersionId());
-        updateProcessStatus(document, ProcessStatus.INDEXED, null);
+        document.setConfigStale(NOT_STALE);
+        documentMapper.update(null, new LambdaUpdateWrapper<Document>()
+                .set(Document::getProcessStatus, ProcessStatus.INDEXED.name())
+                .set(Document::getFailReason, null)
+                .set(Document::getConfigStale, NOT_STALE)
+                .set(Document::getCurrentVersionId, version.getVersionId())
+                .eq(Document::getDocId, document.getDocId()));
+        document.setProcessStatus(ProcessStatus.INDEXED);
     }
 
-    private KbTask startTask(String versionId) {
+    private KbTask startTask(String versionId, TaskType taskType) {
         KbTask task = kbTaskMapper.selectOne(new LambdaQueryWrapper<KbTask>()
                 .eq(KbTask::getBizId, versionId)
-                .eq(KbTask::getTaskType, TaskType.INDEX)
+                .eq(KbTask::getTaskType, taskType)
                 .orderByDesc(KbTask::getId)
                 .last("limit 1"));
         if (task == null) {
             task = new KbTask();
             task.setTaskId(bizIdGenerator.taskId());
-            task.setTaskType(TaskType.INDEX);
+            task.setTaskType(taskType);
             task.setBizId(versionId);
             task.setRetryCount(0);
             task.setStatus(TaskStatus.RUNNING);
@@ -438,8 +524,8 @@ public class IndexPipelineService {
         try (InputStream input = stream) {
             return input.readAllBytes();
         } catch (Exception e) {
-            log.error("read original object failed, errorCode={}", ErrorCode.INTERNAL_ERROR, e);
-            throw new BizException(ErrorCode.INTERNAL_ERROR, "read original file failed", e);
+            log.error("read object failed, errorCode={}", ErrorCode.INTERNAL_ERROR, e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "read stored object failed", e);
         }
     }
 

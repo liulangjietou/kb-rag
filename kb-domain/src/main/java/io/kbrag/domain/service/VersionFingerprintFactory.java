@@ -1,6 +1,7 @@
 package io.kbrag.domain.service;
 
 import io.kbrag.common.util.HashUtil;
+import io.kbrag.domain.model.KbIndexConfig;
 import org.springframework.stereotype.Component;
 
 /**
@@ -27,8 +28,6 @@ public class VersionFingerprintFactory {
     private static final String VISION_PROMPT = "vlm_prompt=none";
     private static final String OCR_ENGINE = "ocr=none";
 
-    private static final String PARENT_CHILD = "parent_child=off";
-
     /**
      * Fingerprint of the parse stage inputs.
      *
@@ -42,16 +41,19 @@ public class VersionFingerprintFactory {
     /**
      * Fingerprint of the split stage inputs.
      *
-     * @param strategy      splitter strategy code
-     * @param maxTokens     maximum estimated tokens per chunk
-     * @param overlapTokens overlap in estimated tokens
+     * <p>The very same function computes the knowledge base level
+     * {@code current_config_fingerprint} and the per version {@code chunk_fingerprint}: comparing the
+     * two is how a configuration change is turned into the {@code config_stale} flag, and that
+     * comparison is only meaningful while both sides are produced here.
+     *
+     * @param config knowledge base index configuration
      * @return hexadecimal digest
      */
-    public String chunkFingerprint(String strategy, int maxTokens, int overlapTokens) {
+    public String chunkFingerprint(KbIndexConfig config) {
         return HashUtil.sha256Hex(String.join(SEPARATOR,
-                "strategy=" + strategy,
-                "max_tokens=" + maxTokens,
-                "overlap_tokens=" + overlapTokens,
-                PARENT_CHILD));
+                "strategy=" + config.getSplitStrategy(),
+                "chunk_max_tokens=" + config.getChunkMaxTokens(),
+                "chunk_overlap=" + config.getChunkOverlap(),
+                config.parentChildOrDisabled().fingerprintSegment()));
     }
 }

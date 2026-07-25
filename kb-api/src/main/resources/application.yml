@@ -1,7 +1,7 @@
 # Every value is injected from an environment variable with a working local default, so the service
 # starts with no .env file. Variable names follow the deployment contract.
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${SERVER_PORT:20000}
 
 spring:
   application:
@@ -80,8 +80,32 @@ kb:
     base-url: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     batch-size: ${EMBEDDING_BATCH_SIZE:10}
     timeout-ms: ${EMBEDDING_TIMEOUT_MS:30000}
+  rerank:
+    provider: ${RERANK_PROVIDER:dashscope}
+    model: ${RERANK_MODEL:gte-rerank}
+    # Blank disables the rerank stage; the retrieval pipeline then keeps the fusion order.
+    api-key: ${RERANK_API_KEY:${DASHSCOPE_API_KEY:}}
+    # DashScope exposes rerank outside the OpenAI compatible surface, so this is a full URL.
+    url: ${RERANK_URL:https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}
+    timeout-ms: ${RERANK_TIMEOUT_MS:1500}
+    candidate-limit: ${RERANK_CANDIDATE_LIMIT:50}
+  chat:
+    provider: ${CHAT_PROVIDER:dashscope}
+    model: ${CHAT_MODEL:qwen-plus}
+    # Blank disables the query rewrite stage.
+    api-key: ${CHAT_API_KEY:${DASHSCOPE_API_KEY:}}
+    base-url: ${CHAT_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    timeout-ms: ${CHAT_TIMEOUT_MS:3000}
+    temperature: ${CHAT_TEMPERATURE:0.0}
+    max-tokens: ${CHAT_MAX_TOKENS:128}
+  sync:
+    compensation-enabled: ${SYNC_COMPENSATION_ENABLED:true}
+    compensation-interval-ms: ${SYNC_COMPENSATION_INTERVAL_MS:30000}
+    pending-timeout-minutes: ${SYNC_PENDING_TIMEOUT_MINUTES:5}
+    max-retry: ${SYNC_MAX_RETRY:5}
+    batch-size: ${SYNC_BATCH_SIZE:500}
   parser:
-    base-url: ${PARSER_BASE_URL:http://127.0.0.1:8001}
+    base-url: ${PARSER_BASE_URL:http://127.0.0.1:20001}
     timeout-ms: ${PARSER_TIMEOUT_MS:300000}
   auth:
     token-ttl-hours: ${AUTH_TOKEN_TTL_HOURS:24}
@@ -94,12 +118,30 @@ kb:
   split:
     max-tokens: ${SPLIT_MAX_TOKENS:600}
     overlap-tokens: ${SPLIT_OVERLAP_TOKENS:100}
+    # Defaults of a freshly created knowledge base; each one can override them per knowledge base.
+    parent-child-enabled: ${SPLIT_PARENT_CHILD_ENABLED:false}
+    parent-max-tokens: ${SPLIT_PARENT_MAX_TOKENS:1200}
+    child-max-tokens: ${SPLIT_CHILD_MAX_TOKENS:400}
+    child-overlap: ${SPLIT_CHILD_OVERLAP:50}
   retrieval:
     rrf-k: ${RETRIEVAL_RRF_K:60}
     default-recall-top-k: ${RETRIEVAL_RECALL_TOP_K:50}
     default-top-n: ${RETRIEVAL_TOP_N:5}
     max-recall-top-k: ${RETRIEVAL_MAX_RECALL_TOP_K:100}
     max-top-n: ${RETRIEVAL_MAX_TOP_N:20}
+    fusion-mode: ${RETRIEVAL_FUSION_MODE:rrf}
+    w-vec: ${RETRIEVAL_W_VEC:0.6}
+    # Off by default: a rewrite costs a model call on every search.
+    rewrite-enabled: ${RETRIEVAL_REWRITE_ENABLED:false}
+    rewrite-timeout-ms: ${RETRIEVAL_REWRITE_TIMEOUT_MS:800}
+    rewrite-cache-ttl-minutes: ${RETRIEVAL_REWRITE_CACHE_TTL_MINUTES:10}
+    rewrite-cache-max-size: ${RETRIEVAL_REWRITE_CACHE_MAX_SIZE:10000}
+    rewrite-max-length: ${RETRIEVAL_REWRITE_MAX_LENGTH:512}
+    rewrite-max-history-turns: ${RETRIEVAL_REWRITE_MAX_HISTORY_TURNS:6}
+    # On by default, but only takes effect when a rerank model is configured.
+    rerank-enabled: ${RETRIEVAL_RERANK_ENABLED:true}
+    parent-candidate-factor: ${RETRIEVAL_PARENT_CANDIDATE_FACTOR:3}
+    parent-candidate-floor: ${RETRIEVAL_PARENT_CANDIDATE_FLOOR:20}
   web:
     allowed-origins: ${WEB_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
 

@@ -36,4 +36,8 @@ public class KnowledgeBase extends BaseEntity {
     /** Fingerprint of the current index configuration, drives the document {@code config_stale} flag. */
     @TableField("current_config_fingerprint")
     private String currentConfigFingerprint;
+
+    /** Knowledge base level retrieval defaults serialised as JSON, overridden by request parameters. */
+    @TableField("retrieval_config")
+    private String retrievalConfig;
 }
