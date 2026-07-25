@@ -277,12 +277,6 @@ export interface SearchResponse {
 // ---------------------------------------------------------------------------
 
 /** Per-model-kind configuration snapshot, used by the M2 settings page's three status cards. */
-export interface ModelProviderStatus {
-  configured: boolean;
-  provider: string | null;
-  model: string | null;
-}
-
 /**
  * GET /api/v1/system/model-status response, extended for M2 (M2-CONTRACTS.md section 5
  * "模型状态卡片（embedding/rerank/chat 三卡，用扩展后的 model-status）").
@@ -293,12 +287,22 @@ export interface ModelProviderStatus {
  */
 export interface ModelStatus {
   embedding_configured: boolean;
-  vector_engine: string;
   provider: string | null;
   model: string | null;
-  embedding: ModelProviderStatus;
-  rerank: ModelProviderStatus;
-  chat: ModelProviderStatus;
+  rerank_configured: boolean;
+  rerank_provider: string | null;
+  rerank_model: string | null;
+  chat_configured: boolean;
+  chat_provider: string | null;
+  chat_model: string | null;
+  vector_engine: string;
+}
+
+/** View model assembled from the flat ModelStatus fields, one per model capability. */
+export interface ModelProviderView {
+  configured: boolean;
+  provider: string | null;
+  model: string | null;
 }
 
 // ---------------------------------------------------------------------------

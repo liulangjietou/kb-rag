@@ -87,8 +87,8 @@ export default function SearchPage() {
   const fusionMode = Form.useWatch('fusion_mode', form) ?? 'rrf';
   const thresholdEnabled = Form.useWatch('threshold_enabled', form) ?? false;
 
-  const rewriteAvailable = modelStatus?.chat.configured ?? false;
-  const rerankAvailable = modelStatus?.rerank.configured ?? false;
+  const rewriteAvailable = modelStatus?.chat_configured ?? false;
+  const rerankAvailable = modelStatus?.rerank_configured ?? false;
 
   useEffect(() => {
     listKnowledgeBases().then(setKbs);
@@ -99,7 +99,7 @@ export default function SearchPage() {
   // the switch once it lands rather than relying on the form's static initialValues.
   useEffect(() => {
     if (modelStatus) {
-      form.setFieldsValue({ rerank_enabled: modelStatus.rerank.configured });
+      form.setFieldsValue({ rerank_enabled: modelStatus.rerank_configured });
     }
   }, [modelStatus, form]);
 

@@ -1,17 +1,17 @@
 import { Card, Col, Row, Tag, Typography } from 'antd';
-import type { ModelProviderStatus } from '../../../api/types';
+import type { ModelProviderView } from '../../../api/types';
 
 interface ModelStatusCardsProps {
   vectorEngine: string;
-  embedding: ModelProviderStatus;
-  rerank: ModelProviderStatus;
-  chat: ModelProviderStatus;
+  embedding: ModelProviderView;
+  rerank: ModelProviderView;
+  chat: ModelProviderView;
 }
 
 interface CardSpec {
   key: string;
   title: string;
-  status: ModelProviderStatus;
+  status: ModelProviderView;
   unconfiguredHint: string;
 }
 

@@ -23,9 +23,9 @@ export default function SettingsPage() {
                 {modelStatus ? (
                   <ModelStatusCards
                     vectorEngine={modelStatus.vector_engine}
-                    embedding={modelStatus.embedding}
-                    rerank={modelStatus.rerank}
-                    chat={modelStatus.chat}
+                    embedding={{ configured: modelStatus.embedding_configured, provider: modelStatus.provider, model: modelStatus.model }}
+                    rerank={{ configured: modelStatus.rerank_configured, provider: modelStatus.rerank_provider, model: modelStatus.rerank_model }}
+                    chat={{ configured: modelStatus.chat_configured, provider: modelStatus.chat_provider, model: modelStatus.chat_model }}
                   />
                 ) : (
                   <Typography.Text type="secondary">正在加载模型状态...</Typography.Text>
