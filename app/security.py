@@ -26,6 +26,8 @@ startup to globally patch ``xml.etree`` / ``xml.dom.minidom`` / ``xml.sax``.
 No outbound network request is implemented anywhere in this service, which
 also removes the classic XXE-to-SSRF exfiltration path even if an external
 entity reference were ever resolved.
+
+Author: owlzhangfq@gmail.com
 """
 
 import io

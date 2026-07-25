@@ -3,6 +3,8 @@
 Adding support for a new format is a two-line change: implement a
 BaseParser subclass in its own module, then register it in _REGISTRY below.
 No changes to app/main.py or any other parser are required.
+
+Author: owlzhangfq@gmail.com
 """
 
 import logging

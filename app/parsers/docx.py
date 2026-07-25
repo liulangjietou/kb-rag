@@ -6,6 +6,8 @@ zip-bomb precheck (requirement §4.2). XXE hardening for the XML parts
 themselves is already provided by python-docx's own lxml parser
 configuration (``resolve_entities=False`` — audited in app/security.py's
 module docstring), so no extra patch is needed here.
+
+Author: owlzhangfq@gmail.com
 """
 
 import io

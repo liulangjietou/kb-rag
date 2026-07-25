@@ -6,6 +6,8 @@ success responses use code="OK"; any parse failure (unsupported format,
 security rejection, oversized file, timeout, or an unexpected exception
 raised by an underlying library) is normalized to code="PARSE_FAILED" with
 a human-readable message. Codes are centralized here to avoid magic strings.
+
+Author: owlzhangfq@gmail.com
 """
 
 

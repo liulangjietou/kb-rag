@@ -1,4 +1,7 @@
-"""PDF parser backed by PyMuPDF (imported as pymupdf/fitz)."""
+"""PDF parser backed by PyMuPDF (imported as pymupdf/fitz).
+
+Author: owlzhangfq@gmail.com
+"""
 
 import logging
 

@@ -5,6 +5,8 @@ security guardrails in app/security.py apply beyond the upload size cap
 already enforced by the API layer. Markdown files are passed through
 as-is since they already are the target "markdown" representation; plain
 text files are wrapped verbatim (no synthetic markdown syntax is invented).
+
+Author: owlzhangfq@gmail.com
 """
 
 import logging

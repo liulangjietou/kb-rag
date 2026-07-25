@@ -12,6 +12,8 @@ Security constraints enforced here (requirement doc §4.2):
   - XML parsing hardened against XXE at process startup
   - a hard timeout (PARSE_TIMEOUT_SECONDS) bounds every parse call
   - no outbound network call is implemented anywhere in this service
+
+Author: owlzhangfq@gmail.com
 """
 
 import asyncio

@@ -5,6 +5,8 @@ through ``ensure_zip_is_safe`` first (requirement §4.2). openpyxl's own XML
 reader disables entity resolution when lxml is installed and falls back to
 defusedxml otherwise (audited in app/security.py's module docstring), so no
 extra XXE patch is needed here. .csv is plain text — no zip, no XML.
+
+Author: owlzhangfq@gmail.com
 """
 
 import csv

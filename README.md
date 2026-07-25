@@ -15,8 +15,8 @@ kb-rag 知识库项目的 Python 文档解析微服务（M1 版本）。只负�
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# 2. 启动服务（默认端口 8001，与 M1 契约 kb-rag-parser 端口一致）
-.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8001
+# 2. 启动服务（默认端口 20001，与 M1 契约 kb-rag-parser 端口一致）
+.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 20001
 
 # 3. 运行测试
 .venv/bin/pytest -q

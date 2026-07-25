@@ -1,4 +1,7 @@
-"""Shared best-effort text decoding used by the txt/md and csv parsers."""
+"""Shared best-effort text decoding used by the txt/md and csv parsers.
+
+Author: owlzhangfq@gmail.com
+"""
 
 # Encodings tried in order; utf-8-sig strips a BOM if present. gbk covers
 # the common case of CSV/txt exported by Chinese-locale Excel/editors.

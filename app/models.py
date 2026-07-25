@@ -4,6 +4,8 @@ Pydantic request/response models for kb-rag-parser.
 The response envelope shape is fixed by docs/M1-CONTRACTS.md §5/§6:
 success: {code:"OK", data:..., message, request_id}
 failure: {code:"PARSE_FAILED", data:null, message, request_id}
+
+Author: owlzhangfq@gmail.com
 """
 
 from typing import Any, List, Optional

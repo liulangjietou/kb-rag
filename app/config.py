@@ -4,11 +4,13 @@ Centralized constants for kb-rag-parser.
 All magic numbers referenced by the security constraints in the M1 contract
 (docs/M1-CONTRACTS.md §6) and the requirement doc (§4.2) live here so they are
 defined exactly once and are easy to audit.
+
+Author: owlzhangfq@gmail.com
 """
 
 # Service identity
 SERVICE_NAME = "kb-rag-parser"
-SERVICE_PORT = 8001
+SERVICE_PORT = 20001
 
 # --- Upload / parse limits (requirement §4.2, contract §6) ---
 

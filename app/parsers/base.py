@@ -1,4 +1,7 @@
-"""Common parser interface implemented by every format-specific parser."""
+"""Common parser interface implemented by every format-specific parser.
+
+Author: owlzhangfq@gmail.com
+"""
 
 from abc import ABC, abstractmethod
 
