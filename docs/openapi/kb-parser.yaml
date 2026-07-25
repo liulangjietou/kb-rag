@@ -11,7 +11,7 @@ info:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
-  - url: http://127.0.0.1:8001
+  - url: http://127.0.0.1:20001
     description: 本地开发（kb-rag-parser 默认端口，见契约 §0）
 
 tags:

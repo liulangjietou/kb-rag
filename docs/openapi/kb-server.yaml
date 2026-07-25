@@ -1,39 +1,51 @@
 openapi: 3.0.3
 info:
   title: kb-rag-server API
-  description: |
-    kb-rag 管理台内部 API（M1 子集）。
+  description: 'kb-rag 管理台内部 API（M1 基线 + M2 增量）。
 
-    本文件按 docs/M1-CONTRACTS.md §5 定型的端点与 DTO 编写，用于 kb-rag-server /
-    kb-rag-web 之间的接口契约测试与前端 mock。对外 API Key 网关（应用发布渠道）
-    属于 M4c 范畴，不在本文件中。
-  version: "0.1.0-m1"
+
+    本文件按 docs/M1-CONTRACTS.md §5 与 docs/M2-CONTRACTS.md §1.5/§3/§4/§6 定型的
+
+    端点与 DTO 编写，用于 kb-rag-server / kb-rag-web 之间的接口契约测试与前端 mock。
+
+    M2 增量：search 新入参（改写/融合/重排/阈值/metadata_filter）与出参（applied、
+
+    各路归一化分）、ik 词典 CRUD、知识库索引配置更新与按新配置重建。ik 词典热更新
+
+    通道 `GET /internal/dict/ik/{ext|stop}.txt`（见 M2-CONTRACTS.md §3）面向 ES ik
+
+    插件而非管理台前端，免鉴权、纯文本响应，不纳入本文件的管理台 API 契约。
+
+    对外 API Key 网关（应用发布渠道）属于 M4c 范畴，不在本文件中。
+
+    '
+  version: 0.2.0-m2
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
 servers:
-  - url: http://127.0.0.1:8080
-    description: 本地开发（kb-rag-server 默认端口，见契约 §0）
-
+- url: http://127.0.0.1:20000
+  description: 本地开发（kb-rag-server 默认端口，见契约 §0）
 tags:
-  - name: auth
-    description: 登录、改密、当前用户
-  - name: knowledge-base
-    description: 知识库管理
-  - name: document
-    description: 文档上传、状态查询、分片查看、重建索引
-  - name: search
-    description: 检索调试
-  - name: system
-    description: 系统状态与健康检查
-
+- name: auth
+  description: 登录、改密、当前用户
+- name: knowledge-base
+  description: 知识库管理
+- name: document
+  description: 文档上传、状态查询、分片查看、重建索引
+- name: search
+  description: 检索调试
+- name: dict
+  description: ik 中文分词自定义词典管理（M2）
+- name: system
+  description: 系统状态与健康检查
 security:
-  - bearerAuth: []
-
+- bearerAuth: []
 paths:
   /api/v1/auth/login:
     post:
-      tags: [auth]
+      tags:
+      - auth
       summary: 管理员登录
       description: 登录失败记入 t_kb_login_audit；连续失败 5 次锁定 15 分钟。
       security: []
@@ -42,274 +54,448 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/LoginRequest"
+              $ref: '#/components/schemas/LoginRequest'
       responses:
-        "200":
+        '200':
           description: 登录成功
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/LoginResult"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "400":
-          $ref: "#/components/responses/InvalidParam"
-
+                $ref: '#/components/schemas/LoginResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
   /api/v1/auth/change-password:
     post:
-      tags: [auth]
+      tags:
+      - auth
       summary: 修改密码（含首登强制改密场景）
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ChangePasswordRequest"
+              $ref: '#/components/schemas/ChangePasswordRequest'
       responses:
-        "200":
+        '200':
           description: 修改成功
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmptyResult"
-        "400":
-          $ref: "#/components/responses/InvalidParam"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /api/v1/auth/me:
     get:
-      tags: [auth]
+      tags:
+      - auth
       summary: 获取当前登录用户信息
       responses:
-        "200":
+        '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/UserInfoResult"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-
+                $ref: '#/components/schemas/UserInfoResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /api/v1/kb:
     post:
-      tags: [knowledge-base]
+      tags:
+      - knowledge-base
       summary: 创建知识库
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateKbRequest"
+              $ref: '#/components/schemas/CreateKbRequest'
       responses:
-        "200":
+        '200':
           description: 创建成功
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/KnowledgeBaseResult"
-        "400":
-          $ref: "#/components/responses/InvalidParam"
+                $ref: '#/components/schemas/KnowledgeBaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
     get:
-      tags: [knowledge-base]
+      tags:
+      - knowledge-base
       summary: 知识库列表
       responses:
-        "200":
+        '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/KnowledgeBaseListResult"
-
+                $ref: '#/components/schemas/KnowledgeBaseListResult'
   /api/v1/kb/{kbId}:
     parameters:
-      - $ref: "#/components/parameters/KbId"
+    - $ref: '#/components/parameters/KbId'
     get:
-      tags: [knowledge-base]
+      tags:
+      - knowledge-base
       summary: 知识库详情
       responses:
-        "200":
+        '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/KnowledgeBaseResult"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/KnowledgeBaseResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
-      tags: [knowledge-base]
+      tags:
+      - knowledge-base
       summary: 删除知识库
       responses:
-        "200":
+        '200':
           description: 删除成功
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmptyResult"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/index-config:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    put:
+      tags:
+      - knowledge-base
+      summary: 更新知识库索引配置（分片参数/父子分片）
+      description: 'M2-CONTRACTS.md §4：更新后重算 current_config_fingerprint，并对该知识库下
 
+        活跃版本 chunk_fingerprint 不等于新指纹的文档置 config_stale=1（web 侧据此
+
+        展示“N 篇文档使用旧配置”提示 + 重建入口）。仅更新配置元数据，**不会**立即
+
+        触发重建，重建需显式调用 `POST /api/v1/kb/{kbId}/rebuild`。
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IndexConfig'
+      responses:
+        '200':
+          description: 更新成功，返回最新知识库信息（含新指纹与索引配置）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/rebuild:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - knowledge-base
+      summary: 按当前索引配置重建文档索引
+      description: 'M2-CONTRACTS.md §4：body 可选 `doc_ids`，缺省时重建该知识库下全部
+
+        config_stale=1 的文档。每篇文档一个 REBUILD 任务：从 MinIO 解析产物
+
+        重切/重嵌入，同一物理索引内原子替换该版本 chunk（先写新 chunk 再删旧，
+
+        引擎双写走既有同步机制），完成后置 config_stale=0。异步受理，幂等。
+
+        '
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RebuildRequest'
+      responses:
+        '200':
+          description: 已受理
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/kb/{kbId}/documents:
     parameters:
-      - $ref: "#/components/parameters/KbId"
+    - $ref: '#/components/parameters/KbId'
     post:
-      tags: [document]
+      tags:
+      - document
       summary: 上传文档（异步进入索引管线）
-      description: |
-        multipart 上传；服务端校验扩展名 + magic number + 文件大小（≤100MB）。
+      description: 'multipart 上传；服务端校验扩展名 + magic number + 文件大小（≤100MB）。
+
         校验通过后立即返回，文档以 UPLOADED 状态异步进入解析/切分/索引管线。
+
+        '
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
-              required: [file]
+              required:
+              - file
               properties:
                 file:
                   type: string
                   format: binary
       responses:
-        "200":
+        '200':
           description: 已接收，进入异步处理
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DocumentResult"
-        "400":
-          $ref: "#/components/responses/InvalidParam"
-        "404":
-          $ref: "#/components/responses/NotFound"
+                $ref: '#/components/schemas/DocumentResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
     get:
-      tags: [document]
+      tags:
+      - document
       summary: 文档列表
       parameters:
-        - name: process_status
-          in: query
-          required: false
-          schema:
-            $ref: "#/components/schemas/ProcessStatus"
-        - name: page
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            default: 1
+      - name: process_status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ProcessStatus'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
       responses:
-        "200":
+        '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DocumentListResult"
-
+                $ref: '#/components/schemas/DocumentListResult'
   /api/v1/documents/{docId}/reindex:
     parameters:
-      - $ref: "#/components/parameters/DocId"
+    - $ref: '#/components/parameters/DocId'
     post:
-      tags: [document]
+      tags:
+      - document
       summary: 重建索引
       description: 幂等：按当前激活版本重建先删旧 chunk 再重建，失败可重试。
       responses:
-        "200":
+        '200':
           description: 已受理
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmptyResult"
-        "404":
-          $ref: "#/components/responses/NotFound"
-
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/documents/{docId}/chunks:
     parameters:
-      - $ref: "#/components/parameters/DocId"
+    - $ref: '#/components/parameters/DocId'
     get:
-      tags: [document]
+      tags:
+      - document
       summary: 分片列表
       parameters:
-        - name: page
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            default: 1
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
       responses:
-        "200":
+        '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ChunkListResult"
-        "404":
-          $ref: "#/components/responses/NotFound"
-
+                $ref: '#/components/schemas/ChunkListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/kb/{kbId}/search:
     parameters:
-      - $ref: "#/components/parameters/KbId"
+    - $ref: '#/components/parameters/KbId'
     post:
-      tags: [search]
+      tags:
+      - search
       summary: 检索调试
-      description: |
-        有 Key：向量 + BM25 双路（lite 单引擎两次独立请求）经 RRF(k=60) 融合后取 top_n；
+      description: '有 Key：向量 + BM25 双路（lite 单引擎两次独立请求）经 RRF(k=60) 融合后取 top_n；
+
         零 Key：仅 BM25 单路，`degraded` 含 `vector_route_unavailable`。
+
         强制过滤 document_version_id 属于当前激活版本且 enabled=true（引擎侧 filter）。
+
+        '
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SearchRequest"
+              $ref: '#/components/schemas/SearchRequest'
       responses:
-        "200":
+        '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SearchResult"
-        "400":
-          $ref: "#/components/responses/InvalidParam"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "502":
-          $ref: "#/components/responses/UpstreamModelError"
+                $ref: '#/components/schemas/SearchResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/UpstreamModelError'
+  /api/v1/dict/ik:
+    get:
+      tags:
+      - dict
+      summary: ik 自定义词典列表（分页）
+      description: M2-CONTRACTS.md §3：t_kb_ik_dict 分页查询，可按 dict_type 过滤。
+      parameters:
+      - name: dict_type
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/IkDictType'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IkDictListResult'
+    post:
+      tags:
+      - dict
+      summary: 新增 ik 自定义词条
+      description: 'word 唯一（UK），新增后立即通过 remote_ext_dict/remote_ext_stopwords 热更新通道
 
+        对 ik 插件生效（ik 轮询 Last-Modified/ETag，见 M2-CONTRACTS.md §3），无需重启 ES/重建索引。
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIkDictRequest'
+      responses:
+        '200':
+          description: 新增成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IkDictEntryResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/dict/ik/{dictId}:
+    parameters:
+    - $ref: '#/components/parameters/DictId'
+    delete:
+      tags:
+      - dict
+      summary: 删除 ik 自定义词条
+      description: 删除后同样通过热更新通道即时生效（词表整体重新拉取）。
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/system/model-status:
     get:
-      tags: [system]
+      tags:
+      - system
       summary: 模型/向量引擎配置状态
       description: 用于前端零 Key 场景的 banner 提示与置灰逻辑判定。
       responses:
-        "200":
+        '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ModelStatusResult"
-
+                $ref: '#/components/schemas/ModelStatusResult'
   /actuator/health:
     get:
-      tags: [system]
+      tags:
+      - system
       summary: 健康检查（含 MySQL/ES/MinIO/Milvus 探活）
       security: []
       responses:
-        "200":
+        '200':
           description: 健康或部分降级
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HealthStatus"
-
+                $ref: '#/components/schemas/HealthStatus'
+  /api/v1/dict/ik/{word}:
+    put:
+      summary: Enable or disable an ik dictionary word
+      tags:
+      - dict
+      parameters:
+      - name: word
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - status
+              properties:
+                status:
+                  type: string
+                  enum:
+                  - ENABLED
+                  - DISABLED
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
-      description: |
-        自定义 Header：Authorization: Bearer <token>。服务端 token 表/内存缓存维护，
+      description: '自定义 Header：Authorization: Bearer <token>。服务端 token 表/内存缓存维护，
+
         有效期 24h；除 /api/v1/auth/login 与 /actuator/** 外全部拦截。
 
+        '
   parameters:
     KbId:
       name: kbId
@@ -325,92 +511,103 @@ components:
       schema:
         type: string
       description: 文档业务主键（doc_id）
-
+    DictId:
+      name: dictId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+      description: ik 词典条目主键（t_kb_ik_dict.id，无独立业务字符串 ID，仅此表通用列 id 即主键）
   responses:
     InvalidParam:
       description: 参数校验失败
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
     Unauthorized:
       description: 未登录或 token 失效
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
     NotFound:
       description: 资源不存在
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
+            $ref: '#/components/schemas/ErrorResponse'
     UpstreamModelError:
       description: 上游模型 Provider 调用失败
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/ErrorResponse"
-
+            $ref: '#/components/schemas/ErrorResponse'
   schemas:
     ErrorCode:
       type: string
       description: M1 错误码子集，HTTP 状态码见括注
       enum:
-        - INVALID_PARAM      # 400
-        - UNAUTHORIZED       # 401
-        - NOT_FOUND          # 404
-        - PARSE_FAILED       # 500
-        - UPSTREAM_MODEL_ERROR  # 502
-        - INTERNAL_ERROR     # 500
-
+      - INVALID_PARAM
+      - UNAUTHORIZED
+      - NOT_FOUND
+      - PARSE_FAILED
+      - UPSTREAM_MODEL_ERROR
+      - INTERNAL_ERROR
     ErrorResponse:
       type: object
       description: 统一错误响应
-      required: [code, message, request_id]
+      required:
+      - code
+      - message
+      - request_id
       properties:
         code:
-          $ref: "#/components/schemas/ErrorCode"
+          $ref: '#/components/schemas/ErrorCode'
         message:
           type: string
-          example: "invalid parameter: name is required"
+          example: 'invalid parameter: name is required'
         request_id:
           type: string
-          description: 全链路透传的请求 ID，经 X-Request-Id Header 贯穿 kb-server/kb-parser/模型 Provider 日志
-          example: "req-3f6a2e1c"
-
+          description: 全链路透传的请求 ID，经 X-Request-Id Header 贯穿 kb-server/kb-parser/模型
+            Provider 日志
+          example: req-3f6a2e1c
     ResultEnvelope:
       type: object
       description: 统一成功响应外壳，具体业务负载见各接口 data 字段的组合 schema
-      required: [code, message, request_id]
+      required:
+      - code
+      - message
+      - request_id
       properties:
         code:
           type: string
-          enum: ["OK"]
+          enum:
+          - OK
         message:
           type: string
-          example: "success"
+          example: success
         request_id:
           type: string
-
     EmptyResult:
       allOf:
-        - $ref: "#/components/schemas/ResultEnvelope"
-        - type: object
-          properties:
-            data:
-              nullable: true
-
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            nullable: true
     LoginRequest:
       type: object
-      required: [username, password]
+      required:
+      - username
+      - password
       properties:
         username:
           type: string
         password:
           type: string
           format: password
-
     LoginData:
       type: object
       properties:
@@ -418,18 +615,18 @@ components:
           type: string
         must_change_password:
           type: boolean
-
     LoginResult:
       allOf:
-        - $ref: "#/components/schemas/ResultEnvelope"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/LoginData"
-
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/LoginData'
     ChangePasswordRequest:
       type: object
-      required: [old_password, new_password]
+      required:
+      - old_password
+      - new_password
       properties:
         old_password:
           type: string
@@ -437,7 +634,6 @@ components:
         new_password:
           type: string
           format: password
-
     UserInfo:
       type: object
       properties:
@@ -449,25 +645,23 @@ components:
           type: string
           format: date-time
           nullable: true
-
     UserInfoResult:
       allOf:
-        - $ref: "#/components/schemas/ResultEnvelope"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/UserInfo"
-
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/UserInfo'
     CreateKbRequest:
       type: object
-      required: [name]
+      required:
+      - name
       properties:
         name:
           type: string
         description:
           type: string
           nullable: true
-
     KnowledgeBase:
       type: object
       properties:
@@ -481,43 +675,48 @@ components:
         current_config_fingerprint:
           type: string
           nullable: true
+        index_config:
+          allOf:
+          - $ref: '#/components/schemas/IndexConfig'
+          nullable: true
+          description: '索引配置（分片参数 + 父子分片，M2 新增可编辑项）；为空表示沿用 M1 固定
+
+            默认值（chunk_max_tokens=600 / chunk_overlap=100，父子分片关闭）。
+
+            '
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
-
     KnowledgeBaseResult:
       allOf:
-        - $ref: "#/components/schemas/ResultEnvelope"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/KnowledgeBase"
-
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/KnowledgeBase'
     KnowledgeBaseListResult:
       allOf:
-        - $ref: "#/components/schemas/ResultEnvelope"
-        - type: object
-          properties:
-            data:
-              type: array
-              items:
-                $ref: "#/components/schemas/KnowledgeBase"
-
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/KnowledgeBase'
     ProcessStatus:
       type: string
       description: 文档处理状态（t_kb_document.process_status）
       enum:
-        - UPLOADED
-        - PARSING
-        - PARSE_FAILED
-        - PARSED
-        - INDEXING
-        - INDEXED
-        - INDEX_FAILED
-
+      - UPLOADED
+      - PARSING
+      - PARSE_FAILED
+      - PARSED
+      - INDEXING
+      - INDEXED
+      - INDEX_FAILED
     Document:
       type: object
       properties:
@@ -536,7 +735,7 @@ components:
           type: string
           nullable: true
         process_status:
-          $ref: "#/components/schemas/ProcessStatus"
+          $ref: '#/components/schemas/ProcessStatus'
         config_stale:
           type: boolean
           description: 配置一致性标记，与处理状态正交
@@ -544,36 +743,36 @@ components:
           type: string
           nullable: true
           maxLength: 1024
-
     DocumentResult:
       allOf:
-        - $ref: "#/components/schemas/ResultEnvelope"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/Document"
-
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/Document'
     DocumentListResult:
       allOf:
-        - $ref: "#/components/schemas/ResultEnvelope"
-        - type: object
-          properties:
-            data:
-              type: object
-              properties:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
                 items:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/Document"
-                page:
-                  type: integer
-                total:
-                  type: integer
-
+                  $ref: '#/components/schemas/Document'
+              page:
+                type: integer
+              total:
+                type: integer
     EmbeddingStatus:
       type: string
-      enum: [PENDING, DONE, FAILED, SKIPPED]
-
+      enum:
+      - PENDING
+      - DONE
+      - FAILED
+      - SKIPPED
     DocumentChunk:
       type: object
       properties:
@@ -595,31 +794,37 @@ components:
         enabled:
           type: boolean
         embedding_status:
-          $ref: "#/components/schemas/EmbeddingStatus"
+          $ref: '#/components/schemas/EmbeddingStatus'
         metadata:
           type: object
           additionalProperties: true
-
     ChunkListResult:
       allOf:
-        - $ref: "#/components/schemas/ResultEnvelope"
-        - type: object
-          properties:
-            data:
-              type: object
-              properties:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
                 items:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/DocumentChunk"
-                page:
-                  type: integer
-                total:
-                  type: integer
-
+                  $ref: '#/components/schemas/DocumentChunk'
+              page:
+                type: integer
+              total:
+                type: integer
     SearchRequest:
       type: object
-      required: [query]
+      description: 'M2-CONTRACTS.md §1.5：管理台调试用扩展入参，全部可选、即时生效（不落库为 KB
+
+        默认值）。固定链路次序见 M2-CONTRACTS.md §1：改写 → 双路召回 → 融合 →
+
+        rerank → 父子归并 → 阈值过滤 → top_n。
+
+        '
+      required:
+      - query
       properties:
         query:
           type: string
@@ -631,40 +836,96 @@ components:
           type: integer
           default: 5
           minimum: 1
+        score_threshold:
+          type: number
+          format: float
+          minimum: 0.01
+          maximum: 1.0
+          nullable: true
+          default: null
+          description: '可空=不过滤。作用于 rerank 分；rerank 关闭或降级时作用于向量标准
 
+            cosine[0,1] 分；BM25 单路时不生效（degraded += threshold_inactive）。
+
+            '
+        fusion:
+          allOf:
+          - $ref: '#/components/schemas/FusionConfig'
+          nullable: true
+        rerank_enabled:
+          type: boolean
+          nullable: true
+          description: 默认 true（仅当 RERANK_MODEL 已配置生效），显式传 false 可关闭。
+        rewrite_enabled:
+          type: boolean
+          default: false
+          description: 默认 false；显式开启却未配置 chat 模型时 degraded += query_rewrite_timeout
+            同类降级标注。
+        messages:
+          type: array
+          nullable: true
+          description: 多轮对话上下文（OpenAI 兼容 role/content），非空时按此做指代消解改写。
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        metadata_filter:
+          allOf:
+          - $ref: '#/components/schemas/MetadataFilter'
+          nullable: true
     ChunkType:
       type: string
-      enum: [text, image, chat_log]
-
+      enum:
+      - text
+      - image
+      - chat_log
     ScoreType:
       type: string
-      description: 分数口径；M1 无 rerank，仅两种原始召回口径
-      enum: [cosine, bm25_rank]
+      description: '分数口径。M1 仅 cosine/bm25_rank 两种原始召回口径；M2 新增 rerank（唯一绝对分）
 
+        与两种融合口径 fused_rrf/fused_weighted（M2-CONTRACTS.md §1.3）。
+
+        '
+      enum:
+      - rerank
+      - cosine
+      - bm25_rank
+      - fused_rrf
+      - fused_weighted
     RetrievalSource:
       type: string
-      enum: [vector, bm25]
-
+      enum:
+      - vector
+      - bm25
     DegradedReason:
       type: string
-      description: |
-        检索降级原因枚举。M1 仅定义 vector_route_unavailable（零 Key 场景，向量路不可用，
-        仅走 BM25 单路）；后续里程碑（改写/重排超时降级等）追加新枚举值。
-      enum:
-        - vector_route_unavailable
+      description: '检索降级原因枚举。M1 仅定义 vector_route_unavailable（零 Key 场景，向量路不可用，
 
+        仅走 BM25 单路）。M2 新增（M2-CONTRACTS.md §1.1/§1.2/§1.3）：
+
+        query_rewrite_timeout（改写超时/失败降级用原 query，或显式开启改写却无模型）、
+
+        rerank_timeout/rerank_error（重排超时或调用失败，降级为融合结果排序）、
+
+        threshold_inactive（score_threshold 在 BM25 单路场景不生效）。
+
+        '
+      enum:
+      - vector_route_unavailable
+      - query_rewrite_timeout
+      - rerank_timeout
+      - rerank_error
+      - threshold_inactive
     RetrievalNode:
       type: object
       description: 检索结果节点（契约 §5 定型结构）
       required:
-        - doc_id
-        - document_version_id
-        - chunk_id
-        - chunk_type
-        - content
-        - score
-        - score_type
-        - retrieval_source
+      - doc_id
+      - document_version_id
+      - chunk_id
+      - chunk_type
+      - content
+      - score
+      - score_type
+      - retrieval_source
       properties:
         doc_id:
           type: string
@@ -673,7 +934,7 @@ components:
         chunk_id:
           type: string
         chunk_type:
-          $ref: "#/components/schemas/ChunkType"
+          $ref: '#/components/schemas/ChunkType'
         content:
           type: string
         score:
@@ -681,11 +942,45 @@ components:
           format: float
           description: 统一映射到标准 cosine [0,1] 后的分数（跨引擎一致，见契约 §4）
         score_type:
-          $ref: "#/components/schemas/ScoreType"
+          $ref: '#/components/schemas/ScoreType'
         retrieval_source:
-          $ref: "#/components/schemas/RetrievalSource"
+          $ref: '#/components/schemas/RetrievalSource'
         metadata:
           type: object
+          description: '引擎侧固定字段（tag_ids/session_id/sender/msg_time 等，见 M1-CONTRACTS.md
+
+            §6）+ M2 新增各路分数明细（M2-CONTRACTS.md §1.5，父子归并开启时另含
+
+            child_ids，见 §1.4），字段按实际生效链路出现，其余透传引擎原始 metadata。
+
+            '
+          properties:
+            norm_vector_score:
+              type: number
+              format: float
+              nullable: true
+              description: 融合前向量路 min-max 归一化分（weighted 融合时使用）
+            norm_bm25_score:
+              type: number
+              format: float
+              nullable: true
+              description: 融合前 BM25 路 min-max 归一化分（weighted 融合时使用）
+            fused_score:
+              type: number
+              format: float
+              nullable: true
+              description: 融合分（RRF 或加权），rerank 关闭/降级时可作为最终分参考
+            rerank_score:
+              type: number
+              format: float
+              nullable: true
+              description: rerank 归一化分（0-1），rerank 开启且未降级时存在
+            child_ids:
+              type: array
+              nullable: true
+              description: 父子分片开启时，归并到该父片的命中子片 chunk_id 列表
+              items:
+                type: string
           additionalProperties: true
         image_urls:
           type: array
@@ -696,65 +991,270 @@ components:
           type: string
           nullable: true
           default: null
-
     SearchData:
       type: object
       properties:
         nodes:
           type: array
           items:
-            $ref: "#/components/schemas/RetrievalNode"
+            $ref: '#/components/schemas/RetrievalNode'
         request_id:
           type: string
         degraded:
           type: array
           items:
-            $ref: "#/components/schemas/DegradedReason"
+            $ref: '#/components/schemas/DegradedReason'
           default: []
-
+        applied:
+          allOf:
+          - $ref: '#/components/schemas/AppliedSearchParams'
+          description: M2 新增，供调试页展示本次请求实际生效的参数（M2-CONTRACTS.md §1.5）
     SearchResult:
       allOf:
-        - $ref: "#/components/schemas/ResultEnvelope"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/SearchData"
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/SearchData'
+    FusionMode:
+      type: string
+      description: M2-CONTRACTS.md §1.3
+      enum:
+      - rrf
+      - weighted
+    FusionConfig:
+      type: object
+      description: 'weighted 模式：每路候选集内 min-max 归一化，融合分 = w_vec·norm(vec) +
 
+        w_bm25·norm(bm25)，w_vec + w_bm25 = 1（入参只传 w_vec，w_bm25 由服务端换算）。
+
+        '
+      properties:
+        mode:
+          $ref: '#/components/schemas/FusionMode'
+        w_vec:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: 仅 mode=weighted 时生效，默认 0.5
+        rrf_k:
+          type: integer
+          minimum: 1
+          default: 60
+          description: 仅 mode=rrf 时生效
+    ChatMessage:
+      type: object
+      description: OpenAI 兼容 chat message（用于多轮指代消解改写，见 M2-CONTRACTS.md §1.1）
+      required:
+      - role
+      - content
+      properties:
+        role:
+          type: string
+          enum:
+          - user
+          - assistant
+          - system
+        content:
+          type: string
+    MetadataFilter:
+      type: object
+      description: 'M2-CONTRACTS.md §1.5：映射为 ES bool filter / Milvus expr，字段即
+
+        M1-CONTRACTS.md §6 引擎固定字段集（tag_ids/session_id/sender/msg_time）。
+
+        '
+      properties:
+        tag_ids:
+          type: array
+          nullable: true
+          items:
+            type: string
+        session_id:
+          type: string
+          nullable: true
+        sender:
+          type: string
+          nullable: true
+        msg_time_from:
+          type: string
+          format: date-time
+          nullable: true
+        msg_time_to:
+          type: string
+          format: date-time
+          nullable: true
+    AppliedSearchParams:
+      type: object
+      description: 调试页顶部信息条：本次请求实际生效的改写/融合/阈值作用口径（M2-CONTRACTS.md §1.5）
+      properties:
+        rewrite_used_query:
+          type: string
+          nullable: true
+          description: 实际用于检索的 query；未开启改写或降级时等于原始 query
+        fusion_mode:
+          $ref: '#/components/schemas/FusionMode'
+        threshold_applied_on:
+          allOf:
+          - $ref: '#/components/schemas/ScoreType'
+          nullable: true
+          description: score_threshold 实际作用的分数口径；未设置阈值或 threshold_inactive 时为 null
+    ParentChildConfig:
+      type: object
+      description: M2-CONTRACTS.md §1.4：父子分片，引擎只索引子片，父片正文只在 MySQL
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        parent_max_tokens:
+          type: integer
+          default: 1200
+          minimum: 1
+        child_max_tokens:
+          type: integer
+          default: 400
+          minimum: 1
+        child_overlap:
+          type: integer
+          default: 50
+          minimum: 0
+    IndexConfig:
+      type: object
+      description: '知识库索引配置（t_kb_knowledge_base.index_config JSON）。chunk_max_tokens/
+
+        chunk_overlap 为 M1 既有按长度切分参数（默认 600/100，见 M1-CONTRACTS.md
+
+        索引管线说明），M2 起可通过 `PUT /api/v1/kb/{kbId}/index-config` 编辑；
+
+        parent_child 为 M2 新增二级切分开关。
+
+        '
+      properties:
+        chunk_max_tokens:
+          type: integer
+          default: 600
+          minimum: 1
+        chunk_overlap:
+          type: integer
+          default: 100
+          minimum: 0
+        parent_child:
+          $ref: '#/components/schemas/ParentChildConfig'
+    RebuildRequest:
+      type: object
+      description: M2-CONTRACTS.md §4：doc_ids 缺省 = 该知识库下全部 config_stale=1 文档
+      properties:
+        doc_ids:
+          type: array
+          nullable: true
+          items:
+            type: string
+    IkDictType:
+      type: string
+      description: t_kb_ik_dict.dict_type（M2-CONTRACTS.md §3）
+      enum:
+      - EXT
+      - STOP
+    IkDictStatus:
+      type: string
+      description: t_kb_ik_dict.status
+      enum:
+      - ENABLED
+      - DISABLED
+    IkDictEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        word:
+          type: string
+        dict_type:
+          $ref: '#/components/schemas/IkDictType'
+        status:
+          $ref: '#/components/schemas/IkDictStatus'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateIkDictRequest:
+      type: object
+      required:
+      - word
+      - dict_type
+      properties:
+        word:
+          type: string
+          minLength: 1
+        dict_type:
+          $ref: '#/components/schemas/IkDictType'
+        status:
+          allOf:
+          - $ref: '#/components/schemas/IkDictStatus'
+          default: ENABLED
+    IkDictEntryResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/IkDictEntry'
+    IkDictListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IkDictEntry'
+              page:
+                type: integer
+              total:
+                type: integer
     VectorEngine:
       type: string
-      enum: [es, milvus]
-
+      enum:
+      - es
+      - milvus
     ModelStatus:
       type: object
       properties:
         embedding_configured:
           type: boolean
         vector_engine:
-          $ref: "#/components/schemas/VectorEngine"
+          $ref: '#/components/schemas/VectorEngine'
         provider:
           type: string
           nullable: true
         model:
           type: string
           nullable: true
-
     ModelStatusResult:
       allOf:
-        - $ref: "#/components/schemas/ResultEnvelope"
-        - type: object
-          properties:
-            data:
-              $ref: "#/components/schemas/ModelStatus"
-
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/ModelStatus'
     ComponentHealth:
       type: string
-      enum: [UP, DOWN, UNKNOWN]
-
+      enum:
+      - UP
+      - DOWN
+      - UNKNOWN
     HealthStatus:
       type: object
       properties:
         status:
-          $ref: "#/components/schemas/ComponentHealth"
+          $ref: '#/components/schemas/ComponentHealth'
         components:
           type: object
           properties:
@@ -762,20 +1262,20 @@ components:
               type: object
               properties:
                 status:
-                  $ref: "#/components/schemas/ComponentHealth"
+                  $ref: '#/components/schemas/ComponentHealth'
             elasticsearch:
               type: object
               properties:
                 status:
-                  $ref: "#/components/schemas/ComponentHealth"
+                  $ref: '#/components/schemas/ComponentHealth'
             minio:
               type: object
               properties:
                 status:
-                  $ref: "#/components/schemas/ComponentHealth"
+                  $ref: '#/components/schemas/ComponentHealth'
             milvus:
               type: object
               description: 仅 VECTOR_ENGINE=milvus 时探活，lite 模式可不出现
               properties:
                 status:
-                  $ref: "#/components/schemas/ComponentHealth"
+                  $ref: '#/components/schemas/ComponentHealth'

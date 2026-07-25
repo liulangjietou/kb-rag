@@ -19,6 +19,8 @@ MinIO（对象存储）构建，全部通过 docker-compose 一键拉起中间�
 - [部署模式与资源要求](#部署模式与资源要求)
 - [环境变量](#环境变量)
 - [中文分词（IK）](#中文分词ik)
+  - [启用 ik（M2）](#启用-ikm2)
+- [压测（M2）](#压测m2)
 - [备份与恢复](#备份与恢复)
 - [接口契约（OpenAPI）](#接口契约openapi)
 - [开源工程文档](#开源工程文档)
@@ -50,7 +52,7 @@ docker compose -f docker-compose.lite.yml ps   # 确认 mysql/elasticsearch/mini
 
 随后按 kb-rag-server / kb-rag-web 各自仓库的 README 启动应用层（M1 阶段应用直接跑在
 宿主机，端口约定见 [`docs/M1-CONTRACTS.md` §0](docs/M1-CONTRACTS.md)：kb-rag-server
-`8080` / kb-rag-parser `8001` / kb-rag-web dev `5173`）。
+`20000` / kb-rag-parser `20001` / kb-rag-web dev `20002`）。
 
 ### 路径二：填 DASHSCOPE_API_KEY 获得全功能
 
@@ -134,9 +136,90 @@ docker exec -it kb-rag-es elasticsearch-plugin install \
 docker restart kb-rag-es
 ```
 
-安装后需要重建索引（mapping 的 analyzer 从 `standard` 切到 `ik_max_word`）。
-自定义词典热更新（DB 为源同步到 ES，容器重建不丢词条）是 M2 落地项，见需求文档 §6
-`t_kb_ik_dict`。
+安装后需要重建索引（mapping 的 analyzer 从 `standard` 切到 `ik_max_word`）。这条手工
+路径功能上可用，但容器重建（升级/迁移环境）后插件会丢失、且没有自定义词典热更新
+能力；生产环境建议改用下方「启用 ik（M2）」的可复现构建路径。
+
+### 启用 ik（M2）
+
+M2 起在 `es-ik/` 下提供固化的 Dockerfile（基于官方 Elasticsearch 镜像装
+analysis-ik 插件，见 [`es-ik/Dockerfile`](es-ik/Dockerfile)）与
+[`docker-compose.es-ik.yml`](docker-compose.es-ik.yml) override，容器重建不再
+丢插件，并对接 kb-rag-server 的自定义词典热更新通道（`t_kb_ik_dict`，见
+docs/M2-CONTRACTS.md §3）。这一层是**可选叠加**，不改动 lite/full 基线文件。
+
+#### 构建与 `-f` 叠加用法
+
+```bash
+# lite 模式叠加 ik（-f 顺序：基线在前，override 在后）
+docker compose -f docker-compose.lite.yml -f docker-compose.es-ik.yml up -d --build
+
+# full 模式同样适用
+docker compose -f docker-compose.yml -f docker-compose.es-ik.yml up -d --build
+```
+
+- `--build` 首次启用、或修改过 `es-ik/Dockerfile`/`IK_VERSION` 后必须带上；之后
+  再执行 `up -d` 可省略，直接复用已构建的 `kb-rag-es-ik:8.11.4` 镜像
+- 只覆盖 `elasticsearch` 一个服务：改用自建镜像并挂载
+  [`es-ik/config/IKAnalyzer.cfg.xml`](es-ik/config/IKAnalyzer.cfg.xml)（`remote_ext_dict`/
+  `remote_ext_stopwords` 指向 kb-rag-server 的热更新端点）；已存在的 `kb_rag_es_data`
+  数据卷沿用不受影响
+- 已建索引的 mapping analyzer 仍是 `standard`，切到 ik 镜像后需要重建索引才会真正
+  生效（`POST /api/v1/documents/{docId}/reindex`，或 M2 的
+  `POST /api/v1/kb/{kbId}/rebuild`；服务端 analyzer 探测已存在的 fallback 逻辑
+  见 M2-CONTRACTS.md §3）
+- 想回退到内置 `standard` 分词器：去掉 `-f docker-compose.es-ik.yml` 重新 `up -d`
+  即可，ES 数据卷不受影响（回退不会删数据，但已用 `ik_max_word` 建的索引在
+  standard 分词器下语义上不等价，回退前请评估）
+
+#### macOS / Linux 的 `host.docker.internal` 差异
+
+`IKAnalyzer.cfg.xml` 里的远程词典地址指向
+`http://host.docker.internal:20000/internal/dict/ik/{ext|stop}.txt`（kb-rag-server
+M2 阶段仍跑在宿主机 20000 端口，见 M1-CONTRACTS.md §0）：
+
+- **macOS（Docker Desktop）**：`host.docker.internal` 由 Docker Desktop 内置 DNS
+  自动解析到宿主机，开箱即用，无需任何额外配置
+- **Linux（Docker Engine）**：`host.docker.internal` 默认不存在，
+  `docker-compose.es-ik.yml` 已用 `extra_hosts: host.docker.internal:host-gateway`
+  补齐（需 Docker Engine >= 20.10）；更早版本不支持 `host-gateway`，需把
+  `es-ik/config/IKAnalyzer.cfg.xml` 中的 `host.docker.internal` 手动换成宿主机在
+  容器网络里可达的实际内网 IP，并重新 `--build`
+
+#### 验证词典热更新
+
+```bash
+# 1) 热更新端点本身可达（免登录，纯文本，见 M2-CONTRACTS.md §3）
+curl -i http://127.0.0.1:20000/internal/dict/ik/ext.txt
+# 期望：200，响应头含 Last-Modified / ETag，body 是一行一词的纯文本扩展词表
+
+# 2) 管理台新增一个扩展词条（TOKEN 来自 POST /api/v1/auth/login）
+curl -s -X POST http://127.0.0.1:20000/api/v1/dict/ik \
+  -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+  -d '{"word":"知识库检索","dict_type":"EXT"}'
+
+# 3) 再次拉取热更新端点：新词已出现，且 Last-Modified/ETag 已变化
+curl -i http://127.0.0.1:20000/internal/dict/ik/ext.txt
+
+# 4) ik 插件按内部轮询间隔（默认约 60s）自动重新加载，无需重启 ES 容器；
+#    用 _analyze 直接验证新词是否已切成一个 token
+curl -s -X POST http://127.0.0.1:9200/_analyze -H "Content-Type: application/json" \
+  -d '{"analyzer":"ik_max_word","text":"知识库检索能力很强"}' | python3 -m json.tool
+```
+
+若第 4 步仍是旧的切分结果，等一个轮询周期后重试；持续不生效则 `docker logs
+kb-rag-es` 排查 `remote_ext_dict` 拉取失败的日志（多数是上一小节的 host 解析问题）。
+
+## 压测（M2）
+
+```bash
+KB_ID=<目标知识库 kb_id> TOKEN=<登录 token> ./scripts/benchmark.sh
+```
+
+对指定知识库并发跑检索请求（默认 200 次、并发 5，query 从内置 10 条中文查询轮换，
+可用 `QUERY_FILE` 换成自定义语料），统计并输出 P50/P95/P99 延迟与错误数。
+**M2 验收口径：基础链路 P95 < 2s**（见 docs/M2-CONTRACTS.md §7）。参数与退出码
+说明见脚本头注释；服务未启动/`KB_ID`/`TOKEN` 有误时会给出明确报错而不是挂起或崩溃。
 
 ## 备份与恢复
 

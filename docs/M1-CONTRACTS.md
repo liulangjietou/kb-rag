@@ -5,7 +5,7 @@
 
 ## 0. 全局约定
 
-- 端口：kb-rag-server **8080**、kb-rag-parser **8001**、kb-rag-web dev **5173**（proxy /api 与 /actuator → 8080）
+- 端口：kb-rag-server **20000**、kb-rag-parser **20001**、kb-rag-web dev **20002**（proxy /api 与 /actuator → 20000）
 - JDK 17（本机 JAVA_HOME=/Users/zhangfuqiang/Library/Java/JavaVirtualMachines/corretto-17.0.16/Contents/Home）、Spring Boot 3.3.x、MyBatis-Plus 3.5.x、Flyway；Python 3.11+/FastAPI；React18+TS+Vite+AntD5
 - **代码注释与 Javadoc/docstring 一律英文**（D15）；日志仅 info/error、英文、error 带错误码占位符，如 `log.error("parse document failed, errorCode={}, docId={}", ErrorCode.PARSE_FAILED, docId, e)`
 - Java：lombok、CollectionUtils 判空、无魔法值（常量/枚举）、fast-fail 防御式编程全链路只做一处（Controller 入参层）
@@ -23,7 +23,7 @@ MINIO_ENDPOINT=http://127.0.0.1:9000  MINIO_ACCESS_KEY=..  MINIO_SECRET_KEY=..  
 VECTOR_ENGINE=es                            # es|milvus（D16；lite 默认 es）
 DASHSCOPE_API_KEY=                          # 可空=零 Key 模式
 EMBEDDING_PROVIDER=dashscope  EMBEDDING_MODEL=text-embedding-v4  EMBEDDING_DIM=1024
-PARSER_BASE_URL=http://127.0.0.1:8001
+PARSER_BASE_URL=http://127.0.0.1:20001
 ```
 
 ## 2. MySQL DDL（Flyway V1__baseline.sql，kb-rag-server 内）
