@@ -62,6 +62,10 @@ export function apiPost<T>(url: string, data?: unknown): Promise<T> {
   return unwrap<T>({ url, method: 'POST', data });
 }
 
+export function apiPut<T>(url: string, data?: unknown): Promise<T> {
+  return unwrap<T>({ url, method: 'PUT', data });
+}
+
 export function apiDelete<T>(url: string): Promise<T> {
   return unwrap<T>({ url, method: 'DELETE' });
 }

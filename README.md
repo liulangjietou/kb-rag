@@ -6,11 +6,11 @@
 
 ## 快速开始
 
-依赖后端 `kb-rag-server`（默认监听 `8080`）先启动，本项目开发模式下会将 `/api` 与 `/actuator` 请求代理到 `http://127.0.0.1:8080`（见 `vite.config.ts`）。
+依赖后端 `kb-rag-server`（默认监听 `20000`）先启动，本项目开发模式下会将 `/api` 与 `/actuator` 请求代理到 `http://127.0.0.1:20000`（见 `vite.config.ts`）。
 
 ```bash
 npm install
-npm run dev      # 启动开发服务器，默认端口 5173
+npm run dev      # 启动开发服务器，默认端口 20002
 ```
 
 首次启动后端时会在日志中打印随机生成的 `admin` 初始密码，使用该账号登录后系统会强制跳转到修改密码页面。
@@ -58,4 +58,4 @@ src/
 
 ## 环境变量
 
-前端本身无需 `.env`；开发代理目标固定为 `http://127.0.0.1:8080`（如需调整请修改 `vite.config.ts` 中的 `BACKEND_ORIGIN`）。生产环境构建产物由反向代理（如 Nginx）转发 `/api`、`/actuator` 到后端服务。
+前端本身无需 `.env`；开发代理目标固定为 `http://127.0.0.1:20000`（如需调整请修改 `vite.config.ts` 中的 `BACKEND_ORIGIN`）。生产环境构建产物由反向代理（如 Nginx）转发 `/api`、`/actuator` 到后端服务。

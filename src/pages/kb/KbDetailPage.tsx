@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeftOutlined, InboxOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeftOutlined, InboxOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons';
 import {
+  Alert,
   Button,
   Popconfirm,
+  Progress,
   Space,
   Table,
   Tag,
@@ -14,13 +16,17 @@ import {
 import type { UploadProps } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import { listDocuments, reindexDocument, uploadDocument } from '../../api/document';
-import { getKnowledgeBase } from '../../api/kb';
+import { getKnowledgeBase, rebuildKb } from '../../api/kb';
 import type { KbDocument, KnowledgeBase } from '../../api/types';
 import { formatFileSize } from '../../utils/format';
 import { PROCESS_STATUS_META } from '../../utils/statusMeta';
 import ChunkDrawer from './components/ChunkDrawer';
+import IndexConfigDrawer from './components/IndexConfigDrawer';
 
 // Document list is polled every 3s while this page stays mounted, per M1-CONTRACTS.md section 7.
+// The same poll loop is reused to track rebuild progress (M2-CONTRACTS.md section 4): there is
+// no dedicated task-status endpoint in the contract, so completion is derived from watching
+// each targeted document's config_stale flag flip back to false.
 const POLL_INTERVAL_MS = 3000;
 
 export default function KbDetailPage() {
@@ -30,7 +36,17 @@ export default function KbDetailPage() {
   const [documents, setDocuments] = useState<KbDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [chunkDoc, setChunkDoc] = useState<KbDocument | null>(null);
+  const [indexConfigOpen, setIndexConfigOpen] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildTargetIds, setRebuildTargetIds] = useState<string[]>([]);
+  const [rebuildInitialCount, setRebuildInitialCount] = useState(0);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const loadKb = useCallback(async () => {
+    if (!kbId) return;
+    const detail = await getKnowledgeBase(kbId);
+    setKb(detail);
+  }, [kbId]);
 
   const loadDocuments = useCallback(async () => {
     if (!kbId) return;
@@ -41,10 +57,8 @@ export default function KbDetailPage() {
   useEffect(() => {
     if (!kbId) return;
     setLoading(true);
-    Promise.all([getKnowledgeBase(kbId), loadDocuments()])
-      .then(([kbDetail]) => setKb(kbDetail))
-      .finally(() => setLoading(false));
-  }, [kbId, loadDocuments]);
+    Promise.all([loadKb(), loadDocuments()]).finally(() => setLoading(false));
+  }, [kbId, loadKb, loadDocuments]);
 
   useEffect(() => {
     pollTimerRef.current = setInterval(() => {
@@ -57,9 +71,41 @@ export default function KbDetailPage() {
     };
   }, [loadDocuments]);
 
+  const staleDocs = useMemo(() => documents.filter((doc) => doc.config_stale), [documents]);
+  const remainingRebuildCount = useMemo(
+    () => documents.filter((doc) => rebuildTargetIds.includes(doc.doc_id) && doc.config_stale).length,
+    [documents, rebuildTargetIds],
+  );
+
+  // Once every targeted document's config_stale flag clears, consider the rebuild finished.
+  useEffect(() => {
+    if (!rebuilding || rebuildTargetIds.length === 0) return;
+    if (remainingRebuildCount === 0) {
+      setRebuilding(false);
+      setRebuildTargetIds([]);
+      message.success('重建完成，新分片配置已生效');
+    }
+  }, [rebuilding, rebuildTargetIds, remainingRebuildCount]);
+
   const handleReindex = async (docId: string) => {
     await reindexDocument(docId);
     message.success('已提交重建任务');
+    loadDocuments();
+  };
+
+  const handleRebuildStale = async () => {
+    if (!kbId || staleDocs.length === 0) return;
+    const targetIds = staleDocs.map((doc) => doc.doc_id);
+    await rebuildKb(kbId, { doc_ids: targetIds });
+    message.success('已提交按新配置重建任务');
+    setRebuildTargetIds(targetIds);
+    setRebuildInitialCount(targetIds.length);
+    setRebuilding(true);
+    loadDocuments();
+  };
+
+  const handleIndexConfigSaved = () => {
+    loadKb();
     loadDocuments();
   };
 
@@ -81,16 +127,46 @@ export default function KbDetailPage() {
 
   return (
     <div>
-      <Space style={{ marginBottom: 16 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/kb')}>
-          返回列表
+      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }}>
+        <Space>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/kb')}>
+            返回列表
+          </Button>
+          <Typography.Title level={4} style={{ margin: 0 }}>
+            {kb?.name ?? '知识库详情'}
+          </Typography.Title>
+        </Space>
+        <Button icon={<SettingOutlined />} onClick={() => setIndexConfigOpen(true)}>
+          索引配置
         </Button>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          {kb?.name ?? '知识库详情'}
-        </Typography.Title>
       </Space>
       {kb?.description && (
         <Typography.Paragraph type="secondary">{kb.description}</Typography.Paragraph>
+      )}
+
+      {staleDocs.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          message={`${staleDocs.length} 篇文档使用旧配置`}
+          description={
+            rebuilding ? (
+              <Progress
+                percent={Math.round(((rebuildInitialCount - remainingRebuildCount) / rebuildInitialCount) * 100)}
+                size="small"
+                status="active"
+              />
+            ) : (
+              '索引配置已变更，需要按新配置重建后才能生效'
+            )
+          }
+          action={
+            <Button size="small" type="primary" loading={rebuilding} disabled={rebuilding} onClick={handleRebuildStale}>
+              {rebuilding ? '重建中' : '按新配置重建'}
+            </Button>
+          }
+          style={{ marginBottom: 16 }}
+        />
       )}
 
       <Upload.Dragger {...uploadProps} style={{ marginBottom: 24 }}>
@@ -132,10 +208,10 @@ export default function KbDetailPage() {
             },
           },
           {
-            title: '配置',
+            title: '索引配置',
             dataIndex: 'config_stale',
-            width: 90,
-            render: (stale: boolean) => (stale ? <Tag color="warning">配置过期</Tag> : null),
+            width: 100,
+            render: (stale: boolean) => (stale ? <Tag color="warning">配置过期</Tag> : <Tag color="success">最新</Tag>),
           },
           {
             title: '操作',
@@ -166,6 +242,16 @@ export default function KbDetailPage() {
         docName={chunkDoc?.file_name ?? null}
         onClose={() => setChunkDoc(null)}
       />
+
+      {kbId && (
+        <IndexConfigDrawer
+          kbId={kbId}
+          open={indexConfigOpen}
+          indexConfig={kb?.index_config ?? null}
+          onClose={() => setIndexConfigOpen(false)}
+          onSaved={handleIndexConfigSaved}
+        />
+      )}
     </div>
   );
 }
