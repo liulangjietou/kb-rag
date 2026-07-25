@@ -6,6 +6,7 @@ import type {
   ProcessStatus,
   RetrievalSource,
   ScoreType,
+  ThresholdAppliedOn,
 } from '../api/types';
 
 /** Ant Design Tag color + Chinese label per process_status, single source of truth for the UI. */
@@ -40,9 +41,9 @@ export const RETRIEVAL_SOURCE_META: Record<RetrievalSource, { color: string; lab
   bm25: { color: 'gold', label: 'bm25' },
 };
 
-export const FUSION_MODE_META: Record<FusionMode, { label: string }> = {
-  rrf: { label: 'RRF（倒数排名融合）' },
-  weighted: { label: '加权归一化融合' },
+export const FUSION_MODE_META: Record<FusionMode, { color: string; label: string }> = {
+  rrf: { color: 'processing', label: 'RRF（倒数排名融合）' },
+  weighted: { color: 'processing', label: '加权归一化融合' },
 };
 
 export const IK_DICT_TYPE_META: Record<IkDictType, { color: string; label: string }> = {
@@ -55,8 +56,32 @@ export const IK_DICT_STATUS_META: Record<IkDictStatus, { color: string; label: s
   DISABLED: { color: 'default', label: '已停用' },
 };
 
+/** Tag metadata shape shared by every enum lookup table in this module. */
+export interface TagMeta {
+  color: string;
+  label: string;
+}
+
+/**
+ * Single defensive lookup for values that come from the server.
+ *
+ * <p>Indexing a lookup table directly crashes the whole page when the backend introduces an enum
+ * value the console does not know yet, which is the one failure mode a display helper must never
+ * have. Every call site goes through here so the fallback lives in exactly one place, and an
+ * unmapped value degrades to showing the raw code instead of blanking the view.
+ */
+export function metaOf(table: Record<string, TagMeta>, key: string | null | undefined): TagMeta {
+  if (!key) {
+    return { color: 'default', label: '未知' };
+  }
+  return table[key] ?? { color: 'default', label: key };
+}
+
 /** Known degraded reason codes mapped to a human readable Chinese explanation. */
 export const DEGRADED_REASON_LABELS: Record<string, string> = {
+  query_rewrite_error: '查询改写失败，已使用原始查询检索',
+  query_rewrite_unavailable: '未配置对话模型，查询改写未启用',
+  rerank_unavailable: '未配置重排模型，重排序未启用',
   vector_route_unavailable: '向量检索不可用，已降级为 BM25 单路检索',
   query_rewrite_timeout: '查询改写超时或失败，已使用原始查询检索',
   rerank_timeout: '重排序超时，已使用融合排序结果',
@@ -73,14 +98,15 @@ export function describeDegradedReason(reason: string): string {
  * result card (M2-CONTRACTS.md section 5). Returns null when no threshold was configured at all.
  */
 export function describeThresholdApplied(
-  thresholdAppliedOn: ScoreType | null,
+  thresholdAppliedOn: ThresholdAppliedOn | null,
   degraded: string[],
-): { color: string; label: string } | null {
+): TagMeta | null {
   if (degraded.includes('threshold_inactive')) {
     return { color: 'warning', label: '阈值未生效（BM25 单路）' };
   }
-  if (!thresholdAppliedOn) {
+  // The server sends 'none' when nothing was filtered, which is not a score type.
+  if (!thresholdAppliedOn || thresholdAppliedOn === 'none') {
     return null;
   }
-  return { color: 'processing', label: `阈值作用于 ${SCORE_TYPE_META[thresholdAppliedOn].label}` };
+  return { color: 'processing', label: `阈值作用于 ${metaOf(SCORE_TYPE_META, thresholdAppliedOn).label}` };
 }

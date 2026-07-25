@@ -259,10 +259,13 @@ export interface SearchRequest {
 }
 
 /** Top-level "actually applied" info bar payload (M2-CONTRACTS.md section 1.5). */
+/** Value of applied.threshold_applied_on; 'none' means no threshold filtered the result set. */
+export type ThresholdAppliedOn = ScoreType | 'none';
+
 export interface SearchApplied {
   rewrite_used_query: string | null;
   fusion_mode: FusionMode;
-  threshold_applied_on: ScoreType | null;
+  threshold_applied_on: ThresholdAppliedOn | null;
 }
 
 export interface SearchResponse {

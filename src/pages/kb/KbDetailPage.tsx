@@ -19,7 +19,7 @@ import { listDocuments, reindexDocument, uploadDocument } from '../../api/docume
 import { getKnowledgeBase, rebuildKb } from '../../api/kb';
 import type { KbDocument, KnowledgeBase } from '../../api/types';
 import { formatFileSize } from '../../utils/format';
-import { PROCESS_STATUS_META } from '../../utils/statusMeta';
+import { PROCESS_STATUS_META, metaOf } from '../../utils/statusMeta';
 import ChunkDrawer from './components/ChunkDrawer';
 import IndexConfigDrawer from './components/IndexConfigDrawer';
 
@@ -198,7 +198,7 @@ export default function KbDetailPage() {
             dataIndex: 'process_status',
             width: 160,
             render: (status: KbDocument['process_status'], record: KbDocument) => {
-              const meta = PROCESS_STATUS_META[status];
+              const meta = metaOf(PROCESS_STATUS_META, status);
               const tag = <Tag color={meta.color}>{meta.label}</Tag>;
               return record.fail_reason ? (
                 <Tooltip title={record.fail_reason}>{tag}</Tooltip>

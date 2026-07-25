@@ -1,6 +1,6 @@
 import { Card, Space, Tag, Typography } from 'antd';
 import type { SearchApplied } from '../../../api/types';
-import { FUSION_MODE_META, describeThresholdApplied } from '../../../utils/statusMeta';
+import { FUSION_MODE_META, describeThresholdApplied, metaOf } from '../../../utils/statusMeta';
 
 interface AppliedInfoBarProps {
   applied: SearchApplied;
@@ -22,7 +22,9 @@ export default function AppliedInfoBar({ applied, degraded, originalQuery }: App
       <Space direction="vertical" size={6} style={{ width: '100%' }}>
         <Space wrap>
           <Typography.Text type="secondary">融合模式：</Typography.Text>
-          <Tag color="processing">{FUSION_MODE_META[applied.fusion_mode].label}</Tag>
+          <Tag color={metaOf(FUSION_MODE_META, applied.fusion_mode).color}>
+            {metaOf(FUSION_MODE_META, applied.fusion_mode).label}
+          </Tag>
           {thresholdTag && <Tag color={thresholdTag.color}>{thresholdTag.label}</Tag>}
         </Space>
         {rewritten && (

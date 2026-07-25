@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Descriptions, Drawer, Empty, List, Pagination, Space, Spin, Tag, Typography } from 'antd';
 import { listChunks } from '../../../api/document';
 import type { KbChunk } from '../../../api/types';
-import { EMBEDDING_STATUS_META } from '../../../utils/statusMeta';
+import { EMBEDDING_STATUS_META, metaOf } from '../../../utils/statusMeta';
 
 interface ChunkDrawerProps {
   /** The document whose chunks are being inspected; drawer is closed when null. */
@@ -65,8 +65,8 @@ export default function ChunkDrawer({ docId, docName, onClose }: ChunkDrawerProp
                     <Tag color={chunk.enabled ? 'success' : 'default'}>
                       {chunk.enabled ? '已启用' : '已停用'}
                     </Tag>
-                    <Tag color={EMBEDDING_STATUS_META[chunk.embedding_status].color}>
-                      {EMBEDDING_STATUS_META[chunk.embedding_status].label}
+                    <Tag color={metaOf(EMBEDDING_STATUS_META, chunk.embedding_status).color}>
+                      {metaOf(EMBEDDING_STATUS_META, chunk.embedding_status).label}
                     </Tag>
                   </Space>
                   <Typography.Paragraph

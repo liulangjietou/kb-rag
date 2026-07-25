@@ -1,7 +1,7 @@
 import { Card, Collapse, List, Space, Tag, Typography } from 'antd';
 import type { RetrievalChildHit, RetrievalNode } from '../../../api/types';
 import { formatScore } from '../../../utils/format';
-import { RETRIEVAL_SOURCE_META, SCORE_TYPE_META } from '../../../utils/statusMeta';
+import { RETRIEVAL_SOURCE_META, SCORE_TYPE_META, metaOf } from '../../../utils/statusMeta';
 
 interface RetrievalNodeCardProps {
   node: RetrievalNode;
@@ -41,8 +41,8 @@ function RouteScoreTags({ source }: { source: Record<string, unknown> }) {
  * section 5), extended with M2's per-route/normalized/fused/rerank scores, the threshold-applied
  * tag, and (parent/child mode) an expandable list of the child chunks merged into this node. */
 export default function RetrievalNodeCard({ node, rank, thresholdTag }: RetrievalNodeCardProps) {
-  const scoreTypeMeta = SCORE_TYPE_META[node.score_type];
-  const sourceMeta = RETRIEVAL_SOURCE_META[node.retrieval_source];
+  const scoreTypeMeta = metaOf(SCORE_TYPE_META, node.score_type);
+  const sourceMeta = metaOf(RETRIEVAL_SOURCE_META, node.retrieval_source);
   const metadata = node.metadata;
   const children = metadata?.children ?? [];
 
@@ -87,8 +87,8 @@ export default function RetrievalNodeCard({ node, rank, thresholdTag }: Retrieva
                       <Space direction="vertical" style={{ width: '100%' }} size={4}>
                         <Space wrap>
                           <Tag>{child.chunk_id}</Tag>
-                          <Tag color={SCORE_TYPE_META[child.score_type].color}>
-                            {SCORE_TYPE_META[child.score_type].label}: {formatScore(child.score)}
+                          <Tag color={metaOf(SCORE_TYPE_META, child.score_type).color}>
+                            {metaOf(SCORE_TYPE_META, child.score_type).label}: {formatScore(child.score)}
                           </Tag>
                         </Space>
                         <RouteScoreTags source={child} />
