@@ -37,8 +37,14 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     private final AuthInterceptor authInterceptor;
 
-    /** Console origins allowed to call the management API. */
-    @Value("${kb.web.allowed-origins:${CORS_ALLOWED_ORIGINS:http://localhost:20002,http://127.0.0.1:20002}}")
+    /**
+     * Console origins allowed to call the management API.
+     *
+     * <p>The effective value comes from {@code kb.web.allowed-origins} in application.yml, which is
+     * itself overridable through the {@code CORS_ALLOWED_ORIGINS} environment variable. The default
+     * here only covers contexts that load this bean without the yml, such as slice tests.
+     */
+    @Value("${kb.web.allowed-origins:http://localhost:20002,http://127.0.0.1:20002}")
     private String[] allowedOrigins;
 
     @Override
