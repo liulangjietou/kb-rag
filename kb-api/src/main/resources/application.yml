@@ -82,7 +82,7 @@ kb:
     timeout-ms: ${EMBEDDING_TIMEOUT_MS:30000}
   rerank:
     provider: ${RERANK_PROVIDER:dashscope}
-    model: ${RERANK_MODEL:gte-rerank}
+    model: ${RERANK_MODEL:gte-rerank-v2}
     # Blank disables the rerank stage; the retrieval pipeline then keeps the fusion order.
     api-key: ${RERANK_API_KEY:${DASHSCOPE_API_KEY:}}
     # DashScope exposes rerank outside the OpenAI compatible surface, so this is a full URL.
