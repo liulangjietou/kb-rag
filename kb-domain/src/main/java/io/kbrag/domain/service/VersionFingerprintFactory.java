@@ -14,6 +14,8 @@ import org.springframework.stereotype.Component;
  * <p>M1 has a single parse route and a single split strategy, so the inputs are few; every value that
  * will become configurable later already has its own slot in the fingerprint string, which keeps the
  * hash stable for unchanged configurations.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 public class VersionFingerprintFactory {

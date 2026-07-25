@@ -2,6 +2,8 @@ package io.kbrag.domain.enums;
 
 /**
  * Embedding state of a chunk.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum EmbeddingStatus {
 

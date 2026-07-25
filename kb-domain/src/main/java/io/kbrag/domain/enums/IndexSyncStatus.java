@@ -2,6 +2,8 @@ package io.kbrag.domain.enums;
 
 /**
  * Synchronization state of one chunk against one physical index.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum IndexSyncStatus {
 

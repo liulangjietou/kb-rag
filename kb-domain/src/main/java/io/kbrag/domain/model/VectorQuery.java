@@ -6,6 +6,8 @@ import lombok.ToString;
 
 /**
  * kNN request issued against a vector index.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Builder

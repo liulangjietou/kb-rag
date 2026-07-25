@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.Mapper;
 
 /**
  * Data access for t_kb_chunk.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Mapper
 public interface ChunkMapper extends BaseMapper<Chunk> {

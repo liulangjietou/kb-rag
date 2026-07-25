@@ -10,6 +10,8 @@ import org.springframework.stereotype.Component;
  * character counts as a quarter of a token (four characters per token). The estimate is
  * deliberately cheap and deterministic so splitting stays reproducible across runs, which is what
  * makes evaluation comparable between configurations.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 public class SimpleTokenEstimator implements TokenEstimator {

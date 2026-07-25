@@ -32,6 +32,8 @@ import java.nio.charset.StandardCharsets;
  * compares {@code Last-Modified} and {@code ETag} with what it saw last time, and only downloads when
  * one of them changed. Answering 304 for an unchanged dictionary is therefore not an optimisation but
  * the mechanism that stops every node from reloading its tokenizer on every poll.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @RestController

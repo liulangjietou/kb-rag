@@ -7,6 +7,8 @@ package io.kbrag.domain.enums;
  * of each route, which makes it robust when the routes disagree on scale; weighted fusion trusts the
  * magnitudes after a per route min-max normalisation, which lets an operator bias retrieval towards
  * semantics or towards keywords. Neither is universally better, so the mode is a request parameter.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum FusionMode {
 

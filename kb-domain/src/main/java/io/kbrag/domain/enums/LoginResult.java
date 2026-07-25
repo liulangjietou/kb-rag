@@ -2,6 +2,8 @@ package io.kbrag.domain.enums;
 
 /**
  * Reason recorded in {@code t_kb_login_audit} for one login attempt.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum LoginResult {
 

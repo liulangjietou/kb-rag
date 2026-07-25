@@ -32,6 +32,8 @@ import java.util.List;
  * the shared mapping to {@code [0,1]}, which is the same two step conversion the Milvus
  * implementation performs on its raw cosine score. Writing it out explicitly is what guarantees a
  * score threshold means the same thing in both deployment modes.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Component

@@ -19,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Covers the candidate budget and the merge of the two level pipeline, the two places where the number
  * of returned units stops matching the number of recalled candidates.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class ParentChildMergerTest {
 

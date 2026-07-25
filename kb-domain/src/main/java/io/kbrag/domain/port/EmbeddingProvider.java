@@ -11,6 +11,8 @@ import java.util.List;
  * <p>Implementations declare their own model metadata; the dimension is fixed at index creation
  * time, so a model whose dimension differs from the configured one forces a rebuild instead of
  * being adapted in place.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public interface EmbeddingProvider {
 

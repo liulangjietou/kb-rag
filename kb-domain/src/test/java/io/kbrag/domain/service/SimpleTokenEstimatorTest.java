@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Covers the token heuristic the splitter budgets against.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class SimpleTokenEstimatorTest {
 

@@ -12,6 +12,8 @@ import lombok.ToString;
  * fusion, the fact source row loaded from MySQL, and the rerank score once that stage has run. Keeping
  * them in one object is what lets the ordering score be defined in a single place instead of being
  * recomputed by every stage.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @ToString

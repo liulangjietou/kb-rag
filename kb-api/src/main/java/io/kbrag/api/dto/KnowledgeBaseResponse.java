@@ -18,6 +18,8 @@ import io.kbrag.domain.model.KbIndexConfig;
  * @param indexConfig             split and parent child parameters
  * @param currentConfigFingerprint fingerprint driving the document {@code config_stale} flag
  * @param createdAt               ISO creation timestamp
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record KnowledgeBaseResponse(
         @JsonProperty("kb_id") String kbId,

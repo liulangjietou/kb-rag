@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>Parameter defaulting and clamping live in the application layer rather than here, because the
  * effective value comes from three configuration layers the transport has no business knowing about;
  * this class only validates the shape of the payload.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @RestController
 @RequiredArgsConstructor

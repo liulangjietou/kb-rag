@@ -12,6 +12,8 @@ import lombok.ToString;
  *
  * <p>Modelled on the physical index rather than on the engine so a rebuild window, where the same
  * chunk targets both the old and the new index, is representable.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

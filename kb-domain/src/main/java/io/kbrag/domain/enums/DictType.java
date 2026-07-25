@@ -8,6 +8,8 @@ import java.util.Locale;
  * <p>The two kinds are served through two different remote dictionary URLs, which is what the ik
  * plugin expects: one file adds domain terms the tokenizer must keep whole, the other removes noise
  * words from the index.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum DictType {
 

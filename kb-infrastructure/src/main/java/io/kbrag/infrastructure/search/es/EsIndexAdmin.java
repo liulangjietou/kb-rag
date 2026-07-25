@@ -35,6 +35,8 @@ import java.util.Map;
  *
  * <p>In lite mode both stores address the same physical index, so index creation, alias handling and
  * bulk writing live in one place and cannot drift apart.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Component

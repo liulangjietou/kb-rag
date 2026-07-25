@@ -8,6 +8,8 @@ import io.kbrag.domain.model.ParsedDocument;
  *
  * <p>The parser never calls a model provider: it returns structured text and image object keys,
  * every model invocation stays on the Java side.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public interface DocumentParserClient {
 

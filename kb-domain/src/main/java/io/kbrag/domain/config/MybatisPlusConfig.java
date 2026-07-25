@@ -12,6 +12,8 @@ import org.springframework.context.annotation.Configuration;
  *
  * <p>Pagination is required by the document and chunk listings; the optimistic locker activates the
  * {@code lock_version} column every business table carries.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Configuration
 public class MybatisPlusConfig {

@@ -22,6 +22,8 @@ import org.springframework.context.annotation.Configuration;
  * <p>A blank credential yields the unconfigured provider, which makes the indexing pipeline skip
  * embedding and the retrieval service fall back to the BM25 single route. No other class has to
  * inspect the configuration, and the application always starts.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Configuration

@@ -2,6 +2,8 @@ package io.kbrag.domain.enums;
 
 /**
  * Engine backing the vector route, selected by the {@code VECTOR_ENGINE} environment variable.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum VectorEngine {
 

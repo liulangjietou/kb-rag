@@ -9,6 +9,8 @@ import io.kbrag.app.retrieval.AppliedInfo;
  * @param rewriteUsedQuery   query the recall stage ran with
  * @param fusionMode         fusion strategy that produced the ordering
  * @param thresholdAppliedOn score the threshold acted on, {@code none} when nothing was filtered
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record AppliedResponse(
         @JsonProperty("rewrite_used_query") String rewriteUsedQuery,

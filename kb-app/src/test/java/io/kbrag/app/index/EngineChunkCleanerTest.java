@@ -18,6 +18,8 @@ import static org.mockito.Mockito.verify;
 /**
  * Covers when the engine side deletion happens relative to the database transaction, which is the whole
  * point of the collaborator: the deletion is irreversible and the transaction around it is not.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class EngineChunkCleanerTest {
 

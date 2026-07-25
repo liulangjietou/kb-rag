@@ -6,6 +6,8 @@ package io.kbrag.domain.constant;
  * <p>This is the complete set of filterable fields. Adding a dimension here is a schema change and
  * has to go through the rebuild plus alias switch migration path, which is why the names are not
  * inlined at any call site.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public final class IndexFields {
 

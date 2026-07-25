@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>The same underlying cosine similarity must produce the same comparable score whether it arrives
  * as an Elasticsearch {@code (1+cos)/2} value or as a raw Milvus cosine; otherwise a score threshold
  * would silently mean two different things in lite and full mode.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class VectorScoreNormalizerTest {
 

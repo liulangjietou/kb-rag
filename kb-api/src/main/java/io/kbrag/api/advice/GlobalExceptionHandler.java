@@ -18,6 +18,8 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
  *
  * <p>Messages are the ones the throwing layer chose; internal details and stack traces stay in the
  * logs, which is what keeps the API from leaking implementation information.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @RestControllerAdvice

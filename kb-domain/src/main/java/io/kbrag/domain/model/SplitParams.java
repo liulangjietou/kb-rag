@@ -9,6 +9,8 @@ import lombok.ToString;
  * <p>M1 ships a single strategy with the contract defaults of 600 estimated tokens per chunk and
  * 100 tokens of overlap; the values stay configurable so the knowledge base level configuration of
  * M2 can feed them without touching the splitter.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @ToString

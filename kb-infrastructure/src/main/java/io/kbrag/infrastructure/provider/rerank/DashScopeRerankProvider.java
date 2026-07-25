@@ -33,6 +33,8 @@ import java.util.Map;
  * <p>Result alignment. The endpoint answers with an index per result and may reorder or omit
  * entries, so scores are scattered back into a list aligned with the submitted documents. A document
  * the provider did not score keeps a zero, which ranks it last instead of dropping it silently.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 public class DashScopeRerankProvider implements RerankProvider {

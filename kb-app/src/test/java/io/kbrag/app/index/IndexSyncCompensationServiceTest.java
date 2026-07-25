@@ -31,6 +31,8 @@ import static org.mockito.Mockito.when;
 /**
  * Covers the compensation scan with every collaborator stubbed: the grouping that decides how many
  * engine writes and embedding calls one pass costs, and the abandonment of a row that keeps failing.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class IndexSyncCompensationServiceTest {
 

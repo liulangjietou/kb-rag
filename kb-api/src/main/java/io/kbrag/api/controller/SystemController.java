@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * System information endpoints.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @RestController
 @RequestMapping("/api/v1/system")

@@ -9,6 +9,8 @@ import lombok.ToString;
  * <p>The stage never fails a search: it either produces a better query or hands the original one
  * back together with the marker explaining why, which is what lets the caller keep a single code
  * path regardless of the model being reachable.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @ToString

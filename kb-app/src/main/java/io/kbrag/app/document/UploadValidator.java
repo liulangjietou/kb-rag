@@ -15,6 +15,8 @@ import java.util.Map;
  * <p>Extension, declared size and file header are checked here and nowhere else, so no downstream
  * stage repeats the checks. Comparing the magic number against the extension is what stops a
  * renamed executable from reaching the parser.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Component

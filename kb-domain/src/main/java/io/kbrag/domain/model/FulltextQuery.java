@@ -6,6 +6,8 @@ import lombok.ToString;
 
 /**
  * BM25 request issued against a full text index.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Builder

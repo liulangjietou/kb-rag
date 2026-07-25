@@ -12,6 +12,8 @@ import io.kbrag.domain.entity.IkDict;
  * @param remark    free text note
  * @param createdAt ISO creation timestamp
  * @param updatedAt ISO update timestamp
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record IkDictResponse(
         String word,

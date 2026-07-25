@@ -28,6 +28,8 @@ import org.springframework.stereotype.Component;
  * filter can be verified from the response alone. With no threshold there is nothing to verify and the
  * node reports the score that ordered it: the fusion score on a dual route search, the raw BM25 score
  * on a single route one.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 public class ScoreThresholdPolicy {

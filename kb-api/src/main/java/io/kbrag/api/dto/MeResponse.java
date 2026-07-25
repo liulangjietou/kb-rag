@@ -8,6 +8,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * @param username           login name
  * @param mustChangePassword {@code true} while the bootstrap password has not been rotated
  * @param lastLoginAt        ISO timestamp of the previous successful login, {@code null} on first login
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record MeResponse(
         String username,

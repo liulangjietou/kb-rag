@@ -18,6 +18,8 @@ import lombok.ToString;
  * <p>The two length fields carry a read alias for the names M1 wrote, so a knowledge base created
  * before the rename keeps its configured lengths instead of silently falling back to zero; every
  * write emits the current names only.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

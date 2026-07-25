@@ -30,6 +30,8 @@ import java.util.Set;
  * <p><b>Merge.</b> Children are grouped by parent and each group keeps its members ordered, so the
  * response can show which passages inside a parent actually matched. Group order follows the best
  * member, which preserves the ranking the previous stage produced.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Component

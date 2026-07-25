@@ -18,6 +18,8 @@ import java.io.IOException;
  * <p>An inbound {@code X-Request-Id} is honoured so a caller can supply its own trace id; otherwise
  * one is generated. The value goes into the logging context, into every response envelope and into
  * the response header, and it is forwarded to the parser service and the model providers.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)

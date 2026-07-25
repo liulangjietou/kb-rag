@@ -25,6 +25,8 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>The bucket stays private: downloads are always served through a time limited pre signed URL, so
  * a leaked link expires instead of granting permanent unauthenticated access to the original file.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Component

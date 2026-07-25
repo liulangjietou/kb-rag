@@ -19,6 +19,8 @@ import java.util.List;
  * cosine, which goes straight through the same final mapping. Every threshold in the retrieval
  * pipeline is applied to that normalised value, which is what makes the two engines behave
  * identically.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public interface VectorStore {
 

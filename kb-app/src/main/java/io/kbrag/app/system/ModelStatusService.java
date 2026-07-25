@@ -15,6 +15,8 @@ import org.springframework.stereotype.Service;
  * <p>The three capabilities are read from their own providers rather than from one credential flag,
  * because they are configured independently: a deployment may hold a rerank key and no chat key, and
  * telling the console otherwise would disable a control that actually works.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Service
 @RequiredArgsConstructor

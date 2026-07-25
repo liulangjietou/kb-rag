@@ -6,6 +6,8 @@ package io.kbrag.domain.port;
  * <p>Every length parameter of the indexing pipeline is expressed in tokens, so the estimator is
  * an interface from the start: M1 ships a cheap heuristic and a later milestone can plug in the
  * real tokenizer of the selected embedding model without touching any splitter.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public interface TokenEstimator {
 

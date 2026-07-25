@@ -62,6 +62,8 @@ import java.util.Map;
  * both levels are persisted, but only the children are indexed. Parents exist purely to be returned:
  * indexing them too would make the same text match twice and would force the fusion stage to compare
  * scores computed over passages of very different length.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service

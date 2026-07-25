@@ -15,6 +15,8 @@ import java.util.List;
  * variables with a working local default, so the service starts without any {@code .env} file.
  * Later layers (global settings, knowledge base, application version, request) override these
  * values at runtime and are introduced by the milestones that need them.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

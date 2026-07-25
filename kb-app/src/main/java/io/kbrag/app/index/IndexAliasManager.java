@@ -28,6 +28,8 @@ import java.util.List;
  * table is the single source of truth of which physical index an alias currently points at, which is
  * what makes an embedding model switch or a snapshot publish the very same operation: create a new
  * physical index, backfill it, repoint the alias.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service

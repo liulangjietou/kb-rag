@@ -6,6 +6,8 @@ import java.util.Map;
 
 /**
  * Helpers shared by the fusion strategies.
+ *
+ * @author owlzhangfq@gmail.com
  */
 final class FusionSupport {
 

@@ -9,6 +9,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * Object storage probe of {@code /actuator/health}.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component("minioHealthIndicator")
 @RequiredArgsConstructor

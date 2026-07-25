@@ -29,6 +29,8 @@ import java.util.Map;
  * <p>The synchronization row is written before the engine call and updated after it. The order is what
  * makes the compensation scan possible at all: a process that dies mid write leaves a PENDING row
  * behind, which is precisely the evidence the scan looks for.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service

@@ -24,6 +24,8 @@ import java.util.Map;
  * <p>Failure classification lives here rather than in each provider because the mapping from HTTP
  * status to actionable cause is a property of the vendor, not of the capability: a 401 means the same
  * thing for embedding, rerank and chat, and the console shows the same remediation for all three.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 public final class DashScopeHttp {

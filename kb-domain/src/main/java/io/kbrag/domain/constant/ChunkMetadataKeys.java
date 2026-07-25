@@ -6,6 +6,8 @@ package io.kbrag.domain.constant;
  * <p>MySQL holds the whole metadata document, the engines only hold this fixed subset. Declaring the
  * bridge in one place is what keeps the indexing pipeline and the metadata filter from drifting: a
  * key that is written but not declared here would be silently unfilterable.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public final class ChunkMetadataKeys {
 

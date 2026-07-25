@@ -9,6 +9,8 @@ import lombok.ToString;
  *
  * <p>A {@code null} {@link #dimension} means the index carries no vector field, which is the zero
  * key case and also the Elasticsearch BM25 index of the full mode.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Builder

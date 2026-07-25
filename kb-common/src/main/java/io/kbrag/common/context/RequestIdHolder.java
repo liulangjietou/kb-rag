@@ -10,6 +10,8 @@ import java.util.UUID;
  * <p>The value lives in the SLF4J {@link MDC} so every log line of the current thread carries it,
  * and it is echoed in every response envelope and forwarded to downstream services through the
  * {@code X-Request-Id} header.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public final class RequestIdHolder {
 

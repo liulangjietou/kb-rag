@@ -16,6 +16,8 @@ import java.util.List;
  * @param requestId correlation id of this call
  * @param degraded  degradation markers, empty when the full pipeline ran
  * @param applied   effective pipeline parameters
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record SearchResponse(
         List<RetrievalNodeResponse> nodes,

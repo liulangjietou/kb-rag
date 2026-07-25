@@ -9,6 +9,8 @@ import io.kbrag.domain.enums.ScoreType;
  * and the normalised cosine similarity. Everything else is either unbounded (raw BM25) or relative to
  * the candidate set of one query (both fusion scores), so a fixed number compared against them would
  * silently mean something different on every search.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum ThresholdTarget {
 

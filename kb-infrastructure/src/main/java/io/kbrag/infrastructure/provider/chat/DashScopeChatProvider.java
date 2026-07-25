@@ -29,6 +29,8 @@ import java.util.Map;
  * <p>The system instruction is always prepended as the single system message and the caller supplied
  * turns keep their own roles; a caller cannot inject a second system message because
  * {@link ChatMessage} only ever leaves the rewrite stage with a user or assistant role.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 public class DashScopeChatProvider implements ChatProvider {

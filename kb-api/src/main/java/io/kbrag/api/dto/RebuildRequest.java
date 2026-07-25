@@ -12,6 +12,8 @@ import java.util.List;
  * without having to enumerate documents.
  *
  * @param docIds explicit document scope
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record RebuildRequest(@JsonProperty("doc_ids") List<String> docIds) {
 }

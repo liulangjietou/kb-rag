@@ -12,6 +12,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
  * <p>Component scanning starts at {@code io.kbrag} so the API module assembles the application and
  * infrastructure layers; the dependency direction stays api to app to domain, with infrastructure
  * implementing the domain ports.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @SpringBootApplication(scanBasePackages = "io.kbrag")
 @MapperScan("io.kbrag.domain.mapper")

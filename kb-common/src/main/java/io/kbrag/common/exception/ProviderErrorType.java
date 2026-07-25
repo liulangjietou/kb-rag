@@ -5,6 +5,8 @@ package io.kbrag.common.exception;
  *
  * <p>The pipeline stores the classification instead of a raw stack trace so the console can show an
  * actionable reason for a failed task.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum ProviderErrorType {
 

@@ -8,6 +8,8 @@ import java.util.List;
 /**
  * Result of one retrieval call: the ordered nodes, the degradation markers that describe how the
  * pipeline actually ran, and the applied parameter summary the debug console displays.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @ToString

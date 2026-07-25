@@ -11,6 +11,8 @@ import java.util.List;
  * <p>With parent child splitting on this is a parent and the children that were recalled inside it;
  * without it, it is a single chunk wrapped in a group of one. Modelling both shapes the same way is
  * what lets the threshold, the truncation and the node builder stay unaware of the split mode.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @ToString

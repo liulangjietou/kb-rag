@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.Mapper;
 
 /**
  * Data access for t_kb_admin_user.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Mapper
 public interface AdminUserMapper extends BaseMapper<AdminUser> {

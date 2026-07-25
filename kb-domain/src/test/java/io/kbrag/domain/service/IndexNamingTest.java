@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 /**
  * Covers the three segment index naming rules, including the deliberate asymmetry that keeps the full
  * mode full text index out of the embedding version scheme.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class IndexNamingTest {
 

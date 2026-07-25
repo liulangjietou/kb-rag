@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.Mapper;
 
 /**
  * Data access for t_kb_index_registry.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Mapper
 public interface IndexRegistryMapper extends BaseMapper<IndexRegistry> {

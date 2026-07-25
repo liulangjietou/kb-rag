@@ -10,6 +10,8 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
  * <p>Only the BCrypt encoder of Spring Security is pulled in, not the whole security filter chain:
  * the console uses an opaque header token verified by a single interceptor, so a full framework
  * integration would add configuration surface without adding protection.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Configuration
 public class PasswordEncoderConfig {

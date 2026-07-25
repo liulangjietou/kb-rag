@@ -32,6 +32,8 @@ import java.util.List;
  * @param rewriteEnabled query rewrite switch, defaults to off
  * @param messages       conversation used to resolve references during the rewrite
  * @param metadataFilter narrowing predicate pushed down to the engines
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record SearchRequest(
         @NotBlank(message = "must not be blank") String query,

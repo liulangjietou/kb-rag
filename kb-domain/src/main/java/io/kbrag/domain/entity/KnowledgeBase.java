@@ -8,6 +8,8 @@ import lombok.ToString;
 
 /**
  * Knowledge base aggregate root.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

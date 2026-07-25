@@ -9,6 +9,8 @@ import lombok.ToString;
 
 /**
  * Registry of physical indices and their aliases, single source of truth for alias switching.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

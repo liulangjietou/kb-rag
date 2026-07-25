@@ -20,6 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Covers weighted fusion: the min-max normalisation, the weighting, and the two degenerate inputs
  * whose handling decides whether a route silently disappears from the ranking.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class WeightedFusionTest {
 

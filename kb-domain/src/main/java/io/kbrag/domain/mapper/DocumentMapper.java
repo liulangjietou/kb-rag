@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.Mapper;
 
 /**
  * Data access for t_kb_document.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Mapper
 public interface DocumentMapper extends BaseMapper<Document> {

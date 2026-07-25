@@ -11,6 +11,8 @@ import lombok.ToString;
  * switched off, degraded or overridden by a knowledge base default. Without it the debug console
  * cannot tell a query that was not rewritten from one whose rewrite happened to be identical, nor a
  * threshold that filtered nothing from one that was never applied.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Builder

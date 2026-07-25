@@ -14,6 +14,8 @@ import java.util.Map;
  * <p>The fusion score only orders the list; the per route ranks, raw scores and normalised scores
  * are kept so the API can report whichever score the threshold actually acts on and so the debug
  * page can show every route contribution side by side.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Builder

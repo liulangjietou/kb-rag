@@ -27,6 +27,8 @@ import java.util.List;
  * that already exists. Doing it in place costs one write per chunk instead of a full corpus
  * re-embedding plus a second copy of the index on disk; the alias switch procedure stays reserved for
  * the embedding model change it was designed for.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service

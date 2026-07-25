@@ -25,6 +25,8 @@ import java.util.List;
  * <p>Sequence numbers are assigned per level in reading order: parents get {@code 0..n-1} and
  * children get a document wide sequence, so the engine side {@code chunk_seq} still orders the whole
  * document and neighbouring children remain adjacent across a parent boundary.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 @RequiredArgsConstructor

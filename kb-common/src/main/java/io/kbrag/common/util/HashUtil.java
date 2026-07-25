@@ -10,6 +10,8 @@ import java.security.NoSuchAlgorithmException;
 
 /**
  * SHA-256 helpers shared by content hashing and chunk text hashing.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 public final class HashUtil {

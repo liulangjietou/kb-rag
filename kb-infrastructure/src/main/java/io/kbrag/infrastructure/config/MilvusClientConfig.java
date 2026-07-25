@@ -15,6 +15,8 @@ import java.net.URI;
  *
  * <p>Lite mode leaves {@code MILVUS_URI} empty, so no client is created and the health endpoint
  * does not probe an engine that is not part of the deployment.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Configuration

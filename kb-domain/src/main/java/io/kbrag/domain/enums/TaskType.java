@@ -2,6 +2,8 @@ package io.kbrag.domain.enums;
 
 /**
  * Asynchronous task categories persisted in {@code t_kb_task}.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum TaskType {
 

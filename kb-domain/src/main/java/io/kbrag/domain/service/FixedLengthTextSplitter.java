@@ -24,6 +24,8 @@ import java.util.List;
  * <p>A segment longer than the whole budget cannot be packed, so it is hard cut on the character
  * position that matches the budget. That case is expected for tables and code blocks and never
  * silently drops content.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 @RequiredArgsConstructor

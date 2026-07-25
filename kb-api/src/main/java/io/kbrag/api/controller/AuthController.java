@@ -22,6 +22,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Console authentication endpoints.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @RestController
 @RequestMapping("/api/v1/auth")

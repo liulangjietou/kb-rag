@@ -7,6 +7,8 @@ package io.kbrag.domain.enums;
  * supplied the reported score is the one the threshold acts on, so the console can verify the
  * filter; otherwise it is the score that ordered the final list. Rerank is the only absolute score
  * comparable across queries, which is why it wins whenever the stage ran.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum ScoreType {
 

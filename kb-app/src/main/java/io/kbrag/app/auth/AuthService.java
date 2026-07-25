@@ -22,6 +22,8 @@ import java.time.LocalDateTime;
  * <p>Every attempt, successful or not, lands in {@code t_kb_login_audit}; the lock decision is then
  * derived from that same table instead of an in memory counter, so a restart cannot be used to
  * reset the failure count.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service

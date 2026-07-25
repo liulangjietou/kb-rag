@@ -25,6 +25,8 @@ import java.util.List;
  *
  * <p>The raw BM25 score has no upper bound and is not comparable between queries, so it is returned
  * as is and only used for ordering; the fusion stage turns it into a rank.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Component

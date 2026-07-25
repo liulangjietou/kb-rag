@@ -27,6 +27,8 @@ import static org.mockito.Mockito.when;
 /**
  * Covers the rerank stage without a model: that the coarse order survives every failure mode, and that
  * a timeout and an error stay distinguishable because they call for different remediations.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class RerankServiceTest {
 

@@ -13,6 +13,8 @@ import java.util.function.Function;
  * @param size  page size
  * @param total total number of matching rows
  * @param <T>   item type
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record PageResponse<T>(
         List<T> items,

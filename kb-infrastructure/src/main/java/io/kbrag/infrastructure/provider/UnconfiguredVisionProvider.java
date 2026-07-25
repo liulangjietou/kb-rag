@@ -8,6 +8,8 @@ import io.kbrag.domain.port.VisionProvider;
 /**
  * Placeholder vision provider. M1 does not generate textual proxies for images, the port exists so
  * the image pipeline of M2 can be wired without reshaping the abstraction.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public class UnconfiguredVisionProvider implements VisionProvider {
 

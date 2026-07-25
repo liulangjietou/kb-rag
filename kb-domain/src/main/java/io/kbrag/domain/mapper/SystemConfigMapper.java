@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.Mapper;
 
 /**
  * Data access for t_kb_system_config.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Mapper
 public interface SystemConfigMapper extends BaseMapper<SystemConfig> {

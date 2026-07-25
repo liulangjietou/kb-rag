@@ -33,6 +33,8 @@ import java.io.ByteArrayInputStream;
  * <p>The upload transaction only persists facts: the original file lands in object storage and the
  * document plus its first version row are created. Everything expensive happens in the asynchronous
  * pipeline, so the console never blocks on a parse.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service

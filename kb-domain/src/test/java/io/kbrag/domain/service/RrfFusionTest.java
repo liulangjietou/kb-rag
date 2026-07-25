@@ -18,6 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Covers reciprocal rank fusion: the arithmetic, the ordering and the per route bookkeeping the API
  * relies on to report an honest score type.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class RrfFusionTest {
 

@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Covers the single fast-fail gate of the upload path.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class UploadValidatorTest {
 

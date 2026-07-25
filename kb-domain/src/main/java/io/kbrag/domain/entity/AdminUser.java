@@ -13,6 +13,8 @@ import java.time.LocalDateTime;
  *
  * <p>The M1 deployment is single administrator, the table still supports multiple rows so the
  * account model does not have to be reshaped later.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

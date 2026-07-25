@@ -9,6 +9,8 @@ import java.time.LocalDateTime;
 /**
  * Fills the audit, optimistic lock and soft delete columns shared by every business table, so no
  * service has to remember them.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 public class AuditFieldFiller implements MetaObjectHandler {

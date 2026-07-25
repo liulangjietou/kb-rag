@@ -15,6 +15,8 @@ import java.util.Map;
  * <p>Modelled as a strategy rather than as a branch inside the retrieval service because the two
  * modes have nothing in common beyond their signature: one works on ranks, the other on normalised
  * magnitudes. A third mode would be a new implementation, not a third branch.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public interface FusionStrategy {
 

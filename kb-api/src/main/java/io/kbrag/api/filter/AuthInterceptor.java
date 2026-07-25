@@ -17,6 +17,8 @@ import java.util.Optional;
  * <p>The login endpoint and the actuator are excluded by the MVC registration; everything else needs a
  * valid token. Using a custom header instead of a cookie removes cross site request forgery from the
  * threat model entirely.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 @RequiredArgsConstructor

@@ -17,6 +17,8 @@ import java.util.Map;
  * <p>Strategies are collected from the container instead of being listed here, so a new mode only
  * has to declare itself; the retrieval service keeps depending on this single collaborator and never
  * on a concrete strategy.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 public class FusionRouter {

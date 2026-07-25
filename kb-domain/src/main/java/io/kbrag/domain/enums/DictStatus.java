@@ -6,6 +6,8 @@ package io.kbrag.domain.enums;
  * <p>Disabling is preferred over deleting when an operator wants to test the retrieval impact of a
  * term: the row keeps its history and can be switched back on, while the served dictionary only
  * contains the enabled entries.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum DictStatus {
 

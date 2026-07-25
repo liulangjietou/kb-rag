@@ -10,6 +10,8 @@ import lombok.ToString;
 
 /**
  * Asynchronous task record, drives the console task monitor and the compensation scan.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

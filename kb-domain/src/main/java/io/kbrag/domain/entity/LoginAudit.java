@@ -9,6 +9,8 @@ import lombok.ToString;
 
 /**
  * Console login audit, also the data source of the brute force lock decision.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

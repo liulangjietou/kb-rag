@@ -5,6 +5,8 @@ package io.kbrag.domain.enums;
  *
  * <p>BUILDING -&gt; (BUILD_FAILED | READY) -&gt; ACTIVE, an active version steps back to READY when a
  * newer version is activated and is ARCHIVED once it falls outside the retention window.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum DocumentVersionStatus {
 

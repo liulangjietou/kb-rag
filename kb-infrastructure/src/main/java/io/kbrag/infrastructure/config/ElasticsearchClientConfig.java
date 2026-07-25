@@ -26,6 +26,8 @@ import java.net.URI;
  *
  * <p>The transport is exposed as its own bean because it, not the typed client, owns the socket pool
  * and is the object that has to be closed on shutdown.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Configuration

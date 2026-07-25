@@ -44,6 +44,8 @@ import java.util.Map;
  * <p>A row that keeps failing is abandoned after the configured number of attempts and reported
  * through an error log. Retrying forever would turn a permanent problem, such as a deleted index or a
  * revoked credential, into an unbounded load that hides the very failure it is trying to fix.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service

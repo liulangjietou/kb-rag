@@ -30,6 +30,8 @@ import java.util.List;
  * words are therefore rendered in a fixed order and the validator hashes that exact rendering, which
  * keeps a reordered query result from looking like a change and triggering a needless reload on every
  * Elasticsearch node.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service

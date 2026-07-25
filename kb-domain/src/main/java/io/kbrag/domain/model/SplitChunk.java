@@ -6,6 +6,8 @@ import lombok.ToString;
 
 /**
  * Output of a splitter: one chunk with its position and estimated token count.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @AllArgsConstructor

@@ -14,6 +14,8 @@ import lombok.ToString;
  * the knowledge base defaults, then the deployment defaults. Doing it once and up front is what lets
  * every later stage read a plain value and keeps the precedence rule from being re-implemented, and
  * differently, at each use site.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @ToString

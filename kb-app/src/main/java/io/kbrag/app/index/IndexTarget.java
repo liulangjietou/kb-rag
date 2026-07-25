@@ -17,6 +17,8 @@ import io.kbrag.domain.enums.VectorEngine;
  *                          full mode Elasticsearch index and {@code none} in zero key mode
  * @param carriesVector     {@code true} when the target declares a vector field
  * @param dimension         vector dimension, 0 when the target carries no vector
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record IndexTarget(VectorEngine engine,
                           String physicalIndexName,

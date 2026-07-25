@@ -14,6 +14,8 @@ import lombok.ToString;
  * <p>MySQL is the fact source of the dictionary and the plugin pulls a rendered text file over HTTP,
  * so a term is added once in the console and every Elasticsearch node converges on it without a
  * restart or a shared volume.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

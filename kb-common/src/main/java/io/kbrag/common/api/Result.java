@@ -16,6 +16,8 @@ import java.io.Serializable;
  * with server side logs.
  *
  * @param <T> payload type
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @ToString

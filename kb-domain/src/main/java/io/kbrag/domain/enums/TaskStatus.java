@@ -2,6 +2,8 @@ package io.kbrag.domain.enums;
 
 /**
  * Lifecycle of an asynchronous task.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum TaskStatus {
 

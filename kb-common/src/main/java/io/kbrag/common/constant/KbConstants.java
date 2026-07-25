@@ -2,6 +2,8 @@ package io.kbrag.common.constant;
 
 /**
  * Cross module constants, kept here so no magic value is inlined at a call site.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public final class KbConstants {
 

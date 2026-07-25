@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.Mapper;
 
 /**
  * Data access for t_kb_document_version.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Mapper
 public interface DocumentVersionMapper extends BaseMapper<DocumentVersion> {

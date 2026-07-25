@@ -16,6 +16,8 @@ import io.kbrag.domain.entity.Document;
  * @param configStale      {@code true} when the active version used an older configuration
  * @param failReason       classified failure cause
  * @param createdAt        ISO creation timestamp
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record DocumentResponse(
         @JsonProperty("doc_id") String docId,

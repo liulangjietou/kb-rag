@@ -33,6 +33,8 @@ import java.util.Map;
  *
  * <p>Failures are classified before they leave this class, so a failed indexing task can display an
  * actionable reason instead of a stack trace.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 public class DashScopeEmbeddingProvider implements EmbeddingProvider {

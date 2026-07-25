@@ -19,6 +19,8 @@ import java.util.Base64;
  * <p>No fixed default password is shipped: a random one is generated, printed once to the startup
  * log and flagged as mandatory to rotate. A hard coded default would be the single most exploited
  * weakness of a self hosted deployment.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Component

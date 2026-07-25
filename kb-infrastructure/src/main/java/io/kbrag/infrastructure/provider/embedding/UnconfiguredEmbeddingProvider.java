@@ -14,6 +14,8 @@ import java.util.List;
  * keeps every collaborator free of null checks: the pipeline asks {@link #isConfigured()} once and
  * skips the embedding stage, and retrieval falls back to the BM25 single route. Calling
  * {@link #embed(List)} is a programming error and fails fast.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public class UnconfiguredEmbeddingProvider implements EmbeddingProvider {
 

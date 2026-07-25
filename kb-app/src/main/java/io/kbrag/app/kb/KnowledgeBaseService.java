@@ -42,6 +42,8 @@ import java.util.Map;
  * touch a single existing chunk: it recomputes the fingerprint and marks the documents whose active
  * version was built with a different one, leaving the operator to decide when to pay for the rebuild.
  * That separation is what makes tuning safe on a live knowledge base.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service

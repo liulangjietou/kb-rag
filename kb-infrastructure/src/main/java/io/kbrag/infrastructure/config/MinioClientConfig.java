@@ -8,6 +8,8 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * Builds the MinIO client used for original files and parse artifacts.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Configuration

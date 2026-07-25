@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 /**
  * Covers the normalisation behind {@code chunk_text_hash}, which is what lets a disable annotation be
  * inherited across document versions.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class ChunkTextHasherTest {
 

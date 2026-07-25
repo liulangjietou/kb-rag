@@ -11,6 +11,8 @@ package io.kbrag.domain.service;
  * <p>The contract is therefore stated once, here: every engine score is first restored to the standard
  * cosine domain {@code [-1,1]}, then linearly mapped to {@code [0,1]}. Both adapters delegate to this
  * class and one test asserts they agree for the same underlying similarity.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public final class VectorScoreNormalizer {
 

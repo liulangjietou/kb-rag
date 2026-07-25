@@ -11,6 +11,8 @@ import java.util.List;
  * <p>The system instruction is a separate argument rather than the first history entry so a caller
  * can never move an instruction into the conversation and change how the model is steered; every
  * implementation must place it in the system role and nowhere else.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public interface ChatProvider {
 

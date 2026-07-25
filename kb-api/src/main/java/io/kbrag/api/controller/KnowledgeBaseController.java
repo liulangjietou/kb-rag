@@ -26,6 +26,8 @@ import java.util.Map;
 
 /**
  * Knowledge base management endpoints.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @RestController
 @RequestMapping("/api/v1/kb")

@@ -5,6 +5,8 @@ import lombok.Getter;
 
 /**
  * Failure raised by a model provider implementation, always carrying a classification.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 public class ProviderException extends BizException {

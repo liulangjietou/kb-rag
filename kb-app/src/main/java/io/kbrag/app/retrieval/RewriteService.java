@@ -45,6 +45,8 @@ import java.util.concurrent.TimeoutException;
  * question resolves differently in two conversations. It is deliberately small and short lived: it
  * absorbs the console retrying the same query while tuning parameters, not a production traffic
  * pattern.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service

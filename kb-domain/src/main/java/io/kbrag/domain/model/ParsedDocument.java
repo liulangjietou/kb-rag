@@ -8,6 +8,8 @@ import java.util.List;
 
 /**
  * Parser service response: the merged markdown plus the per page text used for page anchoring.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Builder

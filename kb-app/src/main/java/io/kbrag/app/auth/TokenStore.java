@@ -18,6 +18,8 @@ import java.security.SecureRandom;
  * <p>The console is a single instance deployment in M1, so an in process map is enough and avoids a
  * Redis dependency. Tokens are opaque random values carried in the {@code Authorization} header,
  * which makes the session immune to cross site request forgery by construction.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Component

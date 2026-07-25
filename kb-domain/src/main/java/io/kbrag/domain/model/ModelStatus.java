@@ -10,6 +10,8 @@ import lombok.ToString;
  * <p>The three capabilities are reported independently because they are configured independently: a
  * deployment can rerank without embedding, or embed without a chat model, and the console has to
  * disable exactly the controls that cannot work.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Builder

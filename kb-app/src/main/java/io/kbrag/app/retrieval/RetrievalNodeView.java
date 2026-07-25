@@ -12,6 +12,8 @@ import java.util.Map;
  *
  * <p>Mirrors the shared {@code RetrievalNode} schema of the open API so the search endpoint and the
  * future chat endpoint cannot drift apart.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Builder

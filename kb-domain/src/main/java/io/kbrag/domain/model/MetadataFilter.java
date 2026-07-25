@@ -14,6 +14,8 @@ import java.util.List;
  * pushed down to the engine and never applied after recall: filtering afterwards would silently
  * shrink the candidate set below {@code recall_top_k} and make the fusion stage compare lists of
  * different depth.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Builder

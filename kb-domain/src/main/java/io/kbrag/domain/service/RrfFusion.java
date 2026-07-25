@@ -31,6 +31,8 @@ import java.util.Map;
  *
  * <p>The result is ordered by descending fusion score with the chunk id as tie breaker, so the same
  * input always produces the same output and evaluation runs stay reproducible.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 public class RrfFusion implements FusionStrategy {

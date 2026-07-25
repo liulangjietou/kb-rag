@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Covers the fixed length splitter: budget compliance, overlap and the oversized segment fallback.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class FixedLengthTextSplitterTest {
 

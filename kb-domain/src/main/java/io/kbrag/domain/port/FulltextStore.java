@@ -14,6 +14,8 @@ import java.util.List;
  * <p>In lite mode the same physical index also carries the vector field, but the two routes are
  * still issued as two independent requests so each one yields its own candidate set and raw
  * score; a single hybrid request would make the fusion stage impossible to implement.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public interface FulltextStore {
 

@@ -32,6 +32,8 @@ import java.util.concurrent.TimeoutException;
  * <p><b>The stage never blocks a search.</b> The provider call runs on a separate thread with a hard
  * timeout; on timeout or failure the coarse fusion order stands and the caller is told which of the
  * two happened, since a timeout is a capacity problem and a failure is a configuration problem.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service

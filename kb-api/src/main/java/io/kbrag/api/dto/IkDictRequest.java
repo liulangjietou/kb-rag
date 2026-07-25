@@ -12,6 +12,8 @@ import jakarta.validation.constraints.Size;
  * @param word     dictionary term
  * @param dictType dictionary kind, {@code EXT} or {@code STOP}
  * @param remark   free text note explaining why the term was added
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record IkDictRequest(
         @NotBlank(message = "must not be blank")

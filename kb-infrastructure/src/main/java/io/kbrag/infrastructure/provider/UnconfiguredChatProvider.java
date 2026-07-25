@@ -14,6 +14,8 @@ import java.util.List;
  * <p>Callers are expected to branch on {@link #isConfigured()} and skip the stage; the throwing
  * implementation exists so a caller that forgets to branch fails loudly instead of silently
  * degrading the answer quality.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public class UnconfiguredChatProvider implements ChatProvider {
 

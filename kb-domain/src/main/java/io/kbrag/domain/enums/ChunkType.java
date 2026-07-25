@@ -2,6 +2,8 @@ package io.kbrag.domain.enums;
 
 /**
  * Content nature of a chunk, mirrored into the engine side {@code chunk_type} keyword field.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum ChunkType {
 

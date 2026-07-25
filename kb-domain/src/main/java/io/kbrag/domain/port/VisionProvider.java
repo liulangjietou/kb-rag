@@ -7,6 +7,8 @@ import io.kbrag.domain.model.HealthStatus;
  *
  * <p>M1 only defines the contract and ships a disabled placeholder implementation; image
  * understanding lands in M2.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public interface VisionProvider {
 

@@ -23,6 +23,8 @@ import java.util.List;
  * is rebuilt, and retrieval discovers an engine hit whose fact source row is gone. Keeping the
  * removal in one collaborator is what stops the third case from re-implementing the first two with a
  * subtly different definition of "everywhere".
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service

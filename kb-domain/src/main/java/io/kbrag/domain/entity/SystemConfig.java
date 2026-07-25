@@ -8,6 +8,8 @@ import lombok.ToString;
 
 /**
  * Global system settings, layer two of the five layer configuration model.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

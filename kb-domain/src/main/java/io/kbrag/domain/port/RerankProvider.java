@@ -9,6 +9,8 @@ import java.util.List;
  *
  * <p>M1 only defines the contract and ships a disabled placeholder implementation; the retrieval
  * pipeline wires it in M2 together with the score threshold.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public interface RerankProvider {
 

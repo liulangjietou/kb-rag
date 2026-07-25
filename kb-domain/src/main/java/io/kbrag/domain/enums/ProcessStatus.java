@@ -6,6 +6,8 @@ package io.kbrag.domain.enums;
  * <p>Transitions: UPLOADED -&gt; PARSING -&gt; (PARSE_FAILED | PARSED) -&gt; INDEXING -&gt;
  * (INDEXED | INDEX_FAILED). The {@code PENDING_CONFIRM} state of the requirement document belongs
  * to the parse preview switch which is out of the M1 scope.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum ProcessStatus {
 

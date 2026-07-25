@@ -20,6 +20,8 @@ import java.util.Map;
  * @param metadata          per route scores and ranks plus the fusion score
  * @param imageUrls         pre signed image URLs, empty in M1
  * @param previewUrl        pre signed page snapshot URL, {@code null} in M1
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record RetrievalNodeResponse(
         @JsonProperty("doc_id") String docId,

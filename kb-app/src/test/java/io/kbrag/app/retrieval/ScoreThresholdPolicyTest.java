@@ -20,6 +20,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Covers the four pipeline shapes a threshold can meet, because each one leaves a different score as
  * the only comparable one: rerank applied, rerank switched off, rerank degraded, and the BM25 single
  * route where no comparable score exists at all.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class ScoreThresholdPolicyTest {
 

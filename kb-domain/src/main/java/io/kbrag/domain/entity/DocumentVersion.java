@@ -10,6 +10,8 @@ import lombok.ToString;
 /**
  * One immutable build of a document: original object, parse artifact and the six element
  * reuse fingerprint.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

@@ -8,6 +8,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  *
  * <p>Kept as its own configuration rather than an annotation on the application class so a test can
  * exclude it and the scheduler never starts inside a unit test context.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Configuration
 @EnableScheduling

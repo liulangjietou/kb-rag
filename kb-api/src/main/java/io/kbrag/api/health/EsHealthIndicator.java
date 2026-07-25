@@ -11,6 +11,8 @@ import org.springframework.stereotype.Component;
  * Elasticsearch probe of {@code /actuator/health}.
  *
  * <p>Elasticsearch is mandatory in both deployment modes because it always serves the BM25 route.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component("esHealthIndicator")
 @RequiredArgsConstructor

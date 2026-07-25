@@ -24,6 +24,8 @@ import java.util.Map;
 
 /**
  * Document intake and inspection endpoints.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @RestController

@@ -7,6 +7,8 @@ import jakarta.validation.constraints.NotBlank;
  *
  * @param username submitted user name
  * @param password submitted password
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record LoginRequest(
         @NotBlank(message = "must not be blank") String username,

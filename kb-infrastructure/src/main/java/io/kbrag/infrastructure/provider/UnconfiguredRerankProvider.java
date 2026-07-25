@@ -10,6 +10,8 @@ import java.util.List;
 /**
  * Placeholder rerank provider. M1 has no rerank stage, the port exists so the retrieval pipeline of
  * M2 can be wired without reshaping the abstraction.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public class UnconfiguredRerankProvider implements RerankProvider {
 

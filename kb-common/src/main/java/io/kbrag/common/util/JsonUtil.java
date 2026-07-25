@@ -14,6 +14,8 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>All serialization inside the service goes through this class so mapper configuration cannot
  * drift between modules.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 public final class JsonUtil {

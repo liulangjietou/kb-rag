@@ -22,6 +22,8 @@ import jakarta.validation.constraints.NotNull;
  * @param chunkOverlap    overlap in estimated tokens
  * @param parentChild     two level splitting parameters
  * @param retrievalConfig knowledge base level retrieval defaults, optional
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record UpdateIndexConfigRequest(
         @JsonProperty("chunk_max_tokens") @NotNull @Min(1) Integer chunkMaxTokens,

@@ -8,6 +8,8 @@ package io.kbrag.domain.enums;
  * deployment free of noise: rewrite and rerank disappear silently when no model is configured, and
  * only an explicit request for them yields {@link #QUERY_REWRITE_UNAVAILABLE} or
  * {@link #RERANK_UNAVAILABLE}.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum DegradedReason {
 

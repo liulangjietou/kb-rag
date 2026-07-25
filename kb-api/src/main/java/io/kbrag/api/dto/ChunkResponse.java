@@ -14,6 +14,8 @@ import io.kbrag.domain.entity.Chunk;
  * @param chunkTextHash     normalised text digest
  * @param enabled           {@code true} when the chunk participates in retrieval
  * @param embeddingStatus   embedding lifecycle state
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record ChunkResponse(
         @JsonProperty("chunk_id") String chunkId,

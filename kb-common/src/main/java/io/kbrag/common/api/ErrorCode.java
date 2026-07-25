@@ -7,6 +7,8 @@ import lombok.Getter;
  *
  * <p>The M1 subset is fixed by the delivery contract; every code carries the HTTP status the
  * API layer must answer with, so controllers never hard code numeric literals.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 public enum ErrorCode {

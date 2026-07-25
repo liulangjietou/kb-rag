@@ -9,6 +9,8 @@ import lombok.ToString;
 
 /**
  * Document master record. Holds the pointer to the currently active version.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

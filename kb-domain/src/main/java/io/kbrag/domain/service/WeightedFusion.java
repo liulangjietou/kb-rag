@@ -39,6 +39,8 @@ import java.util.Map;
  *
  * <p>A candidate missing from a route contributes zero for that route, which is what makes a
  * candidate found by both routes outrank one found by a single route at equal normalised score.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 public class WeightedFusion implements FusionStrategy {

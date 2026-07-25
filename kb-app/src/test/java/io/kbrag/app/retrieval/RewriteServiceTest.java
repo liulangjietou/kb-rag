@@ -30,6 +30,8 @@ import static org.mockito.Mockito.when;
 /**
  * Covers the query rewrite stage without a model: that a slow provider degrades within the budget, that
  * a failure never propagates, and that switching the stage off is not reported as a degradation.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class RewriteServiceTest {
 

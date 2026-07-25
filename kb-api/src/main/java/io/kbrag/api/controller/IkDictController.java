@@ -25,6 +25,8 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>Authenticated like every other management API. The dictionary the plugin downloads is served by a
  * separate, unauthenticated endpoint, because the tokenizer cannot present a credential.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @RestController
 @RequestMapping("/api/v1/dict/ik")

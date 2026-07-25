@@ -14,6 +14,8 @@ import lombok.ToString;
  * the model that reads it, and those two sizes cannot be the same value. Splitting twice separates
  * the concerns: the small child is the unit the engines index and score, the large parent is the
  * unit the caller receives.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

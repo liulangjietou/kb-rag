@@ -63,6 +63,8 @@ import java.util.Map;
  * <p><b>MySQL is the fact source.</b> Text is always read from the database and never from a search
  * engine, so a stale engine copy cannot reach a caller. An engine hit whose row is gone or disabled is
  * dropped from the result and scheduled for removal, which makes every search a small repair pass.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service

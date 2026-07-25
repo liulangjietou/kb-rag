@@ -17,6 +17,8 @@ import io.kbrag.domain.model.ModelStatus;
  * @param chatConfigured      {@code false} disables the query rewrite switch
  * @param chatProvider        chat provider name, {@code none} when unconfigured
  * @param chatModel           chat model name, {@code none} when unconfigured
+ *
+ * @author owlzhangfq@gmail.com
  */
 public record ModelStatusResponse(
         @JsonProperty("embedding_configured") boolean embeddingConfigured,

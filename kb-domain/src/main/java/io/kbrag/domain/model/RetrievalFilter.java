@@ -13,6 +13,8 @@ import java.util.List;
  * influenced by request parameters, so only chunks of a visible document version and only enabled
  * chunks may ever be recalled. The optional {@link #metadataFilter} is the only caller controlled
  * part, and it can only narrow the result further.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Builder

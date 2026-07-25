@@ -15,6 +15,8 @@ import java.util.List;
  *
  * <p>The allow list is explicit and never a wildcard, and origin reflection is not used: the console is
  * the only intended caller of these endpoints.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Configuration
 @RequiredArgsConstructor

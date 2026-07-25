@@ -10,6 +10,8 @@ import java.util.List;
  *
  * <p>Like the rewrite stage, rerank never fails a search: it either produces one score per candidate
  * or reports that the coarse ranking has to stand, so the caller keeps a single code path.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @ToString

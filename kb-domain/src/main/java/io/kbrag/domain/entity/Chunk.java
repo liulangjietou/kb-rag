@@ -10,6 +10,8 @@ import lombok.ToString;
 
 /**
  * Chunk fact source. MySQL is authoritative, the search engines are derived projections.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

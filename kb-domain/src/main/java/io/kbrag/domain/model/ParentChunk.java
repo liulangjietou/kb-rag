@@ -11,6 +11,8 @@ import java.util.List;
  *
  * <p>Both levels are produced in a single pass so a child can never end up orphaned or pointing at a
  * parent whose text it is not actually part of.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @AllArgsConstructor

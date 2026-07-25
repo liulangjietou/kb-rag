@@ -8,6 +8,8 @@ import lombok.Getter;
  *
  * <p>Thrown by application and domain services; translated into the unified error envelope by the
  * single global exception handler in the API module.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 public class BizException extends RuntimeException {

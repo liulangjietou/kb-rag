@@ -5,6 +5,8 @@ import lombok.ToString;
 
 /**
  * Result of a connectivity probe against an external dependency or a model provider.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @ToString

@@ -10,6 +10,8 @@ import java.util.List;
  *
  * <p>M1 ships the fixed length strategy only; the remaining strategies of the requirement document
  * plug in as additional implementations without touching the pipeline.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public interface TextSplitter {
 

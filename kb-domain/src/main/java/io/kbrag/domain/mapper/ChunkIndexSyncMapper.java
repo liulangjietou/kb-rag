@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.Mapper;
 
 /**
  * Data access for t_kb_chunk_index_sync.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Mapper
 public interface ChunkIndexSyncMapper extends BaseMapper<ChunkIndexSync> {

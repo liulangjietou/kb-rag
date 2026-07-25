@@ -9,6 +9,8 @@ import lombok.ToString;
  *
  * <p>Only the two roles the rewrite stage needs are modelled; the system instruction is passed
  * separately so no caller can inject one through the history.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @AllArgsConstructor

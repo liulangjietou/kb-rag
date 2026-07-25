@@ -22,6 +22,8 @@ import java.util.Locale;
  * <p>Giving the full mode Elasticsearch index a {@code bm25} segment instead of the embedding
  * version is deliberate: swapping the embedding model must not force a rebuild of the full text
  * index, which would also reset the BM25 scoring baseline and the tokenizer dictionary.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 public class IndexNaming {

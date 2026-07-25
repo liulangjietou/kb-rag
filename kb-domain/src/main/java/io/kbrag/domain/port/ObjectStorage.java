@@ -7,6 +7,8 @@ import java.time.Duration;
 
 /**
  * Outbound port of the private object storage holding original files and parse artifacts.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public interface ObjectStorage {
 

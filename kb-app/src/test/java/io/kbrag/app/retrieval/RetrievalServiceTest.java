@@ -51,6 +51,8 @@ import static org.mockito.Mockito.when;
  * Covers the assembled pipeline without touching a search engine: the dual route path, the zero key
  * single route path with its degradation marker, the parent merge, the threshold and the self healing
  * of engine hits the fact source no longer owns.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class RetrievalServiceTest {
 

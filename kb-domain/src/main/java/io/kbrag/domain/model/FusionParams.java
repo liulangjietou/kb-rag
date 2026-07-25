@@ -10,6 +10,8 @@ import lombok.ToString;
  * <p>Only the vector weight is a request parameter: the two weights must sum to one for the fused
  * score to stay inside {@code [0,1]}, so deriving the BM25 weight here removes an inconsistent
  * combination from the API surface entirely.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @ToString

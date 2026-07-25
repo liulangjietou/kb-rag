@@ -2,6 +2,8 @@ package io.kbrag.domain.enums;
 
 /**
  * Route a retrieval node was recalled from.
+ *
+ * @author owlzhangfq@gmail.com
  */
 public enum RetrievalSource {
 

@@ -21,6 +21,8 @@ import java.util.concurrent.Executor;
  *
  * <p>The task decorator carries the request id into the worker thread so an upload or a search can be
  * traced end to end in the logs.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Configuration
 @EnableAsync

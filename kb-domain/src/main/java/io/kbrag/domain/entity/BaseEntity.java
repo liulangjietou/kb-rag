@@ -15,6 +15,8 @@ import java.time.LocalDateTime;
 /**
  * Columns every business table carries: surrogate key, audit timestamps, optimistic lock and the
  * soft delete flag.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Setter

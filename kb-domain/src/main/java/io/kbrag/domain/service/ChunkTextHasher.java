@@ -20,6 +20,8 @@ import java.text.Normalizer;
  * </ol>
  * Case is intentionally preserved: two chunks that differ only in case are different text, and the
  * hash is also used for exact deduplication.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 public class ChunkTextHasher {

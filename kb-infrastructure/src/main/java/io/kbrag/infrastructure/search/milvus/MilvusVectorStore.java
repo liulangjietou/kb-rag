@@ -50,6 +50,8 @@ import java.util.stream.Collectors;
  * implementation only applies the shared linear mapping to {@code [0,1]}. Combined with the
  * Elasticsearch implementation, which first restores the raw cosine from its own {@code (1+cos)/2}
  * score, a score threshold means exactly the same thing in both deployment modes.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Component

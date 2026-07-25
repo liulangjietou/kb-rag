@@ -10,6 +10,8 @@ import java.util.UUID;
  *
  * <p>Business keys are used instead of the auto increment primary key so identifiers can be logged,
  * embedded in index names and shared with the console without leaking row counts.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component
 public class BizIdGenerator {

@@ -15,6 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Covers the two level splitter: that both levels come from the same strategy, that children stay
  * inside their parent, and that the sequence numbering keeps the document readable in order.
+ *
+ * @author owlzhangfq@gmail.com
  */
 class ParentChildSplitterTest {
 

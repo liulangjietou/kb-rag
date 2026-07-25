@@ -14,6 +14,8 @@ import org.springframework.stereotype.Component;
  *
  * <p>Registered only when a Milvus URI is configured: the lite deployment does not run Milvus, and
  * probing an engine that is not part of the deployment would make a healthy stack report as down.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Component("milvusHealthIndicator")
 @RequiredArgsConstructor

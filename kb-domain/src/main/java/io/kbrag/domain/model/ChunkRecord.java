@@ -11,6 +11,8 @@ import java.util.List;
  *
  * <p>Only the fields listed as filterable in the data model reach the search engines; every other
  * metadata attribute stays in MySQL.
+ *
+ * @author owlzhangfq@gmail.com
  */
 @Getter
 @Builder
