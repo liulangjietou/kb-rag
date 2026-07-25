@@ -14,7 +14,7 @@ M2 完整链路（固定次序）：
 - 零 Key/未配置 chat 模型：改写自动关闭（不加 degraded——功能未启用不算降级；仅显式开启改写却无模型时加）
 
 ### 1.2 Rerank
-- RerankProvider 落地 DashScope 原生端点 `POST /api/v1/services/rerank/text-rerank/text-rerank`（模型 `RERANK_MODEL` 默认 gte-rerank）；返回 0-1 归一化 relevance_score
+- RerankProvider 落地 DashScope 原生端点 `POST /api/v1/services/rerank/text-rerank/text-rerank`（模型 `RERANK_MODEL` 默认 **gte-rerank-v2**——旧版 gte-rerank 部分账号无访问权限会返回 403）；返回 0-1 归一化 relevance_score
 - 候选上限 50（融合后按粗排序截断，父子开启时按 §1.4 换算）；超时 1.5s；超时/失败降级为融合结果排序，degraded += `rerank_timeout`|`rerank_error`
 - rerank 分是唯一绝对分：score_type=`rerank`
 
