@@ -99,11 +99,10 @@ export default function IkDictTab() {
             title: '类型',
             dataIndex: 'dict_type',
             width: 120,
-            render: (type: IkDictType) => (
-              <Tag color={metaOf(IK_DICT_TYPE_META, type).color}>
-                {metaOf(IK_DICT_TYPE_META, type).label}
-              </Tag>
-            ),
+            render: (type: IkDictType) => {
+              const meta = metaOf(IK_DICT_TYPE_META, type);
+              return <Tag color={meta.color}>{meta.label}</Tag>;
+            },
           },
           {
             title: '状态',
