@@ -7,6 +7,17 @@
 ## [Unreleased]
 
 ### Added
+- M4b 评测体系（docs/M4b-CONTRACTS.md）：评测集/case 的增删改查与分页、证据复核工作台
+  （待复核 case 列表 + Top3 候选原文 + REANCHOR/DEPRECATE）、检索调试页一键收进评测集与
+  检索结果反馈标注、Demo 示例评测集导入（按 file_name+content_hash_sha256 匹配库内文档、
+  幂等）、评测运行配置矩阵（BM25_ONLY/VECTOR_ONLY/HYBRID/HYBRID_RERANK 一次提交产生 N 个
+  run）与提交前费用预估、run 详情/命中明细下钻/同 dataset_revision 下的多 run 对比、
+  三层嵌套指标（overall/span/document/single_turn/multi_turn 分组 × Recall/Precision/
+  Hit Rate/MRR/NDCG + Wilson 95% 置信区间）；`docs/openapi/kb-server.yaml` 同步全部
+  端点与 schema（枚举 AnchorType/CaseStatus/RunStatus/EvalMode 齐全），`ActivateImpact.
+  affected_eval_case_count` 由 M4a 恒 0 占位改为真实统计说明；`.env.example` 新增
+  `EVAL_JUDGE_MODEL`/`EVAL_OFFLINE_TIMEOUT_MS`/`EVAL_CONCURRENCY`/`EVAL_OVERLAP_THRESHOLD`/
+  `EVAL_DEGRADED_RETRY`。
 - M4a 文档版本与分片标注：同名文件重复上传按 major/minor 规则生成新版本（内容全同则不建版）、版本列表与激活/影响预检端点、即时回退与归档版本重建回退（rollback_mode）、非激活版本保留策略与归档清理、分片标注四操作（编辑/启禁用/合并/拆分，统一走事实源先行再双引擎同步）、父子分片禁用语义（disabled_child_ids 与 hide_parent_with_disabled_child 开关）、标注跨版本按 chunk_text_hash 精确继承与待复核清单、Flyway V4 建 t_kb_annotation。
 
 - （M3）`demo/`：4 篇原创 RAG/知识库技术说明文档（覆盖 pdf/docx/xlsx/md 各一，中文，

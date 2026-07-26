@@ -28,10 +28,19 @@ info:
 
     调用任何大模型（docs/M3-CONTRACTS.md §0/§1）。
 
-    对外 API Key 网关（应用发布渠道）属于 M4c 范畴，不在本文件中。
+    M4a 增量：文档版本列表与激活影响预检（`GET .../versions`、`GET .../activate-impact`、
+    `POST .../activate`）、跨版本待复核标注清单、分片标注四操作（编辑/启禁用/合并/拆分）。
+
+    M4b 增量（docs/M4b-CONTRACTS.md）：评测体系全链路——评测集与 case 的增删改查、
+    证据复核工作台（`stale-cases`/`recheck`）、Demo 示例评测集导入（`import-demo`）、
+    检索调试页一键收进评测集（`cases/from-retrieval`）与检索结果反馈标注
+    （`retrieval-feedback`）、评测运行配置矩阵与费用预估（`runs`/`runs/estimate`）、
+    run 详情/命中明细下钻/多 run 对比（`eval-runs/{runId}`、`.../results`、
+    `eval-runs/compare`）；`ActivateImpact.affected_eval_case_count` 由恒 0 占位改为
+    真实统计。对外 API Key 网关（应用发布渠道）属于 M4c 范畴，不在本文件中。
 
     '
-  version: 0.3.0-m3
+  version: 0.4.0-m4b
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -57,6 +66,8 @@ tags:
   description: 告警 Webhook 配置（M3，docs/M3-CONTRACTS.md §3.6）
 - name: demo
   description: Demo 一键导入（M3，docs/M3-CONTRACTS.md §3.7）
+- name: eval
+  description: 评测体系：评测集/case/证据复核/评测运行与报告（M4b，docs/M4b-CONTRACTS.md）
 - name: system
   description: 系统状态与健康检查
 security:
@@ -957,6 +968,430 @@ paths:
                   properties:
                     data:
                       $ref: '#/components/schemas/SplitChunkResult'
+  /api/v1/kb/{kbId}/eval-datasets:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - eval
+      summary: 创建评测集
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvalDatasetRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalDatasetResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags:
+      - eval
+      summary: 评测集列表
+      description: 含 case_count、dataset_revision、最近一次 run 摘要（M4b-CONTRACTS.md §2）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalDatasetListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/eval-datasets/import-demo:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - eval
+      summary: 导入 Demo 示例评测集
+      description: '导入 deploy 仓 demo/eval-cases.json：按 file_name + content_hash_sha256
+        匹配该库文档得 doc_id（匹配不到的 case 跳过并在响应列出）；幂等，同名评测集已存在则返回其 id 不重复导入
+        （M4b-CONTRACTS.md §2）。'
+      responses:
+        '200':
+          description: 导入成功或已存在（幂等）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportDemoEvalDatasetResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-datasets/{datasetId}:
+    parameters:
+    - $ref: '#/components/parameters/EvalDatasetId'
+    get:
+      tags:
+      - eval
+      summary: 评测集详情
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalDatasetResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - eval
+      summary: 删除评测集
+      description: 级联删除该评测集下 case 与 run/result，走软删 + after-commit 清理（M4b-CONTRACTS.md
+        §2）
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-datasets/{datasetId}/cases:
+    parameters:
+    - $ref: '#/components/parameters/EvalDatasetId'
+    post:
+      tags:
+      - eval
+      summary: 新增评测 case
+      description: annotated_version_id 由服务端按该 doc 当前激活版本填入；写入后 dataset_revision+1
+        （M4b-CONTRACTS.md §2）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvalCaseRequest'
+      responses:
+        '200':
+          description: 新增成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalCaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags:
+      - eval
+      summary: 评测 case 分页列表
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/CaseStatus'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalCaseListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-datasets/{datasetId}/cases/from-retrieval:
+    parameters:
+    - $ref: '#/components/parameters/EvalDatasetId'
+    post:
+      tags:
+      - eval
+      summary: 从检索调试页一键收进评测集
+      description: '服务端读取 chunk_ids 对应正文作为 span 证据、其 doc_id 作为锚定文档；source=DEBUG_PAGE。
+        图片类 chunk（chunk_type=image）或显式传 anchor_type=DOCUMENT 时建成文档级锚定 case
+        （M4b-CONTRACTS.md §2）。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CasesFromRetrievalRequest'
+      responses:
+        '200':
+          description: 新增成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalCaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-datasets/{datasetId}/stale-cases:
+    parameters:
+    - $ref: '#/components/parameters/EvalDatasetId'
+    get:
+      tags:
+      - eval
+      summary: 证据复核工作台数据
+      description: 待复核 case 列表 + 每条的失配证据与当前激活版本中的候选原文（按重叠率取 Top3 候选供人工选择，
+        M4b-CONTRACTS.md §2/§4）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaleCaseListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-cases/{caseId}:
+    parameters:
+    - $ref: '#/components/parameters/EvalCaseId'
+    put:
+      tags:
+      - eval
+      summary: 编辑评测 case
+      description: dataset_revision+1（M4b-CONTRACTS.md §2）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvalCaseRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalCaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - eval
+      summary: 删除评测 case
+      description: dataset_revision+1（M4b-CONTRACTS.md §2）
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-cases/{caseId}/recheck:
+    parameters:
+    - $ref: '#/components/parameters/EvalCaseId'
+    post:
+      tags:
+      - eval
+      summary: 证据复核
+      description: REANCHOR 用新证据替换并置回 ACTIVE，DEPRECATE 置 DEPRECATED（M4b-CONTRACTS.md
+        §2）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecheckCaseRequest'
+      responses:
+        '200':
+          description: 复核成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalCaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/retrieval-feedback:
+    post:
+      tags:
+      - eval
+      summary: 检索结果反馈标注
+      description: 'verdict=GOOD 即一键收进评测集（同 cases/from-retrieval 语义承载，source=DEBUG_PAGE）；
+        verdict=BAD 记 info 日志且不落库（M4b-CONTRACTS.md §2）。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetrievalFeedbackRequest'
+      responses:
+        '200':
+          description: 已受理
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-datasets/{datasetId}/runs:
+    parameters:
+    - $ref: '#/components/parameters/EvalDatasetId'
+    post:
+      tags:
+      - eval
+      summary: 提交评测运行（配置矩阵，一次产生 N 个 run）
+      description: 'configs 允许 1..6 组，一次提交产生 N 个 run（每组一个 run，共享 dataset_revision
+        与 corpus_fingerprint，报告可横向对比）。零 Key 环境下 VECTOR_ONLY/HYBRID/HYBRID_RERANK
+        直接置 FAILED（M4b-CONTRACTS.md §3.1）。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvalRunsRequest'
+      responses:
+        '200':
+          description: 已受理（异步执行）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateEvalRunsResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags:
+      - eval
+      summary: 评测集下 run 历史列表
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalRunListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-datasets/{datasetId}/runs/estimate:
+    parameters:
+    - $ref: '#/components/parameters/EvalDatasetId'
+    post:
+      tags:
+      - eval
+      summary: 评测运行前预估调用次数
+      description: 提交前展示预估调用次数与费用护栏（嵌入/重排/改写/judge 各自次数，M4b-CONTRACTS.md §3.4）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvalRunsRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalRunEstimateResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-runs/{runId}:
+    parameters:
+    - $ref: '#/components/parameters/EvalRunId'
+    get:
+      tags:
+      - eval
+      summary: run 详情（含 metrics）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalRunResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-runs/{runId}/results:
+    parameters:
+    - $ref: '#/components/parameters/EvalRunId'
+    get:
+      tags:
+      - eval
+      summary: run 命中明细（下钻）
+      parameters:
+      - name: hit
+        in: query
+        required: false
+        schema:
+          type: boolean
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalResultListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-runs/compare:
+    get:
+      tags:
+      - eval
+      summary: 多 run 指标对比
+      description: 同 dataset_revision 才允许对比，不同则响应 comparable=false 并给出原因（M4b-CONTRACTS.md
+        §3.1 语料变化标注）
+      parameters:
+      - name: run_ids
+        in: query
+        required: true
+        style: form
+        explode: false
+        schema:
+          type: array
+          minItems: 2
+          items:
+            type: string
+        description: 逗号分隔的 run_id 列表，如 run_ids=a,b,c
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalRunCompareResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
 components:
   securitySchemes:
     bearerAuth:
@@ -990,6 +1425,27 @@ components:
         type: integer
         format: int64
       description: ik 词典条目主键（t_kb_ik_dict.id，无独立业务字符串 ID，仅此表通用列 id 即主键）
+    EvalDatasetId:
+      name: datasetId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 评测集业务主键（dataset_id，M4b）
+    EvalCaseId:
+      name: caseId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 评测 case 业务主键（case_id，M4b）
+    EvalRunId:
+      name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 评测运行业务主键（run_id，M4b）
   responses:
     InvalidParam:
       description: 参数校验失败
@@ -2138,7 +2594,8 @@ components:
           type: integer
         affected_eval_case_count:
           type: integer
-          description: always 0 until M4b introduces evaluation sets
+          description: 锚定该 doc_id 且会因本次切换进入待复核（EVIDENCE_STALE）的评测 case 数（M4b-CONTRACTS.md
+            §0：M4a 恒为 0 的占位在 M4b 已填实为真实统计）
     ActivateVersionResult:
       type: object
       properties:
@@ -2205,3 +2662,683 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DocumentChunk'
+    AnchorType:
+      type: string
+      description: 评测 case 证据锚定类型（M4b-CONTRACTS.md §1）。SPAN 锚定到具体原文片段（span 非空）；
+        DOCUMENT 锚定整篇文档（span 恒为空，图片类 case 仅能用此类型）
+      enum:
+      - SPAN
+      - DOCUMENT
+    CaseStatus:
+      type: string
+      description: t_kb_eval_case.status（与 t_kb_annotation.inherit_status 无关，两套枚举不复用）。
+        EVIDENCE_STALE 由文档激活版本切换时同步扫描置入，需人工在证据复核工作台 REANCHOR 或 DEPRECATE
+      enum:
+      - ACTIVE
+      - EVIDENCE_STALE
+      - DEPRECATED
+    CaseSource:
+      type: string
+      description: case 来源。DEBUG_PAGE 来自检索调试页一键收进（含检索结果反馈 GOOD 判定），IMPORTED
+        来自 Demo 评测集导入
+      enum:
+      - MANUAL
+      - DEBUG_PAGE
+      - IMPORTED
+    RunStatus:
+      type: string
+      description: t_kb_eval_run.status。零 Key 环境下 VECTOR_ONLY/HYBRID/HYBRID_RERANK
+        直接置 FAILED（fail_reason 说明嵌入模型未配置），不产生误导性指标
+      enum:
+      - PENDING
+      - RUNNING
+      - SUCCESS
+      - FAILED
+    EvalMode:
+      type: string
+      description: 检索配置矩阵档位到既有检索参数的映射（M4b-CONTRACTS.md §3.1）：BM25_ONLY 禁向量路，
+        VECTOR_ONLY 禁 BM25 路，HYBRID 双路+融合、rerank 关，HYBRID_RERANK 双路+融合+rerank
+      enum:
+      - BM25_ONLY
+      - VECTOR_ONLY
+      - HYBRID
+      - HYBRID_RERANK
+    RecheckAction:
+      type: string
+      description: 证据复核工作台操作（M4b-CONTRACTS.md §2）
+      enum:
+      - REANCHOR
+      - DEPRECATE
+    RetrievalFeedbackVerdict:
+      type: string
+      description: 检索结果反馈判定（M4b-CONTRACTS.md §2）
+      enum:
+      - GOOD
+      - BAD
+    EvalCaseEvidence:
+      type: object
+      description: t_kb_eval_case.evidences 数组元素；DOCUMENT 锚定时 span 为空
+      required:
+      - doc_id
+      - annotated_version_id
+      properties:
+        doc_id:
+          type: string
+        span:
+          type: string
+          nullable: true
+          description: 原文摘录片段；anchor_type=DOCUMENT 时恒为空
+        annotated_version_id:
+          type: string
+          description: 标注时该 doc 的激活版本，由服务端按当前激活版本自动填入
+    EvalCaseEvidenceInput:
+      type: object
+      description: 新增/编辑/复核 case 时提交的证据（annotated_version_id 由服务端填入，不由调用方传入）
+      required:
+      - doc_id
+      properties:
+        doc_id:
+          type: string
+        span:
+          type: string
+          nullable: true
+          description: anchor_type=DOCUMENT 时可省略/为空
+    EvalCase:
+      type: object
+      properties:
+        case_id:
+          type: string
+        dataset_id:
+          type: string
+        query:
+          type: string
+        messages:
+          type: array
+          nullable: true
+          description: 多轮对话历史（可空）
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        expected_answer:
+          type: string
+          nullable: true
+        anchor_type:
+          $ref: '#/components/schemas/AnchorType'
+        evidences:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvalCaseEvidence'
+        status:
+          $ref: '#/components/schemas/CaseStatus'
+        source:
+          $ref: '#/components/schemas/CaseSource'
+        note:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateEvalCaseRequest:
+      type: object
+      description: 新增（POST cases）与编辑（PUT eval-cases/{caseId}）复用同一请求体
+      required:
+      - query
+      - anchor_type
+      - evidences
+      properties:
+        query:
+          type: string
+        messages:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        expected_answer:
+          type: string
+          nullable: true
+        anchor_type:
+          $ref: '#/components/schemas/AnchorType'
+        evidences:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/EvalCaseEvidenceInput'
+        note:
+          type: string
+          nullable: true
+    RecheckCaseRequest:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          $ref: '#/components/schemas/RecheckAction'
+        evidences:
+          type: array
+          nullable: true
+          description: action=REANCHOR 时必填，用新证据整体替换旧证据
+          items:
+            $ref: '#/components/schemas/EvalCaseEvidenceInput'
+    EvidenceCandidate:
+      type: object
+      description: 证据复核工作台候选原文（按重叠率取 Top3，M4b-CONTRACTS.md §2/§4）
+      properties:
+        chunk_id:
+          type: string
+        document_version_id:
+          type: string
+        content:
+          type: string
+        overlap_ratio:
+          type: number
+          format: float
+    StaleEvidenceEntry:
+      type: object
+      properties:
+        evidence:
+          $ref: '#/components/schemas/EvalCaseEvidence'
+        candidates:
+          type: array
+          description: 当前激活版本中按重叠率排序的 Top3 候选原文
+          items:
+            $ref: '#/components/schemas/EvidenceCandidate'
+    StaleCaseEntry:
+      type: object
+      properties:
+        case:
+          $ref: '#/components/schemas/EvalCase'
+        stale_evidences:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaleEvidenceEntry'
+    StaleCaseListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/StaleCaseEntry'
+    EvalCaseResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/EvalCase'
+    EvalCaseListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EvalCase'
+              page:
+                type: integer
+              total:
+                type: integer
+    LastRunSummary:
+      type: object
+      nullable: true
+      description: 评测集尚无 run 时为 null
+      properties:
+        run_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/RunStatus'
+        mode:
+          $ref: '#/components/schemas/EvalMode'
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+    CreateEvalDatasetRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+    EvalDataset:
+      type: object
+      properties:
+        dataset_id:
+          type: string
+        kb_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        dataset_revision:
+          type: integer
+          description: case 增删改即 +1，门禁可比性依据（M4b-CONTRACTS.md §1）
+        case_count:
+          type: integer
+        last_run:
+          $ref: '#/components/schemas/LastRunSummary'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    EvalDatasetResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/EvalDataset'
+    EvalDatasetListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/EvalDataset'
+    SkippedEvalCase:
+      type: object
+      description: import-demo 时按 file_name+content_hash_sha256 匹配不到库内文档而跳过的 case
+      properties:
+        query:
+          type: string
+        file_name:
+          type: string
+        reason:
+          type: string
+    ImportDemoEvalDatasetData:
+      type: object
+      properties:
+        dataset_id:
+          type: string
+        already_existed:
+          type: boolean
+          description: 同名评测集已存在则为 true，直接返回其 id 不重复导入（幂等）
+        imported_case_count:
+          type: integer
+        skipped:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkippedEvalCase'
+    ImportDemoEvalDatasetResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/ImportDemoEvalDatasetData'
+    CasesFromRetrievalRequest:
+      type: object
+      description: 检索调试页一键收进评测集（M4b-CONTRACTS.md §2）；chunk_type=image 或显式传 anchor_type=DOCUMENT
+        时建成文档级锚定 case
+      required:
+      - query
+      - chunk_ids
+      properties:
+        query:
+          type: string
+        messages:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        chunk_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        anchor_type:
+          allOf:
+          - $ref: '#/components/schemas/AnchorType'
+          nullable: true
+    RetrievalFeedbackRequest:
+      type: object
+      description: 'M4b-CONTRACTS.md §2：verdict=GOOD 等价于一键收进评测集（source=DEBUG_PAGE 草稿
+        case）；verdict=BAD 仅记 info 日志，不落库。'
+      required:
+      - kb_id
+      - query
+      - chunk_id
+      - verdict
+      properties:
+        kb_id:
+          type: string
+        query:
+          type: string
+        chunk_id:
+          type: string
+        verdict:
+          $ref: '#/components/schemas/RetrievalFeedbackVerdict'
+    EvalRunConfig:
+      type: object
+      description: 检索配置矩阵单组配置（M4b-CONTRACTS.md §3.1），mode 映射到既有检索参数
+      required:
+      - label
+      - mode
+      properties:
+        label:
+          type: string
+        mode:
+          $ref: '#/components/schemas/EvalMode'
+        recall_top_k:
+          type: integer
+          nullable: true
+          minimum: 1
+        top_n:
+          type: integer
+          nullable: true
+          minimum: 1
+        fusion:
+          allOf:
+          - $ref: '#/components/schemas/FusionConfig'
+          nullable: true
+        score_threshold:
+          type: number
+          format: float
+          nullable: true
+        rewrite_enabled:
+          type: boolean
+          nullable: true
+    JudgeRequestConfig:
+      type: object
+      description: judge 本期仅在 case 有 expected_answer 时对召回内容能否支撑该答案打分（M4b-CONTRACTS.md
+        §3.5）
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        model:
+          type: string
+          nullable: true
+          description: 留空沿用 EVAL_JUDGE_MODEL（未配置则回退 ChatProvider 当前模型）
+    CreateEvalRunsRequest:
+      type: object
+      description: configs 允许 1..6 组，一次提交产生 N 个 run（每组一个），共享 dataset_revision 与
+        corpus_fingerprint（M4b-CONTRACTS.md §3.1）
+      required:
+      - configs
+      properties:
+        k:
+          type: integer
+          default: 5
+          minimum: 1
+        configs:
+          type: array
+          minItems: 1
+          maxItems: 6
+          items:
+            $ref: '#/components/schemas/EvalRunConfig'
+        judge:
+          allOf:
+          - $ref: '#/components/schemas/JudgeRequestConfig'
+          nullable: true
+    ConfidenceInterval:
+      type: object
+      description: Wilson 95% 置信区间，仅作报告展示，不参与判定（M4b-CONTRACTS.md §3.3）
+      properties:
+        lower:
+          type: number
+          format: float
+        upper:
+          type: number
+          format: float
+    EvalMetricValue:
+      type: object
+      description: 单个分组、单个 K 值下的指标集
+      properties:
+        recall:
+          type: number
+          format: float
+        precision:
+          type: number
+          format: float
+        hit_rate:
+          type: number
+          format: float
+        mrr:
+          type: number
+          format: float
+        ndcg:
+          type: number
+          format: float
+        recall_ci:
+          $ref: '#/components/schemas/ConfidenceInterval'
+        hit_rate_ci:
+          $ref: '#/components/schemas/ConfidenceInterval'
+    EvalMetrics:
+      type: object
+      nullable: true
+      description: '三层嵌套：分组 key（overall/span/document/single_turn/multi_turn）→ K
+        值（字符串，如 "5"）→ EvalMetricValue（M4b-CONTRACTS.md §3.3）；run 未 SUCCESS 时为
+        null。'
+      additionalProperties:
+        type: object
+        additionalProperties:
+          $ref: '#/components/schemas/EvalMetricValue'
+    EvalRun:
+      type: object
+      properties:
+        run_id:
+          type: string
+        dataset_id:
+          type: string
+        kb_id:
+          type: string
+        label:
+          type: string
+        mode:
+          $ref: '#/components/schemas/EvalMode'
+        dataset_revision:
+          type: integer
+          description: 跑时快照
+        corpus_fingerprint:
+          type: string
+          description: 激活版本集合 hash + 嵌入版本 + 词典版本
+        retrieval_config:
+          $ref: '#/components/schemas/EvalRunConfig'
+        judge_model:
+          type: string
+          nullable: true
+        judge_prompt_version:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/RunStatus'
+        metrics:
+          $ref: '#/components/schemas/EvalMetrics'
+        case_total:
+          type: integer
+        case_effective:
+          type: integer
+        case_stale:
+          type: integer
+        case_degraded:
+          type: integer
+          description: 重试后仍降级的 case 数，非 0 时报告顶部显著提示
+        fail_reason:
+          type: string
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    CreateEvalRunsResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            description: 一次提交按 configs 数量产生的 N 个 run
+            items:
+              $ref: '#/components/schemas/EvalRun'
+    EvalRunResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/EvalRun'
+    EvalRunListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EvalRun'
+              page:
+                type: integer
+              total:
+                type: integer
+    EvalRunEstimate:
+      type: object
+      description: 提交 run 前的预估调用次数（M4b-CONTRACTS.md §3.4 费用护栏）
+      properties:
+        embedding_calls:
+          type: integer
+        rerank_calls:
+          type: integer
+        rewrite_calls:
+          type: integer
+        judge_calls:
+          type: integer
+    EvalRunEstimateResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/EvalRunEstimate'
+    JudgeScore:
+      type: object
+      description: 正确性/引用忠实度/完整性各 1-5 分制（M4b-CONTRACTS.md §3.5）
+      properties:
+        correctness:
+          type: integer
+          minimum: 1
+          maximum: 5
+        faithfulness:
+          type: integer
+          minimum: 1
+          maximum: 5
+        completeness:
+          type: integer
+          minimum: 1
+          maximum: 5
+    EvalResult:
+      type: object
+      properties:
+        result_id:
+          type: string
+        run_id:
+          type: string
+        case_id:
+          type: string
+        hit:
+          type: boolean
+        hit_rank:
+          type: integer
+          nullable: true
+          description: 首个命中的名次，未命中为 null
+        overlap_ratios:
+          type: array
+          description: 该 case 每条 evidence 的最佳重叠率
+          items:
+            type: number
+            format: float
+        recalled_chunk_ids:
+          type: array
+          items:
+            type: string
+        degraded:
+          type: array
+          items:
+            $ref: '#/components/schemas/DegradedReason'
+        retry_count:
+          type: integer
+        judge_score:
+          allOf:
+          - $ref: '#/components/schemas/JudgeScore'
+          nullable: true
+        judge_reason:
+          type: string
+          nullable: true
+    EvalResultListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EvalResult'
+              page:
+                type: integer
+              total:
+                type: integer
+    CompareRunEntry:
+      type: object
+      properties:
+        run_id:
+          type: string
+        label:
+          type: string
+        mode:
+          $ref: '#/components/schemas/EvalMode'
+        metrics:
+          $ref: '#/components/schemas/EvalMetrics'
+    EvalRunCompareData:
+      type: object
+      description: 同 dataset_revision 才允许对比；不同则 comparable=false 并给出原因（M4b-CONTRACTS.md
+        §3.1）
+      properties:
+        comparable:
+          type: boolean
+        reason:
+          type: string
+          nullable: true
+          description: comparable=false 时的原因说明（如语料/评测集已变化）
+        dataset_revision:
+          type: integer
+          nullable: true
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompareRunEntry'
+    EvalRunCompareResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/EvalRunCompareData'
