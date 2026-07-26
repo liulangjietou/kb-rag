@@ -3,12 +3,17 @@ package io.kbrag.api.dto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.AppPromptConfig;
+import io.kbrag.domain.model.AppRoutingConfig;
+import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
+
+import java.util.List;
 
 /**
  * Version creation payload: the console's configuration form.
@@ -17,7 +22,13 @@ import jakarta.validation.constraints.Size;
  * parameter of what is live does not require restating the whole configuration. Once the version leaves the
  * draft state the snapshot is completed and frozen, and nothing falls back to a live default afterwards.
  *
- * @param kbId          knowledge base the application serves; a single one until M5 unlocks multi base
+ * <p><b>{@code kb_id} is accepted, not encouraged.</b> A client written against M4c sent a single base and must
+ * keep working; it is folded into a one entry {@code kb_refs} list. When both are present {@code kb_refs} wins,
+ * because it is the shape that can express what the other cannot.
+ *
+ * @param kbId          legacy single knowledge base, folded into {@code kbRefs} when that one is absent
+ * @param kbRefs        knowledge bases the application serves with their quota weights, one to fifteen
+ * @param routing       knowledge base routing switch and prompt
  * @param retrieval     retrieval parameters
  * @param prompt        question answering prompt configuration
  * @param gate          absolute gate thresholds, only consulted on a first release
@@ -29,12 +40,40 @@ import jakarta.validation.constraints.Size;
  */
 public record AppVersionConfigRequest(
         @JsonProperty("kb_id") String kbId,
+        @JsonProperty("kb_refs") @Valid List<KbRefRequest> kbRefs,
+        @Valid RoutingRequest routing,
         @Valid RetrievalRequest retrieval,
         @Valid PromptRequest prompt,
         @Valid GateThresholdRequest gate,
         @JsonProperty("chat_model") String chatModel,
         @JsonProperty("gate_dataset_id") String gateDatasetId,
         @Size(max = 1024, message = "must be at most 1024 characters") String changelog) {
+
+    /**
+     * One knowledge base link of a version.
+     *
+     * <p>The count, the duplicate check and the existence of the base are validated in the application layer
+     * rather than here: bean validation can only see one payload, and those three rules are the authoritative
+     * ones an API client must not be able to route around.
+     *
+     * @param kbId   knowledge base business id
+     * @param weight quota weight, {@code null} reads as the default
+     */
+    public record KbRefRequest(
+            @JsonProperty("kb_id") @NotBlank(message = "must not be blank") String kbId,
+            @Min(value = 1, message = "must be at least 1") Integer weight) {
+    }
+
+    /**
+     * Routing configuration of a version.
+     *
+     * @param enabled {@code true} lets a model choose which linked bases a query is searched in
+     * @param prompt  operator wording of the routing instruction, blank keeps the built in one
+     */
+    public record RoutingRequest(
+            Boolean enabled,
+            @Size(max = 4000, message = "must be at most 4000 characters") String prompt) {
+    }
 
     /**
      * Retrieval parameters of a version.
@@ -107,17 +146,45 @@ public record AppVersionConfigRequest(
      * @return configuration snapshot, {@code null} to inherit
      */
     public AppConfigSnapshot toSnapshot() {
-        if (kbId == null && retrieval == null && prompt == null && gate == null && chatModel == null) {
+        if (kbId == null && kbRefs == null && routing == null && retrieval == null && prompt == null
+                && gate == null && chatModel == null) {
             return null;
         }
         AppConfigSnapshot snapshot = new AppConfigSnapshot();
-        snapshot.setKbId(kbId);
+        snapshot.setKbRefs(toKbRefs());
+        snapshot.setRouting(toRouting());
         snapshot.setRetrieval(toRetrieval());
         snapshot.setPrompt(toPrompt());
         snapshot.setChatModel(chatModel);
         snapshot.setGate(gate == null ? null
                 : new AppConfigSnapshot.GateThresholds(gate.minHitRate(), gate.minRecall()));
         return snapshot;
+    }
+
+    /**
+     * Maps the transport shape of the knowledge base links, folding a legacy single base in.
+     *
+     * <p>The weight is carried through as written, {@code null} included: repairing it here would hide it from
+     * the one validation that rejects it.
+     *
+     * @return references in declaration order, empty when the payload named no base
+     */
+    private List<KbRef> toKbRefs() {
+        if (kbRefs != null) {
+            return kbRefs.stream().map(ref -> new KbRef(ref.kbId(),
+                    ref.weight() == null ? KbRef.DEFAULT_WEIGHT : ref.weight())).toList();
+        }
+        return kbId == null || kbId.isBlank() ? List.of() : List.of(KbRef.of(kbId));
+    }
+
+    private AppRoutingConfig toRouting() {
+        AppRoutingConfig config = AppRoutingConfig.defaults();
+        if (routing == null) {
+            return config;
+        }
+        config.setEnabled(Boolean.TRUE.equals(routing.enabled()));
+        config.setPrompt(routing.prompt());
+        return config;
     }
 
     private KbRetrievalConfig toRetrieval() {

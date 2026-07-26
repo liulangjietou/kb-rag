@@ -18,7 +18,7 @@ import java.util.List;
  * <pre>
  * message_delta -&gt; {"delta": "..."}
  * references    -&gt; {"references": [RetrievalNode, ...]}
- * done          -&gt; {"request_id": "...", "degraded": [...]}
+ * done          -&gt; {"request_id": "...", "degraded": [...], "routed_kb_ids": [...]}
  * error         -&gt; {"code": "...", "message": "..."}
  * </pre>
  *
@@ -71,8 +71,8 @@ public class SseChatStreamListener implements ChatStreamListener {
     }
 
     @Override
-    public void onDone(String requestId, List<String> degraded) {
-        send(EVENT_DONE, new DoneEvent(requestId, degraded));
+    public void onDone(String requestId, List<String> degraded, List<String> routedKbIds) {
+        send(EVENT_DONE, new DoneEvent(requestId, degraded, routedKbIds));
         complete();
     }
 
@@ -127,10 +127,12 @@ public class SseChatStreamListener implements ChatStreamListener {
     /**
      * Payload of a {@code done} event.
      *
-     * @param requestId correlation id
-     * @param degraded  degradation markers
+     * @param requestId   correlation id
+     * @param degraded    degradation markers
+     * @param routedKbIds knowledge bases the retrieval stage searched
      */
-    private record DoneEvent(@JsonProperty("request_id") String requestId, List<String> degraded) {
+    private record DoneEvent(@JsonProperty("request_id") String requestId, List<String> degraded,
+                             @JsonProperty("routed_kb_ids") List<String> routedKbIds) {
     }
 
     /**

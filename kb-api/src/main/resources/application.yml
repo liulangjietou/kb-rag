@@ -178,6 +178,9 @@ kb:
     rerank-enabled: ${RETRIEVAL_RERANK_ENABLED:true}
     parent-candidate-factor: ${RETRIEVAL_PARENT_CANDIDATE_FACTOR:3}
     parent-candidate-floor: ${RETRIEVAL_PARENT_CANDIDATE_FLOOR:20}
+    max-linked-kb: ${RETRIEVAL_MAX_LINKED_KB:15}
+    routing-cache-ttl-minutes: ${RETRIEVAL_ROUTING_CACHE_TTL_MINUTES:10}
+    routing-cache-max-size: ${RETRIEVAL_ROUTING_CACHE_MAX_SIZE:10000}
   web:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:20002,http://127.0.0.1:20002}
   eval:

@@ -13,7 +13,9 @@ import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.AppVersion;
 import io.kbrag.domain.enums.TargetStage;
 import io.kbrag.domain.model.AppConfigSnapshot;
+import io.kbrag.domain.model.AppRoutingConfig;
 import io.kbrag.domain.model.ChatMessage;
+import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ChatProviderFactory;
@@ -129,7 +131,7 @@ public class KnowledgeApiService {
                 listener.onDelta(delta);
             });
             listener.onReferences(retrieved.getNodes());
-            listener.onDone(RequestIdHolder.get(), retrieved.getDegraded());
+            listener.onDone(RequestIdHolder.get(), retrieved.getDegraded(), retrieved.routedKbIds());
             audit(principal, command, target, retrieved, startedAt, ApiAuditService.ENDPOINT_CHAT);
         } catch (BizException e) {
             auditRejection(principal, command, startedAt, e, ApiAuditService.ENDPOINT_CHAT);
@@ -212,7 +214,7 @@ public class KnowledgeApiService {
         }
         streamGenerate(target, command, retrieved.getNodes(), listener::onDelta);
         listener.onReferences(retrieved.getNodes());
-        listener.onDone(RequestIdHolder.get(), retrieved.getDegraded());
+        listener.onDone(RequestIdHolder.get(), retrieved.getDegraded(), retrieved.routedKbIds());
         return retrieved;
     }
 
@@ -245,11 +247,12 @@ public class KnowledgeApiService {
      */
     private KnowledgeCallResult retrieve(ResolvedTarget target, KnowledgeCallCommand command) {
         AppConfigSnapshot snapshot = target.snapshot();
-        if (snapshot.getKbId() == null || snapshot.getKbId().isBlank()) {
+        List<KbRef> kbRefs = snapshot.getKbRefs();
+        if (CollectionUtils.isEmpty(kbRefs)) {
             throw new BizException(ErrorCode.VERSION_NOT_PUBLISHED,
                     "应用版本未配置知识库，无法提供检索服务");
         }
-        SearchOutcome outcome = retrievalService.search(snapshot.getKbId(), toRetrievalCommand(snapshot, command));
+        SearchOutcome outcome = retrievalService.search(kbRefs, toRetrievalCommand(snapshot, command));
         List<RetrievalNodeView> nodes = trim(outcome.getNodes(), command.getMaxContentLength());
         return KnowledgeCallResult.builder()
                 .nodes(nodes)
@@ -274,7 +277,10 @@ public class KnowledgeApiService {
      */
     private RetrievalCommand toRetrievalCommand(AppConfigSnapshot snapshot, KnowledgeCallCommand command) {
         KbRetrievalConfig retrieval = snapshot.retrievalOrDefaults();
+        AppRoutingConfig routing = snapshot.routingOrDefaults();
         return RetrievalCommand.builder()
+                .routingEnabled(routing.isEnabled())
+                .routingPrompt(routing.getPrompt())
                 .query(command.getQuery())
                 .messages(command.getMessages() == null ? List.of() : command.getMessages())
                 .recallTopK(retrieval.getRecallTopK())

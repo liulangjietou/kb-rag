@@ -16,6 +16,8 @@ import io.kbrag.domain.enums.GateVerdict;
 import io.kbrag.domain.mapper.AppVersionMapper;
 import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.AppPromptConfig;
+import io.kbrag.domain.model.AppRoutingConfig;
+import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.service.BizIdGenerator;
 import lombok.RequiredArgsConstructor;
@@ -25,7 +27,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Application version lifecycle: the draft, the state machine transitions and the version resolution the
@@ -52,6 +56,9 @@ public class AppVersionService {
     private static final String VERSION_MINOR_SUFFIX = ".0";
     private static final int FORCED = 1;
     private static final int NOT_FORCED = 0;
+
+    /** Index of the first declared knowledge base, whose defaults complete an unset parameter. */
+    private static final int PRIMARY = 0;
 
     private final AppVersionMapper appVersionMapper;
     private final KnowledgeBaseService knowledgeBaseService;
@@ -83,6 +90,11 @@ public class AppVersionService {
         AppVersion newest = CollectionUtils.isEmpty(versions) ? null : versions.get(0);
         AppConfigSnapshot effective = snapshot != null ? snapshot
                 : (newest == null ? defaultSnapshot(null) : parseConfig(newest));
+        if (snapshot != null) {
+            // Validated where the operator's input enters the system, not where it is later read: a draft
+            // that stored fifteen plus one bases would fail at submit time with the form long gone.
+            requireUsableKbRefs(effective.getKbRefs());
+        }
         String effectiveDataset = gateDatasetId != null ? gateDatasetId
                 : (newest == null ? null : newest.getGateDatasetId());
         AppVersion created = insertDraft(appId, nextVersion(versions), effective, effectiveDataset, changelog);
@@ -112,9 +124,9 @@ public class AppVersionService {
             version.setGateDatasetId(null);
         } else {
             EvalDataset dataset = evalDatasetService.require(datasetId);
-            AppConfigSnapshot snapshot = parseConfig(version);
-            if (snapshot.getKbId() != null && !dataset.getKbId().equals(snapshot.getKbId())) {
-                throw BizException.invalidParam("门禁评测集所属知识库与应用配置的知识库不一致，无法用于双跑对比");
+            List<String> kbIds = parseConfig(version).kbIds();
+            if (!CollectionUtils.isEmpty(kbIds) && !kbIds.contains(dataset.getKbId())) {
+                throw BizException.invalidParam("门禁评测集所属知识库不在应用关联的知识库范围内，无法用于双跑对比");
             }
             version.setGateDatasetId(datasetId);
         }
@@ -204,8 +216,8 @@ public class AppVersionService {
         requireGateDatasetUsable(version, snapshot);
         transition(version, AppVersionStatus.TESTING);
         appVersionMapper.updateById(version);
-        log.info("application version submitted for test, appVersionId={}, kbId={}",
-                appVersionId, snapshot.getKbId());
+        log.info("application version submitted for test, appVersionId={}, kbIds={}",
+                appVersionId, snapshot.kbIds());
         return version;
     }
 
@@ -368,10 +380,16 @@ public class AppVersionService {
      * @return the same instance, completed
      */
     private AppConfigSnapshot materialize(AppConfigSnapshot snapshot) {
-        if (snapshot.getKbId() == null || snapshot.getKbId().isBlank()) {
-            throw BizException.invalidParam("应用版本必须选择一个知识库");
+        List<KbRef> kbRefs = requireUsableKbRefs(snapshot.getKbRefs());
+        // Written back in the M5 shape, which is also how a snapshot frozen from a legacy single kb_id row
+        // stops being legacy: the freeze is the one moment a snapshot may legitimately be rewritten.
+        snapshot.setKbRefs(kbRefs);
+        if (snapshot.getRouting() == null) {
+            snapshot.setRouting(AppRoutingConfig.defaults());
         }
-        KnowledgeBase knowledgeBase = knowledgeBaseService.require(snapshot.getKbId());
+        // The first declared base completes the retrieval parameters the operator left unset, the same base
+        // the retrieval pipeline resolves its knowledge base layer from.
+        KnowledgeBase knowledgeBase = knowledgeBaseService.require(kbRefs.get(PRIMARY).kbId());
         KbRetrievalConfig kbRetrieval = JsonUtil.parse(knowledgeBase.getRetrievalConfig(), KbRetrievalConfig.class);
         KbRetrievalConfig target = snapshot.retrievalOrDefaults();
         KbProperties.Retrieval defaults = properties.getRetrieval();
@@ -405,9 +423,11 @@ public class AppVersionService {
     /**
      * Fast-fails a gate binding that could not measure what it claims to.
      *
-     * <p>A data set belongs to one knowledge base. Binding one that measures a different corpus than the
-     * application serves would produce a comparison whose numbers say nothing about the application - the
-     * worst kind of gate, one that looks like it works.
+     * <p>A data set belongs to one knowledge base. Binding one that measures a corpus the application does
+     * not serve at all would produce a comparison whose numbers say nothing about the application - the
+     * worst kind of gate, one that looks like it works. A multi base application is therefore gated on one
+     * of the bases it serves: the dual run stays single base evaluation (requirement section 4.6), and
+     * requiring the data set to cover every linked base would make the gate impossible to satisfy.
      *
      * @param version  version being submitted
      * @param snapshot completed configuration snapshot
@@ -417,9 +437,41 @@ public class AppVersionService {
             return;
         }
         EvalDataset dataset = evalDatasetService.require(version.getGateDatasetId());
-        if (!dataset.getKbId().equals(snapshot.getKbId())) {
-            throw BizException.invalidParam("门禁评测集所属知识库与应用配置的知识库不一致，无法用于双跑对比");
+        if (!snapshot.kbIds().contains(dataset.getKbId())) {
+            throw BizException.invalidParam("门禁评测集所属知识库不在应用关联的知识库范围内，无法用于双跑对比");
         }
+    }
+
+    /**
+     * Validates the knowledge base links of a version, requirement section 4.7.
+     *
+     * <p>The single authoritative check of the four rules the console form also enforces: at least one base
+     * and at most the configured maximum, no base linked twice, a positive weight, and a base that actually
+     * exists. The console cannot be the authority - an API client bypasses it entirely - and putting the
+     * check anywhere later would accept a configuration the release gate would then measure.
+     *
+     * @param kbRefs references as the operator left them, already weight normalised by the snapshot
+     * @return the same references, validated
+     */
+    private List<KbRef> requireUsableKbRefs(List<KbRef> kbRefs) {
+        if (CollectionUtils.isEmpty(kbRefs)) {
+            throw BizException.invalidParam("应用版本必须关联至少一个知识库");
+        }
+        int maximum = properties.getRetrieval().getMaxLinkedKb();
+        if (kbRefs.size() > maximum) {
+            throw BizException.invalidParam("应用版本关联的知识库不能超过 " + maximum + " 个，当前 " + kbRefs.size());
+        }
+        Set<String> seen = new LinkedHashSet<>(kbRefs.size());
+        for (KbRef ref : kbRefs) {
+            if (!seen.add(ref.kbId())) {
+                throw BizException.invalidParam("应用版本重复关联同一个知识库：" + ref.kbId());
+            }
+            if (ref.weight() == null || ref.weight() < KbRef.DEFAULT_WEIGHT) {
+                throw BizException.invalidParam("知识库配额权重必须为正整数：" + ref.kbId());
+            }
+            knowledgeBaseService.require(ref.kbId());
+        }
+        return kbRefs;
     }
 
     private AppVersion insertDraft(String appId, String version, AppConfigSnapshot snapshot,
@@ -480,7 +532,8 @@ public class AppVersionService {
      */
     private AppConfigSnapshot defaultSnapshot(String kbId) {
         AppConfigSnapshot snapshot = new AppConfigSnapshot();
-        snapshot.setKbId(kbId);
+        snapshot.setKbRefs(kbId == null || kbId.isBlank() ? List.of() : List.of(KbRef.of(kbId)));
+        snapshot.setRouting(AppRoutingConfig.defaults());
         KbProperties.Retrieval defaults = properties.getRetrieval();
         KbRetrievalConfig retrieval = new KbRetrievalConfig();
         retrieval.setRecallTopK(defaults.getDefaultRecallTopK());

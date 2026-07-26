@@ -50,6 +50,18 @@ public class RetrievalCommand {
     /** Query rewrite switch. */
     private final Boolean rewriteEnabled;
 
+    /**
+     * Knowledge base routing switch, requirement section 4.9.
+     *
+     * <p>Only an application version snapshot ever sets it: routing selects among the bases the
+     * application declared, so a request that could switch it on would be deciding on a configuration it
+     * cannot see. The management console's single base debug endpoint leaves it {@code null}.
+     */
+    private final Boolean routingEnabled;
+
+    /** Operator wording of the routing instruction, blank or {@code null} keeps the built in one. */
+    private final String routingPrompt;
+
     /** Conversation used to resolve references during the rewrite. */
     private final List<ChatMessage> messages;
 

@@ -34,10 +34,11 @@ public interface ChatStreamListener {
     /**
      * Terminal event of a successful stream.
      *
-     * @param requestId correlation id of the call
-     * @param degraded  degradation markers of the retrieval stage
+     * @param requestId   correlation id of the call
+     * @param degraded    degradation markers of the retrieval stage
+     * @param routedKbIds knowledge bases the retrieval stage searched, requirement section 4.9
      */
-    void onDone(String requestId, List<String> degraded);
+    void onDone(String requestId, List<String> degraded, List<String> routedKbIds);
 
     /**
      * Terminal event of a failed stream.

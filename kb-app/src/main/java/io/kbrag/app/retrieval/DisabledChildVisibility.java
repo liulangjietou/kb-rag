@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 /**
  * Decides what a parent chunk containing disabled children is allowed to return.
@@ -64,7 +65,7 @@ public class DisabledChildVisibility {
     }
 
     /**
-     * Applies the knowledge base policy to the merged units.
+     * Applies one knowledge base policy to the merged units.
      *
      * @param units                        merged units in ranking order
      * @param disabledChildrenByParent     disabled child ids per parent chunk id
@@ -73,6 +74,24 @@ public class DisabledChildVisibility {
      */
     public Visibility apply(List<RetrievalUnit> units, Map<String, List<String>> disabledChildrenByParent,
                             boolean hideParentWithDisabledChild) {
+        return apply(units, disabledChildrenByParent, unit -> hideParentWithDisabledChild);
+    }
+
+    /**
+     * Applies the policy of each unit's own knowledge base to the merged units.
+     *
+     * <p>The switch is a knowledge base setting, so a cross base result list carries units governed by
+     * different answers to the same question. Resolving it per unit is what keeps a base that never asked
+     * to hide anything from losing results because another base in the same application did - collapsing
+     * the two into one flag would let one operator's policy silently rewrite another's.
+     *
+     * @param units                        merged units in ranking order
+     * @param disabledChildrenByParent     disabled child ids per parent chunk id
+     * @param hideParent                   tells whether a unit's knowledge base hides such a parent
+     * @return units that may be returned, together with what has to be reported on each of them
+     */
+    public Visibility apply(List<RetrievalUnit> units, Map<String, List<String>> disabledChildrenByParent,
+                            Predicate<RetrievalUnit> hideParent) {
         if (CollectionUtils.isEmpty(units) || disabledChildrenByParent.isEmpty()) {
             return new Visibility(units == null ? List.of() : units, Map.of());
         }
@@ -86,7 +105,7 @@ public class DisabledChildVisibility {
                 kept.add(unit);
                 continue;
             }
-            if (hideParentWithDisabledChild) {
+            if (hideParent.test(unit)) {
                 hidden++;
                 continue;
             }

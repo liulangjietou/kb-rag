@@ -16,6 +16,7 @@ import io.kbrag.domain.enums.TargetStage;
 import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.AppPromptConfig;
 import io.kbrag.domain.model.ChatMessage;
+import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ChatProviderFactory;
@@ -89,7 +90,7 @@ class KnowledgeApiServiceTest {
         service.search(principal(List.of()), command(null, null, null));
 
         ArgumentCaptor<RetrievalCommand> captor = ArgumentCaptor.forClass(RetrievalCommand.class);
-        verify(retrievalService).search(eq(KB_ID), captor.capture());
+        verify(retrievalService).search(eq(List.of(KbRef.of(KB_ID))), captor.capture());
         RetrievalCommand issued = captor.getValue();
         assertEquals(37, issued.getRecallTopK());
         assertEquals(4, issued.getTopN());
@@ -106,7 +107,7 @@ class KnowledgeApiServiceTest {
         service.search(principal(List.of()), command(2, null, null));
 
         ArgumentCaptor<RetrievalCommand> captor = ArgumentCaptor.forClass(RetrievalCommand.class);
-        verify(retrievalService).search(eq(KB_ID), captor.capture());
+        verify(retrievalService).search(eq(List.of(KbRef.of(KB_ID))), captor.capture());
         assertEquals(2, captor.getValue().getTopN());
         // The frozen recall stays frozen: the white list shapes the response, never the retrieval behaviour.
         assertEquals(37, captor.getValue().getRecallTopK());
@@ -120,7 +121,7 @@ class KnowledgeApiServiceTest {
                 commandWithKeys(Set.of("recall_top_k"))));
 
         assertEquals(ErrorCode.INVALID_PARAM, e.getErrorCode());
-        verify(retrievalService, never()).search(anyString(), any());
+        verify(retrievalService, never()).search(anyList(), any());
         assertEquals(ErrorCode.INVALID_PARAM.name(), capturedAudit().getErrorCode());
     }
 
@@ -164,7 +165,7 @@ class KnowledgeApiServiceTest {
     @Test
     void shouldAuditTheHitDocumentsTheAppliedOverridesAndTheDegradationMarkers() {
         stubVersion(AppVersionStatus.RELEASED);
-        when(retrievalService.search(eq(KB_ID), any())).thenReturn(new SearchOutcome(
+        when(retrievalService.search(eq(List.of(KbRef.of(KB_ID))), any())).thenReturn(new SearchOutcome(
                 List.of(node("doc_1", "x"), node("doc_1", "y"), node("doc_2", "z")),
                 List.of("vector_route_unavailable"), applied()));
 
@@ -331,17 +332,18 @@ class KnowledgeApiServiceTest {
     }
 
     private void stubSearch(RetrievalNodeView... nodes) {
-        when(retrievalService.search(eq(KB_ID), any()))
+        when(retrievalService.search(eq(List.of(KbRef.of(KB_ID))), any()))
                 .thenReturn(new SearchOutcome(new ArrayList<>(List.of(nodes)), List.of(), applied()));
     }
 
     private AppliedInfo applied() {
-        return AppliedInfo.builder().rewriteUsedQuery("q").fusionMode("rrf").thresholdAppliedOn("none").build();
+        return AppliedInfo.builder().rewriteUsedQuery("q").fusionMode("rrf").thresholdAppliedOn("none")
+                .routedKbIds(List.of(KB_ID)).build();
     }
 
     private AppConfigSnapshot snapshot() {
         AppConfigSnapshot snapshot = new AppConfigSnapshot();
-        snapshot.setKbId(KB_ID);
+        snapshot.setKbRefs(List.of(KbRef.of(KB_ID)));
         snapshot.setChatModel("qwen-plus-frozen");
         KbRetrievalConfig retrieval = new KbRetrievalConfig();
         retrieval.setRecallTopK(37);
@@ -431,7 +433,7 @@ class KnowledgeApiServiceTest {
         }
 
         @Override
-        public void onDone(String requestId, List<String> degraded) {
+        public void onDone(String requestId, List<String> degraded, List<String> routedKbIds) {
             events.add("done");
         }
 

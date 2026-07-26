@@ -596,6 +596,20 @@ public class KbProperties {
         private boolean rerankEnabled = true;
 
         /**
+         * Upper bound of knowledge bases one application version may link, requirement section 4.7.
+         *
+         * <p>Bounds the retrieval fan out rather than a screen: every linked base costs its own recall
+         * round trip on every call, so this is the number the latency promise is computed against.
+         */
+        private int maxLinkedKb = 15;
+
+        /** Time to live of a routing decision cache entry in minutes. */
+        private int routingCacheTtlMinutes = 10;
+
+        /** Maximum entries kept in the routing decision cache. */
+        private int routingCacheMaxSize = 10000;
+
+        /**
          * Multiplier applied to {@code top_n} when sizing the parent candidate target of the two
          * level pipeline; the floor below keeps a small {@code top_n} from starving the merge.
          */

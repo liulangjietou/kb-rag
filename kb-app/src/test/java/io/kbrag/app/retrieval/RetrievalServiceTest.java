@@ -4,6 +4,7 @@ import io.kbrag.app.alert.RetrievalDegradeMonitor;
 import io.kbrag.app.index.EngineChunkCleaner;
 import io.kbrag.app.index.IndexAliasManager;
 import io.kbrag.app.kb.KnowledgeBaseService;
+import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.Chunk;
@@ -18,6 +19,7 @@ import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.model.FulltextQuery;
 import io.kbrag.domain.model.KbIndexConfig;
+import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.MetadataFilter;
 import io.kbrag.domain.model.ParentChildParams;
 import io.kbrag.domain.model.RetrievalFilter;
@@ -26,7 +28,9 @@ import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.FulltextStore;
 import io.kbrag.domain.port.ObjectStorage;
 import io.kbrag.domain.port.VectorStore;
+import io.kbrag.domain.service.CrossKbRrfFusion;
 import io.kbrag.domain.service.FusionRouter;
+import io.kbrag.domain.service.KbQuotaAllocator;
 import io.kbrag.domain.service.RrfFusion;
 import io.kbrag.domain.service.WeightedFusion;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,8 +42,10 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -62,6 +68,9 @@ class RetrievalServiceTest {
     private static final String VERSION_ID = "dv_test";
     private static final String FULLTEXT_ALIAS = "kb_test_es";
     private static final String VECTOR_ALIAS = "kb_test_es";
+    private static final String KB_ID_2 = "kb_second";
+    private static final String FULLTEXT_ALIAS_2 = "kb_second_es";
+    private static final String VECTOR_ALIAS_2 = "kb_second_vec";
 
     private KnowledgeBaseService knowledgeBaseService;
     private DocumentMapper documentMapper;
@@ -70,6 +79,7 @@ class RetrievalServiceTest {
     private VectorStore vectorStore;
     private EmbeddingProvider embeddingProvider;
     private IndexAliasManager indexAliasManager;
+    private RoutingService routingService;
     private RewriteService rewriteService;
     private RerankService rerankService;
     private EngineChunkCleaner engineChunkCleaner;
@@ -86,6 +96,7 @@ class RetrievalServiceTest {
         vectorStore = mock(VectorStore.class);
         embeddingProvider = mock(EmbeddingProvider.class);
         indexAliasManager = mock(IndexAliasManager.class);
+        routingService = mock(RoutingService.class);
         rewriteService = mock(RewriteService.class);
         rerankService = mock(RerankService.class);
         engineChunkCleaner = mock(EngineChunkCleaner.class);
@@ -97,6 +108,10 @@ class RetrievalServiceTest {
         when(documentMapper.selectList(any())).thenReturn(List.of(document()));
         when(indexAliasManager.fulltextAlias(KB_ID)).thenReturn(FULLTEXT_ALIAS);
         when(indexAliasManager.vectorAlias(KB_ID)).thenReturn(VECTOR_ALIAS);
+        when(routingService.route(anyList(), anyString(), anyBoolean(), any()))
+                .thenAnswer(invocation -> RoutingOutcome.skipped(
+                        ((List<KnowledgeBase>) invocation.getArgument(0)).stream()
+                                .map(KnowledgeBase::getKbId).toList()));
         when(rewriteService.isAvailable()).thenReturn(false);
         when(rewriteService.rewrite(anyString(), any(), eq(false)))
                 .thenAnswer(invocation -> RewriteOutcome.skipped(invocation.getArgument(0)));
@@ -107,6 +122,7 @@ class RetrievalServiceTest {
         retrievalService = new RetrievalService(knowledgeBaseService, documentMapper, chunkMapper,
                 fulltextStore, vectorStore, embeddingProvider, indexAliasManager,
                 new FusionRouter(List.of(new RrfFusion(), new WeightedFusion())),
+                new CrossKbRrfFusion(), new KbQuotaAllocator(), routingService,
                 rewriteService, rerankService, new ScoreThresholdPolicy(), new ParentChildMerger(),
                 new DisabledChildVisibility(chunkMapper), engineChunkCleaner, objectStorage,
                 new RetrievalDegradeMonitor(properties), properties);
@@ -350,6 +366,175 @@ class RetrievalServiceTest {
         assertEquals(2, outcome.getNodes().size());
         assertEquals(List.of("ck_1", "ck_2"),
                 outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+    }
+
+    @Test
+    void shouldSearchEveryLinkedBaseAndReportThemInTheAppliedBlock() {
+        givenTwoBases();
+        when(fulltextStore.searchBm25(eq(FULLTEXT_ALIAS), any()))
+                .thenReturn(List.of(new ScoredChunk("ck_a1", 9.0d, RetrievalSource.BM25)));
+        when(fulltextStore.searchBm25(eq(FULLTEXT_ALIAS_2), any()))
+                .thenReturn(List.of(new ScoredChunk("ck_b1", 3.0d, RetrievalSource.BM25)));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_a1", "manual passage", null, KB_ID),
+                chunk("ck_b1", "chat passage", null, KB_ID_2)));
+
+        SearchOutcome outcome = retrievalService.search(twoRefs(1, 1), command().build());
+
+        assertEquals(List.of(KB_ID, KB_ID_2), outcome.getApplied().getRoutedKbIds());
+        assertEquals(List.of("ck_a1", "ck_b1"),
+                outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+        // A node has to be traceable to its base, and the value comes from the fact source row rather than
+        // from the routing decision so it cannot disagree with where the text actually lives.
+        assertEquals(KB_ID, outcome.getNodes().get(0).getMetadata().get("kb_id"));
+        assertEquals(KB_ID_2, outcome.getNodes().get(1).getMetadata().get("kb_id"));
+    }
+
+    @Test
+    void shouldOnlySearchTheBasesTheRouterSelected() {
+        givenTwoBases();
+        when(routingService.route(anyList(), anyString(), anyBoolean(), any()))
+                .thenReturn(RoutingOutcome.routed(List.of(KB_ID_2)));
+        when(fulltextStore.searchBm25(eq(FULLTEXT_ALIAS_2), any()))
+                .thenReturn(List.of(new ScoredChunk("ck_b1", 3.0d, RetrievalSource.BM25)));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_b1", "chat passage", null, KB_ID_2)));
+
+        SearchOutcome outcome = retrievalService.search(twoRefs(1, 1), command().routingEnabled(true).build());
+
+        assertEquals(List.of(KB_ID_2), outcome.getApplied().getRoutedKbIds());
+        assertEquals(List.of("ck_b1"),
+                outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+        // The discarded base must not be queried at all: the whole benefit of routing is the round trip and
+        // the candidates it never has to compete with.
+        verify(fulltextStore, never()).searchBm25(eq(FULLTEXT_ALIAS), any());
+    }
+
+    @Test
+    void shouldCarryTheRouterFallbackMarkerAndStillSearchEveryBase() {
+        givenTwoBases();
+        when(routingService.route(anyList(), anyString(), anyBoolean(), any()))
+                .thenReturn(RoutingOutcome.fallbackAll(List.of(KB_ID, KB_ID_2)));
+        when(fulltextStore.searchBm25(eq(FULLTEXT_ALIAS), any()))
+                .thenReturn(List.of(new ScoredChunk("ck_a1", 9.0d, RetrievalSource.BM25)));
+        when(fulltextStore.searchBm25(eq(FULLTEXT_ALIAS_2), any())).thenReturn(List.of());
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_a1", "manual passage", null, KB_ID)));
+
+        SearchOutcome outcome = retrievalService.search(twoRefs(1, 1), command().routingEnabled(true).build());
+
+        assertTrue(outcome.getDegraded().contains(DegradedReason.ROUTE_FALLBACK_ALL.code()));
+        assertEquals(List.of(KB_ID, KB_ID_2), outcome.getApplied().getRoutedKbIds());
+        verify(fulltextStore).searchBm25(eq(FULLTEXT_ALIAS), any());
+        verify(fulltextStore).searchBm25(eq(FULLTEXT_ALIAS_2), any());
+    }
+
+    @Test
+    void shouldInterleaveTheBasesByTheirInBaseRank() {
+        givenTwoBases();
+        // The second base scores an order of magnitude higher, which is what two different embedding models
+        // or two different corpora produce. Cross base ordering must not notice.
+        when(fulltextStore.searchBm25(eq(FULLTEXT_ALIAS), any())).thenReturn(List.of(
+                new ScoredChunk("ck_x1", 0.5d, RetrievalSource.BM25),
+                new ScoredChunk("ck_x2", 0.4d, RetrievalSource.BM25)));
+        when(fulltextStore.searchBm25(eq(FULLTEXT_ALIAS_2), any())).thenReturn(List.of(
+                new ScoredChunk("ck_y1", 99.0d, RetrievalSource.BM25),
+                new ScoredChunk("ck_y2", 98.0d, RetrievalSource.BM25)));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_x1", "one", null, KB_ID), chunk("ck_x2", "two", null, KB_ID),
+                chunk("ck_y1", "three", null, KB_ID_2), chunk("ck_y2", "four", null, KB_ID_2)));
+
+        SearchOutcome outcome = retrievalService.search(twoRefs(1, 1), command().topN(10).build());
+
+        assertEquals(List.of("ck_x1", "ck_y1", "ck_x2", "ck_y2"),
+                outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+        // Fusion mode reported is the cross base one, so the score type a node carries stays honest.
+        assertEquals("rrf", outcome.getApplied().getFusionMode());
+    }
+
+    @Test
+    void shouldCutEachBaseToItsWeightedQuotaBeforeMerging() {
+        givenTwoBases();
+        // A four candidate budget split three to one: 4*3/4 = 3 and 4*1/4 = 1, nothing left over.
+        when(rerankService.candidateLimit()).thenReturn(4);
+        when(fulltextStore.searchBm25(eq(FULLTEXT_ALIAS), any())).thenReturn(List.of(
+                new ScoredChunk("ck_a1", 9.0d, RetrievalSource.BM25),
+                new ScoredChunk("ck_a2", 8.0d, RetrievalSource.BM25),
+                new ScoredChunk("ck_a3", 7.0d, RetrievalSource.BM25),
+                new ScoredChunk("ck_a4", 6.0d, RetrievalSource.BM25)));
+        when(fulltextStore.searchBm25(eq(FULLTEXT_ALIAS_2), any())).thenReturn(List.of(
+                new ScoredChunk("ck_b1", 9.0d, RetrievalSource.BM25),
+                new ScoredChunk("ck_b2", 8.0d, RetrievalSource.BM25),
+                new ScoredChunk("ck_b3", 7.0d, RetrievalSource.BM25)));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_a1", "a1", null, KB_ID), chunk("ck_a2", "a2", null, KB_ID),
+                chunk("ck_a3", "a3", null, KB_ID), chunk("ck_a4", "a4", null, KB_ID),
+                chunk("ck_b1", "b1", null, KB_ID_2), chunk("ck_b2", "b2", null, KB_ID_2),
+                chunk("ck_b3", "b3", null, KB_ID_2)));
+
+        SearchOutcome outcome = retrievalService.search(twoRefs(3, 1), command().topN(10).build());
+
+        assertEquals(List.of("ck_a1", "ck_b1", "ck_a2", "ck_a3"),
+                outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+    }
+
+    @Test
+    void shouldEmbedTheQueryOnceHoweverManyBasesAreSearched() {
+        givenTwoBases();
+        when(embeddingProvider.isConfigured()).thenReturn(true);
+        when(embeddingProvider.embed(any())).thenReturn(List.of(new float[]{0.1f, 0.2f}));
+        when(fulltextStore.searchBm25(anyString(), any())).thenReturn(List.of());
+        when(vectorStore.search(anyString(), any())).thenReturn(List.of());
+
+        retrievalService.search(twoRefs(1, 1), command().build());
+
+        // Every base is asked the same question; embedding once per base would pay N times for one vector.
+        verify(embeddingProvider, times(1)).embed(any());
+        verify(vectorStore).search(eq(VECTOR_ALIAS), any());
+        verify(vectorStore).search(eq(VECTOR_ALIAS_2), any());
+    }
+
+    @Test
+    void shouldRejectASearchWithoutAnyKnowledgeBase() {
+        assertThrows(BizException.class, () -> retrievalService.search(List.of(), command().build()));
+    }
+
+    @Test
+    void shouldStillSearchTheOtherBaseWhenOneHoldsNoActiveVersion() {
+        givenTwoBases();
+        when(documentMapper.selectList(any())).thenReturn(List.of(document()), List.of());
+        when(fulltextStore.searchBm25(eq(FULLTEXT_ALIAS), any()))
+                .thenReturn(List.of(new ScoredChunk("ck_a1", 9.0d, RetrievalSource.BM25)));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_a1", "manual passage", null, KB_ID)));
+
+        SearchOutcome outcome = retrievalService.search(twoRefs(1, 1), command().build());
+
+        assertEquals(List.of("ck_a1"),
+                outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+        // A base with nothing indexed is not queried, and it also does not reserve any of the quota.
+        verify(fulltextStore, never()).searchBm25(eq(FULLTEXT_ALIAS_2), any());
+    }
+
+    private void givenTwoBases() {
+        when(knowledgeBaseService.require(KB_ID_2)).thenReturn(knowledgeBaseOf(KB_ID_2));
+        when(indexAliasManager.fulltextAlias(KB_ID_2)).thenReturn(FULLTEXT_ALIAS_2);
+        when(indexAliasManager.vectorAlias(KB_ID_2)).thenReturn(VECTOR_ALIAS_2);
+    }
+
+    private List<KbRef> twoRefs(int weightA, int weightB) {
+        return List.of(new KbRef(KB_ID, weightA), new KbRef(KB_ID_2, weightB));
+    }
+
+    private KnowledgeBase knowledgeBaseOf(String kbId) {
+        KnowledgeBase knowledgeBase = new KnowledgeBase();
+        knowledgeBase.setKbId(kbId);
+        knowledgeBase.setName(kbId);
+        knowledgeBase.setIndexConfig(JsonUtil.toJson(indexConfig(false)));
+        return knowledgeBase;
+    }
+
+    private Chunk chunk(String chunkId, String content, String parentId, String kbId) {
+        Chunk chunk = chunk(chunkId, content, parentId);
+        chunk.setKbId(kbId);
+        return chunk;
     }
 
     private void givenDualRoute() {

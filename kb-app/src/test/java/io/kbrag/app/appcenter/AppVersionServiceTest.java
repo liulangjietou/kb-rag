@@ -12,6 +12,7 @@ import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.AppVersionStatus;
 import io.kbrag.domain.mapper.AppVersionMapper;
 import io.kbrag.domain.model.AppConfigSnapshot;
+import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.service.BizIdGenerator;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +22,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -40,6 +42,7 @@ class AppVersionServiceTest {
 
     private static final String APP_ID = "app_1";
     private static final String KB_ID = "kb_1";
+    private static final String KB_ID_2 = "kb_2";
     private static final String VERSION_ID = "av_1";
 
     private AppVersionMapper appVersionMapper;
@@ -90,7 +93,7 @@ class AppVersionServiceTest {
         verify(appVersionMapper).insert(captor.capture());
         AppConfigSnapshot inherited = JsonUtil.parse(captor.getValue().getConfig(), AppConfigSnapshot.class);
         assertEquals(11, inherited.getRetrieval().getTopN());
-        assertEquals(KB_ID, inherited.getKbId());
+        assertEquals(List.of(KB_ID), inherited.kbIds());
         // The gate binding is inherited too, so iterating on a gated application keeps its gate.
         assertEquals("evds_1", captor.getValue().getGateDatasetId());
     }
@@ -146,7 +149,7 @@ class AppVersionServiceTest {
         BizException e = assertThrows(BizException.class, () -> service.submitTest(VERSION_ID));
 
         assertEquals(ErrorCode.INVALID_PARAM, e.getErrorCode());
-        assertTrue(e.getMessage().contains("知识库不一致"));
+        assertTrue(e.getMessage().contains("不在应用关联的知识库范围内"));
     }
 
     @Test
@@ -290,6 +293,125 @@ class AppVersionServiceTest {
         assertEquals(ErrorCode.VERSION_NOT_PUBLISHED, e.getErrorCode());
     }
 
+    @Test
+    void shouldFreezeEveryLinkedKnowledgeBaseWithItsWeight() {
+        AppVersion draft = versionOf("V1.0", AppVersionStatus.DRAFT);
+        AppConfigSnapshot stored = new AppConfigSnapshot();
+        stored.setKbRefs(List.of(new KbRef(KB_ID, 3), new KbRef(KB_ID_2, 1)));
+        stored.setRetrieval(new KbRetrievalConfig());
+        draft.setConfig(JsonUtil.toJson(stored));
+        when(appVersionMapper.selectOne(any())).thenReturn(draft);
+        when(knowledgeBaseService.require(any())).thenReturn(new KnowledgeBase());
+
+        service.submitTest(VERSION_ID);
+
+        AppConfigSnapshot frozen = JsonUtil.parse(draft.getConfig(), AppConfigSnapshot.class);
+        assertEquals(List.of(KB_ID, KB_ID_2), frozen.kbIds());
+        assertEquals(3, frozen.getKbRefs().get(0).effectiveWeight());
+        assertEquals(1, frozen.getKbRefs().get(1).effectiveWeight());
+        // A snapshot that never configured routing freezes it as off rather than as absent, so a later change
+        // of the built in default cannot alter what the gate measured.
+        assertFalse(frozen.routingOrDefaults().isEnabled());
+    }
+
+    @Test
+    void shouldRewriteALegacySingleBaseSnapshotIntoTheMultiBaseShapeOnFreeze() {
+        AppVersion draft = versionOf("V1.0", AppVersionStatus.DRAFT);
+        draft.setConfig("{\"kb_id\":\"" + KB_ID + "\",\"retrieval\":{}}");
+        when(appVersionMapper.selectOne(any())).thenReturn(draft);
+        when(knowledgeBaseService.require(any())).thenReturn(new KnowledgeBase());
+
+        service.submitTest(VERSION_ID);
+
+        assertEquals(List.of(KB_ID),
+                JsonUtil.parse(draft.getConfig(), AppConfigSnapshot.class).kbIds());
+    }
+
+    @Test
+    void shouldRefuseAVersionWithoutAnyKnowledgeBase() {
+        when(appVersionMapper.selectList(any())).thenReturn(List.of());
+        AppConfigSnapshot snapshot = new AppConfigSnapshot();
+        snapshot.setRetrieval(new KbRetrievalConfig());
+
+        BizException e = assertThrows(BizException.class,
+                () -> service.createDraft(APP_ID, snapshot, null, "无库"));
+
+        assertEquals(ErrorCode.INVALID_PARAM, e.getErrorCode());
+        assertTrue(e.getMessage().contains("至少一个知识库"));
+    }
+
+    @Test
+    void shouldRefuseMoreKnowledgeBasesThanTheConfiguredMaximum() {
+        properties.getRetrieval().setMaxLinkedKb(2);
+        when(appVersionMapper.selectList(any())).thenReturn(List.of());
+        AppConfigSnapshot snapshot = new AppConfigSnapshot();
+        snapshot.setKbRefs(List.of(new KbRef("kb_a", 1), new KbRef("kb_b", 1), new KbRef("kb_c", 1)));
+
+        BizException e = assertThrows(BizException.class,
+                () -> service.createDraft(APP_ID, snapshot, null, "超上限"));
+
+        assertEquals(ErrorCode.INVALID_PARAM, e.getErrorCode());
+        assertTrue(e.getMessage().contains("不能超过 2 个"));
+    }
+
+    @Test
+    void shouldRefuseTheSameKnowledgeBaseLinkedTwice() {
+        when(appVersionMapper.selectList(any())).thenReturn(List.of());
+        AppConfigSnapshot snapshot = new AppConfigSnapshot();
+        snapshot.setKbRefs(List.of(new KbRef(KB_ID, 1), new KbRef(KB_ID, 2)));
+
+        BizException e = assertThrows(BizException.class,
+                () -> service.createDraft(APP_ID, snapshot, null, "重复库"));
+
+        // Two entries for one base would give it two quotas out of one budget, so the allocation would no
+        // longer sum to the cap the rerank protection is built on.
+        assertEquals(ErrorCode.INVALID_PARAM, e.getErrorCode());
+        assertTrue(e.getMessage().contains("重复关联"));
+    }
+
+    @Test
+    void shouldRefuseANonPositiveQuotaWeight() {
+        when(appVersionMapper.selectList(any())).thenReturn(List.of());
+        AppConfigSnapshot snapshot = new AppConfigSnapshot();
+        snapshot.setKbRefs(List.of(new KbRef(KB_ID, 0), new KbRef(KB_ID_2, 1)));
+
+        BizException e = assertThrows(BizException.class,
+                () -> service.createDraft(APP_ID, snapshot, null, "零权重"));
+
+        assertEquals(ErrorCode.INVALID_PARAM, e.getErrorCode());
+        assertTrue(e.getMessage().contains("正整数"));
+    }
+
+    @Test
+    void shouldRefuseAKnowledgeBaseThatDoesNotExist() {
+        when(appVersionMapper.selectList(any())).thenReturn(List.of());
+        when(knowledgeBaseService.require("kb_missing"))
+                .thenThrow(new BizException(ErrorCode.NOT_FOUND, "knowledge base not found"));
+        AppConfigSnapshot snapshot = new AppConfigSnapshot();
+        snapshot.setKbRefs(List.of(new KbRef(KB_ID, 1), new KbRef("kb_missing", 1)));
+
+        BizException e = assertThrows(BizException.class,
+                () -> service.createDraft(APP_ID, snapshot, null, "库不存在"));
+
+        assertEquals(ErrorCode.NOT_FOUND, e.getErrorCode());
+    }
+
+    @Test
+    void shouldAcceptAGateDataSetMeasuringAnyOfTheLinkedKnowledgeBases() {
+        AppVersion draft = versionOf("V1.0", AppVersionStatus.DRAFT);
+        AppConfigSnapshot stored = new AppConfigSnapshot();
+        stored.setKbRefs(List.of(new KbRef(KB_ID, 1), new KbRef(KB_ID_2, 1)));
+        draft.setConfig(JsonUtil.toJson(stored));
+        when(appVersionMapper.selectOne(any())).thenReturn(draft);
+        EvalDataset dataset = new EvalDataset();
+        dataset.setKbId(KB_ID_2);
+        when(evalDatasetService.require("evds_second")).thenReturn(dataset);
+
+        // The dual run stays single base evaluation; requiring the data set to cover every linked base would
+        // make the gate impossible to satisfy for a multi base application.
+        assertEquals("evds_second", service.setGateDataset(VERSION_ID, "evds_second").getGateDatasetId());
+    }
+
     private AppVersion versionOf(String version, AppVersionStatus status) {
         AppVersion row = new AppVersion();
         row.setAppVersionId(VERSION_ID);
@@ -303,7 +425,7 @@ class AppVersionServiceTest {
 
     private AppConfigSnapshot snapshotOf(String kbId) {
         AppConfigSnapshot snapshot = new AppConfigSnapshot();
-        snapshot.setKbId(kbId);
+        snapshot.setKbRefs(List.of(KbRef.of(kbId)));
         KbRetrievalConfig retrieval = new KbRetrievalConfig();
         retrieval.setTopN(5);
         retrieval.setRecallTopK(50);

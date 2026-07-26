@@ -44,4 +44,20 @@ public class KnowledgeCallResult {
 
     /** Stage the serving version is in. */
     private final TargetStage targetStage;
+
+    /**
+     * Knowledge bases this call searched, requirement section 4.9.
+     *
+     * <p>Read off the applied block rather than stored twice: the chat endpoint reports it at the top level
+     * while the search endpoint reports it inside {@code applied}, and two fields holding the same fact
+     * would eventually disagree.
+     *
+     * @return routed knowledge base ids, empty when the retrieval stage never ran
+     */
+    public List<String> routedKbIds() {
+        if (applied == null || applied.getRoutedKbIds() == null) {
+            return List.of();
+        }
+        return applied.getRoutedKbIds();
+    }
 }
