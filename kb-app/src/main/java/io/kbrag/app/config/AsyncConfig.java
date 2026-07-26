@@ -37,6 +37,15 @@ public class AsyncConfig {
     /** Bean name referenced by the {@code @Async} annotation of the evaluation run submission. */
     public static final String EVAL_EXECUTOR = "evalTaskExecutor";
 
+    /** Bean name of the pool one release gate's dual run supervision occupies. */
+    public static final String GATE_EXECUTOR = "gateTaskExecutor";
+
+    /** Bean name of the pool the open API audit rows are written on. */
+    public static final String AUDIT_EXECUTOR = "auditTaskExecutor";
+
+    /** Bean name of the pool a streamed chat generation runs on. */
+    public static final String CHAT_STREAM_EXECUTOR = "chatStreamTaskExecutor";
+
     private static final int CORE_POOL_SIZE = 2;
     private static final int MAX_POOL_SIZE = 4;
     private static final int QUEUE_CAPACITY = 200;
@@ -56,6 +65,30 @@ public class AsyncConfig {
     private static final int EVAL_MAX_POOL_SIZE = 6;
     private static final int EVAL_QUEUE_CAPACITY = 50;
     private static final String EVAL_THREAD_PREFIX = "kb-eval-";
+
+    /**
+     * A gate thread spends its life waiting for two evaluation runs, so it must never share the pool those
+     * runs execute on: a gate queued behind its own work would wait for a run that cannot start.
+     */
+    private static final int GATE_CORE_POOL_SIZE = 1;
+    private static final int GATE_MAX_POOL_SIZE = 4;
+    private static final int GATE_QUEUE_CAPACITY = 20;
+    private static final String GATE_THREAD_PREFIX = "kb-gate-";
+
+    private static final int AUDIT_CORE_POOL_SIZE = 1;
+    private static final int AUDIT_MAX_POOL_SIZE = 4;
+    private static final int AUDIT_QUEUE_CAPACITY = 2000;
+    private static final String AUDIT_THREAD_PREFIX = "kb-audit-";
+
+    /**
+     * A streamed generation occupies a thread for the whole answer, so the pool is wide and unqueued: a queued
+     * stream would leave the client staring at an open connection with no first token, which is the one thing
+     * streaming exists to avoid.
+     */
+    private static final int CHAT_STREAM_CORE_POOL_SIZE = 2;
+    private static final int CHAT_STREAM_MAX_POOL_SIZE = 16;
+    private static final int CHAT_STREAM_QUEUE_CAPACITY = 0;
+    private static final String CHAT_STREAM_THREAD_PREFIX = "kb-chat-stream-";
 
     /**
      * Creates the indexing executor.
@@ -107,6 +140,60 @@ public class AsyncConfig {
         executor.setMaxPoolSize(EVAL_MAX_POOL_SIZE);
         executor.setQueueCapacity(EVAL_QUEUE_CAPACITY);
         executor.setThreadNamePrefix(EVAL_THREAD_PREFIX);
+        executor.setTaskDecorator(requestIdPropagatingDecorator());
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * Creates the executor one release gate's dual run supervision runs on.
+     *
+     * @return executor used by the release gate
+     */
+    @Bean(GATE_EXECUTOR)
+    public Executor gateTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(GATE_CORE_POOL_SIZE);
+        executor.setMaxPoolSize(GATE_MAX_POOL_SIZE);
+        executor.setQueueCapacity(GATE_QUEUE_CAPACITY);
+        executor.setThreadNamePrefix(GATE_THREAD_PREFIX);
+        executor.setTaskDecorator(requestIdPropagatingDecorator());
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * Creates the executor the open API audit rows are written on.
+     *
+     * <p>Generously queued on purpose: an audit row must not slow a call down, and a burst of traffic should
+     * fill the queue rather than push the write onto the request thread.
+     *
+     * @return executor used by the audit recorder
+     */
+    @Bean(AUDIT_EXECUTOR)
+    public Executor auditTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(AUDIT_CORE_POOL_SIZE);
+        executor.setMaxPoolSize(AUDIT_MAX_POOL_SIZE);
+        executor.setQueueCapacity(AUDIT_QUEUE_CAPACITY);
+        executor.setThreadNamePrefix(AUDIT_THREAD_PREFIX);
+        executor.setTaskDecorator(requestIdPropagatingDecorator());
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * Creates the executor a streamed chat generation runs on.
+     *
+     * @return executor used by the streamed chat endpoints
+     */
+    @Bean(CHAT_STREAM_EXECUTOR)
+    public Executor chatStreamTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(CHAT_STREAM_CORE_POOL_SIZE);
+        executor.setMaxPoolSize(CHAT_STREAM_MAX_POOL_SIZE);
+        executor.setQueueCapacity(CHAT_STREAM_QUEUE_CAPACITY);
+        executor.setThreadNamePrefix(CHAT_STREAM_THREAD_PREFIX);
         executor.setTaskDecorator(requestIdPropagatingDecorator());
         executor.initialize();
         return executor;

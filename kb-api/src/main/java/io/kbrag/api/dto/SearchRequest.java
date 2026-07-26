@@ -87,6 +87,29 @@ public record SearchRequest(
             String sender,
             @JsonProperty("msg_time_from") Long msgTimeFrom,
             @JsonProperty("msg_time_to") Long msgTimeTo) {
+
+        /**
+         * Maps the transport shape onto the domain predicate.
+         *
+         * <p>Lives on the nested record rather than on its enclosing request so the open API can reuse the same
+         * mapping: two definitions of the same filter would eventually disagree on the time range validation and
+         * on what an empty filter means.
+         *
+         * @return domain filter, {@code null} when no condition was supplied
+         */
+        public MetadataFilter toFilter() {
+            if (msgTimeFrom() != null && msgTimeTo() != null && msgTimeFrom() > msgTimeTo()) {
+                throw BizException.invalidParam("msg_time_from must not be after msg_time_to");
+            }
+            MetadataFilter filter = MetadataFilter.builder()
+                    .tagIds(tagIds())
+                    .sessionId(sessionId())
+                    .sender(sender())
+                    .msgTimeFrom(msgTimeFrom())
+                    .msgTimeTo(msgTimeTo())
+                    .build();
+            return filter.isEmpty() ? null : filter;
+        }
     }
 
     /**
@@ -132,20 +155,6 @@ public record SearchRequest(
     }
 
     private MetadataFilter toMetadataFilter() {
-        if (metadataFilter == null) {
-            return null;
-        }
-        if (metadataFilter.msgTimeFrom() != null && metadataFilter.msgTimeTo() != null
-                && metadataFilter.msgTimeFrom() > metadataFilter.msgTimeTo()) {
-            throw BizException.invalidParam("msg_time_from must not be after msg_time_to");
-        }
-        MetadataFilter filter = MetadataFilter.builder()
-                .tagIds(metadataFilter.tagIds())
-                .sessionId(metadataFilter.sessionId())
-                .sender(metadataFilter.sender())
-                .msgTimeFrom(metadataFilter.msgTimeFrom())
-                .msgTimeTo(metadataFilter.msgTimeTo())
-                .build();
-        return filter.isEmpty() ? null : filter;
+        return metadataFilter == null ? null : metadataFilter.toFilter();
     }
 }

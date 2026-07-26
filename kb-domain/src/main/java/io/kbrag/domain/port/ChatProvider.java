@@ -58,6 +58,24 @@ public interface ChatProvider {
     String complete(String systemPrompt, List<ChatMessage> messages);
 
     /**
+     * Produces a completion and hands it to the consumer in one or more pieces.
+     *
+     * <p>The default implementation completes first and emits the whole answer as a single piece, which is
+     * a correct - if not incremental - stream: the server sent event contract of the chat endpoint is about
+     * the shape of the events, and a caller that renders every piece as it arrives behaves identically for
+     * one piece or a hundred. An implementation that can read the provider's own token stream overrides
+     * this and gains the latency benefit without any change on the calling side.
+     *
+     * @param systemPrompt system instruction, placed in the system role
+     * @param messages     conversation turns in chronological order, must not be empty
+     * @param onDelta      receives every generated piece in order
+     */
+    default void stream(String systemPrompt, List<ChatMessage> messages,
+                        java.util.function.Consumer<String> onDelta) {
+        onDelta.accept(complete(systemPrompt, messages));
+    }
+
+    /**
      * Probes provider connectivity.
      *
      * @return probe outcome

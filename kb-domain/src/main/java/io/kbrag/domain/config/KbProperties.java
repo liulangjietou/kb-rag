@@ -84,6 +84,12 @@ public class KbProperties {
     /** Evaluation execution policy. */
     private Eval eval = new Eval();
 
+    /** Release gate policy of the application version state machine. */
+    private Gate gate = new Gate();
+
+    /** Open API policy: rate limit default, audit retention and archiving. */
+    private OpenApi openApi = new OpenApi();
+
     /**
      * Vector engine selection.
      */
@@ -266,6 +272,14 @@ public class KbProperties {
 
         /** Upper bound of the generated rewrite. */
         private int maxTokens = 128;
+
+        /**
+         * Upper bound of a generated answer of the open chat endpoint.
+         *
+         * <p>Separate from {@link #maxTokens} on purpose: that one sizes a query rewrite, which is a single
+         * line, and reusing it for generation would cut every answer off mid sentence.
+         */
+        private int answerMaxTokens = 1024;
     }
 
     /**
@@ -621,5 +635,71 @@ public class KbProperties {
 
         /** Automatic retries of a case that came back degraded. */
         private int degradedRetry = 2;
+    }
+
+    /**
+     * Release gate policy, requirement section 4.7 "sample size and tolerance".
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Gate {
+
+        /**
+         * Effective cases the comparison needs before it is trusted; below this the gate records the run
+         * instead of deciding on it.
+         */
+        private int minCases = 50;
+
+        /**
+         * Tolerance floor in percentage points. The effective tolerance is
+         * {@code max(this / 100, 1 / effectiveCases)}, so a small data set automatically gets a wider band.
+         */
+        private double epsilonPp = 2.0d;
+
+        /** Pending review ratio above which the data set counts as invalid for gating purposes. */
+        private double staleRatio = 0.15d;
+
+        /** Budget of one dual run before the gate gives up and records a retryable outcome. */
+        private long runTimeoutMs = 1800000L;
+
+        /** Delay between two polls of the dual run's completion state. */
+        private long pollIntervalMs = 2000L;
+    }
+
+    /**
+     * Open API policy, requirement section 4.8.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class OpenApi {
+
+        /** Token bucket rate assigned to a freshly created API key, in requests per second. */
+        private int rateLimitDefault = 10;
+
+        /** Seconds advertised in the {@code Retry-After} header of a rate limited response. */
+        private int retryAfterSeconds = 1;
+
+        /** Days an audit row stays queryable in the database before it is archived. */
+        private int auditRetentionDays = 180;
+
+        /**
+         * Rows one archive batch reads, writes and deletes. Bounded so a retention pass never holds a long
+         * transaction over a table the request path keeps inserting into.
+         */
+        private int auditArchiveBatchSize = 5000;
+
+        /** Cron expression of the daily archive pass. */
+        private String auditArchiveCron = "0 30 3 * * *";
+
+        /** {@code false} disables the archive pass entirely, used by tests and read only replicas. */
+        private boolean auditArchiveEnabled = true;
+
+        /** Object storage key prefix the archives are written under. */
+        private String auditArchivePrefix = "audit/";
+
+        /** Width of the {@code query_digest} column; the digest is truncated to it after masking. */
+        private int queryDigestMaxLength = 200;
     }
 }

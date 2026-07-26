@@ -2,6 +2,7 @@ package io.kbrag.infrastructure.config;
 
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.port.ChatProvider;
+import io.kbrag.domain.port.ChatProviderFactory;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.RerankProvider;
 import io.kbrag.domain.port.VisionProvider;
@@ -9,6 +10,7 @@ import io.kbrag.infrastructure.provider.UnconfiguredChatProvider;
 import io.kbrag.infrastructure.provider.UnconfiguredRerankProvider;
 import io.kbrag.infrastructure.provider.UnconfiguredVisionProvider;
 import io.kbrag.infrastructure.provider.chat.DashScopeChatProvider;
+import io.kbrag.infrastructure.provider.chat.ModelChatProviderFactory;
 import io.kbrag.infrastructure.provider.embedding.DashScopeEmbeddingProvider;
 import io.kbrag.infrastructure.provider.rerank.DashScopeRerankProvider;
 import io.kbrag.infrastructure.provider.embedding.UnconfiguredEmbeddingProvider;
@@ -92,6 +94,21 @@ public class ModelProviderConfig {
         }
         log.info("chat provider configured, provider={}, model={}", config.getProvider(), config.getModel());
         return new DashScopeChatProvider(config);
+    }
+
+    /**
+     * Supplies the per model chat provider resolution the open chat endpoint needs, requirement section 4.7
+     * "the generation model belongs to the application version snapshot".
+     *
+     * <p>A factory rather than another bean: the model is only known once a call resolved which application
+     * version serves it, so the choice cannot be made at container startup.
+     *
+     * @param properties bound configuration
+     * @return factory resolving providers by model name
+     */
+    @Bean
+    public ChatProviderFactory chatProviderFactory(KbProperties properties) {
+        return new ModelChatProviderFactory(properties);
     }
 
     /**

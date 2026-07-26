@@ -27,6 +27,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
     private static final List<String> PUBLIC_PATHS = List.of(
             "/api/v1/auth/login",
             "/actuator/**",
+            // The open API has its own authentication chain (ApiKeyAuthFilter): an API key is not a console
+            // session, and letting the console interceptor see these paths would reject every external call
+            // for missing a token it is not supposed to have.
+            "/api/v1/knowledge/**",
             // The ik tokenizer polls its remote dictionary from inside Elasticsearch with a plain HTTP
             // client that cannot carry a bearer token, so this path is deliberately unauthenticated.
             // It only serves the domain terms an operator entered on purpose: no document content, no

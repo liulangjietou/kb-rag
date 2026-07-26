@@ -494,6 +494,10 @@ public class EvalRunService {
         result.setCaseId(outcome.caseId());
         result.setHit(outcome.judgment().hit() ? 1 : 0);
         result.setHitRank(outcome.judgment().hitRank());
+        // Persisted since M4c: the release gate recomputes Recall@K on the intersection of two runs and
+        // needs the counts the judgment already produced, see GateMetricsRecomputer.
+        result.setEvidenceHitCount(outcome.judgment().evidenceHitCount());
+        result.setEvidenceTotalCount(outcome.judgment().evidenceTotalCount());
         result.setOverlapRatios(JsonUtil.toJson(outcome.overlapRatios()));
         result.setRecalledChunkIds(JsonUtil.toJson(outcome.recalledChunkIds()));
         result.setDegraded(JsonUtil.toJson(outcome.degraded()));

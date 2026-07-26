@@ -49,6 +49,26 @@ public final class KbConstants {
     /** Business id prefix of an evaluation result row. */
     public static final String EVAL_RESULT_ID_PREFIX = "evre";
 
+    /** Business id prefix of an application. */
+    public static final String APP_ID_PREFIX = "app";
+
+    /** Business id prefix of an application version. */
+    public static final String APP_VERSION_ID_PREFIX = "av";
+
+    /** Business id prefix of an API key row, never the key material itself. */
+    public static final String API_KEY_ID_PREFIX = "ak";
+
+    /** Business id prefix of an outbound call audit row. */
+    public static final String API_AUDIT_LOG_ID_PREFIX = "aud";
+
+    /**
+     * Fixed prefix of every open API key plaintext, requirement section 4.8 "kb-sk-{prefix}{random}".
+     *
+     * <p>Kept recognisable on purpose: a leaked string can be identified as a credential of this system
+     * by pattern alone, which is what lets secret scanners revoke it.
+     */
+    public static final String API_KEY_PLAINTEXT_PREFIX = "kb-sk-";
+
     /**
      * Operator recorded on every annotation.
      *

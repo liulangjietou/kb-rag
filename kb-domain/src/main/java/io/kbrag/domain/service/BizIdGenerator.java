@@ -127,6 +127,42 @@ public class BizIdGenerator {
         return generate(KbConstants.EVAL_RESULT_ID_PREFIX);
     }
 
+    /**
+     * Generates an application id.
+     *
+     * @return prefixed identifier
+     */
+    public String appId() {
+        return generate(KbConstants.APP_ID_PREFIX);
+    }
+
+    /**
+     * Generates an application version id.
+     *
+     * @return prefixed identifier
+     */
+    public String appVersionId() {
+        return generate(KbConstants.APP_VERSION_ID_PREFIX);
+    }
+
+    /**
+     * Generates an API key row id; the key material itself is minted by {@link ApiKeyFactory}.
+     *
+     * @return prefixed identifier
+     */
+    public String apiKeyId() {
+        return generate(KbConstants.API_KEY_ID_PREFIX);
+    }
+
+    /**
+     * Generates an outbound call audit row id.
+     *
+     * @return prefixed identifier
+     */
+    public String apiAuditLogId() {
+        return generate(KbConstants.API_AUDIT_LOG_ID_PREFIX);
+    }
+
     private String generate(String prefix) {
         String random = UUID.randomUUID().toString().replace("-", "").substring(0, RANDOM_LENGTH);
         return prefix + KbConstants.ID_SEPARATOR + random;

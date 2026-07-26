@@ -98,6 +98,9 @@ kb:
     timeout-ms: ${CHAT_TIMEOUT_MS:3000}
     temperature: ${CHAT_TEMPERATURE:0.0}
     max-tokens: ${CHAT_MAX_TOKENS:128}
+    # Generation budget of the open chat endpoint; max-tokens above sizes a one line query rewrite and would
+    # cut every answer off mid sentence.
+    answer-max-tokens: ${CHAT_ANSWER_MAX_TOKENS:1024}
   vision:
     provider: ${VISION_PROVIDER:dashscope}
     model: ${VISION_MODEL:qwen-vl-max}
@@ -184,6 +187,27 @@ kb:
     concurrency: ${EVAL_CONCURRENCY:4}
     overlap-threshold: ${EVAL_OVERLAP_THRESHOLD:0.5}
     degraded-retry: ${EVAL_DEGRADED_RETRY:2}
+  gate:
+    # Below this many effective cases the dual run comparison is recorded instead of decided on.
+    min-cases: ${GATE_MIN_CASES:50}
+    # Tolerance floor in percentage points; the effective tolerance is max(this / 100, 1 / effectiveCases).
+    epsilon-pp: ${GATE_EPSILON_PP:2}
+    # Pending review ratio above which the evaluation data set counts as invalid for gating.
+    stale-ratio: ${GATE_STALE_RATIO:0.15}
+    run-timeout-ms: ${GATE_RUN_TIMEOUT_MS:1800000}
+    poll-interval-ms: ${GATE_POLL_INTERVAL_MS:2000}
+  open-api:
+    # Token bucket rate assigned to a freshly created API key, in requests per second.
+    rate-limit-default: ${API_RATE_LIMIT_DEFAULT:10}
+    retry-after-seconds: ${API_RATE_LIMIT_RETRY_AFTER_SECONDS:1}
+    # Days an audit row stays queryable before it is archived to object storage and deleted.
+    audit-retention-days: ${AUDIT_RETENTION_DAYS:180}
+    audit-archive-batch-size: ${AUDIT_ARCHIVE_BATCH_SIZE:5000}
+    audit-archive-cron: ${AUDIT_ARCHIVE_CRON:0 30 3 * * *}
+    audit-archive-enabled: ${AUDIT_ARCHIVE_ENABLED:true}
+    audit-archive-prefix: ${AUDIT_ARCHIVE_PREFIX:audit/}
+    # Width of the query_digest column; the digest is masked first and truncated to this afterwards.
+    query-digest-max-length: ${AUDIT_QUERY_DIGEST_MAX_LENGTH:200}
 
 logging:
   level:

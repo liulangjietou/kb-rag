@@ -43,6 +43,20 @@ public class EvalResult extends BaseEntity {
     @TableField("overlap_ratios")
     private String overlapRatios;
 
+    /**
+     * Evidences covered within the top K.
+     *
+     * <p>Persisted since M4c so the release gate can recompute {@code Recall@K} on the intersection of the
+     * effective cases of two runs. Deriving it back from {@link #overlapRatios} would compare a per evidence
+     * best ratio against the run's aggregate coverage decision and disagree with the run's own metrics.
+     */
+    @TableField("evidence_hit_count")
+    private Integer evidenceHitCount;
+
+    /** Evidences the case declares, the denominator of the per case {@code Recall@K}. */
+    @TableField("evidence_total_count")
+    private Integer evidenceTotalCount;
+
     /** JSON array of the chunk ids the top K returned for this case. */
     @TableField("recalled_chunk_ids")
     private String recalledChunkIds;
