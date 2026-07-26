@@ -37,3 +37,9 @@ class FileTooLargeError(ParseError):
 class ZipSafetyError(ParseError):
     """Raised by the zip precheck: zip-slip path traversal, decompressed
     size bomb, or entry-count bomb detected in a docx/xlsx package."""
+
+
+class ChatMappingError(ParseError):
+    """Raised when a chat log mapping profile cannot be loaded, or cannot
+    resolve a required target field (e.g. 'content') against the actual
+    header row of the uploaded csv/xlsx (M3-CONTRACTS.md §2.2)."""

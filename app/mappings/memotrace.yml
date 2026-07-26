@@ -1,0 +1,49 @@
+# Column-name mapping profile for MemoTrace-style WeChat chat exports
+# (docs/M3-CONTRACTS.md §2.2). Candidates are tried in order; matching is
+# case-insensitive and ignores whitespace, so header variants such as
+# "Create Time" and "createtime" both resolve to send_time.
+#
+# NOTE: written from publicly documented MemoTrace/WeChat export column
+# conventions; has NOT yet been validated against a real exported sample.
+# Recalibrate this file (not the parser code) once a real export is
+# available -- see M3-CONTRACTS.md §2.2 "⚠️ 真实样例待验证".
+
+session_id:
+  - room_name
+  - talker
+  - TalkerId
+
+session_name:
+  - NickName
+  - Remark
+  - room_name
+
+sender:
+  - Sender
+  - NickName
+  - talker
+
+is_self:
+  - IsSender
+  - is_sender
+
+send_time:
+  - CreateTime
+  - StrTime
+
+msg_type:
+  - Type
+  - type_name
+
+content:
+  - StrContent
+  - msg
+  - content
+
+# Not part of the M3-CONTRACTS.md §2.2 candidate list, but msg_id is a
+# required output field; when none of these columns is present, the parser
+# falls back to a deterministic "{session_id}-{row_index}" id.
+msg_id:
+  - MsgSvrID
+  - msg_id
+  - MsgId
