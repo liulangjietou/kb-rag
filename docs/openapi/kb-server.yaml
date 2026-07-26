@@ -314,10 +314,8 @@ paths:
       tags:
       - parse-preview
       summary: 批量确认解析预览
-      description: 'M3-CONTRACTS.md §3.4：body 可选 `doc_ids`，缺省时确认该知识库下全部
-        PENDING_CONFIRM 状态的文档。仅在知识库开启 `index_config.parse_preview_required`
-        时有意义；确认后各文档继续切分入库。
-        '
+      description: 'M3-CONTRACTS.md §3.4：body 可选 `doc_ids`，缺省时确认该知识库下全部 PENDING_CONFIRM
+        状态的文档。仅在知识库开启 `index_config.parse_preview_required` 时有意义；确认后各文档继续切分入库。 '
       requestBody:
         required: false
         content:
@@ -383,11 +381,9 @@ paths:
       tags:
       - parse-preview
       summary: 查看解析预览
-      description: 'M3-CONTRACTS.md §3.4：仅当文档 `process_status=PENDING_CONFIRM`
-        （知识库开启 `index_config.parse_preview_required` 时，清洗完成后管线暂停于此状态）
-        时有实际预览产物；预览内容（markdown、按页信息、图片预签名 URL 与 VLM 文本代理、
-        warnings）读自 MinIO 预览产物。
-        '
+      description: 'M3-CONTRACTS.md §3.4：仅当文档 `process_status=PENDING_CONFIRM` （知识库开启
+        `index_config.parse_preview_required` 时，清洗完成后管线暂停于此状态） 时有实际预览产物；预览内容（markdown、按页信息、图片预签名
+        URL 与 VLM 文本代理、 warnings）读自 MinIO 预览产物。 '
       responses:
         '200':
           description: OK
@@ -423,9 +419,8 @@ paths:
       tags:
       - parse-preview
       summary: 按清洗规则重解析（预览用）
-      description: 'M3-CONTRACTS.md §3.4：body 可选 `clean_rules` 覆盖，仅本次预览生效，
-        不修改知识库级配置；重解析完成后返回最新预览，文档保持/回到 PENDING_CONFIRM。
-        '
+      description: 'M3-CONTRACTS.md §3.4：body 可选 `clean_rules` 覆盖，仅本次预览生效， 不修改知识库级配置；重解析完成后返回最新预览，文档保持/回到
+        PENDING_CONFIRM。 '
       requestBody:
         required: false
         content:
@@ -483,12 +478,10 @@ paths:
       tags:
       - chat-import
       summary: 聊天记录导入-匹配预览（不落库）
-      description: 'M3-CONTRACTS.md §3.5：multipart 上传聊天记录导出文件，服务端调用
-        kb-rag-parser `/api/v1/parse/chat` 端点解析后，与库内既有聊天文档做会话匹配，
-        仅返回匹配预览，不执行导入。逻辑文档标识 = 来源渠道 + session_id：已存在的会话
-        `action=NEW_VERSION`，新会话 `action=CREATE`。上传文件与解析结果暂存 MinIO，
-        返回的 `upload_token` 有效期 30 分钟，供 confirm 端点使用。
-        '
+      description: 'M3-CONTRACTS.md §3.5：multipart 上传聊天记录导出文件，服务端调用 kb-rag-parser
+        `/api/v1/parse/chat` 端点解析后，与库内既有聊天文档做会话匹配， 仅返回匹配预览，不执行导入。逻辑文档标识 = 来源渠道 + session_id：已存在的会话
+        `action=NEW_VERSION`，新会话 `action=CREATE`。上传文件与解析结果暂存 MinIO， 返回的 `upload_token`
+        有效期 30 分钟，供 confirm 端点使用。 '
       requestBody:
         required: true
         content:
@@ -523,11 +516,9 @@ paths:
       tags:
       - chat-import
       summary: 执行聊天记录导入
-      description: 'M3-CONTRACTS.md §3.5：`upload_token` 取自匹配预览接口返回值（30 分钟内
-        有效），可选 `session_ids` 只导入子集会话（缺省=预览返回的全部会话）。按会话聚合
-        （chat_aggregation:{window_minutes,max_messages}，无重叠顺切）生成 chunk_type=chat_log
-        的分片，metadata 写 session_id/session_name/sender/msg_time；聊天文本默认开启脱敏。
-        '
+      description: 'M3-CONTRACTS.md §3.5：`upload_token` 取自匹配预览接口返回值（30 分钟内 有效），可选
+        `session_ids` 只导入子集会话（缺省=预览返回的全部会话）。按会话聚合 （chat_aggregation:{window_minutes,max_messages}，无重叠顺切）生成
+        chunk_type=chat_log 的分片，metadata 写 session_id/session_name/sender/msg_time；聊天文本默认开启脱敏。 '
       requestBody:
         required: true
         content:
@@ -630,7 +621,8 @@ paths:
       tags:
       - alert
       summary: 获取告警 Webhook 配置
-      description: M3-CONTRACTS.md §3.6：配置存 t_kb_system_config，未配置时 webhook_url 为 null。
+      description: M3-CONTRACTS.md §3.6：配置存 t_kb_system_config，未配置时 webhook_url 为
+        null。
       responses:
         '200':
           description: OK
@@ -662,11 +654,9 @@ paths:
       tags:
       - alert
       summary: 发送测试告警消息
-      description: 'M3-CONTRACTS.md §3.6：按当前已保存的 webhook_url 发送一条测试消息
-        （`{"msgtype":"text","text":{"content":"..."}}`，兼容钉钉/企微/Slack）。未配置
-        webhook_url 时返回 INVALID_PARAM（管理台据此提示先填写 URL），不降级为 error 日志——
-        降级为 error 日志的场景专指真实告警触发时未配置 Webhook（见需求文档 §5）。
-        '
+      description: 'M3-CONTRACTS.md §3.6：按当前已保存的 webhook_url 发送一条测试消息 （`{"msgtype":"text","text":{"content":"..."}}`，兼容钉钉/企微/Slack）。未配置
+        webhook_url 时返回 INVALID_PARAM（管理台据此提示先填写 URL），不降级为 error 日志—— 降级为 error 日志的场景专指真实告警触发时未配置
+        Webhook（见需求文档 §5）。 '
       responses:
         '200':
           description: 已发送
@@ -681,11 +671,9 @@ paths:
       tags:
       - demo
       summary: 一键导入 Demo 知识库
-      description: 'M3-CONTRACTS.md §3.7：创建知识库“Demo 知识库”并导入 `DEMO_DATA_DIR`
-        指向目录下 `manifest.json` 列出的文档集。幂等：已存在同名 Demo 知识库时直接返回其
-        kb_id，不重复导入。素材目录缺失时返回 INVALID_PARAM（管理台据此提示，`demo/status`
-        的 `available=false` 用于前端提前置灰按钮，避免用户点击后才看到这个错误）。
-        '
+      description: 'M3-CONTRACTS.md §3.7：创建知识库“Demo 知识库”并导入 `DEMO_DATA_DIR` 指向目录下
+        `manifest.json` 列出的文档集。幂等：已存在同名 Demo 知识库时直接返回其 kb_id，不重复导入。素材目录缺失时返回 INVALID_PARAM（管理台据此提示，`demo/status`
+        的 `available=false` 用于前端提前置灰按钮，避免用户点击后才看到这个错误）。 '
       responses:
         '200':
           description: 已创建/已存在，异步执行导入
@@ -700,10 +688,8 @@ paths:
       tags:
       - demo
       summary: Demo 导入状态
-      description: 'M3-CONTRACTS.md §3.7：`available=false` 表示未找到 `DEMO_DATA_DIR`
-        素材目录，前端据此置灰“一键导入 Demo”按钮；`imported=true` 时 `kb_id`/`doc_count`
-        为已导入的 Demo 知识库信息。
-        '
+      description: 'M3-CONTRACTS.md §3.7：`available=false` 表示未找到 `DEMO_DATA_DIR` 素材目录，前端据此置灰“一键导入
+        Demo”按钮；`imported=true` 时 `kb_id`/`doc_count` 为已导入的 Demo 知识库信息。 '
       responses:
         '200':
           description: OK
@@ -756,6 +742,221 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResult'
+  /api/v1/documents/{docId}/versions:
+    get:
+      summary: List document versions, newest first
+      tags:
+      - document
+      parameters: &id003
+      - &id001
+        name: docId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/DocumentVersion'
+  /api/v1/documents/{docId}/versions/{versionId}/activate-impact:
+    get:
+      summary: Preflight for an activation, drives the confirm dialog
+      tags:
+      - document
+      parameters: &id002
+      - *id001
+      - name: versionId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ActivateImpact'
+  /api/v1/documents/{docId}/versions/{versionId}/activate:
+    post:
+      summary: Activate a version, rebuilding it first when its chunks were archived
+      tags:
+      - document
+      parameters: *id002
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ActivateVersionResult'
+  /api/v1/documents/{docId}/annotations/pending-review:
+    get:
+      summary: Annotations of previous versions that the active version neither inherited
+        nor redid
+      tags:
+      - annotation
+      parameters: *id003
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Annotation'
+  /api/v1/chunks/{chunkId}:
+    put:
+      summary: Edit chunk text, re-embed and sync both engines
+      tags:
+      - annotation
+      parameters: &id004
+      - name: chunkId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - content
+              properties:
+                content:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/DocumentChunk'
+  /api/v1/chunks/{chunkId}/toggle:
+    post:
+      summary: Enable or disable a chunk without re-embedding
+      tags:
+      - annotation
+      parameters: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - enabled
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ToggleChunkResult'
+  /api/v1/chunks/merge:
+    post:
+      summary: Merge adjacent chunks of one document version
+      tags:
+      - annotation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - chunk_ids
+              properties:
+                chunk_ids:
+                  type: array
+                  minItems: 2
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/DocumentChunk'
+  /api/v1/chunks/{chunkId}/split:
+    post:
+      summary: Split a chunk at the given character offsets
+      tags:
+      - annotation
+      parameters: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - split_offsets
+              properties:
+                split_offsets:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/SplitChunkResult'
 components:
   securitySchemes:
     bearerAuth:
@@ -978,9 +1179,8 @@ components:
               $ref: '#/components/schemas/KnowledgeBase'
     ProcessStatus:
       type: string
-      description: 文档处理状态（t_kb_document.process_status）。M3 新增 PENDING_CONFIRM
-        （docs/M3-CONTRACTS.md §3.4）：仅当知识库开启 index_config.parse_preview_required
-        时，清洗完成后管线在此暂停等待人工确认，之后才继续切分入库。
+      description: 文档处理状态（t_kb_document.process_status）。M3 新增 PENDING_CONFIRM （docs/M3-CONTRACTS.md
+        §3.4）：仅当知识库开启 index_config.parse_preview_required 时，清洗完成后管线在此暂停等待人工确认，之后才继续切分入库。
       enum:
       - UPLOADED
       - PARSING
@@ -1422,17 +1622,25 @@ components:
         parse_preview_required:
           type: boolean
           default: false
-          description: 'M3-CONTRACTS.md §3.4：默认 false，保证批量上传顺畅。开启后管线在清洗完成后
-            暂停，文档 process_status=PENDING_CONFIRM，需调用 confirm 端点才继续切分入库。
-            '
+          description: 'M3-CONTRACTS.md §3.4：默认 false，保证批量上传顺畅。开启后管线在清洗完成后 暂停，文档 process_status=PENDING_CONFIRM，需调用
+            confirm 端点才继续切分入库。 '
         chat_aggregation:
           $ref: '#/components/schemas/ChatAggregationConfig'
+        hide_parent_with_disabled_child:
+          type: boolean
+          default: false
+          description: when true a parent chunk holding any disabled child is not
+            returned at all
+        inherit_disable_annotation:
+          type: boolean
+          default: true
+          description: carry disable annotations to a new version when the chunk text
+            hash is identical
     CleanRules:
       type: object
-      description: 'M3-CONTRACTS.md §3.3：知识库级清洗规则，索引管线 clean 阶段按固定顺序执行——
-        去页眉页脚 → 去水印 → 正则替换 → 脱敏，每步可独立开关；参与 parse_fingerprint 计算
-        （六元组之一，见需求文档 §4.1），改清洗规则会正确标记文档 config_stale。
-        '
+      description: 'M3-CONTRACTS.md §3.3：知识库级清洗规则，索引管线 clean 阶段按固定顺序执行—— 去页眉页脚 → 去水印
+        → 正则替换 → 脱敏，每步可独立开关；参与 parse_fingerprint 计算 （六元组之一，见需求文档 §4.1），改清洗规则会正确标记文档
+        config_stale。 '
       properties:
         strip_header_footer:
           type: boolean
@@ -1467,9 +1675,8 @@ components:
           type: string
     DesensitizeConfig:
       type: object
-      description: '正则掩码：手机号保留前 3 后 4、身份证保留前 6 后 4、银行卡保留后 4、邮箱保留域名。
-        聊天记录导入时默认开启（需求文档 §4.2）。
-        '
+      description: '正则掩码：手机号保留前 3 后 4、身份证保留前 6 后 4、银行卡保留后 4、邮箱保留域名。 聊天记录导入时默认开启（需求文档
+        §4.2）。 '
       properties:
         enabled:
           type: boolean
@@ -1488,9 +1695,8 @@ components:
           default: false
     ChatAggregationConfig:
       type: object
-      description: 'M3-CONTRACTS.md §3.5：聊天记录按“会话 + 时间窗口”聚合为 chunk_type=chat_log
-        的分片，一期固定无重叠顺切（步长=窗口，需求文档 v1.6 定），不支持重叠滑窗。
-        '
+      description: 'M3-CONTRACTS.md §3.5：聊天记录按“会话 + 时间窗口”聚合为 chunk_type=chat_log 的分片，一期固定无重叠顺切（步长=窗口，需求文档
+        v1.6 定），不支持重叠滑窗。 '
       properties:
         window_minutes:
           type: integer
@@ -1568,9 +1774,7 @@ components:
             $ref: '#/components/schemas/DocumentPreview'
     ReparseRequest:
       type: object
-      description: 'M3-CONTRACTS.md §3.4：可选 clean_rules 覆盖，仅本次重解析预览生效，
-        不写回知识库 index_config。
-        '
+      description: 'M3-CONTRACTS.md §3.4：可选 clean_rules 覆盖，仅本次重解析预览生效， 不写回知识库 index_config。 '
       properties:
         clean_rules:
           allOf:
@@ -1700,9 +1904,7 @@ components:
     ChatImportAction:
       type: string
       description: 'M3-CONTRACTS.md §3.5：逻辑文档标识 = 来源渠道 + session_id。CREATE=库内无匹配，
-        建新文档；NEW_VERSION=已存在同一 session_id 的聊天文档，生成新版本（全量替换，走 M1
-        版本机制）。
-        '
+        建新文档；NEW_VERSION=已存在同一 session_id 的聊天文档，生成新版本（全量替换，走 M1 版本机制）。 '
       enum:
       - CREATE
       - NEW_VERSION
@@ -1768,11 +1970,9 @@ components:
             type: string
     AlertConfig:
       type: object
-      description: 'M3-CONTRACTS.md §3.6：t_kb_system_config 存储的告警配置。触发源：
-        ①同类任务连续失败 >= task_fail_threshold；②最近 5 分钟检索降级率 >
-        degrade_rate_threshold；③双写积压 > sync_backlog_threshold（复用 M2 补偿扫描统计）。
-        同一告警类型 silence_minutes 内不重复发送；未配置 webhook_url 时触发降级为 error 日志。
-        '
+      description: 'M3-CONTRACTS.md §3.6：t_kb_system_config 存储的告警配置。触发源： ①同类任务连续失败
+        >= task_fail_threshold；②最近 5 分钟检索降级率 > degrade_rate_threshold；③双写积压 > sync_backlog_threshold（复用
+        M2 补偿扫描统计）。 同一告警类型 silence_minutes 内不重复发送；未配置 webhook_url 时触发降级为 error 日志。 '
       properties:
         webhook_url:
           type: string
@@ -1890,3 +2090,118 @@ components:
               properties:
                 status:
                   $ref: '#/components/schemas/ComponentHealth'
+    DocumentVersion:
+      type: object
+      properties:
+        version_id:
+          type: string
+        version:
+          type: string
+          example: '2.0'
+        status:
+          type: string
+          enum:
+          - BUILDING
+          - BUILD_FAILED
+          - READY
+          - ACTIVE
+          - ARCHIVED
+        content_hash:
+          type: string
+        chunk_count:
+          type: integer
+        active:
+          type: boolean
+        rollback_mode:
+          type: string
+          enum:
+          - INSTANT
+          - REBUILD
+          description: INSTANT when the target version still owns its chunks, REBUILD
+            once archived
+        changelog:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+    ActivateImpact:
+      type: object
+      properties:
+        rollback_mode:
+          type: string
+          enum:
+          - INSTANT
+          - REBUILD
+        needs_rebuild:
+          type: boolean
+        stale_annotation_count:
+          type: integer
+        affected_eval_case_count:
+          type: integer
+          description: always 0 until M4b introduces evaluation sets
+    ActivateVersionResult:
+      type: object
+      properties:
+        task_id:
+          type: string
+          nullable: true
+          description: null for an INSTANT switch, rebuild task id otherwise
+        rollback_mode:
+          type: string
+          enum:
+          - INSTANT
+          - REBUILD
+    Annotation:
+      type: object
+      properties:
+        annotation_id:
+          type: string
+        kb_id:
+          type: string
+        doc_id:
+          type: string
+        document_version_id:
+          type: string
+        chunk_id:
+          type: string
+        annotation_type:
+          type: string
+          enum:
+          - EDIT
+          - TOGGLE
+          - MERGE
+          - SPLIT
+        payload:
+          type: object
+          additionalProperties: true
+        chunk_text_hash:
+          type: string
+        inherit_status:
+          type: string
+          enum:
+          - NOT_INHERITED
+          - AUTO_INHERITED
+          - REDONE
+        operator:
+          type: string
+        version:
+          type: string
+        excerpt:
+          type: string
+        created_at:
+          type: string
+    ToggleChunkResult:
+      type: object
+      properties:
+        changed_chunk_ids:
+          type: array
+          items:
+            type: string
+          description: includes cascaded child chunks when the target is a parent
+    SplitChunkResult:
+      type: object
+      properties:
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocumentChunk'
