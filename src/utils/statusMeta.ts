@@ -1,16 +1,22 @@
 import type {
+  AnchorType,
   AnnotationType,
+  CaseSource,
+  CaseStatus,
   ChatImportAction,
   ChunkType,
   DocumentVersionStatus,
   EmbeddingStatus,
+  EvalMode,
   FusionMode,
   IkDictStatus,
   IkDictType,
   InheritStatus,
+  MetricGroupKey,
   ProcessStatus,
   RetrievalSource,
   RollbackMode,
+  RunStatus,
   ScoreType,
   ThresholdAppliedOn,
 } from '../api/types';
@@ -109,6 +115,59 @@ export const INHERIT_STATUS_META: Record<InheritStatus, TagMeta> = {
   NOT_INHERITED: { color: 'warning', label: '未继承' },
   AUTO_INHERITED: { color: 'success', label: '自动继承' },
   REDONE: { color: 'processing', label: '已在新版本重做' },
+};
+
+/** t_kb_eval_case.anchor_type Tag meta (M4b-CONTRACTS.md sections 1/5). */
+export const ANCHOR_TYPE_META: Record<AnchorType, TagMeta> = {
+  SPAN: { color: 'blue', label: '片段锚定' },
+  DOCUMENT: { color: 'purple', label: '文档锚定' },
+};
+
+/**
+ * t_kb_eval_case.status Tag meta (M4b-CONTRACTS.md sections 1/5). Unrelated to M4a's
+ * InheritStatus despite the similarly-shaped values -- do not cross-index the two tables.
+ */
+export const CASE_STATUS_META: Record<CaseStatus, TagMeta> = {
+  ACTIVE: { color: 'success', label: '生效' },
+  EVIDENCE_STALE: { color: 'warning', label: '待复核' },
+  DEPRECATED: { color: 'default', label: '已废弃' },
+};
+
+/** t_kb_eval_case.source Tag meta (M4b-CONTRACTS.md section 1). */
+export const CASE_SOURCE_META: Record<CaseSource, TagMeta> = {
+  MANUAL: { color: 'default', label: '手动标注' },
+  DEBUG_PAGE: { color: 'processing', label: '检索调试收录' },
+  IMPORTED: { color: 'cyan', label: '导入' },
+};
+
+/** t_kb_eval_run.status Tag meta (M4b-CONTRACTS.md sections 1/3.1). */
+export const RUN_STATUS_META: Record<RunStatus, TagMeta> = {
+  PENDING: { color: 'default', label: '待执行' },
+  RUNNING: { color: 'processing', label: '执行中' },
+  SUCCESS: { color: 'success', label: '成功' },
+  FAILED: { color: 'error', label: '失败' },
+};
+
+/** Run config matrix mode Tag meta (M4b-CONTRACTS.md section 3.1). */
+export const EVAL_MODE_META: Record<EvalMode, TagMeta> = {
+  BM25_ONLY: { color: 'gold', label: 'BM25 单路' },
+  VECTOR_ONLY: { color: 'geekblue', label: '向量单路' },
+  HYBRID: { color: 'processing', label: '混合检索' },
+  HYBRID_RERANK: { color: 'volcano', label: '混合+重排' },
+};
+
+/**
+ * Report metric grouping Tag meta (M4b-CONTRACTS.md section 3.3: "全体/span级/文档级/单轮/多轮").
+ * Not one of the four backend enums the M4b contract names explicitly, but routed through the
+ * same metaOf defense since the group key still originates from a run's server-computed metrics
+ * JSON.
+ */
+export const METRIC_GROUP_META: Record<MetricGroupKey, TagMeta> = {
+  all: { color: 'default', label: '全体' },
+  span: { color: 'blue', label: 'span 级' },
+  document: { color: 'purple', label: '文档级' },
+  single_turn: { color: 'default', label: '单轮' },
+  multi_turn: { color: 'default', label: '多轮' },
 };
 
 /** Tag metadata shape shared by every enum lookup table in this module. */

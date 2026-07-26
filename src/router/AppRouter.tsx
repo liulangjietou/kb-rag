@@ -4,6 +4,7 @@ import { ModelStatusProvider } from '../context/ModelStatusContext';
 import MainLayout from '../layout/MainLayout';
 import ChangePasswordPage from '../pages/ChangePasswordPage';
 import LoginPage from '../pages/LoginPage';
+import EvalCenterPage from '../pages/eval/EvalCenterPage';
 import KbDetailPage from '../pages/kb/KbDetailPage';
 import KbListPage from '../pages/kb/KbListPage';
 import SearchPage from '../pages/search/SearchPage';
@@ -31,6 +32,7 @@ export default function AppRouter() {
             <Route path="/kb" element={<KbListPage />} />
             <Route path="/kb/:kbId" element={<KbDetailPage />} />
             <Route path="/search" element={<SearchPage />} />
+            <Route path="/eval" element={<EvalCenterPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
         </Route>

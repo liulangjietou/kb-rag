@@ -573,7 +573,9 @@ export interface DocumentVersion {
 /**
  * GET /api/v1/documents/{docId}/versions/{versionId}/activate-impact response (M4a-CONTRACTS.md
  * section 1.2): pre-flight check surfaced in the activation confirm dialog.
- * affected_eval_case_count is a placeholder that always returns 0 in M4a (eval sets ship in M4b).
+ * affected_eval_case_count was a placeholder that always returned 0 in M4a; M4b-CONTRACTS.md
+ * section 0 fills it in with the real count of span-level eval cases anchored to this doc_id that
+ * will flip to EVIDENCE_STALE once this version becomes active.
  */
 export interface ActivateImpact {
   stale_annotation_count: number;
@@ -664,4 +666,291 @@ export interface MergeChunksRequest {
 /** POST /api/v1/chunks/{chunkId}/split request body (M4a-CONTRACTS.md section 2.1). */
 export interface SplitChunkRequest {
   split_offsets: number[];
+}
+
+// ---------------------------------------------------------------------------
+// Evaluation center (M4b-CONTRACTS.md sections 1/2/3)
+// ---------------------------------------------------------------------------
+
+/** t_kb_eval_case.anchor_type (M4b-CONTRACTS.md section 1). */
+export type AnchorType = 'SPAN' | 'DOCUMENT';
+
+/**
+ * t_kb_eval_case.status (M4b-CONTRACTS.md section 1): unrelated to M4a's Annotation.inherit_status
+ * despite the similar naming -- do not reuse INHERIT_STATUS_META for this enum.
+ */
+export type CaseStatus = 'ACTIVE' | 'EVIDENCE_STALE' | 'DEPRECATED';
+
+/** t_kb_eval_case.source (M4b-CONTRACTS.md section 1). */
+export type CaseSource = 'MANUAL' | 'DEBUG_PAGE' | 'IMPORTED';
+
+/** t_kb_eval_run.status (M4b-CONTRACTS.md section 1). */
+export type RunStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
+
+/** Run config matrix mode (M4b-CONTRACTS.md section 3.1), maps to existing retrieval parameters server-side. */
+export type EvalMode = 'BM25_ONLY' | 'VECTOR_ONLY' | 'HYBRID' | 'HYBRID_RERANK';
+
+/** Report grouping key (M4b-CONTRACTS.md section 3.3: "分组输出：全体/span级/文档级/单轮/多轮"). */
+export type MetricGroupKey = 'all' | 'span' | 'document' | 'single_turn' | 'multi_turn';
+
+/**
+ * t_kb_eval_case.evidences[] element (M4b-CONTRACTS.md section 1): `span` is null/empty when
+ * anchor_type=DOCUMENT. `annotated_version_id` is filled server-side from the doc's active version
+ * at write time and is never supplied by the client.
+ */
+export interface EvalCaseEvidence {
+  doc_id: string;
+  span: string | null;
+  annotated_version_id: string | null;
+}
+
+/** Client-submitted evidence shape (create/edit/recheck request bodies), see M4b-CONTRACTS.md section 2. */
+export interface EvalCaseEvidenceInput {
+  doc_id: string;
+  span?: string;
+}
+
+/**
+ * t_kb_eval_dataset row, extended with the list view's derived "最近一次 run 摘要"
+ * (M4b-CONTRACTS.md section 2 dataset list bullet).
+ * ASSUMPTION: the exact JSON key/shape of the run summary embedded in the list response is not
+ * spelled out by the contract beyond "最近一次 run 摘要"; modelled as a minimal
+ * {run_id, status, mode, finished_at} so the dataset table can show a status Tag without a
+ * second round trip per row.
+ */
+export interface EvalDatasetRunSummary {
+  run_id: string;
+  status: RunStatus;
+  mode: EvalMode | null;
+  finished_at: string | null;
+}
+
+export interface EvalDataset {
+  dataset_id: string;
+  kb_id: string;
+  name: string;
+  description: string | null;
+  dataset_revision: number;
+  case_count: number;
+  last_run: EvalDatasetRunSummary | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** POST /api/v1/kb/{kbId}/eval-datasets request body (M4b-CONTRACTS.md section 2). */
+export interface CreateEvalDatasetRequest {
+  name: string;
+  description?: string;
+}
+
+/** t_kb_eval_case row (M4b-CONTRACTS.md section 1). */
+export interface EvalCase {
+  case_id: string;
+  dataset_id: string;
+  query: string;
+  messages: ChatMessage[] | null;
+  expected_answer: string | null;
+  anchor_type: AnchorType;
+  evidences: EvalCaseEvidence[];
+  status: CaseStatus;
+  source: CaseSource;
+  note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * POST /api/v1/eval-datasets/{datasetId}/cases request body (M4b-CONTRACTS.md section 2); also
+ * reused as the PUT /api/v1/eval-cases/{caseId} edit body (same shape per the contract's "编辑"
+ * bullet, no separate schema given).
+ */
+export interface CreateEvalCaseRequest {
+  query: string;
+  messages?: ChatMessage[];
+  expected_answer?: string;
+  anchor_type: AnchorType;
+  evidences: EvalCaseEvidenceInput[];
+  note?: string;
+}
+
+export type UpdateEvalCaseRequest = CreateEvalCaseRequest;
+
+/** POST /api/v1/eval-cases/{caseId}/recheck request body (M4b-CONTRACTS.md section 2). */
+export type RecheckCaseAction = 'REANCHOR' | 'DEPRECATE';
+
+export interface RecheckCaseRequest {
+  action: RecheckCaseAction;
+  /** Required for REANCHOR (the case's full replacement evidence list); omitted for DEPRECATE. */
+  evidences?: EvalCaseEvidenceInput[];
+}
+
+/** POST /api/v1/eval-datasets/{datasetId}/cases/from-retrieval request body (M4b-CONTRACTS.md section 2). */
+export interface CreateEvalCaseFromRetrievalRequest {
+  query: string;
+  messages?: ChatMessage[];
+  chunk_ids: string[];
+  /** Omit to let the server auto-detect (image chunk_type -> DOCUMENT); pass 'DOCUMENT' to force it. */
+  anchor_type?: AnchorType;
+}
+
+/**
+ * One Top-3 replacement candidate for a stale evidence, surfaced by GET
+ * .../stale-cases (M4b-CONTRACTS.md section 2 "按重叠率取 Top3 候选供人工选择").
+ * ASSUMPTION: exact field names are not given by the contract; modelled with the same
+ * doc_id/span vocabulary as EvalCaseEvidence plus the source chunk_id (needed as a stable React
+ * key and for potential future traceability) and overlap_ratio (the number the Top3 ranking and
+ * the 0.5 threshold from section 3.2 are computed from).
+ */
+export interface StaleEvidenceCandidate {
+  doc_id: string;
+  chunk_id: string;
+  span: string;
+  overlap_ratio: number;
+}
+
+/**
+ * ASSUMPTION: pairs one stale (no-longer-matching) evidence of a case with its Top-3 replacement
+ * candidates; exact response shape is not given beyond the section 2 prose description.
+ */
+export interface StaleEvidenceReview {
+  evidence: EvalCaseEvidence;
+  candidates: StaleEvidenceCandidate[];
+}
+
+/** GET /api/v1/eval-datasets/{datasetId}/stale-cases response item (M4b-CONTRACTS.md section 2). */
+export interface StaleCaseItem {
+  case: EvalCase;
+  stale_evidences: StaleEvidenceReview[];
+}
+
+/**
+ * POST /api/v1/kb/{kbId}/eval-datasets/import-demo response (M4b-CONTRACTS.md section 2).
+ * ASSUMPTION: the contract only describes the behavior ("匹配不到的 case 跳过并在响应列出，幂等");
+ * modelled as the created/existing dataset id plus an import-count and a skipped-case reason list.
+ */
+export interface ImportDemoEvalDatasetSkippedCase {
+  case_index: number;
+  reason: string;
+}
+
+export interface ImportDemoEvalDatasetResult {
+  dataset_id: string;
+  /** true when import-demo was a no-op repeat call against an already-imported dataset. */
+  already_existed: boolean;
+  imported_case_count: number;
+  skipped: ImportDemoEvalDatasetSkippedCase[];
+}
+
+/** One run config entry, both as submitted in CreateEvalRunRequest.configs and as stored in EvalRun.retrieval_config (M4b-CONTRACTS.md section 3.1). */
+export interface EvalRunConfig {
+  label: string;
+  mode: EvalMode;
+  recall_top_k?: number;
+  top_n?: number;
+  fusion?: FusionConfig;
+  score_threshold?: number | null;
+  rewrite_enabled?: boolean;
+}
+
+export interface EvalJudgeConfig {
+  enabled: boolean;
+  model?: string;
+}
+
+/** POST /api/v1/eval-datasets/{datasetId}/runs and .../runs/estimate request body (M4b-CONTRACTS.md section 3.1). */
+export interface CreateEvalRunRequest {
+  k: number;
+  /** 1..6 entries; one run is created per entry (section 3.1). */
+  configs: EvalRunConfig[];
+  judge?: EvalJudgeConfig;
+}
+
+/**
+ * POST /api/v1/eval-datasets/{datasetId}/runs/estimate response (M4b-CONTRACTS.md section 3.4
+ * "返回预估调用次数（嵌入/重排/改写/judge 各自次数）").
+ * ASSUMPTION: field names are not spelled out beyond that prose; named to mirror the four call
+ * kinds it lists in that order.
+ */
+export interface EvalRunEstimate {
+  embedding_calls: number;
+  rerank_calls: number;
+  rewrite_calls: number;
+  judge_calls: number;
+}
+
+/** One (value, optional Wilson 95% CI) metric point (M4b-CONTRACTS.md section 3.3). CI is present only for proportion-type metrics (recall/precision/hit_rate), not MRR/NDCG. */
+export interface MetricPoint {
+  value: number;
+  ci_low?: number;
+  ci_high?: number;
+}
+
+/** The five metrics computed per K per group (M4b-CONTRACTS.md section 3.3). */
+export interface KMetricSet {
+  recall: MetricPoint;
+  precision: MetricPoint;
+  hit_rate: MetricPoint;
+  mrr: MetricPoint;
+  ndcg: MetricPoint;
+}
+
+/**
+ * t_kb_eval_run.metrics JSON (M4b-CONTRACTS.md section 3.3): keyed by group then by K (K as a
+ * string key, e.g. "5") since a run can report metrics for more than one K per group.
+ * ASSUMPTION: the contract specifies the grouping and the metric set but not the literal nesting
+ * shape; this is this implementation's best-effort structure, accessed defensively (optional
+ * chaining) everywhere it is read since the backend is not implemented yet.
+ */
+export type EvalMetrics = Partial<Record<MetricGroupKey, Record<string, KMetricSet>>>;
+
+/** t_kb_eval_run row (M4b-CONTRACTS.md section 1/3.1). */
+export interface EvalRun {
+  run_id: string;
+  dataset_id: string;
+  kb_id: string;
+  dataset_revision: number;
+  corpus_fingerprint: string;
+  retrieval_config: EvalRunConfig;
+  judge_model: string | null;
+  judge_prompt_version: string | null;
+  status: RunStatus;
+  metrics: EvalMetrics | null;
+  case_total: number;
+  case_effective: number;
+  case_stale: number;
+  case_degraded: number;
+  fail_reason: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** t_kb_eval_result row (M4b-CONTRACTS.md section 1), used by the report's per-case drill-down table. */
+export interface EvalResult {
+  result_id: string;
+  run_id: string;
+  case_id: string;
+  hit: boolean;
+  hit_rank: number | null;
+  overlap_ratios: number[];
+  recalled_chunk_ids: string[];
+  degraded: string[];
+  retry_count: number;
+  judge_score: number | null;
+  judge_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * GET /api/v1/eval-runs/compare response (M4b-CONTRACTS.md section 3.1): when comparable=false
+ * (different dataset_revision across the requested runs) `runs` is not populated and `reason`
+ * explains why; when comparable=true, `runs` carries each run's full row (including `metrics`) so
+ * the report can zip them into one side-by-side table.
+ */
+export interface EvalRunCompareResult {
+  comparable: boolean;
+  reason: string | null;
+  runs: EvalRun[];
 }

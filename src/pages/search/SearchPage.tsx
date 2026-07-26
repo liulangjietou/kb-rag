@@ -25,6 +25,7 @@ import type { FusionMode, KnowledgeBase, MetadataFilter, SearchRequest, SearchRe
 import { useModelStatus } from '../../context/ModelStatusContext';
 import { describeDegradedReason, describeThresholdApplied } from '../../utils/statusMeta';
 import AppliedInfoBar from './components/AppliedInfoBar';
+import CollectToEvalModal from './components/CollectToEvalModal';
 import RetrievalNodeCard from './components/RetrievalNodeCard';
 
 const DEFAULT_RECALL_TOP_K = 50;
@@ -80,8 +81,12 @@ export default function SearchPage() {
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [searchedQuery, setSearchedQuery] = useState('');
+  const [searchedKbId, setSearchedKbId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  // "收进评测集" selection state (M4b-CONTRACTS.md section 5), keyed by chunk_id; cleared on every new search.
+  const [selectedChunkIds, setSelectedChunkIds] = useState<string[]>([]);
+  const [collectModalOpen, setCollectModalOpen] = useState(false);
   const { modelStatus } = useModelStatus();
   const [form] = Form.useForm<SearchFormValues>();
   const fusionMode = Form.useWatch('fusion_mode', form) ?? 'rrf';
@@ -123,11 +128,19 @@ export default function SearchPage() {
       const res = await search(values.kb_id, payload);
       setResult(res);
       setSearchedQuery(values.query);
+      setSearchedKbId(values.kb_id);
+      setSelectedChunkIds([]);
       setHasSearched(true);
     } finally {
       setLoading(false);
     }
   };
+
+  const toggleChunkSelected = (chunkId: string, checked: boolean) => {
+    setSelectedChunkIds((prev) => (checked ? [...prev, chunkId] : prev.filter((id) => id !== chunkId)));
+  };
+
+  const selectedNodes = result?.nodes.filter((node) => selectedChunkIds.includes(node.chunk_id)) ?? [];
 
   const thresholdTag = result ? describeThresholdApplied(result.applied.threshold_applied_on, result.degraded) : null;
 
@@ -325,13 +338,43 @@ export default function SearchPage() {
 
       {result && <AppliedInfoBar applied={result.applied} degraded={result.degraded} originalQuery={searchedQuery} />}
 
+      {result && result.nodes.length > 0 && (
+        <Space style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }}>
+          <Typography.Text type="secondary">已选 {selectedChunkIds.length} 项</Typography.Text>
+          <Button disabled={selectedChunkIds.length === 0} onClick={() => setCollectModalOpen(true)}>
+            收进评测集
+          </Button>
+        </Space>
+      )}
+
       <Spin spinning={loading}>
         {hasSearched && result && result.nodes.length === 0 && <Empty description="未检索到相关结果" />}
         {result?.nodes.map((node, index) => (
-          <RetrievalNodeCard key={node.chunk_id} node={node} rank={index + 1} thresholdTag={thresholdTag} />
+          <RetrievalNodeCard
+            key={node.chunk_id}
+            node={node}
+            rank={index + 1}
+            thresholdTag={thresholdTag}
+            selected={selectedChunkIds.includes(node.chunk_id)}
+            onSelectChange={(checked) => toggleChunkSelected(node.chunk_id, checked)}
+          />
         ))}
         {!hasSearched && <Empty description="请选择知识库并输入检索内容开始调试" />}
       </Spin>
+
+      {searchedKbId && (
+        <CollectToEvalModal
+          open={collectModalOpen}
+          kbId={searchedKbId}
+          query={searchedQuery}
+          selectedNodes={selectedNodes}
+          onClose={() => setCollectModalOpen(false)}
+          onCollected={() => {
+            setCollectModalOpen(false);
+            setSelectedChunkIds([]);
+          }}
+        />
+      )}
     </div>
   );
 }

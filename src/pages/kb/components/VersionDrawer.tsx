@@ -311,6 +311,13 @@ export default function VersionDrawer({ doc, onClose, onActivated }: VersionDraw
                 message={`切换后将有 ${impactModal.impact.stale_annotation_count} 处人工标注未继承/未重做`}
               />
             )}
+            {impactModal.impact.affected_eval_case_count > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                message={`切换后将有 ${impactModal.impact.affected_eval_case_count} 条评测 case 进入待复核（evidence_stale）`}
+              />
+            )}
           </Space>
         )}
       </Modal>

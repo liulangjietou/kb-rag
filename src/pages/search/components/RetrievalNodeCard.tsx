@@ -1,4 +1,4 @@
-import { Card, Collapse, Image, List, Space, Tag, Typography } from 'antd';
+import { Card, Checkbox, Collapse, Image, List, Space, Tag, Typography } from 'antd';
 import type { RetrievalChildHit, RetrievalNode } from '../../../api/types';
 import { formatEpochMillis, formatScore } from '../../../utils/format';
 import { CHUNK_TYPE_META, RETRIEVAL_SOURCE_META, SCORE_TYPE_META, metaOf } from '../../../utils/statusMeta';
@@ -8,6 +8,12 @@ interface RetrievalNodeCardProps {
   rank: number;
   /** Shared "threshold applied on" tag resolved once per search response (see AppliedInfoBar). */
   thresholdTag: { color: string; label: string } | null;
+  /**
+   * M4b-CONTRACTS.md section 5 "收进评测集": when set, renders a selection checkbox so the page
+   * can collect a subset of result cards into an eval-dataset case (POST cases/from-retrieval).
+   */
+  selected?: boolean;
+  onSelectChange?: (checked: boolean) => void;
 }
 
 /** metadata keys shown as "各路原始分/归一化分/fused 分/rerank 分" tags, in display order. */
@@ -40,7 +46,7 @@ function RouteScoreTags({ source }: { source: Record<string, unknown> }) {
 /** One retrieval result card: content + score/score_type/retrieval_source tags (M1-CONTRACTS.md
  * section 5), extended with M2's per-route/normalized/fused/rerank scores, the threshold-applied
  * tag, and (parent/child mode) an expandable list of the child chunks merged into this node. */
-export default function RetrievalNodeCard({ node, rank, thresholdTag }: RetrievalNodeCardProps) {
+export default function RetrievalNodeCard({ node, rank, thresholdTag, selected, onSelectChange }: RetrievalNodeCardProps) {
   const scoreTypeMeta = metaOf(SCORE_TYPE_META, node.score_type);
   const sourceMeta = metaOf(RETRIEVAL_SOURCE_META, node.retrieval_source);
   const chunkTypeMeta = metaOf(CHUNK_TYPE_META, node.chunk_type);
@@ -51,6 +57,9 @@ export default function RetrievalNodeCard({ node, rank, thresholdTag }: Retrieva
   return (
     <Card size="small" style={{ marginBottom: 12 }}>
       <Space wrap style={{ marginBottom: 8 }}>
+        {onSelectChange && (
+          <Checkbox checked={!!selected} onChange={(e) => onSelectChange(e.target.checked)} />
+        )}
         <Tag>#{rank}</Tag>
         <Tag color="blue">score: {formatScore(node.score)}</Tag>
         <Tag color={scoreTypeMeta.color}>{scoreTypeMeta.label}</Tag>

@@ -1,4 +1,4 @@
-import { DatabaseOutlined, LogoutOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
+import { DatabaseOutlined, ExperimentOutlined, LogoutOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import { Alert, Layout, Menu, Space, Typography } from 'antd';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
@@ -9,6 +9,7 @@ const { Header, Sider, Content } = Layout;
 const MENU_ITEMS = [
   { key: '/kb', icon: <DatabaseOutlined />, label: '知识库' },
   { key: '/search', icon: <SearchOutlined />, label: '检索调试' },
+  { key: '/eval', icon: <ExperimentOutlined />, label: '评测中心' },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
 
