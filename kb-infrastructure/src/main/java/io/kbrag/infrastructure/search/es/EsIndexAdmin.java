@@ -90,11 +90,18 @@ public class EsIndexAdmin {
     private void pointAliasAtSingleIndex(IndexSpec spec) throws IOException {
         String alias = spec.getAliasName();
         String target = spec.getPhysicalIndexName();
-        List<String> staleIndices = client.indices()
-                .getAlias(b -> b.name(alias).ignoreUnavailable(true))
-                .result().keySet().stream()
-                .filter(index -> !index.equals(target))
-                .toList();
+        // A brand new knowledge base has no alias yet, and get_alias answers 404 for a missing alias
+        // rather than an empty result - ignoreUnavailable only covers missing indices. Asking whether
+        // the alias exists first keeps the "nothing to detach" case on the normal path instead of
+        // turning the first index creation of every new knowledge base into a failure.
+        List<String> staleIndices = List.of();
+        if (client.indices().existsAlias(b -> b.name(alias)).value()) {
+            staleIndices = client.indices()
+                    .getAlias(b -> b.name(alias))
+                    .result().keySet().stream()
+                    .filter(index -> !index.equals(target))
+                    .toList();
+        }
 
         List<Action> actions = new ArrayList<>(staleIndices.size() + 1);
         for (String stale : staleIndices) {
