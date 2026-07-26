@@ -89,9 +89,9 @@ public class RetrievalService {
     private static final String META_CHUNK_SEQ = "chunk_seq";
     private static final String META_CHILD_IDS = "child_ids";
     private static final String META_DISABLED_CHILD_IDS = "disabled_child_ids";
-    private static final String META_CHILDREN = "children";
+    private static final String META_CHILDREN = RetrievalMetadataKeys.CHILDREN;
     private static final String META_CHILD_CHUNK_ID = "chunk_id";
-    private static final String META_CHILD_CONTENT = "content";
+    private static final String META_CHILD_CONTENT = RetrievalMetadataKeys.CHILD_CONTENT;
     private static final String META_CHILD_SCORE = "score";
     private static final String META_CHILD_SCORE_TYPE = "score_type";
 
@@ -138,7 +138,7 @@ public class RetrievalService {
         List<String> visibleVersionIds = visibleVersionIds(kbId);
         if (CollectionUtils.isEmpty(visibleVersionIds)) {
             log.info("no active document version, kbId={}", kbId);
-            degradeMonitor.record(!degraded.isEmpty());
+            recordDegradation(!degraded.isEmpty());
             return new SearchOutcome(List.of(), degraded, applied(effectiveQuery, settings,
                     ThresholdTarget.NONE.code()));
         }
@@ -150,10 +150,16 @@ public class RetrievalService {
                 .metadataFilter(command.getMetadataFilter())
                 .build();
 
-        boolean vectorRouteRan = embeddingProvider.isConfigured();
+        // Both routes default to enabled; only the evaluation runner ever sets one of them to false, to
+        // realise a single route configuration of its matrix even once every model is configured.
+        boolean bm25RouteRequested = !Boolean.FALSE.equals(command.getBm25RouteEnabled());
+        boolean vectorRouteRequested = !Boolean.FALSE.equals(command.getVectorRouteEnabled());
+        boolean vectorRouteRan = vectorRouteRequested && embeddingProvider.isConfigured();
         Map<RetrievalSource, List<ScoredChunk>> routeResults = recall(kbId, effectiveQuery, filter,
-                settings.getRecallTopK(), vectorRouteRan);
-        if (!vectorRouteRan) {
+                settings.getRecallTopK(), bm25RouteRequested, vectorRouteRan);
+        if (!vectorRouteRan && vectorRouteRequested) {
+            // A route that was never asked to run is not a degradation - only report the marker when the
+            // vector route was wanted (implicitly or explicitly) and could not run.
             addMarker(degraded, DegradedReason.VECTOR_ROUTE_UNAVAILABLE.code());
         }
 
@@ -190,8 +196,23 @@ public class RetrievalService {
                         + "units={}, returned={}, rerank={}, degraded={}",
                 kbId, settings.getRecallTopK(), settings.getTopN(), settings.getFusion().getMode().code(),
                 candidates.size(), units.size(), nodes.size(), rerankApplied, degraded);
-        degradeMonitor.record(!degraded.isEmpty());
+        recordDegradation(!degraded.isEmpty());
         return new SearchOutcome(nodes, degraded, applied(effectiveQuery, settings, decision.appliedOn()));
+    }
+
+    /**
+     * Feeds the production degradation monitor, unless this call is an offline evaluation run.
+     *
+     * <p>An evaluation batch can carry hundreds of calls in the same observation window the production
+     * alert reads; letting them in would let a batch of judgments trip an alert meant for traffic
+     * nobody actually served.
+     *
+     * @param degraded {@code true} when this call carried at least one degradation marker
+     */
+    private void recordDegradation(boolean degraded) {
+        if (!OfflineExecutionContext.isOffline()) {
+            degradeMonitor.record(degraded);
+        }
     }
 
     /**
@@ -215,11 +236,14 @@ public class RetrievalService {
     }
 
     private Map<RetrievalSource, List<ScoredChunk>> recall(String kbId, String query, RetrievalFilter filter,
-                                                           int recallTopK, boolean vectorRouteRan) {
+                                                           int recallTopK, boolean bm25RouteRequested,
+                                                           boolean vectorRouteRan) {
         Map<RetrievalSource, List<ScoredChunk>> routeResults = new EnumMap<>(RetrievalSource.class);
-        routeResults.put(RetrievalSource.BM25, fulltextStore.searchBm25(
-                indexAliasManager.fulltextAlias(kbId),
-                FulltextQuery.builder().queryText(query).topK(recallTopK).filter(filter).build()));
+        if (bm25RouteRequested) {
+            routeResults.put(RetrievalSource.BM25, fulltextStore.searchBm25(
+                    indexAliasManager.fulltextAlias(kbId),
+                    FulltextQuery.builder().queryText(query).topK(recallTopK).filter(filter).build()));
+        }
         if (vectorRouteRan) {
             float[] queryVector = embeddingProvider.embed(List.of(query)).get(0);
             routeResults.put(RetrievalSource.VECTOR, vectorStore.search(

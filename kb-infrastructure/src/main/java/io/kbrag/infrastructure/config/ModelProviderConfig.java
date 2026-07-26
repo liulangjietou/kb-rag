@@ -16,6 +16,7 @@ import io.kbrag.infrastructure.provider.vision.DashScopeVisionProvider;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 /**
  * Single decision point of the zero key mode.
@@ -71,11 +72,17 @@ public class ModelProviderConfig {
     }
 
     /**
-     * Selects the chat provider implementation, currently consumed by the query rewrite stage.
+     * Selects the chat provider implementation, consumed by the query rewrite stage and by the LLM
+     * semantic split strategy.
+     *
+     * <p>{@code @Primary} since M4b: {@link #judgeChatProvider} joined the container as a second
+     * {@link ChatProvider} bean, and every collaborator that autowires the type without naming a
+     * specific bean has to keep resolving to this one.
      *
      * @param properties bound configuration
      * @return configured provider, or the unconfigured placeholder
      */
+    @Primary
     @Bean
     public ChatProvider chatProvider(KbProperties properties) {
         KbProperties.Chat config = properties.getChat();
@@ -84,7 +91,55 @@ public class ModelProviderConfig {
             return new UnconfiguredChatProvider();
         }
         log.info("chat provider configured, provider={}, model={}", config.getProvider(), config.getModel());
-        return new DashScopeChatProvider(properties);
+        return new DashScopeChatProvider(config);
+    }
+
+    /**
+     * Selects the LLM-as-judge chat provider, requirement section 4.6 "judge model independent from
+     * the generation model, to prevent a model from grading its own answer".
+     *
+     * <p>Shares the credential, base URL and timeout of {@code kb.chat} - a second provider account is
+     * not the point, an independent grader model is - and only substitutes {@code kb.eval.judge-model}
+     * when it is set; a blank value keeps grading on the same model {@link #chatProvider} uses.
+     *
+     * @param properties bound configuration
+     * @return configured provider, or the unconfigured placeholder
+     */
+    @Bean
+    public ChatProvider judgeChatProvider(KbProperties properties) {
+        KbProperties.Chat chatConfig = properties.getChat();
+        if (chatConfig.getApiKey() == null || chatConfig.getApiKey().isBlank()) {
+            log.info("judge chat provider not configured, LLM-as-judge disabled");
+            return new UnconfiguredChatProvider();
+        }
+        String judgeModel = properties.getEval().getJudgeModel();
+        String effectiveModel = judgeModel == null || judgeModel.isBlank() ? chatConfig.getModel() : judgeModel;
+        // Temperature 0 regardless of kb.chat.temperature, requirement section 4.6: a judge score has to
+        // be reproducible across two runs of the same configuration, which a creative rewrite model need
+        // not be.
+        KbProperties.Chat judgeConfig = withModelAndZeroTemperature(chatConfig, effectiveModel);
+        log.info("judge chat provider configured, model={}", judgeConfig.getModel());
+        return new DashScopeChatProvider(judgeConfig);
+    }
+
+    /**
+     * Copies a chat configuration substituting the model and forcing temperature to zero, so the judge
+     * provider can point at a different, reproducible model without a second credential set.
+     *
+     * @param source configuration to copy
+     * @param model  model name to substitute
+     * @return copy carrying the substituted model and zero temperature
+     */
+    private KbProperties.Chat withModelAndZeroTemperature(KbProperties.Chat source, String model) {
+        KbProperties.Chat copy = new KbProperties.Chat();
+        copy.setProvider(source.getProvider());
+        copy.setModel(model);
+        copy.setApiKey(source.getApiKey());
+        copy.setBaseUrl(source.getBaseUrl());
+        copy.setTimeoutMs(source.getTimeoutMs());
+        copy.setTemperature(0.0d);
+        copy.setMaxTokens(source.getMaxTokens());
+        return copy;
     }
 
     /**

@@ -15,9 +15,11 @@ import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.mapper.DocumentVersionMapper;
 import io.kbrag.domain.mapper.KnowledgeBaseMapper;
+import io.kbrag.domain.enums.SplitStrategy;
 import io.kbrag.domain.model.KbIndexConfig;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.model.ParentChildParams;
+import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.VisionProvider;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.FixedLengthTextSplitter;
@@ -65,6 +67,7 @@ public class KnowledgeBaseService {
     private final EngineChunkCleaner engineChunkCleaner;
     private final VersionFingerprintFactory fingerprintFactory;
     private final VisionProvider visionProvider;
+    private final ChatProvider chatProvider;
     private final KbProperties properties;
 
     /**
@@ -154,6 +157,7 @@ public class KnowledgeBaseService {
      */
     @Transactional(rollbackFor = Exception.class)
     public int updateIndexConfig(String kbId, KbIndexConfig config, KbRetrievalConfig retrievalConfig) {
+        requireSplitStrategyUsable(config);
         KnowledgeBase knowledgeBase = require(kbId);
         String fingerprint = configFingerprint(config);
         knowledgeBase.setIndexConfig(JsonUtil.toJson(config));
@@ -245,6 +249,33 @@ public class KnowledgeBaseService {
         }
         // Engine removal is irreversible, so it waits for the commit; see EngineChunkCleaner.
         engineChunkCleaner.removeAfterCommit(kbId, chunkIds);
+    }
+
+    /**
+     * Fast-fails a configuration that selects the LLM semantic strategy without a usable chat model,
+     * requirement section 4.3 "the strategy is not selectable without a chat model". The single gate
+     * for this rule: nothing downstream - the splitter, the pipeline - re-checks it, so a knowledge
+     * base can never end up configured for a strategy its deployment cannot run.
+     *
+     * @param config index configuration being written
+     */
+    private void requireSplitStrategyUsable(KbIndexConfig config) {
+        if (config.getSplitStrategy() == null || config.getSplitStrategy().isBlank()) {
+            return;
+        }
+        // Normalize before persisting. The column stores the raw string, so an uppercase or unknown
+        // code written verbatim would silently bypass this gate and later fall through the splitter
+        // router - the strategy would look configured while never running.
+        SplitStrategy strategy = SplitStrategy.from(config.getSplitStrategy());
+        if (strategy == null) {
+            throw BizException.invalidParam(
+                    "unknown split strategy: " + config.getSplitStrategy());
+        }
+        config.setSplitStrategy(strategy.code());
+        if (strategy == SplitStrategy.LLM_SEMANTIC && !chatProvider.isConfigured()) {
+            throw BizException.invalidParam(
+                    "the LLM semantic split strategy requires a configured chat model");
+        }
     }
 
     /**

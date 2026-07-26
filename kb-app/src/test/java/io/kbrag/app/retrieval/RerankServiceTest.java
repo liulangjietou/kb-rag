@@ -107,6 +107,23 @@ class RerankServiceTest {
     }
 
     @Test
+    void shouldHonourTheOfflineTimeoutInsteadOfTheOnlineOneDuringAnEvaluationRun() {
+        properties.getEval().setOfflineTimeoutMs(TIMEOUT_MS * 20L);
+        when(rerankProvider.isConfigured()).thenReturn(true);
+        when(rerankProvider.rerank(anyString(), any())).thenAnswer(invocation -> {
+            Thread.sleep(TIMEOUT_MS * 2L);
+            return List.of(0.9d, 0.5d, 0.1d);
+        });
+        RerankService service = newService();
+
+        RerankOutcome outcome = OfflineExecutionContext.runOffline(
+                () -> service.rerank(QUERY, DOCUMENTS, true));
+
+        assertTrue(outcome.isApplied());
+        assertNull(outcome.getDegradedReason());
+    }
+
+    @Test
     void shouldApplyTheScoresInSubmissionOrder() {
         when(rerankProvider.isConfigured()).thenReturn(true);
         when(rerankProvider.rerank(anyString(), any())).thenReturn(List.of(0.2d, 0.9d, 0.4d));

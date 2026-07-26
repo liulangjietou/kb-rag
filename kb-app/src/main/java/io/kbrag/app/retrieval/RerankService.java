@@ -41,6 +41,7 @@ public class RerankService {
 
     private final RerankProvider rerankProvider;
     private final KbProperties.Rerank config;
+    private final KbProperties.Eval evalConfig;
     private final Executor executor;
 
     public RerankService(RerankProvider rerankProvider,
@@ -48,6 +49,7 @@ public class RerankService {
                          @Qualifier(AsyncConfig.RETRIEVAL_EXECUTOR) Executor executor) {
         this.rerankProvider = rerankProvider;
         this.config = properties.getRerank();
+        this.evalConfig = properties.getEval();
         this.executor = executor;
     }
 
@@ -100,8 +102,9 @@ public class RerankService {
             return RerankOutcome.degraded(DegradedReason.RERANK_ERROR.code());
         }
 
+        long timeoutMs = effectiveTimeoutMs();
         try {
-            List<Double> scores = future.get(config.getTimeoutMs(), TimeUnit.MILLISECONDS);
+            List<Double> scores = future.get(timeoutMs, TimeUnit.MILLISECONDS);
             if (scores.size() != documents.size()) {
                 log.error("rerank returned {} scores for {} candidates, errorCode={}",
                         scores.size(), documents.size(), ErrorCode.UPSTREAM_MODEL_ERROR);
@@ -111,12 +114,22 @@ public class RerankService {
             return RerankOutcome.applied(scores);
         } catch (TimeoutException e) {
             future.cancel(true);
-            log.info("rerank timed out after {}ms, keeping the fusion order", config.getTimeoutMs());
+            log.info("rerank timed out after {}ms, keeping the fusion order", timeoutMs);
             return RerankOutcome.degraded(DegradedReason.RERANK_TIMEOUT.code());
         } catch (Exception e) {
             log.error("rerank failed, errorCode={}, candidates={}",
                     ErrorCode.UPSTREAM_MODEL_ERROR, documents.size(), e);
             return RerankOutcome.degraded(DegradedReason.RERANK_ERROR.code());
         }
+    }
+
+    /**
+     * Resolves the timeout this call should honour: the offline evaluation profile's shared budget
+     * while an evaluation run is executing on this thread, the online one otherwise.
+     *
+     * @return effective timeout in milliseconds
+     */
+    private long effectiveTimeoutMs() {
+        return OfflineExecutionContext.isOffline() ? evalConfig.getOfflineTimeoutMs() : config.getTimeoutMs();
     }
 }

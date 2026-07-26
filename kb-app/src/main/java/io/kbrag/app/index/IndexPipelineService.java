@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import io.kbrag.app.alert.TaskFailureTracker;
 import io.kbrag.app.annotation.AnnotationInheritanceService;
 import io.kbrag.app.config.AsyncConfig;
+import io.kbrag.app.eval.EvalCaseStalenessService;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
@@ -32,6 +33,7 @@ import io.kbrag.domain.model.ParsePreview;
 import io.kbrag.domain.model.ParsedDocument;
 import io.kbrag.domain.model.ProxiedContent;
 import io.kbrag.domain.model.SplitChunk;
+import io.kbrag.domain.model.SplitParams;
 import io.kbrag.domain.port.DocumentParserClient;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.ObjectStorage;
@@ -43,7 +45,7 @@ import io.kbrag.domain.service.DocumentVersionPlanner;
 import io.kbrag.domain.service.ImageChunkLinker;
 import io.kbrag.domain.service.ImagePlaceholderResolver;
 import io.kbrag.domain.service.ParentChildSplitter;
-import io.kbrag.domain.service.TextSplitter;
+import io.kbrag.domain.service.SplitterRouter;
 import io.kbrag.domain.service.VersionFingerprintFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -111,7 +113,7 @@ public class IndexPipelineService {
     private final KbTaskMapper kbTaskMapper;
     private final ObjectStorage objectStorage;
     private final DocumentParserClient parserClient;
-    private final TextSplitter textSplitter;
+    private final SplitterRouter splitterRouter;
     private final ParentChildSplitter parentChildSplitter;
     private final ChunkTextHasher chunkTextHasher;
     private final EmbeddingProvider embeddingProvider;
@@ -130,6 +132,7 @@ public class IndexPipelineService {
     private final VersionRetentionService versionRetentionService;
     private final AnnotationInheritanceService annotationInheritanceService;
     private final TaskFailureTracker taskFailureTracker;
+    private final EvalCaseStalenessService evalCaseStalenessService;
 
     /**
      * Queues a document version for indexing.
@@ -435,6 +438,7 @@ public class IndexPipelineService {
     private void activateAndFollowUp(Document document, DocumentVersion version) {
         versionActivator.activate(document, version);
         annotationInheritanceService.inherit(document, version);
+        evalCaseStalenessService.markStale(document.getDocId(), version.getVersionId());
         versionRetentionService.submit(document.getDocId());
     }
 
@@ -740,14 +744,16 @@ public class IndexPipelineService {
     private List<Chunk> splitSingleLevel(Document document, DocumentVersion version, StagedContent staged,
                                          KbIndexConfig config, boolean embeddingConfigured,
                                          boolean standaloneImage) {
-        List<SplitChunk> splitChunks = textSplitter.split(staged.proxied().getMarkdown(), config.splitParams());
+        List<SplitChunk> splitChunks = splitterRouter.resolve(config.getSplitStrategy())
+                .split(staged.proxied().getMarkdown(), config.splitParams(cacheContextOf(document, version)));
         Map<Integer, List<String>> imagesByChunk = imageChunkLinker.link(staged.proxied().getMarkdown(),
                 staged.proxied().getPlacements(), splitChunks.stream().map(SplitChunk::getContent).toList());
         List<Chunk> chunks = new ArrayList<>(splitChunks.size());
         for (int index = 0; index < splitChunks.size(); index++) {
             List<String> imageKeys = imagesByChunk.get(index);
             Chunk chunk = persistChunk(document, version, splitChunks.get(index), null, embeddingConfigured,
-                    standaloneImage ? ChunkType.IMAGE : ChunkType.TEXT, metadataOf(imageKeys));
+                    standaloneImage ? ChunkType.IMAGE : ChunkType.TEXT,
+                    metadataOf(imageKeys, splitChunks.get(index)));
             chunks.add(chunk);
         }
         return chunks;
@@ -787,19 +793,41 @@ public class IndexPipelineService {
                     ChunkType.TEXT, null);
             for (SplitChunk child : group.getChildren()) {
                 children.add(persistChunk(document, version, child, parent.getChunkId(), embeddingConfigured,
-                        ChunkType.TEXT, metadataOf(imagesByChunk.get(childIndex++))));
+                        ChunkType.TEXT, metadataOf(imagesByChunk.get(childIndex++), child)));
             }
         }
         return children;
     }
 
-    private String metadataOf(List<String> imageKeys) {
-        if (CollectionUtils.isEmpty(imageKeys)) {
-            return null;
-        }
+    /**
+     * Merges the image links a chunk carries with the title/summary/keywords the LLM semantic
+     * splitter attaches to it, requirement section 4.3.
+     *
+     * @param imageKeys  object storage keys of the images this chunk contains, may be empty
+     * @param splitChunk splitter output, {@code null} metadata for every strategy but the LLM one
+     * @return JSON metadata document, {@code null} when there is nothing to store
+     */
+    private String metadataOf(List<String> imageKeys, SplitChunk splitChunk) {
         Map<String, Object> metadata = new LinkedHashMap<>();
-        metadata.put(ChunkMetadataKeys.IMAGE_URLS, imageKeys);
-        return JsonUtil.toJson(metadata);
+        if (CollectionUtils.isNotEmpty(imageKeys)) {
+            metadata.put(ChunkMetadataKeys.IMAGE_URLS, imageKeys);
+        }
+        if (splitChunk != null && splitChunk.getMetadata() != null && !splitChunk.getMetadata().isEmpty()) {
+            metadata.putAll(splitChunk.getMetadata());
+        }
+        return metadata.isEmpty() ? null : JsonUtil.toJson(metadata);
+    }
+
+    /**
+     * Builds the LLM semantic splitter's cache coordinates for one document version.
+     *
+     * @param document document record
+     * @param version  version being built
+     * @return cache context, safe to pass to every strategy since only the LLM one reads it
+     */
+    private SplitParams.CacheContext cacheContextOf(Document document, DocumentVersion version) {
+        return new SplitParams.CacheContext(document.getKbId(), document.getDocId(),
+                version.getVersionId(), version.getContentHash());
     }
 
     private Chunk persistChunk(Document document, DocumentVersion version, SplitChunk splitChunk,

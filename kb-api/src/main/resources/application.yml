@@ -177,6 +177,13 @@ kb:
     parent-candidate-floor: ${RETRIEVAL_PARENT_CANDIDATE_FLOOR:20}
   web:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:20002,http://127.0.0.1:20002}
+  eval:
+    # Blank keeps the judge on the generation/rewrite chat model; set to grade with an independent model.
+    judge-model: ${EVAL_JUDGE_MODEL:}
+    offline-timeout-ms: ${EVAL_OFFLINE_TIMEOUT_MS:10000}
+    concurrency: ${EVAL_CONCURRENCY:4}
+    overlap-threshold: ${EVAL_OVERLAP_THRESHOLD:0.5}
+    degraded-retry: ${EVAL_DEGRADED_RETRY:2}
 
 logging:
   level:

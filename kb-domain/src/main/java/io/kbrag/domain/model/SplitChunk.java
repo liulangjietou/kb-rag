@@ -1,8 +1,9 @@
 package io.kbrag.domain.model;
 
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.ToString;
+
+import java.util.Map;
 
 /**
  * Output of a splitter: one chunk with its position and estimated token count.
@@ -10,7 +11,6 @@ import lombok.ToString;
  * @author owlzhangfq@gmail.com
  */
 @Getter
-@AllArgsConstructor
 @ToString(exclude = "content")
 public class SplitChunk {
 
@@ -22,4 +22,21 @@ public class SplitChunk {
 
     /** Estimated token count of {@link #content}. */
     private final int tokenCount;
+
+    /**
+     * Title, summary and keywords the LLM semantic splitter produces alongside a chunk, merged into
+     * {@code t_kb_chunk.metadata}; {@code null} for every other strategy.
+     */
+    private final Map<String, Object> metadata;
+
+    public SplitChunk(int seq, String content, int tokenCount) {
+        this(seq, content, tokenCount, null);
+    }
+
+    public SplitChunk(int seq, String content, int tokenCount, Map<String, Object> metadata) {
+        this.seq = seq;
+        this.content = content;
+        this.tokenCount = tokenCount;
+        this.metadata = metadata;
+    }
 }

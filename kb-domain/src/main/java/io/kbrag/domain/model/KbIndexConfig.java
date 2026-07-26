@@ -139,6 +139,17 @@ public class KbIndexConfig {
      * @return validated split parameters
      */
     public SplitParams splitParams() {
-        return SplitParams.of(chunkMaxTokens, chunkOverlap);
+        return splitParams(null);
+    }
+
+    /**
+     * Split parameters of the single level pipeline, carrying the LLM semantic splitter's object
+     * storage cache coordinates.
+     *
+     * @param cacheContext cache coordinates, {@code null} when the caller does not need caching
+     * @return validated split parameters
+     */
+    public SplitParams splitParams(SplitParams.CacheContext cacheContext) {
+        return SplitParams.of(chunkMaxTokens, chunkOverlap, cacheContext);
     }
 }

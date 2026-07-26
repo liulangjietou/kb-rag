@@ -155,6 +155,37 @@ class RetrievalServiceTest {
     }
 
     @Test
+    void shouldForceTheVectorRouteOffForBm25OnlyEvenWhenEmbeddingIsConfigured() {
+        // Requirement section 4.6: the evaluation runner's BM25_ONLY configuration must stay single
+        // route once a zero key deployment gets an embedding provider, otherwise a four way comparison
+        // could not tell "vector off" apart from "vector on" the moment a key is configured.
+        givenDualRoute();
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_2", "bm25 hit", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID,
+                command().vectorRouteEnabled(false).build());
+
+        assertEquals(1, outcome.getNodes().size());
+        assertEquals("ck_2", outcome.getNodes().get(0).getChunkId());
+        verify(vectorStore, never()).search(anyString(), any());
+        // Explicitly turning a route off on purpose is not a degradation.
+        assertFalse(outcome.getDegraded().contains(DegradedReason.VECTOR_ROUTE_UNAVAILABLE.code()));
+    }
+
+    @Test
+    void shouldForceTheBm25RouteOffForVectorOnly() {
+        givenDualRoute();
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_1", "vector hit", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID,
+                command().bm25RouteEnabled(false).build());
+
+        assertEquals(1, outcome.getNodes().size());
+        assertEquals("ck_1", outcome.getNodes().get(0).getChunkId());
+        verify(fulltextStore, never()).searchBm25(anyString(), any());
+    }
+
+    @Test
     void shouldExposeNormalisedScoresInWeightedMode() {
         givenDualRoute();
         when(chunkMapper.selectList(any())).thenReturn(List.of(

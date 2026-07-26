@@ -28,9 +28,17 @@ public final class SplitParams {
     /** Estimated tokens replayed from the tail of the previous chunk. */
     private final int overlapTokens;
 
-    private SplitParams(int maxTokens, int overlapTokens) {
+    /**
+     * Object storage cache coordinates, only read by {@link io.kbrag.domain.service.LlmSemanticTextSplitter}
+     * so a fresh window is not re-priced on every rebuild of the same document; {@code null} for every
+     * other strategy and for a caller that does not need caching, for example a unit test.
+     */
+    private final CacheContext cacheContext;
+
+    private SplitParams(int maxTokens, int overlapTokens, CacheContext cacheContext) {
         this.maxTokens = maxTokens;
         this.overlapTokens = overlapTokens;
+        this.cacheContext = cacheContext;
     }
 
     /**
@@ -42,13 +50,27 @@ public final class SplitParams {
      * @return validated parameters
      */
     public static SplitParams of(int maxTokens, int overlapTokens) {
+        return of(maxTokens, overlapTokens, null);
+    }
+
+    /**
+     * Builds the parameter set carrying the object storage cache coordinates of the LLM semantic
+     * splitter.
+     *
+     * @param maxTokens     maximum estimated tokens per chunk, must be positive
+     * @param overlapTokens overlap in estimated tokens, must be zero or positive and below
+     *                      {@code maxTokens}
+     * @param cacheContext  cache coordinates, {@code null} disables caching for this call
+     * @return validated parameters
+     */
+    public static SplitParams of(int maxTokens, int overlapTokens, CacheContext cacheContext) {
         if (maxTokens <= 0) {
             throw new IllegalArgumentException("maxTokens must be positive");
         }
         if (overlapTokens < 0 || overlapTokens >= maxTokens) {
             throw new IllegalArgumentException("overlapTokens must be within [0, maxTokens)");
         }
-        return new SplitParams(maxTokens, overlapTokens);
+        return new SplitParams(maxTokens, overlapTokens, cacheContext);
     }
 
     /**
@@ -57,6 +79,17 @@ public final class SplitParams {
      * @return 600 token chunks with 100 token overlap
      */
     public static SplitParams defaults() {
-        return new SplitParams(DEFAULT_MAX_TOKENS, DEFAULT_OVERLAP_TOKENS);
+        return new SplitParams(DEFAULT_MAX_TOKENS, DEFAULT_OVERLAP_TOKENS, null);
+    }
+
+    /**
+     * Object storage coordinates of one document version's split cache.
+     *
+     * @param kbId       owning knowledge base business id
+     * @param docId      owning document business id
+     * @param versionId  document version business id
+     * @param contentHash SHA-256 of the version's original byte stream, the identity half of the cache key
+     */
+    public record CacheContext(String kbId, String docId, String versionId, String contentHash) {
     }
 }

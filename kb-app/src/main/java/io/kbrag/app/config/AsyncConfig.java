@@ -34,6 +34,9 @@ public class AsyncConfig {
     /** Bean name of the pool the timeout guarded retrieval stages run on. */
     public static final String RETRIEVAL_EXECUTOR = "retrievalTaskExecutor";
 
+    /** Bean name referenced by the {@code @Async} annotation of the evaluation run submission. */
+    public static final String EVAL_EXECUTOR = "evalTaskExecutor";
+
     private static final int CORE_POOL_SIZE = 2;
     private static final int MAX_POOL_SIZE = 4;
     private static final int QUEUE_CAPACITY = 200;
@@ -43,6 +46,16 @@ public class AsyncConfig {
     private static final int RETRIEVAL_MAX_POOL_SIZE = 16;
     private static final int RETRIEVAL_QUEUE_CAPACITY = 0;
     private static final String RETRIEVAL_THREAD_PREFIX = "kb-retrieval-";
+
+    /**
+     * One run submission can create up to 6 runs and each is handed to this pool independently, so a
+     * small size is enough: the actual per-case concurrency of one run is its own bounded pool sized
+     * by {@code kb.eval.concurrency}, created and torn down inside the run's own execution.
+     */
+    private static final int EVAL_CORE_POOL_SIZE = 2;
+    private static final int EVAL_MAX_POOL_SIZE = 6;
+    private static final int EVAL_QUEUE_CAPACITY = 50;
+    private static final String EVAL_THREAD_PREFIX = "kb-eval-";
 
     /**
      * Creates the indexing executor.
@@ -77,6 +90,23 @@ public class AsyncConfig {
         executor.setMaxPoolSize(RETRIEVAL_MAX_POOL_SIZE);
         executor.setQueueCapacity(RETRIEVAL_QUEUE_CAPACITY);
         executor.setThreadNamePrefix(RETRIEVAL_THREAD_PREFIX);
+        executor.setTaskDecorator(requestIdPropagatingDecorator());
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * Creates the executor that runs one evaluation run's execution off the submitting request.
+     *
+     * @return executor used by the evaluation run submission
+     */
+    @Bean(EVAL_EXECUTOR)
+    public Executor evalTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(EVAL_CORE_POOL_SIZE);
+        executor.setMaxPoolSize(EVAL_MAX_POOL_SIZE);
+        executor.setQueueCapacity(EVAL_QUEUE_CAPACITY);
+        executor.setThreadNamePrefix(EVAL_THREAD_PREFIX);
         executor.setTaskDecorator(requestIdPropagatingDecorator());
         executor.initialize();
         return executor;

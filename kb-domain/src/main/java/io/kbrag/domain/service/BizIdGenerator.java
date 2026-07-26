@@ -91,6 +91,42 @@ public class BizIdGenerator {
         return generate(KbConstants.ANNOTATION_ID_PREFIX);
     }
 
+    /**
+     * Generates an evaluation data set id.
+     *
+     * @return prefixed identifier
+     */
+    public String evalDatasetId() {
+        return generate(KbConstants.EVAL_DATASET_ID_PREFIX);
+    }
+
+    /**
+     * Generates an evaluation case id.
+     *
+     * @return prefixed identifier
+     */
+    public String evalCaseId() {
+        return generate(KbConstants.EVAL_CASE_ID_PREFIX);
+    }
+
+    /**
+     * Generates an evaluation run id.
+     *
+     * @return prefixed identifier
+     */
+    public String evalRunId() {
+        return generate(KbConstants.EVAL_RUN_ID_PREFIX);
+    }
+
+    /**
+     * Generates an evaluation result row id.
+     *
+     * @return prefixed identifier
+     */
+    public String evalResultId() {
+        return generate(KbConstants.EVAL_RESULT_ID_PREFIX);
+    }
+
     private String generate(String prefix) {
         String random = UUID.randomUUID().toString().replace("-", "").substring(0, RANDOM_LENGTH);
         return prefix + KbConstants.ID_SEPARATOR + random;

@@ -6,9 +6,9 @@ import io.kbrag.app.document.DocumentVersionService;
 /**
  * Pre-flight answer of the version switch confirmation dialog.
  *
- * <p>{@code affected_eval_case_count} is present and always zero: evaluation sets belong to a later
- * milestone, and shipping the field now means the console never has to change its confirmation dialog
- * when they arrive.
+ * <p>{@code affected_eval_case_count} counts the span anchored evaluation cases whose evidence would
+ * no longer match once the target version is activated (requirement section 4.5); the confirmation
+ * dialog shows it so an operator knows the switch will send those cases into evidence review.
  *
  * @param rollbackMode          {@code INSTANT} or {@code REBUILD}
  * @param needsRebuild          convenience flag mirroring {@code rollbackMode}

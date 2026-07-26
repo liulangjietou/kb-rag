@@ -28,6 +28,9 @@ import java.util.regex.PatternSyntaxException;
  * {@code index_config}, all three change what a build produces, and one write is what keeps the recomputed
  * fingerprint consistent with the whole stored document.
  *
+ * @param splitStrategy        splitter strategy code, {@code null} keeps the stored one; validated
+ *                             against model availability by the service, not here (single fast-fail
+ *                             gate, requirement section 4.3)
  * @param chunkMaxTokens       maximum estimated tokens per chunk
  * @param chunkOverlap         overlap in estimated tokens
  * @param parentChild          two level splitting parameters
@@ -41,6 +44,7 @@ import java.util.regex.PatternSyntaxException;
  * @author owlzhangfq@gmail.com
  */
 public record UpdateIndexConfigRequest(
+        @JsonProperty("split_strategy") String splitStrategy,
         @JsonProperty("chunk_max_tokens") @NotNull @Min(1) Integer chunkMaxTokens,
         @JsonProperty("chunk_overlap") @NotNull @Min(0) Integer chunkOverlap,
         @JsonProperty("parent_child") ParentChildRequest parentChild,
@@ -78,8 +82,11 @@ public record UpdateIndexConfigRequest(
      */
     public KbIndexConfig toIndexConfig(KbIndexConfig current) {
         KbIndexConfig config = new KbIndexConfig();
-        config.setSplitStrategy(current.getSplitStrategy() == null
-                ? FixedLengthTextSplitter.STRATEGY_CODE : current.getSplitStrategy());
+        String resolvedStrategy = splitStrategy != null && !splitStrategy.isBlank()
+                ? splitStrategy.trim()
+                : (current.getSplitStrategy() == null ? FixedLengthTextSplitter.STRATEGY_CODE
+                        : current.getSplitStrategy());
+        config.setSplitStrategy(resolvedStrategy);
         config.setEmbeddingModel(current.getEmbeddingModel());
         config.setChunkMaxTokens(chunkMaxTokens);
         config.setChunkOverlap(chunkOverlap);

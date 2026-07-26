@@ -55,4 +55,22 @@ public class RetrievalCommand {
 
     /** Caller supplied narrowing predicate. */
     private final MetadataFilter metadataFilter;
+
+    /**
+     * Forces the BM25 route off regardless of what a query would otherwise recall.
+     *
+     * <p>Not reachable from the public search API - only the evaluation runner sets it, to realise
+     * {@code VECTOR_ONLY} in a configuration matrix (requirement section 4.6) even once an embedding
+     * provider is configured, when the BM25 route would otherwise still run.
+     */
+    private final Boolean bm25RouteEnabled;
+
+    /**
+     * Forces the vector route off regardless of embedding provider availability.
+     *
+     * <p>Same rationale as {@link #bm25RouteEnabled}, the other direction: it is what {@code BM25_ONLY}
+     * needs once an embedding provider is configured, so the two single route evaluation modes stay
+     * single route after a zero key deployment gets its embedding model.
+     */
+    private final Boolean vectorRouteEnabled;
 }

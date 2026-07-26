@@ -53,8 +53,18 @@ public class DashScopeChatProvider implements ChatProvider {
     private final KbProperties.Chat config;
     private final RestClient restClient;
 
-    public DashScopeChatProvider(KbProperties properties) {
-        this.config = properties.getChat();
+    /**
+     * Builds a chat provider from one chat configuration.
+     *
+     * <p>Takes the sub-configuration directly, not the whole {@link KbProperties} tree, which is what
+     * lets a second bean serve the LLM-as-judge stage with an independent model (requirement section
+     * 4.6 "judge model configured independently") while sharing the same credential and transport as
+     * the query rewrite one - only {@code model} ever needs to differ between the two instances.
+     *
+     * @param config chat sub-configuration
+     */
+    public DashScopeChatProvider(KbProperties.Chat config) {
+        this.config = config;
         this.restClient = DashScopeHttp.client(config.getBaseUrl(), config.getApiKey(), config.getTimeoutMs());
     }
 

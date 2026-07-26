@@ -1,6 +1,5 @@
 package io.kbrag.domain.model;
 
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.ToString;
 
@@ -13,7 +12,6 @@ import lombok.ToString;
  * @author owlzhangfq@gmail.com
  */
 @Getter
-@AllArgsConstructor
 @ToString(exclude = "content")
 public class ChatMessage {
 
@@ -31,6 +29,21 @@ public class ChatMessage {
 
     /** Turn text. */
     private final String content;
+
+    /**
+     * Jackson creator. The class only carried a lombok all-args constructor, which serializes fine
+     * but cannot be deserialized - the first reader was the evaluation runner loading multi turn
+     * cases back from the database, and every such run failed on parse.
+     *
+     * @param role    turn role
+     * @param content turn text
+     */
+    @com.fasterxml.jackson.annotation.JsonCreator
+    public ChatMessage(@com.fasterxml.jackson.annotation.JsonProperty("role") String role,
+                       @com.fasterxml.jackson.annotation.JsonProperty("content") String content) {
+        this.role = role;
+        this.content = content;
+    }
 
     /**
      * Builds a user turn.

@@ -147,6 +147,26 @@ class RewriteServiceTest {
     }
 
     @Test
+    void shouldHonourTheOfflineTimeoutInsteadOfTheOnlineOneDuringAnEvaluationRun() {
+        // Requirement section 4.6 "offline execution profile": a call that is slower than the online
+        // budget but still faster than the offline one must not be reported as timed out while an
+        // evaluation run is executing on this thread.
+        properties.getEval().setOfflineTimeoutMs(TIMEOUT_MS * 20);
+        when(chatProvider.isConfigured()).thenReturn(true);
+        when(chatProvider.complete(anyString(), anyList())).thenAnswer(invocation -> {
+            Thread.sleep(TIMEOUT_MS * 2);
+            return "rewritten offline";
+        });
+        RewriteService service = newService();
+
+        RewriteOutcome outcome = OfflineExecutionContext.runOffline(
+                () -> service.rewrite(QUERY, List.of(), true));
+
+        assertEquals("rewritten offline", outcome.getQuery());
+        assertNull(outcome.getDegradedReason());
+    }
+
+    @Test
     void shouldServeTheSameConversationFromCache() {
         when(chatProvider.isConfigured()).thenReturn(true);
         when(chatProvider.complete(anyString(), anyList())).thenReturn("resolved query");

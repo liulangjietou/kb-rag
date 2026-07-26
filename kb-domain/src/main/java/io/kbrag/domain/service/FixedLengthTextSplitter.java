@@ -4,6 +4,7 @@ import io.kbrag.domain.model.SplitChunk;
 import io.kbrag.domain.model.SplitParams;
 import io.kbrag.domain.port.TokenEstimator;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -25,8 +26,14 @@ import java.util.List;
  * position that matches the budget. That case is expected for tables and code blocks and never
  * silently drops content.
  *
+ * <p>{@code @Primary} since M4b: a second {@link TextSplitter} bean joined the container
+ * ({@link LlmSemanticTextSplitter}), and every collaborator that still autowires a single
+ * {@code TextSplitter} directly - the two level splitter and the LLM strategy's own fallback path -
+ * has to keep resolving to this one without being rewritten against {@link SplitterRouter}.
+ *
  * @author owlzhangfq@gmail.com
  */
+@Primary
 @Component
 @RequiredArgsConstructor
 public class FixedLengthTextSplitter implements TextSplitter {

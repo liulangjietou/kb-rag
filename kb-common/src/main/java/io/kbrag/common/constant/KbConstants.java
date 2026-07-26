@@ -37,6 +37,18 @@ public final class KbConstants {
     /** Business id prefix of a chunk annotation. */
     public static final String ANNOTATION_ID_PREFIX = "an";
 
+    /** Business id prefix of an evaluation data set. */
+    public static final String EVAL_DATASET_ID_PREFIX = "evds";
+
+    /** Business id prefix of an evaluation case. */
+    public static final String EVAL_CASE_ID_PREFIX = "evc";
+
+    /** Business id prefix of an evaluation run. */
+    public static final String EVAL_RUN_ID_PREFIX = "evr";
+
+    /** Business id prefix of an evaluation result row. */
+    public static final String EVAL_RESULT_ID_PREFIX = "evre";
+
     /**
      * Operator recorded on every annotation.
      *

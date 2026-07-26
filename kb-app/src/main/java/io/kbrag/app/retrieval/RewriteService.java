@@ -81,6 +81,7 @@ public class RewriteService {
 
     private final ChatProvider chatProvider;
     private final KbProperties.Retrieval config;
+    private final KbProperties.Eval evalConfig;
     private final Executor executor;
     private final Cache<String, String> cache;
 
@@ -89,6 +90,7 @@ public class RewriteService {
                           @Qualifier(AsyncConfig.RETRIEVAL_EXECUTOR) Executor executor) {
         this.chatProvider = chatProvider;
         this.config = properties.getRetrieval();
+        this.evalConfig = properties.getEval();
         this.executor = executor;
         this.cache = Caffeine.newBuilder()
                 .maximumSize(config.getRewriteCacheMaxSize())
@@ -130,8 +132,9 @@ public class RewriteService {
             return RewriteOutcome.rewritten(cached);
         }
 
+        long timeoutMs = effectiveTimeoutMs();
         try {
-            String raw = callWithTimeout(query, history);
+            String raw = callWithTimeout(query, history, timeoutMs);
             String sanitized = sanitize(raw);
             if (sanitized == null) {
                 log.info("query rewrite produced no usable query, using the original one");
@@ -142,8 +145,7 @@ public class RewriteService {
                     query.length(), sanitized.length(), history.size());
             return RewriteOutcome.rewritten(sanitized);
         } catch (TimeoutException e) {
-            log.info("query rewrite timed out after {}ms, using the original query",
-                    config.getRewriteTimeoutMs());
+            log.info("query rewrite timed out after {}ms, using the original query", timeoutMs);
             return RewriteOutcome.degraded(query, DegradedReason.QUERY_REWRITE_TIMEOUT.code());
         } catch (Exception e) {
             // A failure and a timeout call for different remediations: a rejected credential or an
@@ -160,23 +162,34 @@ public class RewriteService {
      * answers, or a slow DNS resolution, both elapse outside it. Wrapping the whole call is what makes
      * the promised budget an upper bound on the stage rather than on one socket operation.
      *
-     * @param query   original user query
-     * @param history trimmed conversation
+     * @param query     original user query
+     * @param history   trimmed conversation
+     * @param timeoutMs budget for this call, the online one or the offline evaluation profile's
      * @return raw model answer
      * @throws Exception timeout, interruption or provider failure
      */
-    private String callWithTimeout(String query, List<ChatMessage> history) throws Exception {
+    private String callWithTimeout(String query, List<ChatMessage> history, long timeoutMs) throws Exception {
         List<ChatMessage> messages = new ArrayList<>(history.size() + 1);
         messages.addAll(history);
         messages.add(ChatMessage.user(query));
         CompletableFuture<String> future =
                 CompletableFuture.supplyAsync(() -> chatProvider.complete(SYSTEM_PROMPT, messages), executor);
         try {
-            return future.get(config.getRewriteTimeoutMs(), TimeUnit.MILLISECONDS);
+            return future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
             throw e;
         }
+    }
+
+    /**
+     * Resolves the timeout this call should honour: the offline evaluation profile's shared budget
+     * while an evaluation run is executing on this thread, the online one otherwise.
+     *
+     * @return effective timeout in milliseconds
+     */
+    private long effectiveTimeoutMs() {
+        return OfflineExecutionContext.isOffline() ? evalConfig.getOfflineTimeoutMs() : config.getRewriteTimeoutMs();
     }
 
     /**

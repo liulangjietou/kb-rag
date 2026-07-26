@@ -2,6 +2,7 @@ package io.kbrag.app.document;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.kbrag.app.annotation.AnnotationInheritanceService;
+import io.kbrag.app.eval.EvalCaseStalenessService;
 import io.kbrag.app.index.DocumentVersionActivator;
 import io.kbrag.app.index.IndexPipelineService;
 import io.kbrag.app.index.VersionRetentionService;
@@ -46,9 +47,6 @@ import java.util.List;
 @RequiredArgsConstructor
 public class DocumentVersionService {
 
-    /** Evaluation cases affected by a switch; the evaluation set arrives in a later milestone. */
-    private static final int AFFECTED_EVAL_CASES = 0;
-
     private final DocumentService documentService;
     private final DocumentVersionMapper documentVersionMapper;
     private final ChunkMapper chunkMapper;
@@ -58,6 +56,7 @@ public class DocumentVersionService {
     private final IndexPipelineService indexPipelineService;
     private final VersionRetentionService versionRetentionService;
     private final AnnotationInheritanceService annotationInheritanceService;
+    private final EvalCaseStalenessService evalCaseStalenessService;
 
     /**
      * Lists the versions of a document, newest first.
@@ -97,7 +96,8 @@ public class DocumentVersionService {
         DocumentVersion version = require(docId, versionId);
         RollbackMode mode = RollbackMode.resolve(version.getStatus(), chunkCountOf(versionId));
         int stale = annotationInheritanceService.staleCount(docId, versionId);
-        return new ActivateImpact(mode, stale, AFFECTED_EVAL_CASES);
+        int affectedEvalCases = evalCaseStalenessService.staleCount(docId, versionId);
+        return new ActivateImpact(mode, stale, affectedEvalCases);
     }
 
     /**
@@ -123,6 +123,7 @@ public class DocumentVersionService {
         }
         versionActivator.activate(document, version);
         annotationInheritanceService.inherit(document, version);
+        evalCaseStalenessService.markStale(docId, versionId);
         versionRetentionService.submit(docId);
         log.info("version activated instantly, docId={}, versionId={}", docId, versionId);
         return new Activation(mode, null);

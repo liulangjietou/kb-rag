@@ -39,6 +39,15 @@ public final class ChunkMetadataKeys {
      */
     public static final String IMAGE_URLS = "image_urls";
 
+    /** Chunk title produced alongside the LLM semantic split, requirement section 4.3. */
+    public static final String TITLE = "title";
+
+    /** Chunk summary produced alongside the LLM semantic split. */
+    public static final String SUMMARY = "summary";
+
+    /** Chunk keywords produced alongside the LLM semantic split, a JSON array of strings. */
+    public static final String KEYWORDS = "keywords";
+
     private ChunkMetadataKeys() {
     }
 }

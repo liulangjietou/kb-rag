@@ -81,6 +81,9 @@ public class KbProperties {
     /** Retrieval defaults. */
     private Retrieval retrieval = new Retrieval();
 
+    /** Evaluation execution policy. */
+    private Eval eval = new Eval();
+
     /**
      * Vector engine selection.
      */
@@ -586,5 +589,37 @@ public class KbProperties {
 
         /** Lower bound of the parent candidate target. */
         private int parentCandidateFloor = 20;
+    }
+
+    /**
+     * Evaluation execution policy, requirement section 4.6 "offline execution profile".
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Eval {
+
+        /**
+         * LLM-as-judge model, independent from the generation and rewrite model so a run cannot grade
+         * itself with the same model that produced the answer. Blank keeps the chat model configured
+         * under {@code kb.chat}.
+         */
+        private String judgeModel = "";
+
+        /**
+         * Timeout applied to the rewrite and rerank stages while an evaluation run executes, replacing
+         * their online budgets so a slow but successful call is not counted as a degradation the online
+         * P95 promise never had to keep.
+         */
+        private long offlineTimeoutMs = 10000L;
+
+        /** Cases judged concurrently by one evaluation run. */
+        private int concurrency = 4;
+
+        /** Aggregate coverage threshold a span must reach across the top K to count as a hit. */
+        private double overlapThreshold = 0.5d;
+
+        /** Automatic retries of a case that came back degraded. */
+        private int degradedRetry = 2;
     }
 }
