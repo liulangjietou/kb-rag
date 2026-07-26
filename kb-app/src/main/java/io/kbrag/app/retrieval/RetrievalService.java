@@ -1,11 +1,14 @@
 package io.kbrag.app.retrieval;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.core.type.TypeReference;
+import io.kbrag.app.alert.RetrievalDegradeMonitor;
 import io.kbrag.app.index.EngineChunkCleaner;
 import io.kbrag.app.index.IndexAliasManager;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.constant.ChunkMetadataKeys;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.KnowledgeBase;
@@ -22,6 +25,7 @@ import io.kbrag.domain.model.ScoredChunk;
 import io.kbrag.domain.model.VectorQuery;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.FulltextStore;
+import io.kbrag.domain.port.ObjectStorage;
 import io.kbrag.domain.port.VectorStore;
 import io.kbrag.domain.service.FusionRouter;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +33,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
@@ -102,6 +107,8 @@ public class RetrievalService {
     private final ScoreThresholdPolicy scoreThresholdPolicy;
     private final ParentChildMerger parentChildMerger;
     private final EngineChunkCleaner engineChunkCleaner;
+    private final ObjectStorage objectStorage;
+    private final RetrievalDegradeMonitor degradeMonitor;
     private final KbProperties properties;
 
     /**
@@ -127,6 +134,7 @@ public class RetrievalService {
         List<String> visibleVersionIds = visibleVersionIds(kbId);
         if (CollectionUtils.isEmpty(visibleVersionIds)) {
             log.info("no active document version, kbId={}", kbId);
+            degradeMonitor.record(!degraded.isEmpty());
             return new SearchOutcome(List.of(), degraded, applied(effectiveQuery, settings,
                     ThresholdTarget.NONE.code()));
         }
@@ -172,6 +180,7 @@ public class RetrievalService {
                         + "units={}, returned={}, rerank={}, degraded={}",
                 kbId, settings.getRecallTopK(), settings.getTopN(), settings.getFusion().getMode().code(),
                 candidates.size(), units.size(), nodes.size(), rerankApplied, degraded);
+        degradeMonitor.record(!degraded.isEmpty());
         return new SearchOutcome(nodes, degraded, applied(effectiveQuery, settings, decision.appliedOn()));
     }
 
@@ -364,11 +373,87 @@ public class RetrievalService {
                     .scoreType(reported.getType().code())
                     .retrievalSource(best.getFused().getPrimarySource().code())
                     .metadata(buildMetadata(unit, answerChunk, decision, settings))
-                    .imageUrls(List.of())
+                    .imageUrls(presignedImageUrls(unit, answerChunk))
                     .previewUrl(null)
                     .build());
         }
         return nodes;
+    }
+
+    /**
+     * Turns the stored image keys of a result into time limited pre signed URLs.
+     *
+     * <p>The keys are minted per response rather than stored as URLs: a link that lived in the index would
+     * be public for as long as the index exists, and it would already be expired by the time it is read.
+     *
+     * <p>A two level result collects the keys of its matched children as well as its own, because the parent
+     * text is what is returned and the image that made a child match is part of that text.
+     *
+     * @param unit        merged unit being returned
+     * @param answerChunk chunk whose text is returned
+     * @return pre signed URLs, empty when the result derives from no image
+     */
+    private List<String> presignedImageUrls(RetrievalUnit unit, Chunk answerChunk) {
+        List<String> keys = new ArrayList<>(imageKeysOf(answerChunk));
+        if (unit.isParent()) {
+            for (RetrievalCandidate member : unit.getMembers()) {
+                for (String key : imageKeysOf(member.getChunk())) {
+                    if (!keys.contains(key)) {
+                        keys.add(key);
+                    }
+                }
+            }
+        }
+        if (CollectionUtils.isEmpty(keys)) {
+            return List.of();
+        }
+        Duration ttl = Duration.ofMinutes(properties.getMinio().getPresignedTtlMinutes());
+        List<String> urls = new ArrayList<>(keys.size());
+        for (String key : keys) {
+            try {
+                urls.add(objectStorage.presignedUrl(key, ttl));
+            } catch (Exception e) {
+                // A thumbnail that cannot be signed must not fail a search: the passage is the answer.
+                log.info("image could not be presigned for a search result, object={}", key);
+            }
+        }
+        return urls;
+    }
+
+    /**
+     * Reads the image keys a chunk recorded.
+     *
+     * @param chunk fact source row
+     * @return object storage keys, empty when the chunk derives from no image
+     */
+    private List<String> imageKeysOf(Chunk chunk) {
+        Object value = storedMetadata(chunk).get(ChunkMetadataKeys.IMAGE_URLS);
+        if (!(value instanceof List<?> items)) {
+            return List.of();
+        }
+        List<String> keys = new ArrayList<>(items.size());
+        for (Object item : items) {
+            if (item != null) {
+                keys.add(String.valueOf(item));
+            }
+        }
+        return keys;
+    }
+
+    /**
+     * Parses the metadata column of a chunk.
+     *
+     * @param chunk fact source row
+     * @return metadata document, empty when the column is blank
+     */
+    private Map<String, Object> storedMetadata(Chunk chunk) {
+        if (chunk == null || chunk.getMetadata() == null || chunk.getMetadata().isBlank()) {
+            return Map.of();
+        }
+        Map<String, Object> parsed = JsonUtil.parse(chunk.getMetadata(),
+                new TypeReference<Map<String, Object>>() {
+                });
+        return parsed == null ? Map.of() : parsed;
     }
 
     /**
@@ -402,6 +487,14 @@ public class RetrievalService {
                                               RetrievalSettings settings) {
         Map<String, Object> metadata = new LinkedHashMap<>(scoreMetadata(unit.best()));
         metadata.put(META_CHUNK_SEQ, answerChunk.getSeq());
+        // The stored document facts travel next to the scores so a chat result card can show its
+        // conversation, its senders and its time without a second round trip. The image keys are excluded:
+        // they leave through image_urls as pre signed links and the raw keys are of no use to a caller.
+        storedMetadata(answerChunk).forEach((key, value) -> {
+            if (!ChunkMetadataKeys.IMAGE_URLS.equals(key)) {
+                metadata.putIfAbsent(key, value);
+            }
+        });
         if (!unit.isParent()) {
             return metadata;
         }

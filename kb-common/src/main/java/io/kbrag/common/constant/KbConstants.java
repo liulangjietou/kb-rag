@@ -28,6 +28,21 @@ public final class KbConstants {
     /** Business id prefix of an asynchronous task. */
     public static final String TASK_ID_PREFIX = "task";
 
+    /** Business id prefix of an image asset. */
+    public static final String IMAGE_ASSET_ID_PREFIX = "img";
+
+    /** Business id prefix of a chat import upload token. */
+    public static final String UPLOAD_TOKEN_PREFIX = "upt";
+
+    /**
+     * Source channel of a chat import, first element of the logical document identity.
+     *
+     * <p>The identity is {@code chat:{sessionId}}: a conversation is the same logical document across
+     * two exports of the same channel, which is what turns a re-import into a new version instead of a
+     * duplicate document.
+     */
+    public static final String SOURCE_CHANNEL_CHAT = "chat";
+
     /** Separator between a business id prefix and its random part. */
     public static final String ID_SEPARATOR = "_";
 

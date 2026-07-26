@@ -31,14 +31,33 @@ public class UploadValidator {
     /** Leading bytes of a ZIP container, which is what docx and xlsx really are. */
     private static final byte[] MAGIC_ZIP = {0x50, 0x4B, 0x03, 0x04};
 
+    /** Leading bytes of a PNG file. */
+    private static final byte[] MAGIC_PNG = {(byte) 0x89, 0x50, 0x4E, 0x47};
+
+    /** Leading bytes of a JPEG file. */
+    private static final byte[] MAGIC_JPEG = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF};
+
+    /** Leading bytes of a GIF file. */
+    private static final byte[] MAGIC_GIF = {0x47, 0x49, 0x46, 0x38};
+
+    /** Leading bytes of a BMP file. */
+    private static final byte[] MAGIC_BMP = {0x42, 0x4D};
+
     /**
      * Extensions whose content has a recognisable header. Text formats are absent on purpose: they
-     * have no magic number, so only extension and size can be verified for them.
+     * have no magic number, so only extension and size can be verified for them. WebP is absent as well:
+     * its signature sits at offset eight behind a RIFF container header, which this prefix check cannot
+     * express, and the vision provider rejects a payload that is not an image anyway.
      */
     private static final Map<String, byte[]> MAGIC_BY_EXTENSION = Map.of(
             "pdf", MAGIC_PDF,
             "docx", MAGIC_ZIP,
-            "xlsx", MAGIC_ZIP);
+            "xlsx", MAGIC_ZIP,
+            "png", MAGIC_PNG,
+            "jpg", MAGIC_JPEG,
+            "jpeg", MAGIC_JPEG,
+            "gif", MAGIC_GIF,
+            "bmp", MAGIC_BMP);
 
     private final KbProperties properties;
 

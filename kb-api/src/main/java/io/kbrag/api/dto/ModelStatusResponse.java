@@ -17,6 +17,9 @@ import io.kbrag.domain.model.ModelStatus;
  * @param chatConfigured      {@code false} disables the query rewrite switch
  * @param chatProvider        chat provider name, {@code none} when unconfigured
  * @param chatModel           chat model name, {@code none} when unconfigured
+ * @param visionConfigured    {@code false} means images are stored without a textual proxy
+ * @param visionProvider      vision provider name, {@code none} when unconfigured
+ * @param visionModel         vision model name, {@code none} when unconfigured
  *
  * @author owlzhangfq@gmail.com
  */
@@ -31,7 +34,10 @@ public record ModelStatusResponse(
         @JsonProperty("rerank_model") String rerankModel,
         @JsonProperty("chat_configured") boolean chatConfigured,
         @JsonProperty("chat_provider") String chatProvider,
-        @JsonProperty("chat_model") String chatModel) {
+        @JsonProperty("chat_model") String chatModel,
+        @JsonProperty("vision_configured") boolean visionConfigured,
+        @JsonProperty("vision_provider") String visionProvider,
+        @JsonProperty("vision_model") String visionModel) {
 
     /**
      * Maps a domain snapshot onto the transport shape.
@@ -51,6 +57,9 @@ public record ModelStatusResponse(
                 status.getRerankModel(),
                 status.isChatConfigured(),
                 status.getChatProvider(),
-                status.getChatModel());
+                status.getChatModel(),
+                status.isVisionConfigured(),
+                status.getVisionProvider(),
+                status.getVisionModel());
     }
 }

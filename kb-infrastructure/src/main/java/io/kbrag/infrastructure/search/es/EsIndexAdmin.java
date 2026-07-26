@@ -9,6 +9,7 @@ import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkOperation;
 import co.elastic.clients.elasticsearch.core.bulk.IndexOperation;
+import co.elastic.clients.elasticsearch.indices.update_aliases.Action;
 import co.elastic.clients.json.JsonData;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
@@ -23,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -61,13 +63,47 @@ public class EsIndexAdmin {
             if (!exists) {
                 createIndex(spec);
             }
-            client.indices().putAlias(b -> b.index(spec.getPhysicalIndexName()).name(spec.getAliasName()));
+            pointAliasAtSingleIndex(spec);
             log.info("es index ready, index={}, alias={}, vectorField={}",
                     spec.getPhysicalIndexName(), spec.getAliasName(), spec.hasVectorField());
         } catch (Exception e) {
             log.error("ensure es index failed, errorCode={}, index={}",
                     ErrorCode.INTERNAL_ERROR, spec.getPhysicalIndexName(), e);
             throw new BizException(ErrorCode.INTERNAL_ERROR, "ensure elasticsearch index failed", e);
+        }
+    }
+
+    /**
+     * Repoints the alias so that it resolves to exactly this physical index.
+     *
+     * <p>A plain putAlias only ever appends. As soon as the embedding version segment of the index
+     * name changes - switching embedding model, or losing the API key so the segment falls back to
+     * {@code none} - a second physical index joins the alias, Elasticsearch can no longer tell which
+     * one to write to, and every write and delete through that alias fails permanently with "no
+     * write index is defined for alias". So the alias is moved in one atomic update: it is removed
+     * from whatever else it pointed at and added here as the write index. That is also exactly the
+     * "new physical index plus atomic alias switch" the index contract asks for.
+     *
+     * @param spec physical index and alias description
+     * @throws IOException when the alias update call fails
+     */
+    private void pointAliasAtSingleIndex(IndexSpec spec) throws IOException {
+        String alias = spec.getAliasName();
+        String target = spec.getPhysicalIndexName();
+        List<String> staleIndices = client.indices()
+                .getAlias(b -> b.name(alias).ignoreUnavailable(true))
+                .result().keySet().stream()
+                .filter(index -> !index.equals(target))
+                .toList();
+
+        List<Action> actions = new ArrayList<>(staleIndices.size() + 1);
+        for (String stale : staleIndices) {
+            actions.add(Action.of(a -> a.remove(r -> r.index(stale).alias(alias))));
+        }
+        actions.add(Action.of(a -> a.add(add -> add.index(target).alias(alias).isWriteIndex(true))));
+        client.indices().updateAliases(builder -> builder.actions(actions));
+        if (!CollectionUtils.isEmpty(staleIndices)) {
+            log.info("es alias repointed, alias={}, target={}, detached={}", alias, target, staleIndices);
         }
     }
 

@@ -55,4 +55,14 @@ public class Document extends BaseEntity {
     /** Classified failure cause, cleared on a successful rerun. */
     @TableField("fail_reason")
     private String failReason;
+
+    /**
+     * Stable identity of the logical source this document stands for, {@code null} for plain uploads.
+     *
+     * <p>A chat session is a logical document rather than a file: importing the same session twice has
+     * to produce a new version of one document, not two documents. The file name cannot carry that
+     * identity because it is a display value the user may see repeated across sessions.
+     */
+    @TableField("source_key")
+    private String sourceKey;
 }

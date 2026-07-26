@@ -11,9 +11,12 @@ import org.springframework.stereotype.Component;
  * matches: content hash, parse fingerprint, split fingerprint and embedding version. Computing the
  * fingerprints in one place is what keeps that guarantee auditable as stages gain parameters.
  *
- * <p>M1 has a single parse route and a single split strategy, so the inputs are few; every value that
- * will become configurable later already has its own slot in the fingerprint string, which keeps the
- * hash stable for unchanged configurations.
+ * <p><b>Two fingerprints, one staleness question.</b> The parse fingerprint covers everything that
+ * decides what text a document yields — the cleaning rules and the vision model — while the split
+ * fingerprint covers how that text is cut. The console asks a single question, "is this document built
+ * with the current configuration", so {@link #configFingerprint} combines both and
+ * {@link #versionFingerprint} recombines the two values stored on the version. Comparing only the split
+ * side would let a cleaning rule change go unnoticed.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -22,31 +25,33 @@ public class VersionFingerprintFactory {
 
     private static final String SEPARATOR = "|";
 
-    /** Parse route of M1: the HTTP parser service with no cleaning and no vision model. */
+    /** Parse route: the HTTP parser service. */
     private static final String PARSE_ROUTE = "route=http-parser";
-    private static final String CLEANING_RULES = "clean=none";
-    private static final String MASKING = "mask=off";
-    private static final String VISION_MODEL = "vlm=none";
-    private static final String VISION_PROMPT = "vlm_prompt=none";
+
+    /** Version of the fixed vision prompt, bumped whenever the prompt text changes. */
+    private static final String VISION_PROMPT_VERSION = "vlm_prompt=v1";
+
+    /** Local OCR engine, deliberately absent: scanned pages go through the vision model instead. */
     private static final String OCR_ENGINE = "ocr=none";
 
     /**
      * Fingerprint of the parse stage inputs.
      *
+     * @param config      knowledge base index configuration, supplies the cleaning rules
+     * @param visionModel vision model name, {@code none} when unconfigured
      * @return hexadecimal digest
      */
-    public String parseFingerprint() {
+    public String parseFingerprint(KbIndexConfig config, String visionModel) {
         return HashUtil.sha256Hex(String.join(SEPARATOR,
-                PARSE_ROUTE, CLEANING_RULES, MASKING, VISION_MODEL, VISION_PROMPT, OCR_ENGINE));
+                PARSE_ROUTE,
+                "clean=" + config.cleanRulesOrDefaults().fingerprintSegment(),
+                "vlm=" + visionModel,
+                VISION_PROMPT_VERSION,
+                OCR_ENGINE));
     }
 
     /**
      * Fingerprint of the split stage inputs.
-     *
-     * <p>The very same function computes the knowledge base level
-     * {@code current_config_fingerprint} and the per version {@code chunk_fingerprint}: comparing the
-     * two is how a configuration change is turned into the {@code config_stale} flag, and that
-     * comparison is only meaningful while both sides are produced here.
      *
      * @param config knowledge base index configuration
      * @return hexadecimal digest
@@ -57,5 +62,31 @@ public class VersionFingerprintFactory {
                 "chunk_max_tokens=" + config.getChunkMaxTokens(),
                 "chunk_overlap=" + config.getChunkOverlap(),
                 config.parentChildOrDisabled().fingerprintSegment()));
+    }
+
+    /**
+     * Fingerprint stored on the knowledge base as {@code current_config_fingerprint}.
+     *
+     * @param config      knowledge base index configuration
+     * @param visionModel vision model name, {@code none} when unconfigured
+     * @return hexadecimal digest covering the parse and the split inputs
+     */
+    public String configFingerprint(KbIndexConfig config, String visionModel) {
+        return versionFingerprint(parseFingerprint(config, visionModel), chunkFingerprint(config));
+    }
+
+    /**
+     * Recombines the two fingerprints a version stores, so it can be compared with
+     * {@link #configFingerprint}.
+     *
+     * @param parseFingerprint value of {@code t_kb_document_version.parse_fingerprint}
+     * @param chunkFingerprint value of {@code t_kb_document_version.chunk_fingerprint}
+     * @return hexadecimal digest, {@code null} when either side was never recorded
+     */
+    public String versionFingerprint(String parseFingerprint, String chunkFingerprint) {
+        if (parseFingerprint == null || chunkFingerprint == null) {
+            return null;
+        }
+        return HashUtil.sha256Hex(parseFingerprint + SEPARATOR + chunkFingerprint);
     }
 }

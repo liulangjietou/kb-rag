@@ -1,5 +1,6 @@
 package io.kbrag.app.retrieval;
 
+import io.kbrag.app.alert.RetrievalDegradeMonitor;
 import io.kbrag.app.index.EngineChunkCleaner;
 import io.kbrag.app.index.IndexAliasManager;
 import io.kbrag.app.kb.KnowledgeBaseService;
@@ -23,6 +24,7 @@ import io.kbrag.domain.model.RetrievalFilter;
 import io.kbrag.domain.model.ScoredChunk;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.FulltextStore;
+import io.kbrag.domain.port.ObjectStorage;
 import io.kbrag.domain.port.VectorStore;
 import io.kbrag.domain.service.FusionRouter;
 import io.kbrag.domain.service.RrfFusion;
@@ -71,6 +73,7 @@ class RetrievalServiceTest {
     private RewriteService rewriteService;
     private RerankService rerankService;
     private EngineChunkCleaner engineChunkCleaner;
+    private ObjectStorage objectStorage;
     private KbProperties properties;
     private RetrievalService retrievalService;
 
@@ -86,6 +89,7 @@ class RetrievalServiceTest {
         rewriteService = mock(RewriteService.class);
         rerankService = mock(RerankService.class);
         engineChunkCleaner = mock(EngineChunkCleaner.class);
+        objectStorage = mock(ObjectStorage.class);
         properties = new KbProperties();
 
         when(knowledgeBaseService.require(KB_ID)).thenReturn(knowledgeBase(false));
@@ -104,7 +108,7 @@ class RetrievalServiceTest {
                 fulltextStore, vectorStore, embeddingProvider, indexAliasManager,
                 new FusionRouter(List.of(new RrfFusion(), new WeightedFusion())),
                 rewriteService, rerankService, new ScoreThresholdPolicy(), new ParentChildMerger(),
-                engineChunkCleaner, properties);
+                engineChunkCleaner, objectStorage, new RetrievalDegradeMonitor(properties), properties);
     }
 
     @Test

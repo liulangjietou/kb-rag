@@ -50,6 +50,41 @@ public class KbIndexConfig {
     @JsonProperty("parent_child")
     private ParentChildParams parentChild = ParentChildParams.disabled();
 
+    /** Cleaning rules applied between the image stage and the split stage. */
+    @JsonProperty("clean_rules")
+    private CleanRules cleanRules = CleanRules.defaults();
+
+    /**
+     * Suspends the pipeline after cleaning so a human confirms the parse result before it is indexed.
+     *
+     * <p>Off by default: a bulk upload of hundreds of files would otherwise stop on every one of them,
+     * which is exactly the workflow the requirement wants to keep frictionless.
+     */
+    @JsonProperty("parse_preview_required")
+    private boolean parsePreviewRequired;
+
+    /** Windowing of a chat import. */
+    @JsonProperty("chat_aggregation")
+    private ChatAggregationParams chatAggregation = ChatAggregationParams.defaults();
+
+    /**
+     * Resolves the cleaning rules, never {@code null}.
+     *
+     * @return cleaning rules, defaults when the column carried none
+     */
+    public CleanRules cleanRulesOrDefaults() {
+        return cleanRules == null ? CleanRules.defaults() : cleanRules;
+    }
+
+    /**
+     * Resolves the chat aggregation parameters, never {@code null}.
+     *
+     * @return chat aggregation parameters, defaults when the column carried none
+     */
+    public ChatAggregationParams chatAggregationOrDefaults() {
+        return chatAggregation == null ? ChatAggregationParams.defaults() : chatAggregation;
+    }
+
     /**
      * Resolves the parent child parameters, never {@code null}.
      *

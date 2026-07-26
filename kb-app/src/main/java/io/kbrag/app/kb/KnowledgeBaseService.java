@@ -18,6 +18,7 @@ import io.kbrag.domain.mapper.KnowledgeBaseMapper;
 import io.kbrag.domain.model.KbIndexConfig;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.model.ParentChildParams;
+import io.kbrag.domain.port.VisionProvider;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.FixedLengthTextSplitter;
 import io.kbrag.domain.service.VersionFingerprintFactory;
@@ -63,6 +64,7 @@ public class KnowledgeBaseService {
     private final IndexAliasManager indexAliasManager;
     private final EngineChunkCleaner engineChunkCleaner;
     private final VersionFingerprintFactory fingerprintFactory;
+    private final VisionProvider visionProvider;
     private final KbProperties properties;
 
     /**
@@ -84,7 +86,7 @@ public class KnowledgeBaseService {
         knowledgeBase.setDescription(description);
         KbIndexConfig config = defaultIndexConfig();
         knowledgeBase.setIndexConfig(JsonUtil.toJson(config));
-        knowledgeBase.setCurrentConfigFingerprint(fingerprintFactory.chunkFingerprint(config));
+        knowledgeBase.setCurrentConfigFingerprint(configFingerprint(config));
         knowledgeBaseMapper.insert(knowledgeBase);
         indexAliasManager.ensureIndexes(knowledgeBase.getKbId());
         log.info("knowledge base created, kbId={}, name={}", knowledgeBase.getKbId(), name);
@@ -153,7 +155,7 @@ public class KnowledgeBaseService {
     @Transactional(rollbackFor = Exception.class)
     public int updateIndexConfig(String kbId, KbIndexConfig config, KbRetrievalConfig retrievalConfig) {
         KnowledgeBase knowledgeBase = require(kbId);
-        String fingerprint = fingerprintFactory.chunkFingerprint(config);
+        String fingerprint = configFingerprint(config);
         knowledgeBase.setIndexConfig(JsonUtil.toJson(config));
         knowledgeBase.setCurrentConfigFingerprint(fingerprint);
         if (retrievalConfig != null) {
@@ -246,6 +248,20 @@ public class KnowledgeBaseService {
     }
 
     /**
+     * Fingerprint of the whole configuration a build depends on.
+     *
+     * <p>Covers the parse inputs as well as the split ones, so changing a cleaning rule marks documents as
+     * stale exactly like changing a chunk length does. The vision model is part of it because a different
+     * model produces different image proxies, which is a content change even when nothing else moved.
+     *
+     * @param config index configuration
+     * @return hexadecimal digest
+     */
+    public String configFingerprint(KbIndexConfig config) {
+        return fingerprintFactory.configFingerprint(config, visionProvider.model());
+    }
+
+    /**
      * Builds the index configuration of a freshly created knowledge base from the deployment defaults.
      *
      * @return default index configuration
@@ -285,7 +301,8 @@ public class KnowledgeBaseService {
             List<DocumentVersion> versions = documentVersionMapper.selectList(
                     new LambdaQueryWrapper<DocumentVersion>().in(DocumentVersion::getVersionId, batch));
             for (DocumentVersion version : versions) {
-                byVersion.put(version.getVersionId(), version.getChunkFingerprint());
+                byVersion.put(version.getVersionId(), fingerprintFactory.versionFingerprint(
+                        version.getParseFingerprint(), version.getChunkFingerprint()));
             }
         }
         return byVersion;

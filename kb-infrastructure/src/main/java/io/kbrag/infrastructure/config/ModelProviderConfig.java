@@ -12,6 +12,7 @@ import io.kbrag.infrastructure.provider.chat.DashScopeChatProvider;
 import io.kbrag.infrastructure.provider.embedding.DashScopeEmbeddingProvider;
 import io.kbrag.infrastructure.provider.rerank.DashScopeRerankProvider;
 import io.kbrag.infrastructure.provider.embedding.UnconfiguredEmbeddingProvider;
+import io.kbrag.infrastructure.provider.vision.DashScopeVisionProvider;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -87,12 +88,24 @@ public class ModelProviderConfig {
     }
 
     /**
-     * Placeholder vision provider until M2 wires image understanding.
+     * Selects the vision provider implementation.
      *
-     * @return unconfigured vision provider
+     * <p>A blank key does not disable the image stage: images are still stored and registered, they
+     * simply carry no textual proxy. That is what lets a deployment add a credential later and backfill
+     * the proxies from the rows the stage left behind.
+     *
+     * @param properties bound configuration
+     * @return configured provider, or the unconfigured placeholder
      */
     @Bean
-    public VisionProvider visionProvider() {
-        return new UnconfiguredVisionProvider();
+    public VisionProvider visionProvider(KbProperties properties) {
+        KbProperties.Vision config = properties.getVision();
+        if (config.getApiKey() == null || config.getApiKey().isBlank()) {
+            log.info("vision provider not configured, image text proxies skipped");
+            return new UnconfiguredVisionProvider();
+        }
+        log.info("vision provider configured, provider={}, model={}, timeoutMs={}",
+                config.getProvider(), config.getModel(), config.getTimeoutMs());
+        return new DashScopeVisionProvider(properties);
     }
 }

@@ -50,4 +50,13 @@ public class ModelStatus {
 
     /** Chat model name, {@code none} when unconfigured. */
     private final String chatModel;
+
+    /** {@code false} means images are stored but carry no textual proxy. */
+    private final boolean visionConfigured;
+
+    /** Vision provider name, {@code none} when unconfigured. */
+    private final String visionProvider;
+
+    /** Vision model name, {@code none} when unconfigured. */
+    private final String visionModel;
 }

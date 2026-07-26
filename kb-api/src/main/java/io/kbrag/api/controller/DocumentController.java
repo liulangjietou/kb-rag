@@ -1,8 +1,11 @@
 package io.kbrag.api.controller;
 
 import io.kbrag.api.dto.ChunkResponse;
+import io.kbrag.api.dto.DocumentPreviewResponse;
 import io.kbrag.api.dto.DocumentResponse;
 import io.kbrag.api.dto.PageResponse;
+import io.kbrag.api.dto.ReparseRequest;
+import io.kbrag.app.document.DocumentPreviewService;
 import io.kbrag.app.document.DocumentService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
@@ -14,6 +17,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -38,6 +42,7 @@ public class DocumentController {
     private static final String FIELD_VERSION_ID = "version_id";
 
     private final DocumentService documentService;
+    private final DocumentPreviewService documentPreviewService;
 
     /**
      * Uploads a document and hands it over to the asynchronous pipeline.
@@ -109,6 +114,42 @@ public class DocumentController {
     @PostMapping("/api/v1/documents/{docId}/reindex")
     public Result<Map<String, String>> reindex(@PathVariable String docId) {
         return Result.success(Map.of(FIELD_VERSION_ID, documentService.reindex(docId)));
+    }
+
+    /**
+     * Returns what a document would be indexed as, while it waits for a confirmation.
+     *
+     * @param docId document business id
+     * @return preview with pre signed image URLs and the textual proxies
+     */
+    @GetMapping("/api/v1/documents/{docId}/preview")
+    public Result<DocumentPreviewResponse> preview(@PathVariable String docId) {
+        return Result.success(DocumentPreviewResponse.from(documentPreviewService.preview(docId)));
+    }
+
+    /**
+     * Confirms a document so the pipeline splits and indexes it.
+     *
+     * @param docId document business id
+     * @return version that was resumed
+     */
+    @PostMapping("/api/v1/documents/{docId}/confirm")
+    public Result<Map<String, String>> confirm(@PathVariable String docId) {
+        return Result.success(Map.of(FIELD_VERSION_ID, documentPreviewService.confirm(docId)));
+    }
+
+    /**
+     * Re-renders the preview, optionally under an experimental rule set that is not saved.
+     *
+     * @param docId   document business id
+     * @param request optional cleaning rules to try
+     * @return refreshed preview, in the same shape the preview endpoint returns
+     */
+    @PostMapping("/api/v1/documents/{docId}/reparse")
+    public Result<DocumentPreviewResponse> reparse(@PathVariable String docId,
+                                                  @RequestBody(required = false) ReparseRequest request) {
+        return Result.success(DocumentPreviewResponse.from(documentPreviewService.reparse(docId,
+                request == null ? null : request.cleanRules())));
     }
 
     /**

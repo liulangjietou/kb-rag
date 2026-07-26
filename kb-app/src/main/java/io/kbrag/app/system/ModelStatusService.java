@@ -5,6 +5,7 @@ import io.kbrag.domain.model.ModelStatus;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.RerankProvider;
+import io.kbrag.domain.port.VisionProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +26,7 @@ public class ModelStatusService {
     private final EmbeddingProvider embeddingProvider;
     private final RerankProvider rerankProvider;
     private final ChatProvider chatProvider;
+    private final VisionProvider visionProvider;
     private final KbProperties properties;
 
     /**
@@ -45,6 +47,9 @@ public class ModelStatusService {
                 .chatConfigured(chatProvider.isConfigured())
                 .chatProvider(chatProvider.providerName())
                 .chatModel(chatProvider.model())
+                .visionConfigured(visionProvider.isConfigured())
+                .visionProvider(visionProvider.providerName())
+                .visionModel(visionProvider.model())
                 .build();
     }
 }

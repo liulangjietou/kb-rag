@@ -8,7 +8,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
+
+import java.net.http.HttpClient;
 import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
@@ -47,9 +49,15 @@ public final class DashScopeHttp {
      * @return configured client
      */
     public static RestClient client(String baseUrl, String apiKey, int timeoutMs) {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         Duration timeout = Duration.ofMillis(timeoutMs);
-        factory.setConnectTimeout(timeout);
+        // JdkClientHttpRequestFactory over HttpURLConnection on purpose: HttpURLConnection cannot
+        // replay a streamed request body, so a 401 carrying WWW-Authenticate surfaces as an I/O
+        // failure ("cannot retry due to server authentication") instead of a status code. That made
+        // every credential problem land in the NETWORK_UNREACHABLE bucket and sent operators
+        // debugging connectivity while the real cause was the API key. java.net.http returns the
+        // status normally, so classify() can do its job.
+        HttpClient httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
         factory.setReadTimeout(timeout);
         RestClient.Builder builder = RestClient.builder()
                 .requestFactory(factory)

@@ -23,6 +23,22 @@ public final class ChunkMetadataKeys {
     /** Chat message timestamp in epoch milliseconds. */
     public static final String MSG_TIME = "msg_time";
 
+    /**
+     * Display name of the chat session.
+     *
+     * <p>Not mirrored into an engine field: a display name is not a filter dimension, and the session id
+     * already identifies the conversation. It is returned so a result card can be labelled.
+     */
+    public static final String SESSION_NAME = "session_name";
+
+    /**
+     * Object storage keys of the images this chunk derives from.
+     *
+     * <p>Kept in MySQL only. The keys are turned into time limited pre signed URLs at retrieval time, so
+     * indexing them would store a value that is useless to a search and stale by the time it is read.
+     */
+    public static final String IMAGE_URLS = "image_urls";
+
     private ChunkMetadataKeys() {
     }
 }

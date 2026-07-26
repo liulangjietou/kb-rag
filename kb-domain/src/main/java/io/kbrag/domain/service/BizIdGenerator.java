@@ -64,6 +64,24 @@ public class BizIdGenerator {
         return generate(KbConstants.TASK_ID_PREFIX);
     }
 
+    /**
+     * Generates an image asset id.
+     *
+     * @return prefixed identifier
+     */
+    public String imageAssetId() {
+        return generate(KbConstants.IMAGE_ASSET_ID_PREFIX);
+    }
+
+    /**
+     * Generates a chat import upload token.
+     *
+     * @return prefixed identifier
+     */
+    public String uploadToken() {
+        return generate(KbConstants.UPLOAD_TOKEN_PREFIX);
+    }
+
     private String generate(String prefix) {
         String random = UUID.randomUUID().toString().replace("-", "").substring(0, RANDOM_LENGTH);
         return prefix + KbConstants.ID_SEPARATOR + random;

@@ -45,6 +45,21 @@ public class KbProperties {
     /** Chat provider configuration, currently only consumed by the query rewrite stage. */
     private Chat chat = new Chat();
 
+    /** Vision provider configuration, consumed by the image asset stage. */
+    private Vision vision = new Vision();
+
+    /** Image asset pipeline policy. */
+    private Image image = new Image();
+
+    /** Chat log import policy. */
+    private ChatImport chatImport = new ChatImport();
+
+    /** Operations alert dispatcher policy. */
+    private Alert alert = new Alert();
+
+    /** Demo data set location. */
+    private Demo demo = new Demo();
+
     /** Index synchronization compensation policy. */
     private Sync sync = new Sync();
 
@@ -248,6 +263,119 @@ public class KbProperties {
     }
 
     /**
+     * Vision provider configuration. A blank API key makes the image stage skip every image.
+     */
+    @Getter
+    @Setter
+    @ToString(exclude = "apiKey")
+    public static class Vision {
+
+        /** Provider implementation name. */
+        private String provider = "dashscope";
+
+        /** Model name. */
+        private String model = "qwen-vl-max";
+
+        /** Credential, blank means images are stored but carry no text. */
+        private String apiKey = "";
+
+        /** OpenAI compatible base URL of the provider. */
+        private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+
+        /** Request timeout in milliseconds; image understanding is slower than text completion. */
+        private int timeoutMs = 20000;
+
+        /** Sampling temperature, zero keeps the transcription reproducible. */
+        private double temperature = 0.0d;
+
+        /** Upper bound of the generated proxy. */
+        private int maxTokens = 1024;
+    }
+
+    /**
+     * Image asset pipeline policy.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Image {
+
+        /** Extensions treated as a standalone image upload rather than as a document. */
+        private List<String> standaloneExtensions =
+                List.of("png", "jpg", "jpeg", "webp", "bmp", "gif");
+
+        /** Images processed per document; the rest are skipped and reported as a warning. */
+        private int maxPerDocument = 100;
+
+        /** Maximum size of one image in megabytes, larger ones are skipped. */
+        private int maxImageSizeMb = 10;
+    }
+
+    /**
+     * Chat log import policy.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class ChatImport {
+
+        /** Column mapping profile requested from the parser when the caller names none. */
+        private String defaultMappingProfile = "memotrace";
+
+        /** Validity of an upload token issued by the match preview, in minutes. */
+        private int uploadTokenTtlMinutes = 30;
+
+        /**
+         * Masking default of the chat path.
+         *
+         * <p>On, because a chat log is personal data by nature; the per category switches still come from
+         * the knowledge base cleaning rules.
+         */
+        private boolean desensitizeDefault = true;
+    }
+
+    /**
+     * Operations alert dispatcher policy.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Alert {
+
+        /** Length of the retrieval degradation observation window in minutes. */
+        private int degradeWindowMinutes = 5;
+
+        /** Minimum retrieval calls in the window before the degradation ratio is trusted. */
+        private int degradeMinSamples = 20;
+
+        /** Delay between two alert evaluation passes in milliseconds. */
+        private long evaluationIntervalMs = 60000L;
+
+        /** Request timeout of the webhook call in milliseconds. */
+        private int webhookTimeoutMs = 3000;
+    }
+
+    /**
+     * Demo data set location.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Demo {
+
+        /**
+         * Directory holding the demo documents and their manifest.
+         *
+         * <p>The default points at the deployment repository so a local checkout works without any
+         * environment variable; a container overrides it with the mounted path.
+         */
+        private String dataDir = "/Users/zhangfuqiang/AI/kb-rag/kb-rag-deploy/demo";
+
+        /** Display name of the knowledge base the demo import creates. */
+        private String knowledgeBaseName = "Demo 知识库";
+    }
+
+    /**
      * Index synchronization compensation policy.
      */
     @Getter
@@ -320,7 +448,8 @@ public class KbProperties {
 
         /** Accepted lower case extensions. */
         private List<String> allowedExtensions =
-                List.of("pdf", "docx", "txt", "md", "xlsx", "csv");
+                List.of("pdf", "docx", "txt", "md", "xlsx", "csv",
+                        "png", "jpg", "jpeg", "webp", "bmp", "gif");
     }
 
     /**

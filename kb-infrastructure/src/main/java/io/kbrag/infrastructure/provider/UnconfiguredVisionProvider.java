@@ -6,8 +6,11 @@ import io.kbrag.domain.model.HealthStatus;
 import io.kbrag.domain.port.VisionProvider;
 
 /**
- * Placeholder vision provider. M1 does not generate textual proxies for images, the port exists so
- * the image pipeline of M2 can be wired without reshaping the abstraction.
+ * Vision provider of a deployment without a vision credential.
+ *
+ * <p>Every call fails fast with a classified exception rather than returning an empty string, so the
+ * image stage records the asset as {@code SKIPPED} on purpose instead of storing a blank proxy that
+ * would later look like a successful but useless call.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -32,7 +35,7 @@ public class UnconfiguredVisionProvider implements VisionProvider {
     }
 
     @Override
-    public String describeImage(String imageObjectKey) {
+    public String describeImage(byte[] content, String mediaType) {
         throw new ProviderException(PROVIDER_NAME, ProviderErrorType.AUTH_FAILED,
                 "no vision provider configured");
     }

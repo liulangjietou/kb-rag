@@ -98,6 +98,34 @@ kb:
     timeout-ms: ${CHAT_TIMEOUT_MS:3000}
     temperature: ${CHAT_TEMPERATURE:0.0}
     max-tokens: ${CHAT_MAX_TOKENS:128}
+  vision:
+    provider: ${VISION_PROVIDER:dashscope}
+    model: ${VISION_MODEL:qwen-vl-max}
+    # Blank stores images without a textual proxy; the rest of the document is still indexed.
+    api-key: ${VISION_API_KEY:${DASHSCOPE_API_KEY:}}
+    base-url: ${VISION_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    # Image understanding is slower than text completion, hence the wider budget.
+    timeout-ms: ${VISION_TIMEOUT_MS:20000}
+    temperature: ${VISION_TEMPERATURE:0.0}
+    max-tokens: ${VISION_MAX_TOKENS:1024}
+  image:
+    standalone-extensions: ${IMAGE_STANDALONE_EXTENSIONS:png,jpg,jpeg,webp,bmp,gif}
+    max-per-document: ${MAX_IMAGES_PER_DOC:100}
+    max-image-size-mb: ${MAX_IMAGE_SIZE_MB:10}
+  chat-import:
+    default-mapping-profile: ${CHAT_MAPPING_PROFILE:memotrace}
+    upload-token-ttl-minutes: ${CHAT_UPLOAD_TOKEN_TTL_MINUTES:30}
+    # A chat log is personal data by nature, so masking is on for this path by default.
+    desensitize-default: ${CHAT_DESENSITIZE_DEFAULT:true}
+  alert:
+    degrade-window-minutes: ${ALERT_DEGRADE_WINDOW_MINUTES:5}
+    degrade-min-samples: ${ALERT_DEGRADE_MIN_SAMPLES:20}
+    evaluation-interval-ms: ${ALERT_EVALUATION_INTERVAL_MS:60000}
+    webhook-timeout-ms: ${ALERT_WEBHOOK_TIMEOUT_MS:3000}
+  demo:
+    # Local development points at the deployment repository; a container mounts the set and overrides this.
+    data-dir: ${DEMO_DATA_DIR:/Users/zhangfuqiang/AI/kb-rag/kb-rag-deploy/demo}
+    knowledge-base-name: ${DEMO_KB_NAME:Demo 知识库}
   sync:
     compensation-enabled: ${SYNC_COMPENSATION_ENABLED:true}
     compensation-interval-ms: ${SYNC_COMPENSATION_INTERVAL_MS:30000}
@@ -114,7 +142,7 @@ kb:
     bootstrap-username: ${AUTH_BOOTSTRAP_USERNAME:admin}
   upload:
     max-file-size-mb: ${UPLOAD_MAX_FILE_SIZE_MB:100}
-    allowed-extensions: ${UPLOAD_ALLOWED_EXTENSIONS:pdf,docx,txt,md,xlsx,csv}
+    allowed-extensions: ${UPLOAD_ALLOWED_EXTENSIONS:pdf,docx,txt,md,xlsx,csv,png,jpg,jpeg,webp,bmp,gif}
   split:
     max-tokens: ${SPLIT_MAX_TOKENS:600}
     overlap-tokens: ${SPLIT_OVERLAP_TOKENS:100}
