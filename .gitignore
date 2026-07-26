@@ -3,7 +3,8 @@
 .env.*
 !.env.example
 
-# 备份产物
+# 备份产物（M6 起默认目录改为 backup/，backups/ 兼容旧配置保留）
+backup/
 backups/
 *.sql.gz
 *.tar.gz

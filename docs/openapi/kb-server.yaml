@@ -56,9 +56,18 @@ info:
     顶层新增 `routed_kb_ids`，SSE `done` 事件同增；`RetrievalNode.metadata` 新增 `kb_id`
     （全量填充，来自事实源行）；门禁评测集绑定放宽为「所属知识库属于版本 kb_refs 并集」。
     旧版仅存单 `kb_id` 的快照读侧兼容翻译为等价单元素 `kb_refs`，永不需要迁移。
+    M6 增量（docs/M6-CONTRACTS.md）：索引快照发布——门禁通过/force 之后、状态切 RELEASED 之前，
+    对关联知识库物理索引建不可变快照并固化当时的版本可见集，写入 `AppVersion.index_snapshots`
+    （每库每引擎一条，物理索引名直存不重算）与 `visible_version_kb_count`（按库汇总的文档版本数，
+    只给数量不给 id 列表）；经 RELEASED 版本（含 rollback 重新发布的历史版本）发起的对外
+    search/chat 固定检索这份快照与固化可见集，TESTING 灰度/chat-preview/管理台调试/评测仍走实时
+    别名与当前激活集合；快照索引被误删时降级为实时别名并记 `degraded=snapshot_index_missing`
+    （M6 之前发布、本就没有快照的旧 RELEASED 版本走同样路径但不记该标记，是历史数据形态而非故障）；
+    `DocumentVersionResponse` 新增 `pinned`/`pinned_by`，被任意未清理应用版本（含 SUPERSEDED）
+    的固化可见集引用即 pin，归档保留清理跳过之。同 PR 补 M5 遗漏的 `route_fallback_all` 枚举值。
 
     '
-  version: 0.6.0-m5
+  version: 0.7.0-m6
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -1658,7 +1667,12 @@ paths:
         仅在双方有效 case 交集上比较 Hit Rate/Recall@K，容差 ε=max(0.02, 1/N)；三态结论 GATE_PASSED
         自动放行，GATE_LOG_ONLY/GATE_BLOCKED 需 force=true 显式放行并留痕（force_operator）。
         响应即调用返回时刻的版本状态：门禁场景下为 GATING，双跑异步执行，控制台轮询详情接口获取结果
-        （M4c-CONTRACTS.md §2）。'
+        （M4c-CONTRACTS.md §2）。门禁通过/force 之后、状态切 RELEASED 之前，对关联的每个知识库
+        物理索引建不可变快照并固化当时的版本可见集（写入 index_snapshots/visible_version_kb_count，
+        M6-CONTRACTS.md §0.3）；任一库快照失败则发布中止、版本停留在门禁结论状态可重试，已建的本次
+        快照索引会被回滚删除。此后经该 RELEASED 版本（含 rollback 重新发布的历史版本）发起的对外
+        search/chat 调用固定检索这份快照索引与固化可见集，不受快照建立之后的新文档/新版本影响；
+        管理台调试与 TESTING 灰度调用仍走实时别名与当前激活集合。'
       parameters:
       - name: force
         in: query
@@ -1686,7 +1700,10 @@ paths:
       - app-center
       summary: 回滚为正式版
       description: 仅 SUPERSEDED 态版本可回滚；门禁不重跑（历史结论视为既成事实），原 RELEASED 版本转
-        SUPERSEDED，发布/回滚均为原子状态切换
+        SUPERSEDED，发布/回滚均为原子状态切换。回滚后的检索恢复该版本自己发布时冻结的索引快照与
+        版本可见集（历史知识状态），不会重新对当前语料建快照；被 SUPERSEDED 的版本只要其快照仍存在
+        即持续视为"被引用"，归档清理会跳过其固化可见集覆盖的文档版本，直到快照按保留策略被清理
+        （M6-CONTRACTS.md §0.8/§0.9）
       responses:
         '200':
           description: 回滚成功
@@ -2517,13 +2534,26 @@ components:
 
         threshold_inactive（score_threshold 在 BM25 单路场景不生效）。
 
+        M5 新增 route_fallback_all（知识库路由白名单未命中/解析失败/超时/未配置模型，降级检索全部
+
+        关联库）。M6 新增 snapshot_index_missing（RELEASED 版本的快照索引已不存在，如被误删，
+
+        回退实时别名与当前激活集合提供结果；M6 之前发布、本就没有快照的旧 RELEASED 版本走同样的
+
+        实时别名路径，但那是历史数据形态而非故障，不记该标记，M6-CONTRACTS.md §0.4/§0.5）。
+
         '
       enum:
       - vector_route_unavailable
       - query_rewrite_timeout
+      - query_rewrite_error
+      - query_rewrite_unavailable
       - rerank_timeout
       - rerank_error
+      - rerank_unavailable
       - threshold_inactive
+      - route_fallback_all
+      - snapshot_index_missing
     RetrievalNode:
       type: object
       description: 检索结果节点（契约 §5 定型结构）
@@ -3269,6 +3299,16 @@ components:
           - REBUILD
           description: INSTANT when the target version still owns its chunks, REBUILD
             once archived
+        pinned:
+          type: boolean
+          description: true 表示至少一个未删除的应用版本（含 SUPERSEDED，只要其固化可见集尚未随快照
+            清理而清空）引用了这个文档版本，归档保留清理会跳过它（M6-CONTRACTS.md §0.8）
+        pinned_by:
+          type: array
+          items:
+            type: string
+          description: 引用该文档版本的应用版本业务 id 列表，供控制台解释为何一个版本被跳过归档，
+            而不是只把归档动作置灰；pinned=false 时为空数组
         changelog:
           type: string
           nullable: true
@@ -4443,12 +4483,46 @@ components:
           type: string
           format: date-time
           nullable: true
+        index_snapshots:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppIndexSnapshot'
+          description: 该版本发布时对关联知识库物理索引冻结的快照，一库一引擎一条（完整模式下同一库
+            的 BM25 与向量各一条）；从未发布过、在索引快照能力上线前发布、或快照已被清理保留策略
+            回收的版本一律为空数组，此时调用回退实时别名与当前激活集合（M6-CONTRACTS.md §0）
+        visible_version_kb_count:
+          type: array
+          items:
+            $ref: '#/components/schemas/VisibleVersionCount'
+          description: 该版本固化的版本可见集，按知识库汇总为文档版本数量（只给数量不给 id 列表，
+            避免列表响应随语料规模膨胀），空数组语义与 index_snapshots 相同
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+    AppIndexSnapshot:
+      type: object
+      description: 一次发布对某知识库某引擎冻结的物理索引（t_kb_app_version.index_snapshots 一个元素，
+        M6-CONTRACTS.md §0.2/§0.10）；物理名直接存储、从不重新计算，避免嵌入模型切换后历史版本被
+        指向一个从未包含过的索引
+      properties:
+        kb_id:
+          type: string
+        engine:
+          $ref: '#/components/schemas/VectorEngine'
+        physical_index_name:
+          type: string
+          description: 快照物理索引/集合名，不挂别名，按物理名直查
+    VisibleVersionCount:
+      type: object
+      description: 一个知识库在某次发布固化的可见集里贡献了多少个文档版本（仅计数，M6-CONTRACTS.md §0.10）
+      properties:
+        kb_id:
+          type: string
+        version_count:
+          type: integer
     AppVersionResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'

@@ -21,7 +21,8 @@ MinIO（对象存储）构建，全部通过 docker-compose 一键拉起中间�
 - [中文分词（IK）](#中文分词ik)
   - [启用 ik（M2）](#启用-ikm2)
 - [压测（M2）](#压测m2)
-- [备份与恢复](#备份与恢复)
+- [备份与恢复（M6）](#备份与恢复m6)
+- [压测种子数据（M6）](#压测种子数据m6)
 - [Demo 数据集与聊天记录映射（M3）](#demo-数据集与聊天记录映射m3)
 - [接口契约（OpenAPI）](#接口契约openapi)
 - [开源工程文档](#开源工程文档)
@@ -222,19 +223,39 @@ KB_ID=<目标知识库 kb_id> TOKEN=<登录 token> ./scripts/benchmark.sh
 **M2 验收口径：基础链路 P95 < 2s**（见 docs/M2-CONTRACTS.md §7）。参数与退出码
 说明见脚本头注释；服务未启动/`KB_ID`/`TOKEN` 有误时会给出明确报错而不是挂起或崩溃。
 
-## 备份与恢复
+## 备份与恢复（M6）
 
 ```bash
-./scripts/backup.sh              # mysqldump 全量 + MinIO 数据卷全量导出，按份数轮转
+./scripts/backup.sh                                   # mysqldump 全量 + ES 快照(kb_*) + MinIO 镜像
+./scripts/restore.sh ./backup/<UTC 时间戳> [--yes]     # 按 MySQL -> ES -> MinIO 顺序原地恢复
 ```
 
-- 备份产物落地 `.env` 中的 `BACKUP_DIR`（默认 `./backups`），按 `BACKUP_KEEP_COUNT`
-  （默认 7）滚动清理旧备份
+- 备份产物落地 `.env` 中的 `BACKUP_DIR`（默认 `./backup`）下的 `<UTC 时间戳>/` 子目录，
+  含 `mysql/*.sql.gz` + `es-snapshot.json` + `minio/<bucket>/` + `manifest.json`
+  （三段各自 status 与体积），按 `BACKUP_KEEP_COUNT`（默认 7）滚动清理旧的时间戳目录
+- ES 快照走 `_snapshot` API，物理数据落 compose 挂载的共享仓库目录 `./backup/es-repo`
+  （对应 ES 容器 `path.repo`），离线归档需把整个 `./backup` 目录一起搬走
 - 建议用 cron 每日调度（RPO 目标 ≤24h），示例见 `scripts/backup.sh` 文件头注释
-- **恢复顺序**：MySQL → MinIO → 触发"从事实源重建索引"（kb-rag-server 管理台功能，
-  M6 里程碑）
-- RTO 不设硬指标，但需实测端到端恢复时长并写入部署文档（见需求文档 §5，M6 验收含一次
-  "备份-删库-恢复-检索可用"演练）
+- **恢复顺序**：MySQL → Elasticsearch（先删 `kb_*` 索引再按快照 `_restore`）→ MinIO
+  （`mc mirror --remove` 逆向镜像）；`restore.sh` 恢复前交互确认（`--yes` 跳过），
+  恢复后打印验证提示
+- RTO 不设硬指标，但需实测端到端恢复时长并写入部署文档；完整的 RPO 说明、脚本参数、
+  恢复演练步骤清单见 [`docs/backup-restore.md`](docs/backup-restore.md)（M6 验收⑥
+  "备份-删库-恢复-检索可用"演练照此文档执行）
+
+## 压测种子数据（M6）
+
+```bash
+python3 scripts/seed-bench.py                 # 零 Key 灌入 10 万分片种子知识库（幂等）
+KB_ID=kb_benchseed TOKEN=<登录 token> ./scripts/benchmark.sh   # 复用 M2 压测脚本
+python3 scripts/seed-bench.py --clean-only    # 压测结束后清理
+```
+
+`scripts/seed-bench.py` 直写 MySQL（`t_kb_knowledge_base`/`t_kb_document`/
+`t_kb_document_version`/`t_kb_chunk`）+ Elasticsearch bulk（零 Key 三段命名
+`kb_{kbId}_none_v1` 物理索引 + `kb_{kbId}_es` 别名），供 10 万分片规模压测复用，
+不依赖模型 Key。参数、依赖说明与验收口径见
+[`docs/backup-restore.md`](docs/backup-restore.md) 第 4 节。
 
 ## Demo 数据集与聊天记录映射（M3）
 

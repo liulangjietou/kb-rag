@@ -7,6 +7,24 @@
 ## [Unreleased]
 
 ### Added
+- M6 索引快照发布（docs/M6-CONTRACTS.md）：发布门禁通过/force 之后、状态切 RELEASED 之前，对关联
+  知识库的物理索引执行不可变快照（ES `_clone`：源索引临时置 `index.blocks.write=true` → clone →
+  两端解锁，段级硬链接毫秒级完成；Milvus 为同步批量读写拷贝）并固化当时的版本可见集
+  （`visible_version_ids`）与快照索引清单（`index_snapshots`），任一库快照失败则发布中止、已建
+  的本次快照回滚删除、版本停留在门禁结论状态可重试；经 RELEASED 版本（含 rollback 重新发布的
+  历史版本）发起的对外调用固定检索这份快照与固化可见集，回滚即刻恢复历史知识状态，TESTING 灰度/
+  chat-preview/管理台调试/评测仍走实时别名与当前激活集合；快照索引被误删时降级为实时别名并记
+  `degraded=snapshot_index_missing`（M6 之前发布的旧 RELEASED 版本走同样路径但不记该标记，属历史
+  数据形态而非故障）；`AppVersionPinChecker` 落地归档保护——文档版本被任意未清理应用版本（含
+  SUPERSEDED）的固化可见集引用即 pin，`VersionRetentionService` 跳过之；新增按应用保留最近 3 个
+  SUPERSEDED 版本快照的定时清理任务，超出的删物理索引并解除 pin，RELEASED 快照永不清理；
+  `scripts/backup.sh`/`scripts/restore.sh`（mysqldump + ES 数据导出/mc mirror + MinIO 全量，
+  产物带时间戳目录）与 `docs/backup-restore.md`（RPO/RTO 说明与演练步骤）；`scripts/seed-bench.py`
+  零 Key 直写 10 万分片压测数据，P95 由 33.7ms 劣化至 39.0ms（+15.9%，≤20% 验收阈值内）。
+  `docs/openapi/kb-server.yaml` 同步：`AppVersionResponse` 增 `index_snapshots`/
+  `visible_version_kb_count`，`DocumentVersionResponse` 增 `pinned`/`pinned_by`，`degraded`
+  枚举增 `snapshot_index_missing`（并补齐 M5 遗漏的 `route_fallback_all`），`info.version` 升至
+  `0.7.0-m6`。
 - M5 多知识库路由（docs/M5-CONTRACTS.md）：应用版本配置 `kb_id` 单库字段废弃为兼容可选项，
   新增 `kb_refs`（1..15 个知识库 + 配额权重，正整数，默认 1，`kb.retrieval.max-linked-kb`
   控制上限）；`RoutingService` 按需（路由开关开启且应用挂 ≥2 库时）调用 ChatProvider 做
@@ -101,6 +119,19 @@
 
 ### Notes
 
+- 2026-07-26：M6-CONTRACTS.md §4 验收通过（零 Key 域）——V1 发布产生快照
+  `kb_{id}_none_s1`（ES 实索引 + registry 行 + 两列固化），新文档版本激活后对外 search（V1）
+  不含新内容、管理台调试含新内容（快照隔离实证）；V2 发布 s2 后 rollback V1，检索恢复历史状态且
+  召回非空；旧文档版本 `pinned=true` 且 `pinned_by` 指向引用它的应用版本；误删快照后 RELEASED
+  调用 `degraded=[snapshot_index_missing,…]` 且结果出自实时索引；M5 期旧格式 RELEASED 兼容调用
+  不记该标记；备份-删库-恢复演练（`backup.sh` → `DROP DATABASE` + 删全部 `kb_*` 索引 →
+  `restore.sh` 恢复 301 行 chunk/15 索引 → 检索命中非空）；seed 10 万分片压测
+  P50=18.3/P95=39.0/P99=159.8ms，对比 100 分片基线 P50=19.9/P95=33.7/P99=128.8ms，
+  **P95 劣化 15.9% ≤ 20% 验收阈值**，200/200 全 2xx。单测 606 项（新增 53）全过。Key 恢复后
+  补验：向量路快照检索、Milvus 快照（需 full 模式）。本仓库范围内本次同步完成 M6 OpenAPI
+  增量（`docs/openapi/kb-server.yaml` → `0.7.0-m6`）；`t_kb_app_version` 新增
+  `visible_version_ids`/`index_snapshots` 两列的 Flyway V7 迁移脚本在 kb-rag-server 仓库，
+  不在本仓库交付范围；compose/`.env.example`/需求文档 v1.12 回补由主会话另行处理
 - 2026-07-26：M5-CONTRACTS.md §5 验收通过（零 Key 域）——双库路由关时两库都查且
   `node.metadata.kb_id` 覆盖两库；路由开 + 零 Key 时 `degraded` 含 `route_fallback_all`
   仍全库检索；权重 3:1 配额实测 `quotas={38, 12}`；M4c 旧版单库快照对外调用仍正常且
