@@ -1,6 +1,8 @@
 import type {
   AnchorType,
   AnnotationType,
+  ApiKeyStatus,
+  AppVersionStatus,
   CaseSource,
   CaseStatus,
   ChatImportAction,
@@ -168,6 +170,35 @@ export const METRIC_GROUP_META: Record<MetricGroupKey, TagMeta> = {
   document: { color: 'purple', label: '文档级' },
   single_turn: { color: 'default', label: '单轮' },
   multi_turn: { color: 'default', label: '多轮' },
+};
+
+/**
+ * t_kb_app_version.status Tag meta (M4c-CONTRACTS.md sections 1/2/4): the release/gate state
+ * machine's eight states, hard-constrained by the M4c web scope to always render through this
+ * table (never a raw switch), including the "仅记录不拦截" GATE_LOG_ONLY state that still requires
+ * an explicit force-release action rather than blocking release outright.
+ */
+export const APP_VERSION_STATUS_META: Record<AppVersionStatus, TagMeta> = {
+  DRAFT: { color: 'default', label: '草稿' },
+  TESTING: { color: 'processing', label: '测试中' },
+  GATING: { color: 'processing', label: '门禁执行中' },
+  GATE_PASSED: { color: 'cyan', label: '门禁通过' },
+  GATE_LOG_ONLY: { color: 'warning', label: '门禁仅记录' },
+  GATE_BLOCKED: { color: 'error', label: '门禁拦截' },
+  RELEASED: { color: 'success', label: '已发布' },
+  SUPERSEDED: { color: 'default', label: '已下线' },
+};
+
+/** App version statuses that mean "gate is still running", used to drive 3s polling. */
+export const APP_VERSION_GATING_STATUSES: AppVersionStatus[] = ['GATING'];
+
+/**
+ * t_kb_api_key.status Tag meta (M4c-CONTRACTS.md sections 1/3). See ApiKeyStatus's doc comment in
+ * api/types.ts for why the two values are an assumption rather than a literal contract quote.
+ */
+export const API_KEY_STATUS_META: Record<ApiKeyStatus, TagMeta> = {
+  ENABLED: { color: 'success', label: '启用' },
+  DISABLED: { color: 'default', label: '已禁用' },
 };
 
 /** Tag metadata shape shared by every enum lookup table in this module. */

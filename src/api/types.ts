@@ -954,3 +954,276 @@ export interface EvalRunCompareResult {
   reason: string | null;
   runs: EvalRun[];
 }
+
+// ---------------------------------------------------------------------------
+// Application center: apps, versions, release gate (M4c-CONTRACTS.md sections 1/2)
+// ---------------------------------------------------------------------------
+
+/** t_kb_app row (M4c-CONTRACTS.md section 1). M4c limits an app to a single kb_id; multi-kb is M5. */
+export interface KbApp {
+  app_id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateAppRequest {
+  name: string;
+  description?: string;
+}
+
+/**
+ * ASSUMPTION: section 2 only lists the CRUD path prefix ("应用 CRUD `/api/v1/apps`") without
+ * spelling out which verbs beyond create; a plain PUT for name/description edits mirrors every
+ * other resource's CRUD shape in this codebase (e.g. kb.ts's create/get/delete trio).
+ */
+export type UpdateAppRequest = CreateAppRequest;
+
+/**
+ * t_kb_app_version.config JSON (M4c-CONTRACTS.md section 1): "发布时固化的全部检索+问答配置快照".
+ * Editable while the owning version is DRAFT/TESTING; frozen once RELEASED (rollback re-releases
+ * the historical row's config verbatim, never re-derives it).
+ */
+export interface AppRetrievalConfig {
+  recall_top_k: number;
+  top_n: number;
+  score_threshold?: number | null;
+  fusion?: FusionConfig;
+  rerank_enabled?: boolean;
+  rewrite_enabled?: boolean;
+}
+
+/**
+ * Prompt config sub-object named field-by-field in M4c-CONTRACTS.md section 1: "{system_prompt,
+ * refusal_enabled,refusal_prompt,leak_guard_enabled,leak_guard_prompt,citation_enabled}".
+ */
+export interface AppPromptConfig {
+  system_prompt: string;
+  refusal_enabled: boolean;
+  refusal_prompt: string;
+  leak_guard_enabled: boolean;
+  leak_guard_prompt: string;
+  citation_enabled: boolean;
+}
+
+export interface AppVersionConfig {
+  /** Single kb_id per M4c's stage limitation; multi-kb selection unlocks in M5. */
+  kb_id: string;
+  retrieval: AppRetrievalConfig;
+  prompt: AppPromptConfig;
+}
+
+/**
+ * t_kb_app_version.status (M4c-CONTRACTS.md section 1): the eight-state release/gate machine.
+ * Must always be displayed through APP_VERSION_STATUS_META/metaOf, never a raw switch.
+ */
+export type AppVersionStatus =
+  | 'DRAFT'
+  | 'TESTING'
+  | 'GATING'
+  | 'GATE_PASSED'
+  | 'GATE_LOG_ONLY'
+  | 'GATE_BLOCKED'
+  | 'RELEASED'
+  | 'SUPERSEDED';
+
+/**
+ * t_kb_app_version row (M4c-CONTRACTS.md section 1). gate_run_ids is modelled as an ordered pair
+ * [candidate_run_id, baseline_run_id] -- ASSUMPTION: the contract only says "同语料双跑...候选配置
+ * 与当前 RELEASED 配置各一轮" and names the column gate_run_ids JSON without giving element order;
+ * this ordering is what GateCompareDrawer's labels assume and is not a guaranteed backend contract.
+ */
+export interface AppVersion {
+  app_version_id: string;
+  app_id: string;
+  version: string;
+  status: AppVersionStatus;
+  config: AppVersionConfig;
+  gate_dataset_id: string | null;
+  gate_run_ids: string[] | null;
+  gate_verdict: string | null;
+  changelog: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * POST /api/v1/apps/{id}/versions request body (M4c-CONTRACTS.md section 2: "从当前草稿配置建版").
+ * ASSUMPTION: there is no separate persisted "draft config" resource on the app row in the
+ * contract text; the web's 配置编辑 form holds the draft client-side and this call snapshots it
+ * into a brand new DRAFT version, matching the section 4 UI description (配置编辑 + 版本列表 as two
+ * panes of the same page rather than a bidirectional draft-sync API).
+ */
+export interface CreateAppVersionRequest extends AppVersionConfig {
+  changelog?: string;
+}
+
+/**
+ * PUT /api/v1/app-versions/{vid}/gate-dataset request body.
+ * ASSUMPTION: section 4 lists "绑定门禁评测集选择" as its own version-list-row action distinct
+ * from version creation, but section 2/3 do not name a binding endpoint; modelled as a dedicated
+ * PUT so binding can happen (and be changed) any time before `release` is called, consistent with
+ * "绑定 gate_dataset 时进入 GATING" being described as a release-time trigger, not a creation-time one.
+ */
+export interface BindGateDatasetRequest {
+  dataset_id: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Open API: external search/chat + admin chat preview (M4c-CONTRACTS.md section 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/v1/knowledge/search request body (M4c-CONTRACTS.md section 3): app_id + optional
+ * app_version (omitted = current RELEASED; explicit value targets TESTING for beta grayscale,
+ * audited as target_stage=beta). Override whitelist is exactly top_n/score_threshold/
+ * metadata_filter/max_content_length -- recall_top_k/fusion/rerank_enabled/rewrite_enabled live
+ * only in the app version's frozen config and are intentionally absent from this request shape.
+ */
+export interface PublicSearchRequest {
+  query: string;
+  app_id: string;
+  app_version?: string;
+  messages?: ChatMessage[];
+  max_content_length?: number;
+  metadata_filter?: MetadataFilter;
+  top_n?: number;
+  score_threshold?: number | null;
+}
+
+/** POST /api/v1/knowledge/chat request body (M4c-CONTRACTS.md section 3): same fields + stream. */
+export interface ChatRequest extends PublicSearchRequest {
+  /** Default false; true switches the response to the SSE event stream described below. */
+  stream?: boolean;
+}
+
+/** Admin-authenticated chat preview body (see ChatRequest doc); app_id comes from the URL path instead. */
+export type ChatPreviewRequest = Omit<ChatRequest, 'app_id'>;
+
+/** Non-streaming POST /api/v1/knowledge/chat response (M4c-CONTRACTS.md section 3). */
+export interface ChatResponse {
+  answer: string;
+  references: RetrievalNode[];
+  request_id: string;
+  degraded: string[];
+}
+
+/**
+ * SSE event payload shapes for stream=true chat (M4c-CONTRACTS.md section 3: "message_delta* ->
+ * references -> done(含 request_id/degraded) -> 或 error"). ASSUMPTION: field names inside each
+ * frame's `data:` JSON are not spelled out beyond the event-name sequence; modelled as the minimal
+ * shape each event name implies.
+ */
+export interface ChatDeltaEvent {
+  delta: string;
+}
+export interface ChatReferencesEvent {
+  references: RetrievalNode[];
+}
+export interface ChatDoneEvent {
+  request_id: string;
+  degraded: string[];
+}
+export interface ChatErrorEvent {
+  code: string;
+  message: string;
+}
+
+// ---------------------------------------------------------------------------
+// API Key management (M4c-CONTRACTS.md sections 1/3)
+// ---------------------------------------------------------------------------
+
+/**
+ * t_kb_api_key.status. ASSUMPTION: the contract names the column ("status") but not its concrete
+ * values; ENABLED/DISABLED mirrors IkDictStatus, the only other simple two-state status enum in
+ * this codebase's contracts.
+ */
+export type ApiKeyStatus = 'ENABLED' | 'DISABLED';
+
+/** t_kb_api_key row (M4c-CONTRACTS.md sections 1/3). app_scope null = every application. */
+export interface ApiKey {
+  key_id: string;
+  name: string;
+  /** Display-only prefix, e.g. "kb-sk-ab12"; the full secret is never returned again after creation/rotation. */
+  prefix: string;
+  /** Last 4 characters of the plaintext secret, shown alongside prefix per "列表(prefix+末4位)". */
+  last4: string;
+  status: ApiKeyStatus;
+  qps_limit: number;
+  app_scope: string[] | null;
+  last_used_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateApiKeyRequest {
+  name: string;
+  qps_limit: number;
+  /** Omitted/null = all applications. */
+  app_scope?: string[] | null;
+}
+
+/** Creation/rotation response: the plaintext secret is only ever present in these two responses. */
+export interface ApiKeyWithSecret extends ApiKey {
+  plain_key: string;
+}
+
+/**
+ * ASSUMPTION: section 3 lists "app_scope 配置" as its own management bullet separate from create;
+ * modelled as a dedicated scope-update endpoint so an existing key's scope can be edited without a
+ * full rotate (which would also invalidate the currently distributed secret).
+ */
+export interface UpdateApiKeyScopeRequest {
+  app_scope: string[] | null;
+}
+
+// ---------------------------------------------------------------------------
+// API audit log (M4c-CONTRACTS.md sections 1/3)
+// ---------------------------------------------------------------------------
+
+/** t_kb_api_audit_log.target_stage (M4c-CONTRACTS.md section 3). */
+export type AuditTargetStage = 'release' | 'beta';
+
+/**
+ * t_kb_api_audit_log row (M4c-CONTRACTS.md section 1). ASSUMPTION: the contract does not name a
+ * primary-key column for this table; audit_log_id follows the `xxx_id` convention used by every
+ * other row type in this codebase (case_id, run_id, etc).
+ */
+export interface ApiAuditLogEntry {
+  audit_log_id: string;
+  key_id: string;
+  app_version_id: string;
+  target_stage: AuditTargetStage;
+  /** Already desensitized + truncated to 200 chars server-side (M4c-CONTRACTS.md section 1). */
+  query_digest: string;
+  hit_doc_ids: string[];
+  latency_ms: number;
+  degraded: string[];
+  request_id: string;
+  created_at: string;
+}
+
+export interface AuditLogQueryParams {
+  key_id?: string;
+  /** ISO instant, inclusive lower bound. */
+  from?: string;
+  /** ISO instant, inclusive upper bound. */
+  to?: string;
+  target_stage?: AuditTargetStage;
+  page?: number;
+}
+
+/**
+ * GET /api/v1/api-audit-logs/stats response.
+ * ASSUMPTION: section 4 only asks for "调用量简单统计" without a response schema; modelled as the
+ * smallest useful call-volume summary (bucketed identically to the log query's filters) so the
+ * audit tab can show a headline row above the filtered table without paging through every row
+ * client-side.
+ */
+export interface AuditLogStats {
+  total_calls: number;
+  avg_latency_ms: number;
+  degraded_calls: number;
+  error_calls: number;
+}

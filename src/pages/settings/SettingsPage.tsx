@@ -1,6 +1,8 @@
 import { Card, Tabs, Typography } from 'antd';
 import { useModelStatus } from '../../context/ModelStatusContext';
 import AlertConfigTab from './components/AlertConfigTab';
+import ApiKeyTab from './components/ApiKeyTab';
+import AuditLogTab from './components/AuditLogTab';
 import IkDictTab from './components/IkDictTab';
 import ModelStatusCards from './components/ModelStatusCards';
 
@@ -50,6 +52,24 @@ export default function SettingsPage() {
             children: (
               <Card>
                 <AlertConfigTab />
+              </Card>
+            ),
+          },
+          {
+            key: 'api-key',
+            label: 'API Key 管理',
+            children: (
+              <Card>
+                <ApiKeyTab />
+              </Card>
+            ),
+          },
+          {
+            key: 'audit-log',
+            label: '审计日志查询',
+            children: (
+              <Card>
+                <AuditLogTab />
               </Card>
             ),
           },

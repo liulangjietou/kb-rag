@@ -4,6 +4,9 @@ import { ModelStatusProvider } from '../context/ModelStatusContext';
 import MainLayout from '../layout/MainLayout';
 import ChangePasswordPage from '../pages/ChangePasswordPage';
 import LoginPage from '../pages/LoginPage';
+import AppDetailPage from '../pages/apps/AppDetailPage';
+import AppListPage from '../pages/apps/AppListPage';
+import ChatDebugPage from '../pages/chat/ChatDebugPage';
 import EvalCenterPage from '../pages/eval/EvalCenterPage';
 import KbDetailPage from '../pages/kb/KbDetailPage';
 import KbListPage from '../pages/kb/KbListPage';
@@ -32,6 +35,9 @@ export default function AppRouter() {
             <Route path="/kb" element={<KbListPage />} />
             <Route path="/kb/:kbId" element={<KbDetailPage />} />
             <Route path="/search" element={<SearchPage />} />
+            <Route path="/chat" element={<ChatDebugPage />} />
+            <Route path="/apps" element={<AppListPage />} />
+            <Route path="/apps/:appId" element={<AppDetailPage />} />
             <Route path="/eval" element={<EvalCenterPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
