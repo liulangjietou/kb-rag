@@ -74,12 +74,12 @@ export default function AppDetailPage() {
             {
               key: 'versions',
               label: '版本列表',
-              children: <AppVersionTab appId={appId} onVersionsChanged={setVersions} />,
+              children: <AppVersionTab appId={appId} kbs={kbs} onVersionsChanged={setVersions} />,
             },
             {
               key: 'api-debug',
               label: 'API 调试',
-              children: <ApiDebugTab appId={appId} />,
+              children: <ApiDebugTab appId={appId} kbs={kbs} />,
             },
           ]}
         />

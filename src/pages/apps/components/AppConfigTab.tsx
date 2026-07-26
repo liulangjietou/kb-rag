@@ -1,12 +1,19 @@
 // Author: owlzhangfq@gmail.com
 import { useEffect } from 'react';
-import { PlusOutlined } from '@ant-design/icons';
+import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Collapse, Form, Input, InputNumber, Select, Slider, Space, Switch, Typography, message } from 'antd';
 import { createAppVersion } from '../../../api/app';
-import type { AppVersion, AppVersionConfig, FusionMode, KnowledgeBase } from '../../../api/types';
+import type { AppVersion, AppVersionConfig, FusionMode, KbRef, KnowledgeBase } from '../../../api/types';
+import { resolveKbRefs } from '../../../utils/kbRefs';
+
+/** M5-CONTRACTS.md section 1: app versions may span 1..15 knowledge bases. */
+const MIN_KB_REFS = 1;
+const MAX_KB_REFS = 15;
 
 interface AppConfigFormValues {
-  kb_id: string;
+  kb_refs: KbRef[];
+  routing_enabled: boolean;
+  routing_prompt?: string;
   recall_top_k: number;
   top_n: number;
   threshold_enabled: boolean;
@@ -26,7 +33,9 @@ interface AppConfigFormValues {
 }
 
 const DEFAULT_VALUES: AppConfigFormValues = {
-  kb_id: '',
+  kb_refs: [{ kb_id: '', weight: 1 }],
+  routing_enabled: false,
+  routing_prompt: undefined,
   recall_top_k: 50,
   top_n: 5,
   threshold_enabled: false,
@@ -46,7 +55,9 @@ const DEFAULT_VALUES: AppConfigFormValues = {
 
 function configToFormValues(config: AppVersionConfig): AppConfigFormValues {
   return {
-    kb_id: config.kb_id,
+    kb_refs: resolveKbRefs(config),
+    routing_enabled: config.routing?.enabled ?? false,
+    routing_prompt: config.routing?.prompt ?? undefined,
     recall_top_k: config.retrieval.recall_top_k,
     top_n: config.retrieval.top_n,
     threshold_enabled: config.retrieval.score_threshold != null,
@@ -67,7 +78,11 @@ function configToFormValues(config: AppVersionConfig): AppConfigFormValues {
 
 function formValuesToConfig(values: AppConfigFormValues): AppVersionConfig {
   return {
-    kb_id: values.kb_id,
+    kb_refs: values.kb_refs,
+    routing: {
+      enabled: values.routing_enabled,
+      prompt: values.routing_prompt?.trim() ? values.routing_prompt.trim() : null,
+    },
     retrieval: {
       recall_top_k: values.recall_top_k,
       top_n: values.top_n,
@@ -100,8 +115,9 @@ interface AppConfigTabProps {
 }
 
 /**
- * 配置编辑 tab (M4c-CONTRACTS.md section 4): the three config blocks -- single kb selection,
- * retrieval params, 问答 prompt config (含拒答/防泄漏开关与文案) -- submitted as one call that
+ * 配置编辑 tab (M4c-CONTRACTS.md section 4, extended by M5-CONTRACTS.md section 3): the config
+ * blocks -- multi-kb selection (1..15 rows, each a kb + rerank-quota weight), kb 路由 (LLM query
+ * routing switch + prompt), retrieval params, 问答 prompt config -- submitted as one call that
  * snapshots a brand new DRAFT version (see CreateAppVersionRequest's doc comment for why there is
  * no separate draft-persistence endpoint: the form itself is the draft).
  */
@@ -111,6 +127,8 @@ export default function AppConfigTab({ appId, kbs, latestVersion, onVersionCreat
   const thresholdEnabled = Form.useWatch('threshold_enabled', form) ?? false;
   const refusalEnabled = Form.useWatch('refusal_enabled', form) ?? false;
   const leakGuardEnabled = Form.useWatch('leak_guard_enabled', form) ?? false;
+  const routingEnabled = Form.useWatch('routing_enabled', form) ?? false;
+  const kbRefs = Form.useWatch('kb_refs', form) ?? [];
 
   useEffect(() => {
     form.setFieldsValue(latestVersion ? configToFormValues(latestVersion.config) : DEFAULT_VALUES);
@@ -125,6 +143,8 @@ export default function AppConfigTab({ appId, kbs, latestVersion, onVersionCreat
     onVersionCreated();
   };
 
+  const kbOptions = kbs.map((kb) => ({ label: kb.name, value: kb.kb_id }));
+
   return (
     <Card>
       <Alert
@@ -135,9 +155,86 @@ export default function AppConfigTab({ appId, kbs, latestVersion, onVersionCreat
       />
       <Form<AppConfigFormValues> form={form} layout="vertical" initialValues={DEFAULT_VALUES}>
         <Typography.Title level={5}>关联知识库</Typography.Title>
-        <Form.Item name="kb_id" label="知识库（M4c 阶段仅支持单库，多库关联随 M5 解锁）" rules={[{ required: true, message: '请选择知识库' }]}>
-          <Select placeholder="请选择该应用关联的知识库" options={kbs.map((kb) => ({ label: kb.name, value: kb.kb_id }))} />
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+          1~15 个知识库，每行的权重决定该库在跨库融合时能分到的 rerank 候选配额比例（单库应用可忽略权重）
+        </Typography.Paragraph>
+        <Form.List
+          name="kb_refs"
+          rules={[
+            {
+              validator: async (_, refs: KbRef[]) => {
+                if (!refs || refs.length < MIN_KB_REFS) {
+                  throw new Error('至少保留一个知识库');
+                }
+                if (refs.length > MAX_KB_REFS) {
+                  throw new Error(`最多关联 ${MAX_KB_REFS} 个知识库`);
+                }
+                const ids = refs.map((r) => r.kb_id).filter(Boolean);
+                if (new Set(ids).size !== ids.length) {
+                  throw new Error('同一知识库不能重复添加');
+                }
+              },
+            },
+          ]}
+        >
+          {(fields, { add, remove }, { errors }) => (
+            <Space direction="vertical" style={{ width: '100%', marginBottom: 8 }}>
+              {fields.map((field) => (
+                <Space key={field.key} align="baseline" wrap>
+                  <Form.Item
+                    name={[field.name, 'kb_id']}
+                    rules={[{ required: true, message: '请选择知识库' }]}
+                    style={{ marginBottom: 8, width: 260 }}
+                  >
+                    <Select placeholder="选择知识库" options={kbOptions} />
+                  </Form.Item>
+                  <Form.Item
+                    name={[field.name, 'weight']}
+                    label="权重"
+                    initialValue={1}
+                    rules={[{ required: true, message: '请输入权重' }]}
+                    style={{ marginBottom: 8 }}
+                  >
+                    <InputNumber min={1} precision={0} style={{ width: 100 }} />
+                  </Form.Item>
+                  <MinusCircleOutlined
+                    style={{ marginTop: 8, color: fields.length <= MIN_KB_REFS ? '#00000040' : undefined }}
+                    onClick={() => fields.length > MIN_KB_REFS && remove(field.name)}
+                  />
+                </Space>
+              ))}
+              <Form.ErrorList errors={errors} />
+              <Button
+                type="dashed"
+                icon={<PlusOutlined />}
+                disabled={fields.length >= MAX_KB_REFS}
+                onClick={() => add({ kb_id: '', weight: 1 })}
+              >
+                添加知识库（{fields.length}/{MAX_KB_REFS}）
+              </Button>
+            </Space>
+          )}
+        </Form.List>
+
+        <Typography.Title level={5} style={{ marginTop: 24 }}>
+          知识库路由
+        </Typography.Title>
+        <Form.Item name="routing_enabled" label="启用 LLM 路由（按 query 判断该查哪些库）" valuePropName="checked" style={{ marginBottom: 8 }}>
+          <Switch />
         </Form.Item>
+        {routingEnabled && kbRefs.length < 2 && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 8 }}
+            message="当前仅关联 1 个知识库，路由不会实际触发（需 ≥2 个知识库才生效）"
+          />
+        )}
+        {routingEnabled && (
+          <Form.Item name="routing_prompt" label="路由 Prompt（留空使用内置默认路由 Prompt）" style={{ marginBottom: 0 }}>
+            <Input.TextArea rows={3} maxLength={2000} showCount placeholder="留空则使用系统内置的默认路由 Prompt" />
+          </Form.Item>
+        )}
 
         <Typography.Title level={5} style={{ marginTop: 24 }}>
           检索参数

@@ -4,11 +4,13 @@ import { SendOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, Select, Space, Switch, Tabs, Tag, Typography, message } from 'antd';
 import { listApiKeys } from '../../../api/apiKey';
 import { chatViaApiKey, searchViaApiKey, streamChatViaApiKey, type PublicApiResult } from '../../../api/publicApi';
-import type { ApiKey, ChatResponse, RetrievalNode, SearchResponse } from '../../../api/types';
+import type { ApiKey, ChatResponse, KnowledgeBase, RetrievalNode, SearchResponse } from '../../../api/types';
+import { kbNameOf } from '../../../utils/kbRefs';
 import { describeDegradedReason } from '../../../utils/statusMeta';
 
 interface ApiDebugTabProps {
   appId: string;
+  kbs: KnowledgeBase[];
 }
 
 interface DebugFormValues {
@@ -41,7 +43,7 @@ function buildCurl(endpoint: 'search' | 'chat', apiKey: string, body: Record<str
  * a real request against the external, API-Key-gated /api/v1/knowledge/search and /chat endpoints.
  * Chat additionally supports SSE streaming render. Both modes show an equivalent curl example.
  */
-export default function ApiDebugTab({ appId }: ApiDebugTabProps) {
+export default function ApiDebugTab({ appId, kbs }: ApiDebugTabProps) {
   const [form] = Form.useForm<DebugFormValues>();
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const thresholdEnabled = Form.useWatch('threshold_enabled', form) ?? false;
@@ -60,6 +62,7 @@ export default function ApiDebugTab({ appId }: ApiDebugTabProps) {
   const [chatAnswer, setChatAnswer] = useState('');
   const [chatReferences, setChatReferences] = useState<RetrievalNode[]>([]);
   const [chatDegraded, setChatDegraded] = useState<string[]>([]);
+  const [chatRoutedKbIds, setChatRoutedKbIds] = useState<string[]>([]);
   const [chatRequestId, setChatRequestId] = useState<string | null>(null);
   const [chatError, setChatError] = useState<{ code: string; message: string } | null>(null);
 
@@ -106,6 +109,7 @@ export default function ApiDebugTab({ appId }: ApiDebugTabProps) {
     setChatAnswer('');
     setChatReferences([]);
     setChatDegraded([]);
+    setChatRoutedKbIds([]);
     setChatRequestId(null);
     setChatError(null);
     try {
@@ -113,9 +117,10 @@ export default function ApiDebugTab({ appId }: ApiDebugTabProps) {
         await streamChatViaApiKey(values.api_key, buildPayload(values), {
           onDelta: (delta) => setChatAnswer((prev) => prev + delta),
           onReferences: (references) => setChatReferences(references),
-          onDone: (requestId, degraded) => {
+          onDone: (requestId, degraded, routedKbIds) => {
             setChatRequestId(requestId);
             setChatDegraded(degraded);
+            setChatRoutedKbIds(routedKbIds);
           },
           onError: (error) => setChatError(error),
         });
@@ -126,6 +131,7 @@ export default function ApiDebugTab({ appId }: ApiDebugTabProps) {
           setChatAnswer(data.answer);
           setChatReferences(data.references);
           setChatDegraded(data.degraded);
+          setChatRoutedKbIds(data.routed_kb_ids ?? []);
           setChatRequestId(data.request_id);
         } else {
           setChatError(result.error);
@@ -240,8 +246,19 @@ export default function ApiDebugTab({ appId }: ApiDebugTabProps) {
                         <Descriptions.Item label="request_id">{searchResult.data.request_id}</Descriptions.Item>
                         <Descriptions.Item label="命中数">{searchResult.data.nodes.length}</Descriptions.Item>
                       </Descriptions>
+                      {(searchResult.data.applied.routed_kb_ids?.length ?? 0) > 0 && (
+                        <Space wrap>
+                          <Typography.Text type="secondary">本次检索知识库：</Typography.Text>
+                          {searchResult.data.applied.routed_kb_ids!.map((kbId) => (
+                            <Tag key={kbId} color="processing">
+                              {kbNameOf(kbs, kbId)}
+                            </Tag>
+                          ))}
+                        </Space>
+                      )}
                       {searchResult.data.nodes.map((node, index) => (
                         <Card key={node.chunk_id} size="small" title={`#${index + 1} ${node.chunk_id}（${node.score_type}: ${node.score.toFixed(4)}）`}>
+                          {node.metadata?.kb_id && <Tag style={{ marginBottom: 8 }}>{kbNameOf(kbs, node.metadata.kb_id)}</Tag>}
                           <Typography.Paragraph ellipsis={{ rows: 4, expandable: true, symbol: '展开' }} style={{ marginBottom: 0 }}>
                             {node.content}
                           </Typography.Paragraph>
@@ -282,6 +299,16 @@ export default function ApiDebugTab({ appId }: ApiDebugTabProps) {
                   {chatDegraded.length > 0 && (
                     <Alert type="warning" showIcon message="已降级" description={chatDegraded.map(describeDegradedReason).join('；')} />
                   )}
+                  {chatRoutedKbIds.length > 0 && (
+                    <Space wrap>
+                      <Typography.Text type="secondary">本次检索知识库：</Typography.Text>
+                      {chatRoutedKbIds.map((kbId) => (
+                        <Tag key={kbId} color="processing">
+                          {kbNameOf(kbs, kbId)}
+                        </Tag>
+                      ))}
+                    </Space>
+                  )}
                   {chatRequestId && <Typography.Text type="secondary">request_id: {chatRequestId}</Typography.Text>}
                   {chatReferences.length > 0 && (
                     <>
@@ -290,7 +317,10 @@ export default function ApiDebugTab({ appId }: ApiDebugTabProps) {
                         {chatReferences.map((ref) => (
                           <Card key={ref.chunk_id} size="small">
                             <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                              <Tag>{ref.doc_id}</Tag>
+                              <Space wrap>
+                                <Tag>{ref.doc_id}</Tag>
+                                {ref.metadata?.kb_id && <Tag color="purple">{kbNameOf(kbs, ref.metadata.kb_id)}</Tag>}
+                              </Space>
                               <Typography.Paragraph ellipsis={{ rows: 3, expandable: true, symbol: '展开' }} style={{ marginBottom: 0 }}>
                                 {ref.content}
                               </Typography.Paragraph>

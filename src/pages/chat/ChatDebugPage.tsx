@@ -3,7 +3,9 @@ import { useEffect, useRef, useState } from 'react';
 import { SendOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Empty, Input, Select, Space, Switch, Tag, Typography, message } from 'antd';
 import { chatPreview, listApps, streamChatPreview } from '../../api/app';
-import type { ChatMessage, KbApp, RetrievalNode } from '../../api/types';
+import { listKnowledgeBases } from '../../api/kb';
+import type { ChatMessage, KbApp, KnowledgeBase, RetrievalNode } from '../../api/types';
+import { kbNameOf } from '../../utils/kbRefs';
 import { describeDegradedReason } from '../../utils/statusMeta';
 
 interface ChatTurn {
@@ -11,6 +13,7 @@ interface ChatTurn {
   content: string;
   references?: RetrievalNode[];
   degraded?: string[];
+  routedKbIds?: string[];
   requestId?: string;
   error?: { code: string; message: string };
 }
@@ -25,6 +28,7 @@ interface ChatTurn {
  */
 export default function ChatDebugPage() {
   const [apps, setApps] = useState<KbApp[]>([]);
+  const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [appId, setAppId] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string>('');
   const [streamEnabled, setStreamEnabled] = useState(true);
@@ -38,6 +42,7 @@ export default function ChatDebugPage() {
       setApps(list);
       setAppId((prev) => prev ?? list[0]?.app_id ?? null);
     });
+    listKnowledgeBases().then(setKbs);
   }, []);
 
   useEffect(() => {
@@ -76,10 +81,10 @@ export default function ChatDebugPage() {
                 next[assistantIndex] = { ...next[assistantIndex], references };
                 return next;
               }),
-            onDone: (requestId, degraded) =>
+            onDone: (requestId, degraded, routedKbIds) =>
               setTurns((prev) => {
                 const next = [...prev];
-                next[assistantIndex] = { ...next[assistantIndex], requestId, degraded };
+                next[assistantIndex] = { ...next[assistantIndex], requestId, degraded, routedKbIds };
                 return next;
               }),
             onError: (error) =>
@@ -99,6 +104,7 @@ export default function ChatDebugPage() {
             content: response.answer,
             references: response.references,
             degraded: response.degraded,
+            routedKbIds: response.routed_kb_ids,
             requestId: response.request_id,
           },
         ]);
@@ -182,10 +188,31 @@ export default function ChatDebugPage() {
                       description={turn.degraded.map(describeDegradedReason).join('；')}
                     />
                   )}
+                  {turn.routedKbIds && turn.routedKbIds.length > 0 && (
+                    <Space wrap style={{ marginTop: 8 }}>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        本次检索知识库：
+                      </Typography.Text>
+                      {turn.routedKbIds.map((kbId) => (
+                        <Tag key={kbId} color="processing">
+                          {kbNameOf(kbs, kbId)}
+                        </Tag>
+                      ))}
+                    </Space>
+                  )}
                   {turn.references && turn.references.length > 0 && (
                     <Space direction="vertical" style={{ width: '100%', marginTop: 8 }}>
                       {turn.references.map((ref) => (
-                        <Card key={ref.chunk_id} size="small" title={ref.doc_id}>
+                        <Card
+                          key={ref.chunk_id}
+                          size="small"
+                          title={
+                            <Space wrap>
+                              <span>{ref.doc_id}</span>
+                              {ref.metadata?.kb_id && <Tag color="purple">{kbNameOf(kbs, ref.metadata.kb_id)}</Tag>}
+                            </Space>
+                          }
+                        >
                           <Typography.Paragraph ellipsis={{ rows: 2, expandable: true, symbol: '展开' }} style={{ marginBottom: 0 }}>
                             {ref.content}
                           </Typography.Paragraph>

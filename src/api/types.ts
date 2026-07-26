@@ -307,6 +307,12 @@ export interface RetrievalNodeMetadata {
   child_ids?: string[];
   /** Present only in parent/child mode: per-child-chunk score detail, see RetrievalChildHit. */
   children?: RetrievalChildHit[];
+  /**
+   * M5-CONTRACTS.md section 2.2: which kb this node came from. Populated on the multi-kb-routed
+   * endpoints (chat-preview, external knowledge/search, knowledge/chat); the admin single-kb debug
+   * search endpoint is unchanged and does not need it (always the page's one kb).
+   */
+  kb_id?: string;
   [key: string]: unknown;
 }
 
@@ -351,6 +357,11 @@ export interface SearchApplied {
   rewrite_used_query: string | null;
   fusion_mode: FusionMode;
   threshold_applied_on: ThresholdAppliedOn | null;
+  /**
+   * M5-CONTRACTS.md section 2.2: kb ids actually searched this call (single-kb apps still report
+   * their one kb here). Optional so responses from a pre-M5 backend still type-check.
+   */
+  routed_kb_ids?: string[];
 }
 
 export interface SearchResponse {
@@ -959,7 +970,7 @@ export interface EvalRunCompareResult {
 // Application center: apps, versions, release gate (M4c-CONTRACTS.md sections 1/2)
 // ---------------------------------------------------------------------------
 
-/** t_kb_app row (M4c-CONTRACTS.md section 1). M4c limits an app to a single kb_id; multi-kb is M5. */
+/** t_kb_app row (M4c-CONTRACTS.md section 1). */
 export interface KbApp {
   app_id: string;
   name: string;
@@ -1007,11 +1018,42 @@ export interface AppPromptConfig {
   citation_enabled: boolean;
 }
 
-export interface AppVersionConfig {
-  /** Single kb_id per M4c's stage limitation; multi-kb selection unlocks in M5. */
+/**
+ * t_kb_app_version.config.kb_refs entry (M5-CONTRACTS.md section 1): one knowledge base an app
+ * version is bound to, plus its share of the rerank-candidate quota when the app spans several
+ * kbs. weight is a positive integer, default 1; a single-kb version's one entry always gets the
+ * full quota regardless of its weight value (M5-CONTRACTS.md section 2.2).
+ */
+export interface KbRef {
   kb_id: string;
+  weight: number;
+}
+
+/**
+ * t_kb_app_version.config.routing (M5-CONTRACTS.md sections 1/2.1): LLM-judged per-query kb
+ * selection, only actually invoked when enabled and the version has >=2 kb_refs (a single-kb
+ * version never calls the router even if this is left on).
+ */
+export interface AppRoutingConfig {
+  enabled: boolean;
+  /** null/empty = server falls back to its built-in default routing prompt. */
+  prompt: string | null;
+}
+
+export interface AppVersionConfig {
+  /** 1..15 entries (M5-CONTRACTS.md section 1), replacing M4c's single kb_id. */
+  kb_refs: KbRef[];
   retrieval: AppRetrievalConfig;
   prompt: AppPromptConfig;
+  /** Absent on pre-M5 snapshots; read as `config.routing?.enabled ?? false` / `?.prompt ?? null`. */
+  routing?: AppRoutingConfig;
+  /**
+   * @deprecated M4c-era single-kb snapshot field. Present only on versions created before M5;
+   * never populated by this web's write path. Do not read directly -- go through
+   * resolveKbRefs() (utils/kbRefs.ts) so the M4c/M5 shapes are normalized in exactly one place
+   * (M5-CONTRACTS.md section 1: "读侧兼容旧快照的单 kb_id 字段").
+   */
+  kb_id?: string;
 }
 
 /**
@@ -1107,6 +1149,13 @@ export interface ChatResponse {
   references: RetrievalNode[];
   request_id: string;
   degraded: string[];
+  /**
+   * M5-CONTRACTS.md section 2.2 ("applied 增 routed_kb_ids"). ASSUMPTION: M4c's ChatResponse has
+   * no `applied` wrapper (unlike SearchResponse), so this sits as a top-level sibling of
+   * `degraded` rather than nested under one; the SSE `done` event mirrors it for the same reason
+   * (see ChatDoneEvent below).
+   */
+  routed_kb_ids: string[];
 }
 
 /**
@@ -1124,6 +1173,8 @@ export interface ChatReferencesEvent {
 export interface ChatDoneEvent {
   request_id: string;
   degraded: string[];
+  /** M5-CONTRACTS.md section 2.2; see ChatResponse.routed_kb_ids doc comment. */
+  routed_kb_ids: string[];
 }
 export interface ChatErrorEvent {
   code: string;

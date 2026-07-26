@@ -9,12 +9,14 @@ import {
   submitAppVersionForTest,
 } from '../../../api/app';
 import { listEvalDatasets } from '../../../api/evalDataset';
-import type { AppVersion, EvalDataset } from '../../../api/types';
+import type { AppVersion, EvalDataset, KnowledgeBase } from '../../../api/types';
 import { APP_VERSION_STATUS_META, metaOf } from '../../../utils/statusMeta';
+import { kbNameOf, resolveKbRefs } from '../../../utils/kbRefs';
 import GateCompareDrawer from './GateCompareDrawer';
 
 interface AppVersionTabProps {
   appId: string;
+  kbs: KnowledgeBase[];
   onVersionsChanged: (versions: AppVersion[]) => void;
 }
 
@@ -27,7 +29,7 @@ const POLL_INTERVAL_MS = 3000;
  * rollback actions, gate-dataset binding, GATING progress polling, and the GATE_LOG_ONLY
  * force-release confirmation dialog. Double-run comparison results are shown via GateCompareDrawer.
  */
-export default function AppVersionTab({ appId, onVersionsChanged }: AppVersionTabProps) {
+export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVersionTabProps) {
   const [versions, setVersions] = useState<AppVersion[]>([]);
   const [loading, setLoading] = useState(false);
   const [datasetsByKb, setDatasetsByKb] = useState<Map<string, EvalDataset[]>>(new Map());
@@ -53,10 +55,11 @@ export default function AppVersionTab({ appId, onVersionsChanged }: AppVersionTa
     loadVersions();
   }, [loadVersions]);
 
-  // Load the gate-dataset picker options for every distinct kb_id referenced by this app's
-  // versions (in practice just one, since M4c limits an app to a single kb).
+  // Load the gate-dataset picker options for every distinct kb_id referenced across this app's
+  // versions' kb_refs (M5: a version can span several kbs, so this is now a flatMap/union rather
+  // than one id per version).
   useEffect(() => {
-    const kbIds = Array.from(new Set(versions.map((v) => v.config.kb_id)));
+    const kbIds = Array.from(new Set(versions.flatMap((v) => resolveKbRefs(v.config).map((ref) => ref.kb_id))));
     kbIds.forEach((kbId) => {
       if (!datasetsByKb.has(kbId)) {
         listEvalDatasets(kbId).then((datasets) => {
@@ -157,10 +160,17 @@ export default function AppVersionTab({ appId, onVersionsChanged }: AppVersionTa
             width: 220,
             render: (_, record: AppVersion) => {
               const canBind = record.status === 'DRAFT' || record.status === 'TESTING';
-              const options = (datasetsByKb.get(record.config.kb_id) ?? []).map((d) => ({
-                label: d.name,
-                value: d.dataset_id,
-              }));
+              // M5: a version may span several kbs (M4b's eval dataset is still single-kb, per
+              // M5-CONTRACTS.md section 2.2 "评测不涉及多库，不改"), so the picker offers the
+              // union of every referenced kb's datasets, prefixed with the kb name once there is
+              // more than one to disambiguate same-named datasets across kbs.
+              const refs = resolveKbRefs(record.config);
+              const options = refs.flatMap((ref) =>
+                (datasetsByKb.get(ref.kb_id) ?? []).map((d) => ({
+                  label: refs.length > 1 ? `${kbNameOf(kbs, ref.kb_id)}·${d.name}` : d.name,
+                  value: d.dataset_id,
+                })),
+              );
               return (
                 <Select
                   size="small"
@@ -235,10 +245,23 @@ export default function AppVersionTab({ appId, onVersionsChanged }: AppVersionTa
         ]}
         expandable={{
           expandedRowRender: (record) => (
-            <Typography.Paragraph style={{ marginBottom: 0 }} type="secondary">
-              知识库 kb_id：{record.config.kb_id}；recall_top_k={record.config.retrieval.recall_top_k}；top_n=
-              {record.config.retrieval.top_n}；rerank_enabled={String(record.config.retrieval.rerank_enabled ?? false)}
-            </Typography.Paragraph>
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <Space wrap size={4}>
+                <Typography.Text type="secondary">关联知识库：</Typography.Text>
+                {resolveKbRefs(record.config).map((ref) => (
+                  <Tag key={ref.kb_id}>
+                    {kbNameOf(kbs, ref.kb_id)} × {ref.weight}
+                  </Tag>
+                ))}
+                <Tag color={record.config.routing?.enabled ? 'processing' : 'default'}>
+                  知识库路由：{record.config.routing?.enabled ? '开启' : '关闭'}
+                </Tag>
+              </Space>
+              <Typography.Paragraph style={{ marginBottom: 0 }} type="secondary">
+                recall_top_k={record.config.retrieval.recall_top_k}；top_n=
+                {record.config.retrieval.top_n}；rerank_enabled={String(record.config.retrieval.rerank_enabled ?? false)}
+              </Typography.Paragraph>
+            </Space>
           ),
         }}
       />

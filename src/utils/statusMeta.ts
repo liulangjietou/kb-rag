@@ -232,6 +232,8 @@ export const DEGRADED_REASON_LABELS: Record<string, string> = {
   rerank_timeout: '重排序超时，已使用融合排序结果',
   rerank_error: '重排序服务异常，已使用融合排序结果',
   threshold_inactive: 'BM25 单路检索下阈值过滤未生效',
+  /** M5-CONTRACTS.md section 2.1: router output empty/unparseable/timed out -> fell back to searching every kb_refs member. */
+  route_fallback_all: '知识库路由降级，已检索该应用关联的全部知识库',
 };
 
 export function describeDegradedReason(reason: string): string {

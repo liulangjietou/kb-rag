@@ -5,7 +5,7 @@ import type { ChatDeltaEvent, ChatDoneEvent, ChatErrorEvent, ChatReferencesEvent
 export interface ChatStreamHandlers {
   onDelta: (delta: string) => void;
   onReferences: (references: RetrievalNode[]) => void;
-  onDone: (requestId: string, degraded: string[]) => void;
+  onDone: (requestId: string, degraded: string[], routedKbIds: string[]) => void;
   onError: (error: { code: string; message: string }) => void;
 }
 
@@ -70,7 +70,7 @@ export async function streamChat(
       }
       case 'done': {
         const done = data as ChatDoneEvent;
-        handlers.onDone(done.request_id, done.degraded ?? []);
+        handlers.onDone(done.request_id, done.degraded ?? [], done.routed_kb_ids ?? []);
         break;
       }
       case 'error': {
