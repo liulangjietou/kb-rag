@@ -7,6 +7,20 @@
 ## [Unreleased]
 
 ### Added
+- M7 GraphRAG（docs/M7-CONTRACTS.md，一期收官）：知识库级实体/关系抽取（逐分片 LLM 抽取 JSON、
+  注入防护分隔声明、输出强校验跳过计数落库 `t_kb_task.skipped_count`）入 Neo4j（`(:Entity)-[:REL]->
+  (:Entity)`、`(:Entity)-[:MENTIONED_IN]->(:Chunk)` 溯源边，Neo4j 为可从 MySQL 重建的派生存储）；
+  图检索路作为库内第三路进 RRF——query 轻量切词后经实体名 fulltext（cjk 分析器）匹配、N 跳扩展、
+  溯源回 chunk，关联度=匹配分/(1+跳数)，回溯 chunk 复用 MySQL 事实源过滤谓词二次校验（版本可见集+
+  未禁用），版本隔离不被图路击穿；开启图路的库库内融合强制 RRF（与 weighted 互斥校验单点）；
+  Neo4j 未配置/不可达降级 `degraded=graph_route_unavailable`、快照上下文图路直接关闭；文档/知识库
+  删除级联清理图数据（溯源边+孤立实体）；管理端五端点（config/extract/summary/entities/entity
+  chunks）与知识图谱页（简版 SVG 力导向可视化）；Neo4j 5 以 compose profile=graph 可选启用
+  （默认不启动，保 lite 4GB 承诺）；OpenAPI 升 0.8.0-m7、需求文档升 v1.13
+- M7 验收中发现并修复 M6 遗留缺陷：分片禁用广播对已缺失的快照索引执行 ES bulk update 会触发
+  `action.auto_create_index` 把该名字重建为空索引，使 `snapshot_index_missing` 降级安全网被静默
+  击穿（RELEASED 调用查询空快照返回空结果且无降级标记）；修复为广播前 `indexExists` 探测、缺失
+  跳过并 error 日志，附回归单测
 - M6 索引快照发布（docs/M6-CONTRACTS.md）：发布门禁通过/force 之后、状态切 RELEASED 之前，对关联
   知识库的物理索引执行不可变快照（ES `_clone`：源索引临时置 `index.blocks.write=true` → clone →
   两端解锁，段级硬链接毫秒级完成；Milvus 为同步批量读写拷贝）并固化当时的版本可见集

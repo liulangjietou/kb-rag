@@ -109,6 +109,34 @@ services:
     networks:
       - kb-rag-net
 
+  # M7 GraphRAG：Neo4j 为可选服务（profile=graph，默认不启动以保 lite 4GB 承诺）。
+  # 启用：docker compose -f docker-compose.lite.yml --profile graph up -d
+  # 应用侧 NEO4J_URI 留空即代表不使用图能力，二者独立不互相阻塞。
+  neo4j:
+    image: neo4j:5.20-community
+    container_name: kb-rag-neo4j
+    restart: *restart-policy
+    profiles:
+      - graph
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-CHANGE_ME_neo4j_password}
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP:-512m}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP:-512m}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-256m}
+    ports:
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+    volumes:
+      - kb_rag_neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - kb-rag-net
+
 volumes:
   kb_rag_mysql_data:
     name: kb_rag_mysql_data
@@ -116,6 +144,8 @@ volumes:
     name: kb_rag_es_data
   kb_rag_minio_data:
     name: kb_rag_minio_data
+  kb_rag_neo4j_data:
+    name: kb_rag_neo4j_data
 
 networks:
   kb-rag-net:

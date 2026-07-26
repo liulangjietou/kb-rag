@@ -67,7 +67,7 @@ info:
     的固化可见集引用即 pin，归档保留清理跳过之。同 PR 补 M5 遗漏的 `route_fallback_all` 枚举值。
 
     '
-  version: 0.7.0-m6
+  version: 0.8.0-m7
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -485,6 +485,120 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/graph/config:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    put:
+      tags: [graph]
+      summary: 开关知识库的 GraphRAG 能力
+      description: 'M7-CONTRACTS.md §0.3/§0.6：开启后可触发实体关系抽取；graph_enabled 与
+        fusion_mode=weighted 互斥（开启图路的库库内融合强制 RRF），违规返回 INVALID_PARAM。
+        关闭开关不删除图数据。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: 更新后的开关状态
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  graph_enabled:
+                    type: boolean
+  /api/v1/kb/{kbId}/graph/extract:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags: [graph]
+      summary: 手动触发全量图抽取
+      description: 'M7-CONTRACTS.md §0.3：先清空本库图数据再对激活版本全部启用分片逐片 LLM 抽取；
+        任务入 t_kb_task（type=GRAPH_EXTRACT，biz_id=kbId，一库一行复用）。零 Key/未配置对话模型时
+        任务 fast-fail UPSTREAM_MODEL_ERROR。'
+      responses:
+        '200':
+          description: 任务受理
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id:
+                    type: string
+  /api/v1/kb/{kbId}/graph/summary:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags: [graph]
+      summary: 图谱概览与最近抽取任务
+      responses:
+        '200':
+          description: 概览
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphSummary'
+  /api/v1/kb/{kbId}/graph/entities:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags: [graph]
+      summary: 实体列表（含出边，供简版可视化）
+      description: 每实体 relations 上限 20 条（Cypher 侧截断）；size 上限 200。
+      parameters:
+      - name: query
+        in: query
+        schema: {type: string}
+      - name: page
+        in: query
+        schema: {type: integer, default: 1}
+      - name: size
+        in: query
+        schema: {type: integer, default: 20, maximum: 200}
+      responses:
+        '200':
+          description: 分页实体列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GraphEntity'
+                  page: {type: integer}
+                  size: {type: integer}
+                  total: {type: integer}
+  /api/v1/kb/{kbId}/graph/entities/{entityName}/chunks:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: entityName
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags: [graph]
+      summary: 实体来源分片下钻
+      description: 'M7-CONTRACTS.md §0.10：简化行（非 RetrievalNode），上限 100 行；被禁用分片以
+        enabled:false 返回而非隐藏——下钻页的用途正是解释"为什么图路没召回它"。'
+      responses:
+        '200':
+          description: 来源分片列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GraphEntityChunk'
   /api/v1/kb/{kbId}/search:
     parameters:
     - $ref: '#/components/parameters/KbId'
@@ -2294,6 +2408,9 @@ components:
           type: string
         name:
           type: string
+        graph_enabled:
+          type: boolean
+          description: M7 GraphRAG：本库是否开启实体关系抽取与图检索路（M7-CONTRACTS.md §0.3）
         description:
           type: string
           nullable: true
@@ -2554,6 +2671,60 @@ components:
       - threshold_inactive
       - route_fallback_all
       - snapshot_index_missing
+      - graph_route_unavailable
+    GraphSummary:
+      type: object
+      description: M7 图谱概览（GraphSummaryResponse）
+      properties:
+        graph_enabled: {type: boolean}
+        entity_count: {type: integer, format: int64}
+        relation_count: {type: integer, format: int64}
+        covered_chunk_count: {type: integer, format: int64}
+        latest_task:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/GraphTask'
+    GraphTask:
+      type: object
+      description: 最近一次图抽取任务（type 恒为 GRAPH_EXTRACT——图清理挂删除级联不产生任务行，
+        M7-CONTRACTS.md §5 偏离①）
+      properties:
+        task_id: {type: string}
+        type: {type: string, enum: [GRAPH_EXTRACT]}
+        status: {type: string, enum: [PENDING, RUNNING, SUCCESS, FAILED]}
+        progress: {type: integer, nullable: true}
+        skipped_chunk_count:
+          type: integer
+          nullable: true
+          description: 因输出强校验（非法 JSON/实体名超长/关系端点不在本次实体列表）被跳过的分片数，
+            任务成功时同样返回——"成功但丢了语料"是必须暴露的失败模式
+        error_message: {type: string, nullable: true}
+        created_at: {type: string}
+    GraphEntity:
+      type: object
+      description: 实体行（GraphEntityResponse），relations 为出边、上限 20 条
+      properties:
+        name: {type: string}
+        type: {type: string}
+        source_chunk_count: {type: integer, format: int64}
+        relations:
+          type: array
+          items:
+            type: object
+            properties:
+              target: {type: string}
+              type: {type: string}
+    GraphEntityChunk:
+      type: object
+      description: 实体来源分片简化行（GraphEntityChunkResponse）
+      properties:
+        chunk_id: {type: string}
+        doc_id: {type: string}
+        doc_file_name: {type: string}
+        document_version_id: {type: string}
+        document_version_label: {type: string}
+        content: {type: string}
+        enabled: {type: boolean}
     RetrievalNode:
       type: object
       description: 检索结果节点（契约 §5 定型结构）
@@ -2587,7 +2758,8 @@ components:
           $ref: '#/components/schemas/RetrievalSource'
         metadata:
           type: object
-          description: '引擎侧固定字段（tag_ids/session_id/sender/msg_time 等，见 M1-CONTRACTS.md
+          description: 'M7 图路命中时含 graph_score/graph_hops/graph_entities（≤5 个实体名；未被图路命中时三键不出现）。
+        引擎侧固定字段（tag_ids/session_id/sender/msg_time 等，见 M1-CONTRACTS.md
 
             §6）+ M2 新增各路分数明细（M2-CONTRACTS.md §1.5，父子归并开启时另含
 
