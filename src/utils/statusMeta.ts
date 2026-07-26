@@ -1,4 +1,6 @@
 import type {
+  ChatImportAction,
+  ChunkType,
   EmbeddingStatus,
   FusionMode,
   IkDictStatus,
@@ -15,9 +17,24 @@ export const PROCESS_STATUS_META: Record<ProcessStatus, { color: string; label: 
   PARSING: { color: 'processing', label: '解析中' },
   PARSE_FAILED: { color: 'error', label: '解析失败' },
   PARSED: { color: 'processing', label: '已解析' },
+  // M3-CONTRACTS.md section 3.4: pipeline paused after clean, waiting on preview confirm/reparse.
+  PENDING_CONFIRM: { color: 'gold', label: '待确认' },
   INDEXING: { color: 'processing', label: '索引中' },
   INDEXED: { color: 'success', label: '已就绪' },
   INDEX_FAILED: { color: 'error', label: '索引失败' },
+};
+
+/** chunk_type Tag meta (M3-CONTRACTS.md section 4: retrieval card image/chat_log tags). */
+export const CHUNK_TYPE_META: Record<ChunkType, TagMeta> = {
+  text: { color: 'default', label: '文本' },
+  image: { color: 'purple', label: '图片' },
+  chat_log: { color: 'cyan', label: '聊天记录' },
+};
+
+/** chat-import session action Tag meta (M3-CONTRACTS.md section 3.5/4). */
+export const CHAT_IMPORT_ACTION_META: Record<ChatImportAction, TagMeta> = {
+  CREATE: { color: 'success', label: '新建文档' },
+  NEW_VERSION: { color: 'processing', label: '生成新版本' },
 };
 
 export const EMBEDDING_STATUS_META: Record<EmbeddingStatus, { color: string; label: string }> = {

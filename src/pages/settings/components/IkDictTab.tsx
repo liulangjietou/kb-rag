@@ -8,7 +8,7 @@ import {
   updateIkDictStatus,
 } from '../../../api/system';
 import type { IkDictEntry, IkDictType } from '../../../api/types';
-import { IK_DICT_TYPE_META } from '../../../utils/statusMeta';
+import { IK_DICT_TYPE_META, metaOf } from '../../../utils/statusMeta';
 
 const DEFAULT_PAGE = 1;
 
@@ -100,7 +100,9 @@ export default function IkDictTab() {
             dataIndex: 'dict_type',
             width: 120,
             render: (type: IkDictType) => (
-              <Tag color={IK_DICT_TYPE_META[type].color}>{IK_DICT_TYPE_META[type].label}</Tag>
+              <Tag color={metaOf(IK_DICT_TYPE_META, type).color}>
+                {metaOf(IK_DICT_TYPE_META, type).label}
+              </Tag>
             ),
           },
           {

@@ -1,7 +1,7 @@
-import { Card, Collapse, List, Space, Tag, Typography } from 'antd';
+import { Card, Collapse, Image, List, Space, Tag, Typography } from 'antd';
 import type { RetrievalChildHit, RetrievalNode } from '../../../api/types';
-import { formatScore } from '../../../utils/format';
-import { RETRIEVAL_SOURCE_META, SCORE_TYPE_META, metaOf } from '../../../utils/statusMeta';
+import { formatEpochMillis, formatScore } from '../../../utils/format';
+import { CHUNK_TYPE_META, RETRIEVAL_SOURCE_META, SCORE_TYPE_META, metaOf } from '../../../utils/statusMeta';
 
 interface RetrievalNodeCardProps {
   node: RetrievalNode;
@@ -43,8 +43,10 @@ function RouteScoreTags({ source }: { source: Record<string, unknown> }) {
 export default function RetrievalNodeCard({ node, rank, thresholdTag }: RetrievalNodeCardProps) {
   const scoreTypeMeta = metaOf(SCORE_TYPE_META, node.score_type);
   const sourceMeta = metaOf(RETRIEVAL_SOURCE_META, node.retrieval_source);
+  const chunkTypeMeta = metaOf(CHUNK_TYPE_META, node.chunk_type);
   const metadata = node.metadata;
   const children = metadata?.children ?? [];
+  const isChatLog = node.chunk_type === 'chat_log';
 
   return (
     <Card size="small" style={{ marginBottom: 12 }}>
@@ -53,9 +55,27 @@ export default function RetrievalNodeCard({ node, rank, thresholdTag }: Retrieva
         <Tag color="blue">score: {formatScore(node.score)}</Tag>
         <Tag color={scoreTypeMeta.color}>{scoreTypeMeta.label}</Tag>
         <Tag color={sourceMeta.color}>{sourceMeta.label}</Tag>
-        <Tag>{node.chunk_type}</Tag>
+        <Tag color={chunkTypeMeta.color}>{chunkTypeMeta.label}</Tag>
         {thresholdTag && <Tag color={thresholdTag.color}>{thresholdTag.label}</Tag>}
       </Space>
+      {isChatLog && metadata && (
+        <Space wrap style={{ marginBottom: 8 }}>
+          {metadata.session_name && <Tag>会话：{metadata.session_name}</Tag>}
+          {metadata.sender && <Tag>发送人：{metadata.sender}</Tag>}
+          {metadata.msg_time !== undefined && <Tag>{formatEpochMillis(metadata.msg_time)}</Tag>}
+        </Space>
+      )}
+      {node.image_urls.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <Image.PreviewGroup>
+            <Space wrap>
+              {node.image_urls.map((url) => (
+                <Image key={url} src={url} width={96} height={96} style={{ objectFit: 'cover' }} />
+              ))}
+            </Space>
+          </Image.PreviewGroup>
+        </div>
+      )}
       {metadata && (
         <div style={{ marginBottom: 8 }}>
           <RouteScoreTags source={metadata} />

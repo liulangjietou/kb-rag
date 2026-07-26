@@ -56,6 +56,55 @@ export interface ParentChildConfig {
   child_overlap: number;
 }
 
+/** One entry of index_config.clean_rules.regex_replacements (M3-CONTRACTS.md section 3.3). */
+export interface RegexReplacement {
+  pattern: string;
+  replacement: string;
+}
+
+/**
+ * index_config.clean_rules.desensitize (M3-CONTRACTS.md section 3.3): four independent regex
+ * mask switches under one master `enabled` flag. Chat log imports default this to enabled.
+ */
+export interface DesensitizeConfig {
+  enabled: boolean;
+  phone: boolean;
+  id_card: boolean;
+  bank_card: boolean;
+  email: boolean;
+}
+
+/**
+ * t_kb_knowledge_base.index_config.clean_rules (M3-CONTRACTS.md section 3.3). Execution order is
+ * fixed and not user-configurable: strip_header_footer -> strip_watermark_patterns (regex) ->
+ * regex_replacements -> desensitize.
+ */
+export interface CleanRules {
+  strip_header_footer: boolean;
+  strip_watermark_patterns: string[];
+  regex_replacements: RegexReplacement[];
+  excel_header_join: boolean;
+  /**
+   * Present in the clean_rules schema but not part of the M3 web deliverable's clean-rules
+   * form group (M3-CONTRACTS.md section 4 lists 页眉页脚/水印/正则替换/Excel表头/脱敏 only), so
+   * the drawer carries this value through unmodified (hidden field) instead of rendering a control.
+   */
+  extract_metadata: boolean;
+  desensitize: DesensitizeConfig;
+}
+
+/**
+ * index_config.chat_aggregation (M3-CONTRACTS.md section 3.5): no-overlap sequential windowing
+ * applied when slicing an imported chat session into chunk_type=chat_log chunks.
+ * ASSUMPTION: the contract calls this "KB 级配置" without spelling out its exact JSON path;
+ * nested under index_config alongside clean_rules/parse_preview_required since section 4 groups
+ * all three ("清洗规则分组...解析预览开关、聊天聚合参数") under the same index-config drawer/API.
+ */
+export interface ChatAggregationConfig {
+  window_minutes: number;
+  max_messages: number;
+}
+
 /**
  * t_kb_knowledge_base.index_config JSON (M1-CONTRACTS.md section 2).
  * ASSUMPTION: exact field names for the flat chunking params are not spelled out by the
@@ -67,6 +116,12 @@ export interface IndexConfig {
   chunk_max_tokens: number;
   chunk_overlap: number;
   parent_child: ParentChildConfig;
+  /** M3-CONTRACTS.md section 3.3. */
+  clean_rules: CleanRules;
+  /** M3-CONTRACTS.md section 3.4; KB-level switch, default false. */
+  parse_preview_required: boolean;
+  /** M3-CONTRACTS.md section 3.5; see ChatAggregationConfig doc comment for the nesting assumption. */
+  chat_aggregation: ChatAggregationConfig;
 }
 
 /** PUT /api/v1/kb/{kbId}/index-config request body (M2-CONTRACTS.md section 4). */
@@ -96,12 +151,17 @@ export interface CreateKbRequest {
 // Document / chunk
 // ---------------------------------------------------------------------------
 
-/** t_kb_document.process_status, see M1-CONTRACTS.md section 2. */
+/**
+ * t_kb_document.process_status, see M1-CONTRACTS.md section 2, extended by M3-CONTRACTS.md
+ * section 3.4: PENDING_CONFIRM is entered when the KB has parse_preview_required=true and the
+ * pipeline pauses after clean/before chunking, waiting for a human confirm or reparse.
+ */
 export type ProcessStatus =
   | 'UPLOADED'
   | 'PARSING'
   | 'PARSE_FAILED'
   | 'PARSED'
+  | 'PENDING_CONFIRM'
   | 'INDEXING'
   | 'INDEXED'
   | 'INDEX_FAILED';
@@ -149,6 +209,14 @@ export interface RebuildRequest {
 // ---------------------------------------------------------------------------
 // Retrieval
 // ---------------------------------------------------------------------------
+
+/**
+ * chunk_type, see M1-CONTRACTS.md section 6 (ES field `chunk_type(keyword: text|image|chat_log)`)
+ * and M3-CONTRACTS.md sections 3.2/3.5: image = standalone uploaded picture, chat_log = one
+ * aggregation window of an imported chat session, text = everything else (embedded-image proxy
+ * text is folded into a normal text chunk, not its own chunk_type).
+ */
+export type ChunkType = 'text' | 'image' | 'chat_log';
 
 /** score_type enum, extended by M2-CONTRACTS.md section 1.3. */
 export type ScoreType = 'rerank' | 'cosine' | 'bm25_rank' | 'fused_rrf' | 'fused_weighted';
@@ -213,6 +281,8 @@ export interface RetrievalChildHit {
 export interface RetrievalNodeMetadata {
   tag_ids?: string[];
   session_id?: string;
+  /** chat_log only (M3-CONTRACTS.md section 3.5): the session's display name. */
+  session_name?: string;
   sender?: string;
   msg_time?: number;
   vector_score?: number;
@@ -228,12 +298,15 @@ export interface RetrievalNodeMetadata {
   [key: string]: unknown;
 }
 
-/** RetrievalNode, see M1-CONTRACTS.md section 5, extended by M2-CONTRACTS.md section 1.5. */
+/**
+ * RetrievalNode, see M1-CONTRACTS.md section 5, extended by M2-CONTRACTS.md section 1.5 and
+ * M3-CONTRACTS.md section 4 (chunk_type-driven display: image/chat_log tags, image_urls thumbnails).
+ */
 export interface RetrievalNode {
   doc_id: string;
   document_version_id: string;
   chunk_id: string;
-  chunk_type: string;
+  chunk_type: ChunkType;
   content: string;
   score: number;
   score_type: ScoreType;
@@ -299,6 +372,10 @@ export interface ModelStatus {
   chat_provider: string | null;
   chat_model: string | null;
   vector_engine: string;
+  /** M3-CONTRACTS.md section 3.1: qwen-vl-max image understanding model used by the M3 image pipeline. */
+  vision_configured: boolean;
+  vision_provider: string | null;
+  vision_model: string | null;
 }
 
 /** View model assembled from the flat ModelStatus fields, one per model capability. */
@@ -332,4 +409,123 @@ export interface IkDictEntry {
 export interface CreateIkDictEntryRequest {
   word: string;
   dict_type: IkDictType;
+}
+
+// ---------------------------------------------------------------------------
+// Parse preview / confirm (M3-CONTRACTS.md section 3.4)
+// ---------------------------------------------------------------------------
+
+/** parser response pages[] entry, mirrored from kb-rag-parser (M3-CONTRACTS.md section 2.1). */
+export interface ParsedPage {
+  page_no: number;
+  text: string;
+  scanned: boolean;
+}
+
+/** One image entry inside GET /documents/{docId}/preview (M3-CONTRACTS.md section 3.4). */
+export interface DocumentPreviewImage {
+  image_id: string;
+  preview_url: string;
+  text_proxy: string;
+}
+
+/** GET /api/v1/documents/{docId}/preview response. */
+export interface DocumentPreview {
+  markdown: string;
+  pages: ParsedPage[];
+  images: DocumentPreviewImage[];
+  warnings: string[];
+}
+
+/**
+ * POST /api/v1/documents/{docId}/reparse request body (M3-CONTRACTS.md section 3.4): an optional
+ * clean_rules override used only for this preview run, never persisted to the KB's index_config.
+ */
+export interface ReparseDocumentRequest {
+  clean_rules?: CleanRules;
+}
+
+/** POST /api/v1/kb/{kbId}/documents/confirm request body; omitted doc_ids = all PENDING_CONFIRM docs in the KB. */
+export interface ConfirmDocumentsRequest {
+  doc_ids?: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Chat log import (M3-CONTRACTS.md section 3.5)
+// ---------------------------------------------------------------------------
+
+export type ChatImportAction = 'CREATE' | 'NEW_VERSION';
+
+/**
+ * ASSUMPTION: the response sketch only says "时间范围" without naming keys; modelled as an
+ * epoch-millis [from, to] pair to mirror msg_time (RetrievalNodeMetadata/MetadataFilter above).
+ */
+export interface ChatImportTimeRange {
+  from: number;
+  to: number;
+}
+
+export interface ChatImportSessionPreview {
+  session_id: string;
+  session_name: string;
+  message_count: number;
+  time_range: ChatImportTimeRange;
+  matched_doc_id: string | null;
+  action: ChatImportAction;
+}
+
+/**
+ * POST /api/v1/kb/{kbId}/chat-imports response.
+ * ASSUMPTION: the contract's JSON sketch only shows the `sessions` array, but the confirm step
+ * requires an `upload_token` in its request body and the parsed upload is "暂存 MinIO...30 分钟",
+ * so the preview response must hand that token back; assumed to sit alongside `sessions`.
+ */
+export interface ChatImportPreviewResponse {
+  upload_token: string;
+  sessions: ChatImportSessionPreview[];
+}
+
+/** POST /api/v1/kb/{kbId}/chat-imports/confirm request body. */
+export interface ConfirmChatImportRequest {
+  upload_token: string;
+  /** Optional subset of session_ids to import; omitted = import every previewed session. */
+  session_ids?: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Alert webhook (M3-CONTRACTS.md section 3.6)
+// ---------------------------------------------------------------------------
+
+export interface AlertConfig {
+  webhook_url: string | null;
+  enabled: boolean;
+  task_fail_threshold: number;
+  /** 0-1 ratio, e.g. 0.3 = 30% degrade rate over the trailing 5 minutes. */
+  degrade_rate_threshold: number;
+  sync_backlog_threshold: number;
+  /** Minutes; same alert type is not resent again within this window. */
+  silence_minutes: number;
+}
+
+export type UpdateAlertConfigRequest = AlertConfig;
+
+// ---------------------------------------------------------------------------
+// Demo one-click import (M3-CONTRACTS.md section 3.7)
+// ---------------------------------------------------------------------------
+
+export interface DemoStatus {
+  available: boolean;
+  imported: boolean;
+  kb_id: string | null;
+  doc_count: number;
+}
+
+/**
+ * POST /api/v1/system/demo/import response.
+ * ASSUMPTION: the contract only specifies "返回其 kb_id" for the idempotent repeat-call case;
+ * modelled as a minimal {kb_id} shape since the web action only needs the id to navigate to the
+ * KB detail page, not a full KnowledgeBase payload.
+ */
+export interface DemoImportResult {
+  kb_id: string;
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Drawer, Form, InputNumber, Space, Switch, Typography, message } from 'antd';
 import { updateIndexConfig } from '../../../api/kb';
-import type { IndexConfig } from '../../../api/types';
+import type { ChatAggregationConfig, CleanRules, IndexConfig } from '../../../api/types';
+import CleanRulesFields from './CleanRulesFields';
 
 // M1 pipeline defaults (M1-CONTRACTS.md section 4 "按长度策略切分... 默认 600 token / 重叠 100").
 const DEFAULT_CHUNK_MAX_TOKENS = 600;
@@ -10,6 +11,17 @@ const DEFAULT_CHUNK_OVERLAP = 100;
 const DEFAULT_PARENT_MAX_TOKENS = 1200;
 const DEFAULT_CHILD_MAX_TOKENS = 400;
 const DEFAULT_CHILD_OVERLAP = 50;
+// M3-CONTRACTS.md section 3.3 clean_rules defaults (schema sample in the contract).
+const DEFAULT_CLEAN_RULES: CleanRules = {
+  strip_header_footer: false,
+  strip_watermark_patterns: [],
+  regex_replacements: [],
+  excel_header_join: true,
+  extract_metadata: false,
+  desensitize: { enabled: false, phone: true, id_card: true, bank_card: true, email: false },
+};
+// M3-CONTRACTS.md section 3.5 chat_aggregation default window.
+const DEFAULT_CHAT_AGGREGATION: ChatAggregationConfig = { window_minutes: 60, max_messages: 50 };
 
 interface IndexConfigFormValues {
   chunk_max_tokens: number;
@@ -18,6 +30,9 @@ interface IndexConfigFormValues {
   parent_max_tokens: number;
   child_max_tokens: number;
   child_overlap: number;
+  clean_rules: CleanRules;
+  parse_preview_required: boolean;
+  chat_aggregation: ChatAggregationConfig;
 }
 
 interface IndexConfigDrawerProps {
@@ -37,6 +52,9 @@ function toFormValues(config: IndexConfig | null): IndexConfigFormValues {
     parent_max_tokens: config?.parent_child.parent_max_tokens ?? DEFAULT_PARENT_MAX_TOKENS,
     child_max_tokens: config?.parent_child.child_max_tokens ?? DEFAULT_CHILD_MAX_TOKENS,
     child_overlap: config?.parent_child.child_overlap ?? DEFAULT_CHILD_OVERLAP,
+    clean_rules: config?.clean_rules ?? DEFAULT_CLEAN_RULES,
+    parse_preview_required: config?.parse_preview_required ?? false,
+    chat_aggregation: config?.chat_aggregation ?? DEFAULT_CHAT_AGGREGATION,
   };
 }
 
@@ -69,6 +87,9 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
           child_max_tokens: values.child_max_tokens,
           child_overlap: values.child_overlap,
         },
+        clean_rules: values.clean_rules,
+        parse_preview_required: values.parse_preview_required,
+        chat_aggregation: values.chat_aggregation,
       });
       message.success('索引配置已更新，使用旧配置的文档将标记为待重建');
       onSaved();
@@ -83,7 +104,7 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
       title="索引配置"
       open={open}
       onClose={onClose}
-      width={480}
+      width={560}
       destroyOnClose
       footer={
         <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -142,6 +163,36 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
             </Form.Item>
           </>
         )}
+
+        <Typography.Title level={5}>清洗规则</Typography.Title>
+        <CleanRulesFields form={form} namePath={['clean_rules']} />
+
+        <Typography.Title level={5}>解析预览</Typography.Title>
+        <Form.Item
+          name="parse_preview_required"
+          label="启用解析预览确认"
+          valuePropName="checked"
+          tooltip="开启后文档解析清洗完成即暂停在待确认状态，需人工预览确认或改规则重解析后才继续切分入库"
+        >
+          <Switch />
+        </Form.Item>
+
+        <Typography.Title level={5}>聊天聚合</Typography.Title>
+        <Form.Item
+          name={['chat_aggregation', 'window_minutes']}
+          label="聚合窗口（分钟）"
+          tooltip="按发送时间无重叠顺切窗口，超过窗口时长或消息数上限即切下一片"
+          rules={[{ required: true, message: '请输入聚合窗口分钟数' }]}
+        >
+          <InputNumber min={1} max={1440} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item
+          name={['chat_aggregation', 'max_messages']}
+          label="单窗口最大消息数"
+          rules={[{ required: true, message: '请输入单窗口最大消息数' }]}
+        >
+          <InputNumber min={1} max={1000} style={{ width: '100%' }} />
+        </Form.Item>
       </Form>
     </Drawer>
   );

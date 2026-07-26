@@ -6,6 +6,8 @@ interface ModelStatusCardsProps {
   embedding: ModelProviderView;
   rerank: ModelProviderView;
   chat: ModelProviderView;
+  /** M3-CONTRACTS.md section 3.1: qwen-vl-max image understanding model status. */
+  vision: ModelProviderView;
 }
 
 interface CardSpec {
@@ -37,8 +39,8 @@ function ModelCard({ title, status, unconfiguredHint }: Omit<CardSpec, 'key'>) {
   );
 }
 
-/** embedding/rerank/chat 三卡 model status row, driven by the extended GET /system/model-status. */
-export default function ModelStatusCards({ vectorEngine, embedding, rerank, chat }: ModelStatusCardsProps) {
+/** embedding/rerank/chat/vision 四卡 model status row, driven by the extended GET /system/model-status. */
+export default function ModelStatusCards({ vectorEngine, embedding, rerank, chat, vision }: ModelStatusCardsProps) {
   const cards: CardSpec[] = [
     {
       key: 'embedding',
@@ -58,6 +60,12 @@ export default function ModelStatusCards({ vectorEngine, embedding, rerank, chat
       status: chat,
       unconfiguredHint: '未配置时查询改写自动关闭，检索使用原始 query',
     },
+    {
+      key: 'vision',
+      title: '视觉模型（vision）',
+      status: vision,
+      unconfiguredHint: '未配置或调用失败时图片跳过处理，文档其余部分正常入库',
+    },
   ];
 
   return (
@@ -67,7 +75,7 @@ export default function ModelStatusCards({ vectorEngine, embedding, rerank, chat
       </Typography.Paragraph>
       <Row gutter={[16, 16]}>
         {cards.map((card) => (
-          <Col key={card.key} xs={24} md={8}>
+          <Col key={card.key} xs={24} md={6}>
             <ModelCard title={card.title} status={card.status} unconfiguredHint={card.unconfiguredHint} />
           </Col>
         ))}

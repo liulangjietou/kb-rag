@@ -1,5 +1,6 @@
 import { apiDelete, apiGet, apiPost, apiPut } from './request';
 import type {
+  ConfirmDocumentsRequest,
   CreateKbRequest,
   KnowledgeBase,
   RebuildRequest,
@@ -35,4 +36,13 @@ export function updateIndexConfig(kbId: string, payload: UpdateIndexConfigReques
  */
 export function rebuildKb(kbId: string, payload?: RebuildRequest): Promise<void> {
   return apiPost<void>(`/kb/${kbId}/rebuild`, payload);
+}
+
+/**
+ * POST /api/v1/kb/{kbId}/documents/confirm (M3-CONTRACTS.md section 3.4): batch-confirms
+ * PENDING_CONFIRM documents past the parse-preview pause. Omitted doc_ids = every PENDING_CONFIRM
+ * document in this KB.
+ */
+export function confirmKbDocuments(kbId: string, payload?: ConfirmDocumentsRequest): Promise<void> {
+  return apiPost<void>(`/kb/${kbId}/documents/confirm`, payload);
 }

@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeftOutlined, InboxOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons';
+import {
+  ArrowLeftOutlined,
+  CheckOutlined,
+  InboxOutlined,
+  MessageOutlined,
+  ReloadOutlined,
+  SettingOutlined,
+} from '@ant-design/icons';
 import {
   Alert,
   Button,
@@ -16,12 +23,14 @@ import {
 import type { UploadProps } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import { listDocuments, reindexDocument, uploadDocument } from '../../api/document';
-import { getKnowledgeBase, rebuildKb } from '../../api/kb';
+import { confirmKbDocuments, getKnowledgeBase, rebuildKb } from '../../api/kb';
 import type { KbDocument, KnowledgeBase } from '../../api/types';
 import { formatFileSize } from '../../utils/format';
 import { PROCESS_STATUS_META, metaOf } from '../../utils/statusMeta';
+import ChatImportWizard from './components/ChatImportWizard';
 import ChunkDrawer from './components/ChunkDrawer';
 import IndexConfigDrawer from './components/IndexConfigDrawer';
+import ParsePreviewDrawer from './components/ParsePreviewDrawer';
 
 // Document list is polled every 3s while this page stays mounted, per M1-CONTRACTS.md section 7.
 // The same poll loop is reused to track rebuild progress (M2-CONTRACTS.md section 4): there is
@@ -36,10 +45,14 @@ export default function KbDetailPage() {
   const [documents, setDocuments] = useState<KbDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [chunkDoc, setChunkDoc] = useState<KbDocument | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<KbDocument | null>(null);
+  const [chatImportOpen, setChatImportOpen] = useState(false);
   const [indexConfigOpen, setIndexConfigOpen] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildTargetIds, setRebuildTargetIds] = useState<string[]>([]);
   const [rebuildInitialCount, setRebuildInitialCount] = useState(0);
+  const [selectedPendingIds, setSelectedPendingIds] = useState<string[]>([]);
+  const [batchConfirming, setBatchConfirming] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadKb = useCallback(async () => {
@@ -76,6 +89,11 @@ export default function KbDetailPage() {
     () => documents.filter((doc) => rebuildTargetIds.includes(doc.doc_id) && doc.config_stale).length,
     [documents, rebuildTargetIds],
   );
+  // M3-CONTRACTS.md section 3.4/4: documents paused on parse-preview confirmation.
+  const pendingConfirmDocs = useMemo(
+    () => documents.filter((doc) => doc.process_status === 'PENDING_CONFIRM'),
+    [documents],
+  );
 
   // Once every targeted document's config_stale flag clears, consider the rebuild finished.
   useEffect(() => {
@@ -86,6 +104,12 @@ export default function KbDetailPage() {
       message.success('重建完成，新分片配置已生效');
     }
   }, [rebuilding, rebuildTargetIds, remainingRebuildCount]);
+
+  // Selection can only ever reference documents still pending confirmation; drop stale ids once
+  // a document leaves that state (e.g. confirmed from the preview drawer directly).
+  useEffect(() => {
+    setSelectedPendingIds((prev) => prev.filter((id) => pendingConfirmDocs.some((doc) => doc.doc_id === id)));
+  }, [pendingConfirmDocs]);
 
   const handleReindex = async (docId: string) => {
     await reindexDocument(docId);
@@ -107,6 +131,30 @@ export default function KbDetailPage() {
   const handleIndexConfigSaved = () => {
     loadKb();
     loadDocuments();
+  };
+
+  const handlePreviewConfirmed = () => {
+    setPreviewDoc(null);
+    loadDocuments();
+  };
+
+  const handleChatImported = () => {
+    setChatImportOpen(false);
+    loadDocuments();
+  };
+
+  const handleBatchConfirm = async () => {
+    if (!kbId || pendingConfirmDocs.length === 0) return;
+    setBatchConfirming(true);
+    try {
+      const docIds = selectedPendingIds.length > 0 ? selectedPendingIds : undefined;
+      await confirmKbDocuments(kbId, docIds ? { doc_ids: docIds } : undefined);
+      message.success('已确认入库');
+      setSelectedPendingIds([]);
+      loadDocuments();
+    } finally {
+      setBatchConfirming(false);
+    }
   };
 
   const uploadProps: UploadProps = {
@@ -136,9 +184,14 @@ export default function KbDetailPage() {
             {kb?.name ?? '知识库详情'}
           </Typography.Title>
         </Space>
-        <Button icon={<SettingOutlined />} onClick={() => setIndexConfigOpen(true)}>
-          索引配置
-        </Button>
+        <Space>
+          <Button icon={<MessageOutlined />} onClick={() => setChatImportOpen(true)}>
+            导入聊天记录
+          </Button>
+          <Button icon={<SettingOutlined />} onClick={() => setIndexConfigOpen(true)}>
+            索引配置
+          </Button>
+        </Space>
       </Space>
       {kb?.description && (
         <Typography.Paragraph type="secondary">{kb.description}</Typography.Paragraph>
@@ -169,6 +222,27 @@ export default function KbDetailPage() {
         />
       )}
 
+      {pendingConfirmDocs.length > 0 && (
+        <Alert
+          type="info"
+          showIcon
+          message={`${pendingConfirmDocs.length} 篇文档待预览确认`}
+          description="已开启解析预览确认，文档清洗完成后会暂停在此状态；可逐篇预览后确认，或直接批量确认全部"
+          action={
+            <Button
+              size="small"
+              type="primary"
+              icon={<CheckOutlined />}
+              loading={batchConfirming}
+              onClick={handleBatchConfirm}
+            >
+              批量确认{selectedPendingIds.length > 0 ? `（${selectedPendingIds.length}）` : '（全部）'}
+            </Button>
+          }
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       <Upload.Dragger {...uploadProps} style={{ marginBottom: 24 }}>
         <p className="ant-upload-drag-icon">
           <InboxOutlined />
@@ -184,6 +258,11 @@ export default function KbDetailPage() {
         loading={loading}
         dataSource={documents}
         pagination={false}
+        rowSelection={{
+          selectedRowKeys: selectedPendingIds,
+          onChange: (keys) => setSelectedPendingIds(keys as string[]),
+          getCheckboxProps: (record) => ({ disabled: record.process_status !== 'PENDING_CONFIRM' }),
+        }}
         columns={[
           { title: '文件名', dataIndex: 'file_name' },
           { title: '类型', dataIndex: 'file_ext', width: 80 },
@@ -215,12 +294,17 @@ export default function KbDetailPage() {
           },
           {
             title: '操作',
-            width: 200,
+            width: 260,
             render: (_, record: KbDocument) => (
               <Space>
                 <Button size="small" onClick={() => setChunkDoc(record)}>
                   查看分片
                 </Button>
+                {record.process_status === 'PENDING_CONFIRM' && (
+                  <Button size="small" type="link" onClick={() => setPreviewDoc(record)}>
+                    预览确认
+                  </Button>
+                )}
                 <Popconfirm
                   title="确认重建该文档的解析与索引？"
                   okText="重建"
@@ -242,6 +326,21 @@ export default function KbDetailPage() {
         docName={chunkDoc?.file_name ?? null}
         onClose={() => setChunkDoc(null)}
       />
+
+      <ParsePreviewDrawer
+        doc={previewDoc}
+        onClose={() => setPreviewDoc(null)}
+        onConfirmed={handlePreviewConfirmed}
+      />
+
+      {kbId && (
+        <ChatImportWizard
+          kbId={kbId}
+          open={chatImportOpen}
+          onClose={() => setChatImportOpen(false)}
+          onImported={handleChatImported}
+        />
+      )}
 
       {kbId && (
         <IndexConfigDrawer

@@ -19,3 +19,11 @@ export function formatFileSize(bytes: number): string {
 export function formatScore(score: number): string {
   return score.toFixed(4);
 }
+
+/** Formats an epoch-millis timestamp (e.g. chat msg_time) as a locale date-time string. */
+export function formatEpochMillis(epochMillis: number | null | undefined): string {
+  if (epochMillis === null || epochMillis === undefined || !Number.isFinite(epochMillis)) {
+    return '-';
+  }
+  return new Date(epochMillis).toLocaleString('zh-CN', { hour12: false });
+}

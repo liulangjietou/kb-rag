@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
-import { PlusOutlined } from '@ant-design/icons';
-import { Button, Card, Col, Empty, Popconfirm, Row, Spin, Typography, message } from 'antd';
+import { PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { Button, Card, Col, Empty, Popconfirm, Row, Space, Spin, Tooltip, Typography, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { deleteKnowledgeBase, listKnowledgeBases } from '../../api/kb';
-import type { KnowledgeBase } from '../../api/types';
+import { getDemoStatus, importDemo } from '../../api/system';
+import type { DemoStatus, KnowledgeBase } from '../../api/types';
 import CreateKbModal from './components/CreateKbModal';
 
 export default function KbListPage() {
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [loading, setLoading] = useState(true);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [demoStatus, setDemoStatus] = useState<DemoStatus | null>(null);
+  const [demoImporting, setDemoImporting] = useState(false);
   const navigate = useNavigate();
 
   const loadKbs = useCallback(async () => {
@@ -26,10 +29,31 @@ export default function KbListPage() {
     loadKbs();
   }, [loadKbs]);
 
+  // Drives the empty-state "一键导入 Demo 知识库" button (M3-CONTRACTS.md section 3.7/4).
+  useEffect(() => {
+    getDemoStatus().then(setDemoStatus);
+  }, []);
+
   const handleDelete = async (kbId: string) => {
     await deleteKnowledgeBase(kbId);
     message.success('知识库已删除');
     loadKbs();
+  };
+
+  const handleDemoImport = async () => {
+    // Already imported: no need to hit the (idempotent) import API again, just navigate straight in.
+    if (demoStatus?.imported && demoStatus.kb_id) {
+      navigate(`/kb/${demoStatus.kb_id}`);
+      return;
+    }
+    setDemoImporting(true);
+    try {
+      const result = await importDemo();
+      message.success('Demo 知识库导入成功');
+      navigate(`/kb/${result.kb_id}`);
+    } finally {
+      setDemoImporting(false);
+    }
   };
 
   return (
@@ -46,9 +70,21 @@ export default function KbListPage() {
       <Spin spinning={loading}>
         {!loading && kbs.length === 0 ? (
           <Empty description="还没有知识库，点击右上角「新建知识库」开始创建，上传文档后即可在此进行检索调试">
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
-              立即新建
-            </Button>
+            <Space>
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+                立即新建
+              </Button>
+              <Tooltip title={demoStatus && !demoStatus.available ? '未找到 Demo 素材目录，暂不可用' : undefined}>
+                <Button
+                  icon={<ThunderboltOutlined />}
+                  loading={demoImporting}
+                  disabled={!demoStatus?.available}
+                  onClick={handleDemoImport}
+                >
+                  {demoStatus?.imported ? '查看 Demo 知识库' : '一键导入 Demo 知识库'}
+                </Button>
+              </Tooltip>
+            </Space>
           </Empty>
         ) : (
           <Row gutter={[16, 16]}>
