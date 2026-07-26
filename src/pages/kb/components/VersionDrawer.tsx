@@ -13,6 +13,7 @@ import {
   Spin,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
@@ -260,6 +261,26 @@ export default function VersionDrawer({ doc, onClose, onActivated }: VersionDraw
                 dataIndex: 'active',
                 width: 90,
                 render: (active: boolean) => (active ? <Tag color="success">当前激活</Tag> : null),
+              },
+              {
+                // M6-CONTRACTS.md section 0.8/2: pin state from AppVersionPinChecker, display-only
+                // (see DocumentVersion.pinned doc comment in api/types.ts -- archival itself has no
+                // manual web entry point to disable, the server-side pin check blocks the automatic
+                // retention sweep directly).
+                title: '引用状态',
+                width: 160,
+                render: (_, record: DocumentVersion) =>
+                  record.pinned ? (
+                    <Tooltip
+                      title={
+                        record.pinned_by && record.pinned_by.length > 0
+                          ? `被以下应用版本引用：${record.pinned_by.join('、')}`
+                          : '被应用版本引用'
+                      }
+                    >
+                      <Tag color="gold">被引用（保留中）</Tag>
+                    </Tooltip>
+                  ) : null,
               },
               {
                 title: '操作',

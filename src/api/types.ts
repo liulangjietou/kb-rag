@@ -568,7 +568,16 @@ export type DocumentVersionStatus = 'BUILDING' | 'BUILD_FAILED' | 'READY' | 'ACT
  */
 export type RollbackMode = 'INSTANT' | 'REBUILD';
 
-/** GET /api/v1/documents/{docId}/versions list item (M4a-CONTRACTS.md section 1.2). */
+/**
+ * GET /api/v1/documents/{docId}/versions list item (M4a-CONTRACTS.md section 1.2), extended by
+ * M6-CONTRACTS.md section 0.8/2 with the AppVersionPinChecker's pin state.
+ * ASSUMPTION: M6-CONTRACTS.md section 1 names these two fields but not their exact JSON shape
+ * beyond "pinned（boolean...）与 pinned_by（引用它的 app_version_id 列表...）"; modelled as-is here.
+ * pinned/pinned_by are display-only in this web -- archival/cleanup itself has no manual web entry
+ * point (it is VersionRetentionService's automatic retention sweep, M4a-CONTRACTS.md section 1.3),
+ * so there is nothing here for a pinned version to disable; the server-side pin check is what
+ * actually blocks the automatic cleanup from touching this version.
+ */
 export interface DocumentVersion {
   version_id: string;
   version: string;
@@ -579,6 +588,10 @@ export interface DocumentVersion {
   active: boolean;
   chunk_count: number;
   rollback_mode: RollbackMode;
+  /** True when any not-yet-cleaned application version's visible set still references this version. */
+  pinned?: boolean;
+  /** app_version_id list pinning this version; tooltip display only. Empty/absent when not pinned. */
+  pinned_by?: string[];
 }
 
 /**
@@ -1071,6 +1084,33 @@ export type AppVersionStatus =
   | 'SUPERSEDED';
 
 /**
+ * t_kb_app_version.index_snapshots JSON element (M6-CONTRACTS.md section 0.10/2): one immutable
+ * physical index built as a release-time snapshot, one row per (kb, engine) that version's
+ * kb_refs touch. Snapshot indexes carry no alias and are looked up by physical name directly
+ * (section 0.2), unlike the live index which is always addressed through its alias.
+ */
+export interface AppVersionIndexSnapshot {
+  kb_id: string;
+  engine: string;
+  physical_index_name: string;
+}
+
+/**
+ * Per-kb "可见集文档版本数" summary for the version-list expanded row (M6-CONTRACTS.md section 2).
+ * ASSUMPTION: M6-CONTRACTS.md section 1 explicitly leaves this field's server-side name undecided
+ * ("visible_version_kb_count/每库版本数摘要...字段命名可在实现时定版但须回报"); this web
+ * implementation assumes an array of {kb_id, version_count} -- mirroring the shape of
+ * index_snapshots/KbRef rather than exposing the raw visible_version_ids id-list, since the
+ * expanded row only needs a count per kb, not the full document_version_id set -- named
+ * visible_version_kb_count after the server section's own suggested name. Field name to be
+ * reconciled once the server side lands.
+ */
+export interface VisibleVersionKbCount {
+  kb_id: string;
+  version_count: number;
+}
+
+/**
  * t_kb_app_version row (M4c-CONTRACTS.md section 1). gate_run_ids is modelled as an ordered pair
  * [candidate_run_id, baseline_run_id] -- ASSUMPTION: the contract only says "同语料双跑...候选配置
  * 与当前 RELEASED 配置各一轮" and names the column gate_run_ids JSON without giving element order;
@@ -1088,6 +1128,16 @@ export interface AppVersion {
   changelog: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * M6-CONTRACTS.md section 0.10/2: snapshot physical indexes created at release time, one entry
+   * per (kb, engine). Absent/empty on versions that never went through the M6 release path --
+   * either not yet RELEASED (still live-alias-served), or RELEASED before M6 shipped -- both
+   * render as the "无索引快照，调用走实时索引" empty state rather than an error (section 0.4's
+   * third branch: this is a historical/in-progress data shape, not a degraded condition).
+   */
+  index_snapshots?: AppVersionIndexSnapshot[];
+  /** M6-CONTRACTS.md section 2; see VisibleVersionKbCount doc comment for the naming assumption. */
+  visible_version_kb_count?: VisibleVersionKbCount[];
 }
 
 /**

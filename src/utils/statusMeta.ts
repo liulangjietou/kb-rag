@@ -234,6 +234,14 @@ export const DEGRADED_REASON_LABELS: Record<string, string> = {
   threshold_inactive: 'BM25 单路检索下阈值过滤未生效',
   /** M5-CONTRACTS.md section 2.1: router output empty/unparseable/timed out -> fell back to searching every kb_refs member. */
   route_fallback_all: '知识库路由降级，已检索该应用关联的全部知识库',
+  /**
+   * M6-CONTRACTS.md section 0.5: a RELEASED-version call found its snapshot physical index
+   * missing (e.g. accidentally deleted) and fell back to the live alias + current active set.
+   * Distinct from the "旧 RELEASED（M6 前发布，无快照数据）" branch in section 0.4, which is the
+   * same fallback but explicitly NOT recorded as degraded -- only an actually-missing snapshot
+   * (one that was expected to exist) counts as this reason.
+   */
+  snapshot_index_missing: '快照索引缺失，已回退实时索引',
 };
 
 export function describeDegradedReason(reason: string): string {

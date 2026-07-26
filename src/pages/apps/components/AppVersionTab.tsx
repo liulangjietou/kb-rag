@@ -9,7 +9,7 @@ import {
   submitAppVersionForTest,
 } from '../../../api/app';
 import { listEvalDatasets } from '../../../api/evalDataset';
-import type { AppVersion, EvalDataset, KnowledgeBase } from '../../../api/types';
+import type { AppVersion, AppVersionIndexSnapshot, EvalDataset, KnowledgeBase } from '../../../api/types';
 import { APP_VERSION_STATUS_META, metaOf } from '../../../utils/statusMeta';
 import { kbNameOf, resolveKbRefs } from '../../../utils/kbRefs';
 import GateCompareDrawer from './GateCompareDrawer';
@@ -244,25 +244,81 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
           },
         ]}
         expandable={{
-          expandedRowRender: (record) => (
-            <Space direction="vertical" size={4} style={{ width: '100%' }}>
-              <Space wrap size={4}>
-                <Typography.Text type="secondary">关联知识库：</Typography.Text>
-                {resolveKbRefs(record.config).map((ref) => (
-                  <Tag key={ref.kb_id}>
-                    {kbNameOf(kbs, ref.kb_id)} × {ref.weight}
+          expandedRowRender: (record) => {
+            const kbRefs = resolveKbRefs(record.config);
+            // M6-CONTRACTS.md section 0.10/2: index_snapshots is only populated for versions that
+            // went through the M6 release path; absent/empty covers both "not yet RELEASED" and
+            // "RELEASED before M6 shipped" -- both render the same empty state, never an error.
+            const hasSnapshots = (record.index_snapshots?.length ?? 0) > 0;
+            const snapshotsByKb = new Map<string, AppVersionIndexSnapshot[]>();
+            (record.index_snapshots ?? []).forEach((snap) => {
+              const list = snapshotsByKb.get(snap.kb_id) ?? [];
+              list.push(snap);
+              snapshotsByKb.set(snap.kb_id, list);
+            });
+            const visibleCountByKb = new Map<string, number>();
+            (record.visible_version_kb_count ?? []).forEach((v) => visibleCountByKb.set(v.kb_id, v.version_count));
+
+            return (
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Space wrap size={4}>
+                  <Typography.Text type="secondary">关联知识库：</Typography.Text>
+                  {kbRefs.map((ref) => (
+                    <Tag key={ref.kb_id}>
+                      {kbNameOf(kbs, ref.kb_id)} × {ref.weight}
+                    </Tag>
+                  ))}
+                  <Tag color={record.config.routing?.enabled ? 'processing' : 'default'}>
+                    知识库路由：{record.config.routing?.enabled ? '开启' : '关闭'}
                   </Tag>
-                ))}
-                <Tag color={record.config.routing?.enabled ? 'processing' : 'default'}>
-                  知识库路由：{record.config.routing?.enabled ? '开启' : '关闭'}
-                </Tag>
+                </Space>
+                <Typography.Paragraph style={{ marginBottom: 0 }} type="secondary">
+                  recall_top_k={record.config.retrieval.recall_top_k}；top_n=
+                  {record.config.retrieval.top_n}；rerank_enabled={String(record.config.retrieval.rerank_enabled ?? false)}
+                </Typography.Paragraph>
+                <div>
+                  <Typography.Text type="secondary">索引快照：</Typography.Text>
+                  {hasSnapshots ? (
+                    <Table<{ kb_id: string }>
+                      size="small"
+                      style={{ marginTop: 4 }}
+                      pagination={false}
+                      rowKey="kb_id"
+                      dataSource={kbRefs.map((ref) => ({ kb_id: ref.kb_id }))}
+                      columns={[
+                        { title: '知识库', render: (_, row) => kbNameOf(kbs, row.kb_id) },
+                        {
+                          title: '物理索引名',
+                          render: (_, row) => (
+                            <Space direction="vertical" size={2}>
+                              {(snapshotsByKb.get(row.kb_id) ?? []).map((snap) => (
+                                <Tag key={snap.engine}>
+                                  {snap.engine}: {snap.physical_index_name}
+                                </Tag>
+                              ))}
+                            </Space>
+                          ),
+                        },
+                        {
+                          title: '可见集文档版本数',
+                          width: 140,
+                          render: (_, row) => visibleCountByKb.get(row.kb_id) ?? '-',
+                        },
+                      ]}
+                    />
+                  ) : (
+                    <Alert
+                      type="info"
+                      showIcon
+                      style={{ marginTop: 4 }}
+                      message="无索引快照，调用走实时索引"
+                      description="该版本未发布，或在 M6 索引快照能力上线前发布，检索按当前激活集合与 live 别名实时执行"
+                    />
+                  )}
+                </div>
               </Space>
-              <Typography.Paragraph style={{ marginBottom: 0 }} type="secondary">
-                recall_top_k={record.config.retrieval.recall_top_k}；top_n=
-                {record.config.retrieval.top_n}；rerank_enabled={String(record.config.retrieval.rerank_enabled ?? false)}
-              </Typography.Paragraph>
-            </Space>
-          ),
+            );
+          },
         }}
       />
 
