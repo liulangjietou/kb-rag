@@ -1,11 +1,12 @@
 package io.kbrag.app.chat;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import io.kbrag.app.annotation.AnnotationInheritanceService;
+import io.kbrag.app.index.ChunkEmbedder;
 import io.kbrag.app.index.ChunkIndexWriter;
 import io.kbrag.app.index.DocumentVersionActivator;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.ErrorCode;
-import io.kbrag.common.constant.KbConstants;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.HashUtil;
 import io.kbrag.common.util.JsonUtil;
@@ -32,6 +33,7 @@ import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.ChatWindowAggregator;
 import io.kbrag.domain.service.ChunkTextHasher;
 import io.kbrag.domain.service.DocumentCleaner;
+import io.kbrag.domain.service.DocumentVersionPlanner;
 import io.kbrag.domain.service.VersionFingerprintFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -84,7 +86,6 @@ public class ChatImportService {
     private static final List<String> SUPPORTED_EXTENSIONS = List.of("csv", "xlsx");
     private static final String CHAT_FILE_EXT = "chat";
     private static final int ENABLED = 1;
-    private static final int VERSION_MINOR_START = 0;
 
     private final DocumentMapper documentMapper;
     private final DocumentVersionMapper documentVersionMapper;
@@ -99,10 +100,13 @@ public class ChatImportService {
     private final DocumentCleaner documentCleaner;
     private final ChunkTextHasher chunkTextHasher;
     private final ChunkIndexWriter chunkIndexWriter;
+    private final ChunkEmbedder chunkEmbedder;
     private final DocumentVersionActivator versionActivator;
+    private final AnnotationInheritanceService annotationInheritanceService;
     private final EmbeddingProvider embeddingProvider;
     private final BizIdGenerator bizIdGenerator;
     private final VersionFingerprintFactory fingerprintFactory;
+    private final DocumentVersionPlanner versionPlanner;
     private final KbProperties properties;
 
     /**
@@ -214,12 +218,15 @@ public class ChatImportService {
         documentVersionMapper.updateById(version);
 
         if (CollectionUtils.isNotEmpty(chunks)) {
-            chunkIndexWriter.write(kbId, chunks, embed(chunks));
+            chunkIndexWriter.write(kbId, chunks, chunkEmbedder.embed(chunks));
         }
         // Replacing the whole content is the requirement for a re-import, so the chunks of the version that
         // was active until now are removed only after the new ones are searchable.
         removePreviousChunks(kbId, document, version.getVersionId());
         versionActivator.activate(document, version);
+        // A conversation re-imported under the same identity is a new version of the same document, so the
+        // disable decisions taken on the previous one follow the text exactly as they do for an upload.
+        annotationInheritanceService.inherit(document, version);
         log.info("chat session imported, kbId={}, docId={}, versionId={}, windows={}, chunks={}",
                 kbId, document.getDocId(), version.getVersionId(), windows.size(), chunks.size());
         return document.getDocId();
@@ -282,36 +289,15 @@ public class ChatImportService {
      * Computes the next version number of a document.
      *
      * <p>The minor part is bumped: a re-import replaces the content of the same logical document, which is
-     * a revision of it and not a new lineage.
+     * a revision of it and not a new lineage. The numbering itself is delegated so the upload path and the
+     * chat path can never drift into two different version ladders for the same table.
      *
      * @param docId document business id
      * @return version number in {@code major.minor} form
      */
     private String nextVersionNumber(String docId) {
-        List<DocumentVersion> versions = documentVersionMapper.selectList(
-                new LambdaQueryWrapper<DocumentVersion>().eq(DocumentVersion::getDocId, docId));
-        if (CollectionUtils.isEmpty(versions)) {
-            return KbConstants.INITIAL_VERSION;
-        }
-        int major = 1;
-        int minor = VERSION_MINOR_START;
-        for (DocumentVersion version : versions) {
-            String[] parts = version.getVersion() == null ? new String[0] : version.getVersion().split("\\.");
-            if (parts.length != 2) {
-                continue;
-            }
-            try {
-                int currentMajor = Integer.parseInt(parts[0]);
-                int currentMinor = Integer.parseInt(parts[1]);
-                if (currentMajor > major || (currentMajor == major && currentMinor > minor)) {
-                    major = currentMajor;
-                    minor = currentMinor;
-                }
-            } catch (NumberFormatException e) {
-                log.info("skip unparsable version number, docId={}, version={}", docId, version.getVersion());
-            }
-        }
-        return major + "." + (minor + 1);
+        return versionPlanner.nextMinor(documentVersionMapper.selectList(
+                new LambdaQueryWrapper<DocumentVersion>().eq(DocumentVersion::getDocId, docId)));
     }
 
     private Chunk persistChunk(Document document, DocumentVersion version, ChatWindow window,
@@ -336,25 +322,6 @@ public class ChatImportService {
         chunk.setEmbeddingStatus(embeddingConfigured ? EmbeddingStatus.PENDING : EmbeddingStatus.SKIPPED);
         chunkMapper.insert(chunk);
         return chunk;
-    }
-
-    private Map<String, float[]> embed(List<Chunk> chunks) {
-        Map<String, float[]> vectors = new HashMap<>();
-        if (!embeddingProvider.isConfigured()) {
-            return vectors;
-        }
-        int batchSize = Math.max(1, embeddingProvider.maxBatchSize());
-        for (int start = 0; start < chunks.size(); start += batchSize) {
-            List<Chunk> batch = chunks.subList(start, Math.min(chunks.size(), start + batchSize));
-            List<float[]> embedded = embeddingProvider.embed(batch.stream().map(Chunk::getContent).toList());
-            for (int i = 0; i < batch.size(); i++) {
-                Chunk chunk = batch.get(i);
-                vectors.put(chunk.getChunkId(), embedded.get(i));
-                chunk.setEmbeddingStatus(EmbeddingStatus.DONE);
-                chunkMapper.updateById(chunk);
-            }
-        }
-        return vectors;
     }
 
     /**

@@ -171,6 +171,30 @@ public class IndexAliasManager {
         }
     }
 
+    /**
+     * Mirrors the retrieval switch of chunks into every target of a knowledge base.
+     *
+     * <p>Deliberately not expressed as a write: an upsert replaces the whole engine document, and in
+     * lite mode that document also carries the embedding, which no MySQL row can supply. Flipping the
+     * flag on its own is what makes disabling a chunk free of a re-embedding.
+     *
+     * @param kbId     knowledge base business id
+     * @param chunkIds chunk ids to update, ignored when empty
+     * @param enabled  new retrieval switch value
+     */
+    public void updateEnabledEverywhere(String kbId, List<String> chunkIds, boolean enabled) {
+        if (CollectionUtils.isEmpty(chunkIds)) {
+            return;
+        }
+        for (IndexTarget target : resolveTargets(kbId)) {
+            if (target.engine() == VectorEngine.ES) {
+                fulltextStore.updateEnabled(target.aliasName(), chunkIds, enabled);
+            } else {
+                vectorStore.updateEnabled(target.aliasName(), chunkIds, enabled);
+            }
+        }
+    }
+
     private void register(String kbId, IndexTarget target) {
         IndexRegistry existing = indexRegistryMapper.selectOne(new LambdaQueryWrapper<IndexRegistry>()
                 .eq(IndexRegistry::getPhysicalIndexName, target.physicalIndexName())

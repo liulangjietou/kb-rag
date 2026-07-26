@@ -67,6 +67,13 @@ public class EsVectorStore implements VectorStore {
     }
 
     @Override
+    public void updateEnabled(String alias, List<String> chunkIds, boolean enabled) {
+        // Lite mode addresses the same document as the BM25 route, and a partial update is precisely
+        // what keeps the embedding in place while the flag changes.
+        indexAdmin.bulkUpdateEnabled(alias, chunkIds, enabled);
+    }
+
+    @Override
     public List<ScoredChunk> search(String alias, VectorQuery query) {
         List<Query> filters = indexAdmin.toFilters(query.getFilter());
         List<Float> queryVector = toFloatList(query.getQueryVector());

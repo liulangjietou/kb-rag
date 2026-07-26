@@ -72,6 +72,9 @@ public class KbProperties {
     /** Upload validation policy. */
     private Upload upload = new Upload();
 
+    /** Document level policy, currently the version retention window. */
+    private Doc doc = new Doc();
+
     /** Splitting defaults of the indexing pipeline. */
     private Split split = new Split();
 
@@ -450,6 +453,52 @@ public class KbProperties {
         private List<String> allowedExtensions =
                 List.of("pdf", "docx", "txt", "md", "xlsx", "csv",
                         "png", "jpg", "jpeg", "webp", "bmp", "gif");
+    }
+
+    /**
+     * Document level policy.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Doc {
+
+        /** Version retention window. */
+        private Version version = new Version();
+
+        /**
+         * Document version retention window.
+         */
+        @Getter
+        @Setter
+        @ToString
+        public static class Version {
+
+            /** Non active READY versions kept before the oldest ones are archived. */
+            private static final int DEFAULT_RETAIN_COUNT = 3;
+
+            /** Smallest window the requirement allows. */
+            private static final int MIN_RETAIN_COUNT = 1;
+
+            /** Largest window the requirement allows. */
+            private static final int MAX_RETAIN_COUNT = 20;
+
+            /** Configured window, clamped when read. */
+            private int retainCount = DEFAULT_RETAIN_COUNT;
+
+            /**
+             * Window actually applied by the cleanup.
+             *
+             * <p>Clamped here rather than validated at startup: the value is a deployment knob with no
+             * request to fast-fail, and refusing to boot over a typo would take the whole service down
+             * for a setting whose sane range is known.
+             *
+             * @return retention window within the allowed range
+             */
+            public int resolvedRetainCount() {
+                return Math.min(MAX_RETAIN_COUNT, Math.max(MIN_RETAIN_COUNT, retainCount));
+            }
+        }
     }
 
     /**

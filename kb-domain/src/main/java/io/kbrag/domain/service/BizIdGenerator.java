@@ -82,6 +82,15 @@ public class BizIdGenerator {
         return generate(KbConstants.UPLOAD_TOKEN_PREFIX);
     }
 
+    /**
+     * Generates a chunk annotation id.
+     *
+     * @return prefixed identifier
+     */
+    public String annotationId() {
+        return generate(KbConstants.ANNOTATION_ID_PREFIX);
+    }
+
     private String generate(String prefix) {
         String random = UUID.randomUUID().toString().replace("-", "").substring(0, RANDOM_LENGTH);
         return prefix + KbConstants.ID_SEPARATOR + random;

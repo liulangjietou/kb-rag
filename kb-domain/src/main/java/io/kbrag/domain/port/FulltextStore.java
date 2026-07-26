@@ -43,6 +43,23 @@ public interface FulltextStore {
     void delete(String alias, List<String> chunkIds);
 
     /**
+     * Flips the retrieval switch of records without touching any other field.
+     *
+     * <p>Separate from {@link #upsert} because an upsert replaces the whole document: in lite mode the
+     * same document also carries the embedding, and rewriting it from a chunk row - which does not
+     * store the vector - would silently erase it. Disabling a chunk must never cost a re-embedding, so
+     * the flag travels on its own.
+     *
+     * <p>A chunk that has no document in the index is skipped rather than reported as a failure: a
+     * parent chunk is never indexed and a chunk whose write is still pending has nothing to update.
+     *
+     * @param alias    alias of the target index
+     * @param chunkIds chunk ids to update, ignored when empty
+     * @param enabled  new retrieval switch value
+     */
+    void updateEnabled(String alias, List<String> chunkIds, boolean enabled);
+
+    /**
      * Runs a BM25 search with the mandatory version and enabled filter applied engine side.
      *
      * @param alias alias of the target index

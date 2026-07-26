@@ -150,6 +150,30 @@ public class MilvusVectorStore implements VectorStore {
         checkResponse(response, "delete");
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p><b>Not applied to the collection.</b> Milvus has no partial update: {@code upsert} replaces the
+     * whole entity and therefore needs the embedding, which lives only inside this collection and is
+     * never read back. Re-embedding on a toggle is exactly the cost the operation is defined not to pay.
+     *
+     * <p>Correctness does not depend on the flag being mirrored here. MySQL is the fact source and the
+     * retrieval pipeline drops a disabled chunk after loading its row, so a stale {@code true} in the
+     * collection can only waste a slot of the recall budget, never surface disabled text. The
+     * Elasticsearch side of the same knowledge base is updated in place, so the BM25 route stays exact.
+     *
+     * <p>TODO(M5): read the entity back with a query on {@code vector} and re-upsert it, once a Milvus
+     * deployment exists to verify the round trip against.
+     */
+    @Override
+    public void updateEnabled(String alias, List<String> chunkIds, boolean enabled) {
+        if (CollectionUtils.isEmpty(chunkIds)) {
+            return;
+        }
+        log.info("milvus enabled flag not mirrored, enforced by the fact source, "
+                + "collection={}, enabled={}, chunks={}", alias, enabled, chunkIds.size());
+    }
+
     @Override
     public List<ScoredChunk> search(String alias, VectorQuery query) {
         SearchParam param = SearchParam.newBuilder()

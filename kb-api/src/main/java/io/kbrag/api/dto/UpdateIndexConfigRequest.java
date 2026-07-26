@@ -34,6 +34,8 @@ import java.util.regex.PatternSyntaxException;
  * @param cleanRules           cleaning rules, {@code null} keeps the stored ones
  * @param parsePreviewRequired parse preview switch, {@code null} keeps the stored value
  * @param chatAggregation      chat import window, {@code null} keeps the stored one
+ * @param hideParentWithDisabledChild parent suppression switch, {@code null} keeps the stored value
+ * @param inheritDisableAnnotation    disable inheritance switch, {@code null} keeps the stored value
  * @param retrievalConfig      knowledge base level retrieval defaults, optional
  *
  * @author owlzhangfq@gmail.com
@@ -45,6 +47,8 @@ public record UpdateIndexConfigRequest(
         @JsonProperty("clean_rules") CleanRules cleanRules,
         @JsonProperty("parse_preview_required") Boolean parsePreviewRequired,
         @JsonProperty("chat_aggregation") ChatAggregationParams chatAggregation,
+        @JsonProperty("hide_parent_with_disabled_child") Boolean hideParentWithDisabledChild,
+        @JsonProperty("inherit_disable_annotation") Boolean inheritDisableAnnotation,
         @JsonProperty("retrieval_config") KbRetrievalConfig retrievalConfig) {
 
     /**
@@ -85,6 +89,13 @@ public record UpdateIndexConfigRequest(
                 ? current.isParsePreviewRequired() : parsePreviewRequired);
         config.setChatAggregation(chatAggregation == null
                 ? current.chatAggregationOrDefaults() : chatAggregation);
+        // Neither switch feeds a fingerprint: one changes what retrieval returns and the other what a new
+        // version inherits, and neither changes a single stored chunk, so flipping them must not mark any
+        // document as configuration stale.
+        config.setHideParentWithDisabledChild(hideParentWithDisabledChild == null
+                ? current.isHideParentWithDisabledChild() : hideParentWithDisabledChild);
+        config.setInheritDisableAnnotation(inheritDisableAnnotation == null
+                ? current.isInheritDisableAnnotation() : inheritDisableAnnotation);
         validate(config);
         return config;
     }

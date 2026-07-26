@@ -55,6 +55,18 @@ public interface VectorStore {
     void delete(String alias, List<String> chunkIds);
 
     /**
+     * Flips the retrieval switch of records without touching any other field.
+     *
+     * <p>Exists so that disabling a chunk never costs a re-embedding: the vector lives only inside the
+     * engine, so replacing the whole record from its MySQL row would erase it.
+     *
+     * @param alias    alias of the target index
+     * @param chunkIds chunk ids to update, ignored when empty
+     * @param enabled  new retrieval switch value
+     */
+    void updateEnabled(String alias, List<String> chunkIds, boolean enabled);
+
+    /**
      * Runs a kNN search with the mandatory version and enabled filter applied engine side.
      *
      * @param alias alias of the target index

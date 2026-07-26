@@ -108,7 +108,8 @@ class RetrievalServiceTest {
                 fulltextStore, vectorStore, embeddingProvider, indexAliasManager,
                 new FusionRouter(List.of(new RrfFusion(), new WeightedFusion())),
                 rewriteService, rerankService, new ScoreThresholdPolicy(), new ParentChildMerger(),
-                engineChunkCleaner, objectStorage, new RetrievalDegradeMonitor(properties), properties);
+                new DisabledChildVisibility(chunkMapper), engineChunkCleaner, objectStorage,
+                new RetrievalDegradeMonitor(properties), properties);
     }
 
     @Test
@@ -213,10 +214,13 @@ class RetrievalServiceTest {
         when(fulltextStore.searchBm25(anyString(), any())).thenReturn(List.of(
                 new ScoredChunk("ck_child_a", 9.0d, RetrievalSource.BM25),
                 new ScoredChunk("ck_child_b", 4.0d, RetrievalSource.BM25)));
+        // Three reads in order: the recalled children, the disabled children of the merged parent, and
+        // the parent row whose text is returned.
         when(chunkMapper.selectList(any()))
                 .thenReturn(List.of(
                         chunk("ck_child_a", "first passage", "ck_parent"),
                         chunk("ck_child_b", "second passage", "ck_parent")))
+                .thenReturn(List.of())
                 .thenReturn(List.of(chunk("ck_parent", "the whole section", null)));
 
         SearchOutcome outcome = retrievalService.search(KB_ID, command().build());

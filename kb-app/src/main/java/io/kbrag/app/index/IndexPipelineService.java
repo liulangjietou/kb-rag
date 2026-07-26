@@ -3,6 +3,7 @@ package io.kbrag.app.index;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import io.kbrag.app.alert.TaskFailureTracker;
+import io.kbrag.app.annotation.AnnotationInheritanceService;
 import io.kbrag.app.config.AsyncConfig;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.ErrorCode;
@@ -38,6 +39,7 @@ import io.kbrag.domain.port.VisionProvider;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.ChunkTextHasher;
 import io.kbrag.domain.service.DocumentCleaner;
+import io.kbrag.domain.service.DocumentVersionPlanner;
 import io.kbrag.domain.service.ImageChunkLinker;
 import io.kbrag.domain.service.ImagePlaceholderResolver;
 import io.kbrag.domain.service.ParentChildSplitter;
@@ -53,7 +55,6 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -114,6 +115,7 @@ public class IndexPipelineService {
     private final ParentChildSplitter parentChildSplitter;
     private final ChunkTextHasher chunkTextHasher;
     private final EmbeddingProvider embeddingProvider;
+    private final ChunkEmbedder chunkEmbedder;
     private final VisionProvider visionProvider;
     private final ChunkIndexWriter chunkIndexWriter;
     private final KnowledgeBaseService knowledgeBaseService;
@@ -124,6 +126,9 @@ public class IndexPipelineService {
     private final ImagePlaceholderResolver placeholderResolver;
     private final ImageChunkLinker imageChunkLinker;
     private final DocumentVersionActivator versionActivator;
+    private final VersionArtifactReuser versionArtifactReuser;
+    private final VersionRetentionService versionRetentionService;
+    private final AnnotationInheritanceService annotationInheritanceService;
     private final TaskFailureTracker taskFailureTracker;
 
     /**
@@ -133,7 +138,28 @@ public class IndexPipelineService {
      */
     @Async(AsyncConfig.INDEX_EXECUTOR)
     public void submit(String versionId) {
-        execute(versionId);
+        execute(versionId, DocumentVersionPlanner.Reuse.none());
+    }
+
+    /**
+     * Queues a document version for indexing, taking over what an earlier build already produced.
+     *
+     * @param versionId document version business id
+     * @param reuse     artifacts the version may take over
+     */
+    @Async(AsyncConfig.INDEX_EXECUTOR)
+    public void submit(String versionId, DocumentVersionPlanner.Reuse reuse) {
+        execute(versionId, reuse);
+    }
+
+    /**
+     * Queues the rebuild of a version that lost its chunks, and activates it once it is complete.
+     *
+     * @param versionId document version business id
+     */
+    @Async(AsyncConfig.INDEX_EXECUTOR)
+    public void submitRestore(String versionId) {
+        restore(versionId);
     }
 
     /**
@@ -163,12 +189,27 @@ public class IndexPipelineService {
      * @param versionId document version business id
      */
     public void execute(String versionId) {
+        execute(versionId, DocumentVersionPlanner.Reuse.none());
+    }
+
+    /**
+     * Runs the pipeline synchronously, taking over what an earlier build of the same document produced.
+     *
+     * @param versionId document version business id
+     * @param reuse     artifacts the version may take over
+     */
+    public void execute(String versionId, DocumentVersionPlanner.Reuse reuse) {
         DocumentVersion version = requireVersion(versionId);
         Document document = requireDocument(version.getDocId());
         KbTask task = startTask(versionId, TaskType.INDEX);
         try {
             KbIndexConfig config = knowledgeBaseService.indexConfigOf(document.getKbId());
-            StagedContent staged = prepare(document, version, config, null, task, false);
+            if (reuse.reusesChunks() && indexReusedChunks(document, version, config, reuse, task)) {
+                log.info("index pipeline finished from a reused chunk generation, docId={}, versionId={}",
+                        document.getDocId(), versionId);
+                return;
+            }
+            StagedContent staged = prepare(document, version, config, null, task, adoptParsed(version, reuse));
             if (config.isParsePreviewRequired()) {
                 pauseForConfirmation(document, version, config, staged, null);
                 completeTask(task);
@@ -261,10 +302,39 @@ public class IndexPipelineService {
      * @param versionId document version business id
      */
     public void rebuild(String versionId) {
+        rebuild(versionId, false);
+    }
+
+    /**
+     * Rebuilds an archived version from its stored parse artifact and makes it the active one.
+     *
+     * <p>This is the expensive half of a rollback. The retention policy deleted the chunks of the target
+     * while deliberately keeping its original file and its parse artifact, so the content can be produced
+     * again; the version status walks BUILDING and ends at ACTIVE, or at BUILD_FAILED if it does not get
+     * there, which is the signal the console polls. The document pointer only moves once the chunks are
+     * searchable, so a failure leaves the currently active version serving untouched.
+     *
+     * @param versionId document version business id
+     */
+    public void restore(String versionId) {
+        rebuild(versionId, true);
+    }
+
+    /**
+     * Rebuilds the chunk generation of a version, optionally activating it afterwards.
+     *
+     * @param versionId document version business id
+     * @param activate  {@code true} makes the rebuilt version the active one
+     */
+    private void rebuild(String versionId, boolean activate) {
         DocumentVersion version = requireVersion(versionId);
         Document document = requireDocument(version.getDocId());
         KbTask task = startTask(versionId, TaskType.REBUILD);
         try {
+            if (activate) {
+                version.setStatus(DocumentVersionStatus.BUILDING);
+                documentVersionMapper.updateById(version);
+            }
             KbIndexConfig config = knowledgeBaseService.indexConfigOf(document.getKbId());
             StagedContent staged = prepare(document, version, config, null, task, true);
             updateProcessStatus(document, ProcessStatus.INDEXING, null);
@@ -277,19 +347,95 @@ public class IndexPipelineService {
             index(document, chunks, task);
             removeObsolete(document.getKbId(), versionId, obsolete);
 
-            documentMapper.update(null, new LambdaUpdateWrapper<Document>()
-                    .set(Document::getProcessStatus, ProcessStatus.INDEXED.name())
-                    .set(Document::getConfigStale, NOT_STALE)
-                    .set(Document::getFailReason, null)
-                    .eq(Document::getDocId, document.getDocId()));
+            if (activate) {
+                activateAndFollowUp(document, version);
+            } else {
+                documentMapper.update(null, new LambdaUpdateWrapper<Document>()
+                        .set(Document::getProcessStatus, ProcessStatus.INDEXED.name())
+                        .set(Document::getConfigStale, NOT_STALE)
+                        .set(Document::getFailReason, null)
+                        .eq(Document::getDocId, document.getDocId()));
+            }
             completeTask(task);
-            log.info("rebuild finished, docId={}, versionId={}, newChunks={}, removedChunks={}",
-                    document.getDocId(), versionId, chunks.size(), obsolete.size());
+            log.info("rebuild finished, docId={}, versionId={}, newChunks={}, removedChunks={}, activated={}",
+                    document.getDocId(), versionId, chunks.size(), obsolete.size(), activate);
         } catch (Exception e) {
             fail(document, version, task, ProcessStatus.INDEX_FAILED, e.getMessage());
             log.error("rebuild failed, errorCode={}, docId={}, versionId={}",
                     ErrorCode.INTERNAL_ERROR, document.getDocId(), versionId, e);
         }
+    }
+
+    /**
+     * Adopts the parse artifact of an earlier build so the parser is not called again.
+     *
+     * @param version version being built
+     * @param reuse   reuse decision of the intake
+     * @return {@code true} when the stored artifact may be read instead of parsing
+     */
+    private boolean adoptParsed(DocumentVersion version, DocumentVersionPlanner.Reuse reuse) {
+        if (!reuse.reusesParse()) {
+            return false;
+        }
+        version.setParsedObject(reuse.parsedObject());
+        documentVersionMapper.updateById(version);
+        log.info("parse artifact reused, versionId={}, sourceVersionId={}, object={}",
+                version.getVersionId(), reuse.sourceVersionId(), reuse.parsedObject());
+        return true;
+    }
+
+    /**
+     * Builds a version by copying the chunk generation of an earlier one.
+     *
+     * <p>Reports failure rather than throwing when the source turns out to be empty, so the caller falls
+     * back to a full build: the source may have been archived between the intake decision and this call,
+     * and a document that silently ends up with no chunk would be far worse than a redundant parse.
+     *
+     * @param document document record
+     * @param version  version being built
+     * @param config   knowledge base index configuration
+     * @param reuse    reuse decision of the intake
+     * @param task     running task
+     * @return {@code true} when the version was built and activated from the copy
+     */
+    private boolean indexReusedChunks(Document document, DocumentVersion version, KbIndexConfig config,
+                                      DocumentVersionPlanner.Reuse reuse, KbTask task) {
+        updateProcessStatus(document, ProcessStatus.INDEXING, null);
+        deleteExistingChunks(document.getKbId(), version.getVersionId());
+        List<Chunk> copied = versionArtifactReuser.copyChunks(document, version, reuse.sourceVersionId(),
+                embeddingProvider.isConfigured());
+        if (CollectionUtils.isEmpty(copied)) {
+            log.info("chunk reuse source carries nothing, falling back to a full build, "
+                    + "versionId={}, sourceVersionId={}", version.getVersionId(), reuse.sourceVersionId());
+            return false;
+        }
+        version.setParsedObject(reuse.parsedObject());
+        version.setParseFingerprint(fingerprintFactory.parseFingerprint(config, visionProvider.model()));
+        version.setChunkFingerprint(fingerprintFactory.chunkFingerprint(config));
+        version.setEmbeddingVersion(embeddingProvider.model());
+        documentVersionMapper.updateById(version);
+        updateProgress(task, PROGRESS_CHUNKED);
+        index(document, copied, task);
+        activateAndFollowUp(document, version);
+        completeTask(task);
+        return true;
+    }
+
+    /**
+     * Makes a freshly built version the active one and runs everything that depends on that.
+     *
+     * <p>Both follow ups belong here rather than inside the activator: the activator is also used by the
+     * chat import path and by a manual rollback, which need the switch without necessarily needing the
+     * same follow ups, and the single active version invariant must not depend on either of them
+     * succeeding.
+     *
+     * @param document document record
+     * @param version  version that finished building
+     */
+    private void activateAndFollowUp(Document document, DocumentVersion version) {
+        versionActivator.activate(document, version);
+        annotationInheritanceService.inherit(document, version);
+        versionRetentionService.submit(document.getDocId());
     }
 
     /**
@@ -415,7 +561,7 @@ public class IndexPipelineService {
         deleteExistingChunks(document.getKbId(), version.getVersionId());
         List<Chunk> chunks = split(document, version, staged, config, task);
         index(document, chunks, task);
-        versionActivator.activate(document, version);
+        activateAndFollowUp(document, version);
         completeTask(task);
     }
 
@@ -681,36 +827,8 @@ public class IndexPipelineService {
             updateProgress(task, PROGRESS_INDEXED);
             return;
         }
-        Map<String, float[]> vectors = embed(chunks);
-        chunkIndexWriter.write(document.getKbId(), chunks, vectors);
+        chunkIndexWriter.write(document.getKbId(), chunks, chunkEmbedder.embed(chunks));
         updateProgress(task, PROGRESS_INDEXED);
-    }
-
-    /**
-     * Embeds the chunk texts in provider sized batches.
-     *
-     * @param chunks persisted chunks
-     * @return vector per chunk id, empty in zero key mode
-     */
-    private Map<String, float[]> embed(List<Chunk> chunks) {
-        Map<String, float[]> vectors = new HashMap<>();
-        if (!embeddingProvider.isConfigured()) {
-            return vectors;
-        }
-        int batchSize = Math.max(1, embeddingProvider.maxBatchSize());
-        for (int start = 0; start < chunks.size(); start += batchSize) {
-            List<Chunk> batch = chunks.subList(start, Math.min(chunks.size(), start + batchSize));
-            List<String> texts = batch.stream().map(Chunk::getContent).toList();
-            List<float[]> embedded = embeddingProvider.embed(texts);
-            for (int i = 0; i < batch.size(); i++) {
-                Chunk chunk = batch.get(i);
-                vectors.put(chunk.getChunkId(), embedded.get(i));
-                chunk.setEmbeddingStatus(EmbeddingStatus.DONE);
-                chunkMapper.updateById(chunk);
-            }
-        }
-        log.info("chunks embedded, count={}, model={}", vectors.size(), embeddingProvider.model());
-        return vectors;
     }
 
     /**

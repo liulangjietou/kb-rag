@@ -9,7 +9,6 @@ import io.kbrag.app.document.DocumentPreviewService;
 import io.kbrag.app.document.DocumentService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
-import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.enums.ProcessStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -49,7 +48,7 @@ public class DocumentController {
      *
      * @param kbId target knowledge base
      * @param file uploaded file
-     * @return created document record
+     * @return document the upload landed on, with the version and the duplicate hints
      */
     @PostMapping("/api/v1/kb/{kbId}/documents")
     public Result<DocumentResponse> upload(@PathVariable String kbId,
@@ -63,8 +62,8 @@ public class DocumentController {
         } catch (IOException e) {
             throw BizException.invalidParam("unable to read the uploaded file");
         }
-        Document document = documentService.upload(kbId, file.getOriginalFilename(), content);
-        return Result.success(DocumentResponse.from(document));
+        return Result.success(DocumentResponse.from(
+                documentService.upload(kbId, file.getOriginalFilename(), content)));
     }
 
     /**

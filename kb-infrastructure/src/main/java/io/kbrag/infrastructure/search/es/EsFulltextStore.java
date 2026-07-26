@@ -51,6 +51,11 @@ public class EsFulltextStore implements FulltextStore {
     }
 
     @Override
+    public void updateEnabled(String alias, List<String> chunkIds, boolean enabled) {
+        indexAdmin.bulkUpdateEnabled(alias, chunkIds, enabled);
+    }
+
+    @Override
     public List<ScoredChunk> searchBm25(String alias, FulltextQuery query) {
         List<Query> filters = indexAdmin.toFilters(query.getFilter());
         try {

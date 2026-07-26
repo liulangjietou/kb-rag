@@ -66,8 +66,10 @@ import java.util.Map;
  * version. The optional metadata filter can only narrow that set further.
  *
  * <p><b>MySQL is the fact source.</b> Text is always read from the database and never from a search
- * engine, so a stale engine copy cannot reach a caller. An engine hit whose row is gone or disabled is
- * dropped from the result and scheduled for removal, which makes every search a small repair pass.
+ * engine, so a stale engine copy cannot reach a caller. An engine hit whose row is <em>gone</em> is
+ * dropped and scheduled for removal, which makes every search a small repair pass. An engine hit whose
+ * row merely says <em>disabled</em> is dropped and nothing else: the two look alike from the engine but
+ * only one of them is garbage, and deleting the second would destroy a chunk an operator can re-enable.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -86,6 +88,7 @@ public class RetrievalService {
     private static final String META_BM25_RANK = "bm25_rank";
     private static final String META_CHUNK_SEQ = "chunk_seq";
     private static final String META_CHILD_IDS = "child_ids";
+    private static final String META_DISABLED_CHILD_IDS = "disabled_child_ids";
     private static final String META_CHILDREN = "children";
     private static final String META_CHILD_CHUNK_ID = "chunk_id";
     private static final String META_CHILD_CONTENT = "content";
@@ -106,6 +109,7 @@ public class RetrievalService {
     private final RerankService rerankService;
     private final ScoreThresholdPolicy scoreThresholdPolicy;
     private final ParentChildMerger parentChildMerger;
+    private final DisabledChildVisibility disabledChildVisibility;
     private final EngineChunkCleaner engineChunkCleaner;
     private final ObjectStorage objectStorage;
     private final RetrievalDegradeMonitor degradeMonitor;
@@ -156,6 +160,7 @@ public class RetrievalService {
         List<FusedChunk> fused = fusionRouter.fuse(routeResults, settings.getFusion());
         Map<String, Chunk> chunkById = loadChunks(fused);
         List<FusedChunk> live = dropOrphans(kbId, fused, chunkById);
+        live = dropDisabled(live, chunkById);
 
         List<RetrievalCandidate> candidates = selectCandidates(live, chunkById, indexConfig, settings);
         applyRerank(effectiveQuery, candidates, settings, command, kbRetrieval, degraded);
@@ -163,6 +168,10 @@ public class RetrievalService {
         candidates.sort(Comparator.comparingDouble(RetrievalCandidate::orderingScore).reversed()
                 .thenComparing(RetrievalCandidate::chunkId));
         List<RetrievalUnit> units = parentChildMerger.merge(candidates);
+        DisabledChildVisibility.Visibility visibility = disabledChildVisibility.apply(units,
+                disabledChildVisibility.disabledChildrenOf(parentIdsOf(units)),
+                indexConfig.isHideParentWithDisabledChild());
+        units = visibility.units();
 
         boolean rerankApplied = !candidates.isEmpty() && candidates.get(0).getRerankScore() != null;
         ScoreThresholdPolicy.ThresholdDecision decision =
@@ -175,7 +184,8 @@ public class RetrievalService {
             units = units.subList(0, settings.getTopN());
         }
 
-        List<RetrievalNodeView> nodes = toNodes(units, decision, settings);
+        List<RetrievalNodeView> nodes = toNodes(units, decision, settings,
+                visibility.disabledChildIdsByUnit());
         log.info("search finished, kbId={}, recallTopK={}, topN={}, fusion={}, candidates={}, "
                         + "units={}, returned={}, rerank={}, degraded={}",
                 kbId, settings.getRecallTopK(), settings.getTopN(), settings.getFusion().getMode().code(),
@@ -308,19 +318,66 @@ public class RetrievalService {
         return documents.stream().map(Document::getCurrentVersionId).toList();
     }
 
+    /**
+     * Loads the fact source rows of the recalled candidates.
+     *
+     * <p><b>Disabled rows are loaded, not filtered out here.</b> The engine side predicate already
+     * excludes them, so a disabled row reaching this point means the engine copy of its flag is stale -
+     * which happens legitimately, for instance on the Milvus route where no partial update exists.
+     * Filtering it out in the query would make it indistinguishable from a row that no longer exists,
+     * and the self healing path would then delete a perfectly valid chunk from the engines, so
+     * re-enabling it later would return nothing until the next rebuild. The two cases are therefore kept
+     * apart: absent rows are repaired, disabled ones are merely dropped from the ranking.
+     *
+     * @param fused fused candidates
+     * @return fact source row per chunk id, disabled rows included
+     */
     private Map<String, Chunk> loadChunks(List<FusedChunk> fused) {
         if (CollectionUtils.isEmpty(fused)) {
             return Map.of();
         }
         List<String> chunkIds = fused.stream().map(FusedChunk::getChunkId).toList();
         List<Chunk> chunks = chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
-                .in(Chunk::getChunkId, chunkIds)
-                .eq(Chunk::getEnabled, ENABLED));
+                .in(Chunk::getChunkId, chunkIds));
         Map<String, Chunk> chunkById = new HashMap<>(chunks.size());
         for (Chunk chunk : chunks) {
             chunkById.put(chunk.getChunkId(), chunk);
         }
         return chunkById;
+    }
+
+    /**
+     * Drops candidates whose fact source row is disabled, without touching the engines.
+     *
+     * @param live      candidates backed by a live row
+     * @param chunkById fact source rows
+     * @return candidates that may take part in the ranking, in the original order
+     */
+    private List<FusedChunk> dropDisabled(List<FusedChunk> live, Map<String, Chunk> chunkById) {
+        List<FusedChunk> enabled = new ArrayList<>(live.size());
+        int dropped = 0;
+        for (FusedChunk candidate : live) {
+            Chunk chunk = chunkById.get(candidate.getChunkId());
+            if (chunk.getEnabled() != null && chunk.getEnabled() == ENABLED) {
+                enabled.add(candidate);
+            } else {
+                dropped++;
+            }
+        }
+        if (dropped > 0) {
+            log.info("recalled chunks dropped because the fact source disabled them, count={}", dropped);
+        }
+        return enabled;
+    }
+
+    /**
+     * Parent chunk ids of the merged units.
+     *
+     * @param units merged units
+     * @return parent unit ids, empty for a single level knowledge base
+     */
+    private List<String> parentIdsOf(List<RetrievalUnit> units) {
+        return units.stream().filter(RetrievalUnit::isParent).map(RetrievalUnit::getUnitId).toList();
     }
 
     /**
@@ -350,7 +407,8 @@ public class RetrievalService {
 
     private List<RetrievalNodeView> toNodes(List<RetrievalUnit> units,
                                             ScoreThresholdPolicy.ThresholdDecision decision,
-                                            RetrievalSettings settings) {
+                                            RetrievalSettings settings,
+                                            Map<String, List<String>> disabledChildIdsByUnit) {
         if (CollectionUtils.isEmpty(units)) {
             return List.of();
         }
@@ -372,7 +430,8 @@ public class RetrievalService {
                     .score(reported.getValue())
                     .scoreType(reported.getType().code())
                     .retrievalSource(best.getFused().getPrimarySource().code())
-                    .metadata(buildMetadata(unit, answerChunk, decision, settings))
+                    .metadata(buildMetadata(unit, answerChunk, decision, settings,
+                            disabledChildIdsByUnit.get(unit.getUnitId())))
                     .imageUrls(presignedImageUrls(unit, answerChunk))
                     .previewUrl(null)
                     .build());
@@ -484,7 +543,8 @@ public class RetrievalService {
 
     private Map<String, Object> buildMetadata(RetrievalUnit unit, Chunk answerChunk,
                                               ScoreThresholdPolicy.ThresholdDecision decision,
-                                              RetrievalSettings settings) {
+                                              RetrievalSettings settings,
+                                              List<String> disabledChildIds) {
         Map<String, Object> metadata = new LinkedHashMap<>(scoreMetadata(unit.best()));
         metadata.put(META_CHUNK_SEQ, answerChunk.getSeq());
         // The stored document facts travel next to the scores so a chat result card can show its
@@ -497,6 +557,11 @@ public class RetrievalService {
         });
         if (!unit.isParent()) {
             return metadata;
+        }
+        if (CollectionUtils.isNotEmpty(disabledChildIds)) {
+            // The parent text is returned in full, so the caller is told which passages inside it an
+            // operator excluded rather than being left to assume the whole parent is approved.
+            metadata.put(META_DISABLED_CHILD_IDS, disabledChildIds);
         }
         metadata.put(META_CHILD_IDS, unit.getMembers().stream().map(RetrievalCandidate::chunkId).toList());
         List<Map<String, Object>> children = new ArrayList<>(unit.getMembers().size());

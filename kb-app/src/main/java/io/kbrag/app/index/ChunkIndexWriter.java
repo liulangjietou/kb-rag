@@ -84,6 +84,28 @@ public class ChunkIndexWriter {
     }
 
     /**
+     * Mirrors the retrieval switch of chunks into every target of a knowledge base.
+     *
+     * <p>Routed through this class rather than straight to the alias manager so that every path which
+     * changes what the engines hold for a chunk goes through one collaborator, and so the annotation
+     * pipeline never has to know how many targets a deployment has.
+     *
+     * <p>No synchronization row is touched: the row records whether the chunk reached the index, and a
+     * flag update neither creates nor loses a projection.
+     *
+     * @param kbId     knowledge base business id
+     * @param chunkIds chunk ids to update, ignored when empty
+     * @param enabled  new retrieval switch value
+     */
+    public void syncEnabled(String kbId, List<String> chunkIds, boolean enabled) {
+        if (CollectionUtils.isEmpty(chunkIds)) {
+            return;
+        }
+        indexAliasManager.updateEnabledEverywhere(kbId, chunkIds, enabled);
+        log.info("chunk enabled flag synced, kbId={}, chunks={}, enabled={}", kbId, chunkIds.size(), enabled);
+    }
+
+    /**
      * Builds the engine side projection of a chunk.
      *
      * <p>Only the fixed subset of {@code metadata} declared in {@link ChunkMetadataKeys} crosses over;

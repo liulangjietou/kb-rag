@@ -8,7 +8,9 @@ import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkOperation;
+import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import co.elastic.clients.elasticsearch.core.bulk.IndexOperation;
+import co.elastic.clients.elasticsearch.core.bulk.UpdateOperation;
 import co.elastic.clients.elasticsearch.indices.update_aliases.Action;
 import co.elastic.clients.json.JsonData;
 import io.kbrag.common.api.ErrorCode;
@@ -48,6 +50,9 @@ public class EsIndexAdmin {
     private static final String META_SCHEMA_VERSION = "schema_version";
     private static final String SIMILARITY_COSINE = "cosine";
     private static final String ERROR_ALREADY_EXISTS = "resource_already_exists_exception";
+
+    /** Bulk item status of a partial update whose document does not exist. */
+    private static final int STATUS_NOT_FOUND = 404;
 
     private final ElasticsearchClient client;
     private final KbProperties properties;
@@ -134,6 +139,42 @@ public class EsIndexAdmin {
             operations.add(BulkOperation.of(op -> op.index(operation)));
         }
         executeBulk(alias, operations, "upsert");
+    }
+
+    /**
+     * Flips the retrieval switch of documents through the alias, leaving every other field untouched.
+     *
+     * <p>A partial update rather than a write: in lite mode the document also holds the embedding, and
+     * an index operation built from a chunk row would drop the vector field and silently remove the
+     * chunk from the vector route.
+     *
+     * <p><b>A missing document is not a failure.</b> Elasticsearch answers a partial update of an
+     * absent id with {@code document_missing_exception}, and the ids handed over here legitimately
+     * include chunks that were never indexed - a parent chunk is stored in MySQL only, and a chunk
+     * whose write is still pending has nothing to update yet. Those items are counted and logged; any
+     * other error still fails the call.
+     *
+     * @param alias    alias of the target index
+     * @param chunkIds chunk ids to update
+     * @param enabled  new retrieval switch value
+     */
+    public void bulkUpdateEnabled(String alias, List<String> chunkIds, boolean enabled) {
+        if (CollectionUtils.isEmpty(chunkIds)) {
+            return;
+        }
+        Map<String, Object> partial = new HashMap<>();
+        partial.put(IndexFields.ENABLED, enabled);
+        List<BulkOperation> operations = new ArrayList<>(chunkIds.size());
+        for (String chunkId : chunkIds) {
+            UpdateOperation<Void, Map<String, Object>> operation =
+                    new UpdateOperation.Builder<Void, Map<String, Object>>()
+                            .index(alias)
+                            .id(chunkId)
+                            .action(action -> action.doc(partial))
+                            .build();
+            operations.add(BulkOperation.of(op -> op.update(operation)));
+        }
+        executeTolerantBulk(alias, operations, enabled);
     }
 
     /**
@@ -357,6 +398,46 @@ public class EsIndexAdmin {
         } catch (Exception e) {
             log.error("es bulk {} failed, errorCode={}, alias={}", action, ErrorCode.INTERNAL_ERROR, alias, e);
             throw new BizException(ErrorCode.INTERNAL_ERROR, "elasticsearch bulk " + action + " failed", e);
+        }
+    }
+
+    /**
+     * Runs a bulk of partial updates, treating an absent document as a skip.
+     *
+     * @param alias      alias the operations address
+     * @param operations bulk operations
+     * @param enabled    value being written, logged for traceability
+     */
+    private void executeTolerantBulk(String alias, List<BulkOperation> operations, boolean enabled) {
+        try {
+            BulkResponse response = client.bulk(BulkRequest.of(b -> b
+                    .operations(operations)
+                    .refresh(Refresh.True)));
+            int missing = 0;
+            String blockingError = null;
+            for (BulkResponseItem item : response.items()) {
+                if (item.error() == null) {
+                    continue;
+                }
+                if (item.status() == STATUS_NOT_FOUND) {
+                    missing++;
+                    continue;
+                }
+                blockingError = item.error().reason();
+                break;
+            }
+            if (blockingError != null) {
+                log.error("es enabled flag sync failed, errorCode={}, alias={}, reason={}",
+                        ErrorCode.INTERNAL_ERROR, alias, blockingError);
+                throw new BizException(ErrorCode.INTERNAL_ERROR, "elasticsearch enabled flag sync failed");
+            }
+            log.info("es enabled flag synced, alias={}, enabled={}, chunks={}, notIndexed={}",
+                    alias, enabled, operations.size(), missing);
+        } catch (BizException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("es enabled flag sync failed, errorCode={}, alias={}", ErrorCode.INTERNAL_ERROR, alias, e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "elasticsearch enabled flag sync failed", e);
         }
     }
 

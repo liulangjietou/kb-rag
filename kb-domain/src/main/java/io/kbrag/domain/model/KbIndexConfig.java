@@ -68,6 +68,32 @@ public class KbIndexConfig {
     private ChatAggregationParams chatAggregation = ChatAggregationParams.defaults();
 
     /**
+     * Suppresses a parent chunk entirely as soon as one of its children is disabled.
+     *
+     * <p>Off by default. The one phase semantics return the whole parent and merely report which of
+     * its children are disabled, which keeps the passage readable; a deployment that must never let a
+     * disabled sentence reach a caller turns this on and accepts losing the surrounding context.
+     *
+     * <p>Deliberately outside both fingerprints: the switch changes what retrieval returns, not what
+     * the pipeline produces, so flipping it must not mark a single document as configuration stale.
+     */
+    @JsonProperty("hide_parent_with_disabled_child")
+    private boolean hideParentWithDisabledChild;
+
+    /**
+     * Carries disable annotations over to a new document version when the chunk text is byte identical.
+     *
+     * <p>On by default: a chunk whose normalised text did not change is the same knowledge, and losing
+     * its disabled state on every re-upload would silently re-expose content somebody removed on
+     * purpose. Matching is exact — no similarity heuristic — so an edited chunk is never assumed to be
+     * the same one.
+     *
+     * <p>Outside both fingerprints for the same reason as the switch above.
+     */
+    @JsonProperty("inherit_disable_annotation")
+    private boolean inheritDisableAnnotation = true;
+
+    /**
      * Resolves the cleaning rules, never {@code null}.
      *
      * @return cleaning rules, defaults when the column carried none

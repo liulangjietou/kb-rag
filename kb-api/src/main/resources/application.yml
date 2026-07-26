@@ -143,6 +143,11 @@ kb:
   upload:
     max-file-size-mb: ${UPLOAD_MAX_FILE_SIZE_MB:100}
     allowed-extensions: ${UPLOAD_ALLOWED_EXTENSIONS:pdf,docx,txt,md,xlsx,csv,png,jpg,jpeg,webp,bmp,gif}
+  doc:
+    version:
+      # Non active READY versions kept per document; the older ones are archived and lose their chunks,
+      # while their original file and parse artifact stay so they can still be rebuilt. Clamped to 1-20.
+      retain-count: ${DOC_VERSION_RETAIN_COUNT:3}
   split:
     max-tokens: ${SPLIT_MAX_TOKENS:600}
     overlap-tokens: ${SPLIT_OVERLAP_TOKENS:100}

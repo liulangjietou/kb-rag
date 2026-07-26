@@ -34,6 +34,17 @@ public final class KbConstants {
     /** Business id prefix of a chat import upload token. */
     public static final String UPLOAD_TOKEN_PREFIX = "upt";
 
+    /** Business id prefix of a chunk annotation. */
+    public static final String ANNOTATION_ID_PREFIX = "an";
+
+    /**
+     * Operator recorded on every annotation.
+     *
+     * <p>Fixed for now: the console has exactly one administrator account, so a per user value would
+     * be a column that always holds the same string while pretending to be an audit dimension.
+     */
+    public static final String ANNOTATION_OPERATOR_ADMIN = "admin";
+
     /**
      * Source channel of a chat import, first element of the logical document identity.
      *
