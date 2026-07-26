@@ -7,6 +7,27 @@
 ## [Unreleased]
 
 ### Added
+- M5 多知识库路由（docs/M5-CONTRACTS.md）：应用版本配置 `kb_id` 单库字段废弃为兼容可选项，
+  新增 `kb_refs`（1..15 个知识库 + 配额权重，正整数，默认 1，`kb.retrieval.max-linked-kb`
+  控制上限）；`RoutingService` 按需（路由开关开启且应用挂 ≥2 库时）调用 ChatProvider 做
+  LLM 选库，输出与候选知识库白名单求交集，空交集/解析失败/超时/未配置对话模型一律降级为
+  检索全部关联库并记 `degraded=route_fallback_all`（需求文档 §4.4 注入防护③），决策结果按
+  query+候选集哈希缓存（`kb.retrieval.routing-cache-ttl-minutes`/`routing-cache-max-size`）；
+  跨库检索基于库内排名做 Reciprocal Rank Fusion 合并（`CrossKbRrfFusion`），rerank 候选总
+  预算（全局默认 50，非每库）按 `kb_refs` 权重比例分配到各库（`KbQuotaAllocator`，向下取整、
+  余量归权重最高库，验收用例权重 3:1 分 50 得 38/12）；对外/管理 search、chat、chat-preview
+  响应新增 `routed_kb_ids`（`applied` 信息条或顶层，SSE `done` 事件同增）与
+  `RetrievalNode.metadata.kb_id`；门禁评测集绑定放宽为「所属知识库属于版本 kb_refs 并集」；
+  旧版仅存单 `kb_id` 的快照读侧兼容翻译，无需迁移。`docs/openapi/kb-server.yaml` 同步全部
+  M5 字段变更，`info.version` 升至 `0.6.0-m5`。
+- 补齐 M4c OpenAPI 欠账（`docs/openapi/kb-server.yaml`，`info.version` 升至 `0.5.0-m4c`）：
+  应用与版本全部端点（CRUD/`versions`/`gate-dataset`/`submit-test`/`release?force`/
+  `rollback`）、控制台 `chat-preview`（JSON + SSE）、API Key 管理（`create`/`list`/`status`/
+  `scope`/`rotate`/`delete`）、调用审计查询与统计（`/api-audit-logs`、`.../stats`）、对外
+  `/api/v1/knowledge/search`、`/chat`（新增 `ApiKeyBearer` securityScheme 区分管理鉴权）、
+  `AppVersionStatus` 八状态机、`GateVerdict`/`GateReason` 枚举、SSE 事件 schema 与
+  `APP_ACCESS_DENIED`/`API_KEY_DISABLED`/`RATE_LIMITED` 等错误码，此前该增量因排期滞后于
+  server 侧实现（M4c-CONTRACTS.md §6 已记录该欠账）。
 - M4c 应用发布与开放能力：应用与版本八状态机（单应用唯一 RELEASED）、发布门禁（同语料双跑/容差 ε/有效 case 交集/四情形 LOG_ONLY/force 留痕/首发基线）、对外 knowledge search+chat（API Key 哈希鉴权、app_scope、令牌桶限流、SSE 流式、注入防护 prompt）、API Key 管理、审计落库与 180 天归档、Flyway V6。
 - M4b 评测体系（docs/M4b-CONTRACTS.md）：评测集/case 的增删改查与分页、证据复核工作台
   （待复核 case 列表 + Top3 候选原文 + REANCHOR/DEPRECATE）、检索调试页一键收进评测集与
@@ -80,6 +101,14 @@
 
 ### Notes
 
+- 2026-07-26：M5-CONTRACTS.md §5 验收通过（零 Key 域）——双库路由关时两库都查且
+  `node.metadata.kb_id` 覆盖两库；路由开 + 零 Key 时 `degraded` 含 `route_fallback_all`
+  仍全库检索；权重 3:1 配额实测 `quotas={38, 12}`；M4c 旧版单库快照对外调用仍正常且
+  `routed_kb_ids=[该库]`（读侧兼容）。单测 553 项（新增 53）全过；LLM 真实选库与 rerank
+  参与的跨库排序待模型 Key 恢复后补验。本仓库范围内本次同步完成 M4c OpenAPI 欠账补齐 +
+  M5 OpenAPI 增量，`t_kb_app_version.config` 的 JSON 结构变更（`kb_refs`/`routing`）无新增
+  Flyway 迁移（沿用既有 JSON 列，读侧翻译兼容），迁移脚本本就在 kb-rag-server 仓库
+  不在本仓库交付范围
 - 本版本对应需求文档 v1.11 / M3-CONTRACTS.md 的 M3 里程碑增量（本仓库范围：Demo 文档集
   与生成脚本、示例评测集、聊天记录列名映射模板、`.env.example` 新增变量、OpenAPI 契约
   同步、NOTICE 声明）；`t_kb_image_asset` 表、`process_status` 增 `PENDING_CONFIRM` 等
