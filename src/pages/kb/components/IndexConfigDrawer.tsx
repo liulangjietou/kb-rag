@@ -22,6 +22,9 @@ const DEFAULT_CLEAN_RULES: CleanRules = {
 };
 // M3-CONTRACTS.md section 3.5 chat_aggregation default window.
 const DEFAULT_CHAT_AGGREGATION: ChatAggregationConfig = { window_minutes: 60, max_messages: 50 };
+// M4a-CONTRACTS.md section 2.4 defaults.
+const DEFAULT_HIDE_PARENT_WITH_DISABLED_CHILD = false;
+const DEFAULT_INHERIT_DISABLE_ANNOTATION = true;
 
 interface IndexConfigFormValues {
   chunk_max_tokens: number;
@@ -33,6 +36,8 @@ interface IndexConfigFormValues {
   clean_rules: CleanRules;
   parse_preview_required: boolean;
   chat_aggregation: ChatAggregationConfig;
+  hide_parent_with_disabled_child: boolean;
+  inherit_disable_annotation: boolean;
 }
 
 interface IndexConfigDrawerProps {
@@ -55,6 +60,9 @@ function toFormValues(config: IndexConfig | null): IndexConfigFormValues {
     clean_rules: config?.clean_rules ?? DEFAULT_CLEAN_RULES,
     parse_preview_required: config?.parse_preview_required ?? false,
     chat_aggregation: config?.chat_aggregation ?? DEFAULT_CHAT_AGGREGATION,
+    hide_parent_with_disabled_child:
+      config?.hide_parent_with_disabled_child ?? DEFAULT_HIDE_PARENT_WITH_DISABLED_CHILD,
+    inherit_disable_annotation: config?.inherit_disable_annotation ?? DEFAULT_INHERIT_DISABLE_ANNOTATION,
   };
 }
 
@@ -90,6 +98,8 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
         clean_rules: values.clean_rules,
         parse_preview_required: values.parse_preview_required,
         chat_aggregation: values.chat_aggregation,
+        hide_parent_with_disabled_child: values.hide_parent_with_disabled_child,
+        inherit_disable_annotation: values.inherit_disable_annotation,
       });
       message.success('索引配置已更新，使用旧配置的文档将标记为待重建');
       onSaved();
@@ -192,6 +202,24 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
           rules={[{ required: true, message: '请输入单窗口最大消息数' }]}
         >
           <InputNumber min={1} max={1000} style={{ width: '100%' }} />
+        </Form.Item>
+
+        <Typography.Title level={5}>标注与父子片</Typography.Title>
+        <Form.Item
+          name="hide_parent_with_disabled_child"
+          label="父片含禁用子片时隐藏"
+          valuePropName="checked"
+          tooltip="关闭时父片命中仍整段返回并在 metadata.disabled_child_ids 标注被禁用的子片；开启后只要父片含任意被禁用子片就整段不返回，用于严格合规场景"
+        >
+          <Switch />
+        </Form.Item>
+        <Form.Item
+          name="inherit_disable_annotation"
+          label="自动继承禁用类标注"
+          valuePropName="checked"
+          tooltip="文档升级新版本后，按 chunk_text_hash 完全相同精确匹配自动继承禁用标注；不做相似度匹配"
+        >
+          <Switch />
         </Form.Item>
       </Form>
     </Drawer>

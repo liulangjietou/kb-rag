@@ -31,6 +31,7 @@ import ChatImportWizard from './components/ChatImportWizard';
 import ChunkDrawer from './components/ChunkDrawer';
 import IndexConfigDrawer from './components/IndexConfigDrawer';
 import ParsePreviewDrawer from './components/ParsePreviewDrawer';
+import VersionDrawer from './components/VersionDrawer';
 
 // Document list is polled every 3s while this page stays mounted, per M1-CONTRACTS.md section 7.
 // The same poll loop is reused to track rebuild progress (M2-CONTRACTS.md section 4): there is
@@ -46,6 +47,7 @@ export default function KbDetailPage() {
   const [loading, setLoading] = useState(true);
   const [chunkDoc, setChunkDoc] = useState<KbDocument | null>(null);
   const [previewDoc, setPreviewDoc] = useState<KbDocument | null>(null);
+  const [versionDocId, setVersionDocId] = useState<string | null>(null);
   const [chatImportOpen, setChatImportOpen] = useState(false);
   const [indexConfigOpen, setIndexConfigOpen] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
@@ -94,6 +96,12 @@ export default function KbDetailPage() {
     () => documents.filter((doc) => doc.process_status === 'PENDING_CONFIRM'),
     [documents],
   );
+  // Looked up from the live, poll-refreshed `documents` array (not a static snapshot) so
+  // VersionDrawer's REBUILD-progress hint reflects the same 3s poll this page already runs.
+  const versionDoc = useMemo(
+    () => documents.find((doc) => doc.doc_id === versionDocId) ?? null,
+    [documents, versionDocId],
+  );
 
   // Once every targeted document's config_stale flag clears, consider the rebuild finished.
   useEffect(() => {
@@ -140,6 +148,10 @@ export default function KbDetailPage() {
 
   const handleChatImported = () => {
     setChatImportOpen(false);
+    loadDocuments();
+  };
+
+  const handleVersionActivated = () => {
     loadDocuments();
   };
 
@@ -300,6 +312,9 @@ export default function KbDetailPage() {
                 <Button size="small" onClick={() => setChunkDoc(record)}>
                   查看分片
                 </Button>
+                <Button size="small" onClick={() => setVersionDocId(record.doc_id)}>
+                  版本
+                </Button>
                 {record.process_status === 'PENDING_CONFIRM' && (
                   <Button size="small" type="link" onClick={() => setPreviewDoc(record)}>
                     预览确认
@@ -332,6 +347,8 @@ export default function KbDetailPage() {
         onClose={() => setPreviewDoc(null)}
         onConfirmed={handlePreviewConfirmed}
       />
+
+      <VersionDrawer doc={versionDoc} onClose={() => setVersionDocId(null)} onActivated={handleVersionActivated} />
 
       {kbId && (
         <ChatImportWizard

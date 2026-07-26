@@ -122,6 +122,18 @@ export interface IndexConfig {
   parse_preview_required: boolean;
   /** M3-CONTRACTS.md section 3.5; see ChatAggregationConfig doc comment for the nesting assumption. */
   chat_aggregation: ChatAggregationConfig;
+  /**
+   * M4a-CONTRACTS.md section 2.2/2.4: when a parent chunk contains any disabled child chunk,
+   * hide the parent from search results entirely instead of returning it with
+   * metadata.disabled_child_ids. Default false. Does not participate in parse/chunk fingerprints.
+   */
+  hide_parent_with_disabled_child: boolean;
+  /**
+   * M4a-CONTRACTS.md section 2.3/2.4: auto-carry a TOGGLE(disable) annotation over to a new
+   * document version when the target chunk's chunk_text_hash matches exactly (no similarity
+   * matching). Default true. Does not participate in parse/chunk fingerprints.
+   */
+  inherit_disable_annotation: boolean;
 }
 
 /** PUT /api/v1/kb/{kbId}/index-config request body (M2-CONTRACTS.md section 4). */
@@ -528,4 +540,128 @@ export interface DemoStatus {
  */
 export interface DemoImportResult {
   kb_id: string;
+}
+
+// ---------------------------------------------------------------------------
+// Document version management (M4a-CONTRACTS.md section 1)
+// ---------------------------------------------------------------------------
+
+/** t_kb_document_version.status (M4a-CONTRACTS.md section 0, already delivered by the M1 baseline). */
+export type DocumentVersionStatus = 'BUILDING' | 'BUILD_FAILED' | 'READY' | 'ACTIVE' | 'ARCHIVED';
+
+/**
+ * Activation switch-over strategy (M4a-CONTRACTS.md section 1.2): INSTANT when the target
+ * version is still READY with its chunk rows intact (atomic swap, returns immediately); REBUILD
+ * when the target is ARCHIVED and its chunks were already cleaned up (re-derives chunks from the
+ * stored parse artifact via an async task).
+ */
+export type RollbackMode = 'INSTANT' | 'REBUILD';
+
+/** GET /api/v1/documents/{docId}/versions list item (M4a-CONTRACTS.md section 1.2). */
+export interface DocumentVersion {
+  version_id: string;
+  version: string;
+  status: DocumentVersionStatus;
+  content_hash: string;
+  created_at: string;
+  changelog: string | null;
+  active: boolean;
+  chunk_count: number;
+  rollback_mode: RollbackMode;
+}
+
+/**
+ * GET /api/v1/documents/{docId}/versions/{versionId}/activate-impact response (M4a-CONTRACTS.md
+ * section 1.2): pre-flight check surfaced in the activation confirm dialog.
+ * affected_eval_case_count is a placeholder that always returns 0 in M4a (eval sets ship in M4b).
+ */
+export interface ActivateImpact {
+  stale_annotation_count: number;
+  affected_eval_case_count: number;
+  rollback_mode: RollbackMode;
+  needs_rebuild: boolean;
+}
+
+/**
+ * POST /api/v1/documents/{docId}/versions/{versionId}/activate response.
+ * ASSUMPTION: the contract only spells out the REBUILD-mode body ("返回 {task_id}"); the
+ * INSTANT-mode response shape ("同步原子切换并立即返回") is not given, so it is modelled here as
+ * task_id: null so both branches share one response type and the caller only needs to check
+ * whether task_id is present to decide whether to enter the polling flow.
+ */
+export interface ActivateVersionResponse {
+  task_id: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Chunk annotation (M4a-CONTRACTS.md section 2)
+// ---------------------------------------------------------------------------
+
+/** t_kb_annotation.annotation_type (M4a-CONTRACTS.md section 2.4). */
+export type AnnotationType = 'EDIT' | 'TOGGLE' | 'MERGE' | 'SPLIT';
+
+/**
+ * t_kb_annotation.inherit_status (M4a-CONTRACTS.md sections 2.3/2.4): whether this old-version
+ * annotation carried over to the new active version automatically, was manually redone there, or
+ * was not carried over at all.
+ */
+export type InheritStatus = 'NOT_INHERITED' | 'AUTO_INHERITED' | 'REDONE';
+
+/**
+ * t_kb_annotation.payload JSON (M4a-CONTRACTS.md section 2.4): "合并的来源 id 列表、拆分偏移、
+ * 编辑前后摘录、启用状态". Shape varies by annotation_type -- only the fields matching the row's
+ * annotation_type are populated by the server, so every field is optional here.
+ */
+export interface AnnotationPayload {
+  /** EDIT: content excerpt before the edit. */
+  before_excerpt?: string;
+  /** EDIT: content excerpt after the edit. */
+  after_excerpt?: string;
+  /** TOGGLE: the resulting enabled state. */
+  enabled?: boolean;
+  /** MERGE: source chunk ids that were merged into the new chunk. */
+  source_chunk_ids?: string[];
+  /** SPLIT: character offsets the original chunk was split at. */
+  split_offsets?: number[];
+  [key: string]: unknown;
+}
+
+/**
+ * t_kb_annotation row, returned by GET /api/v1/documents/{docId}/annotations/pending-review
+ * (M4a-CONTRACTS.md section 2.3): the old-version annotation list shown before a stale-annotation
+ * activation warning is expanded.
+ */
+export interface Annotation {
+  annotation_id: string;
+  kb_id: string;
+  doc_id: string;
+  document_version_id: string;
+  chunk_id: string;
+  annotation_type: AnnotationType;
+  payload: AnnotationPayload;
+  chunk_text_hash: string;
+  inherit_status: InheritStatus;
+  operator: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** PUT /api/v1/chunks/{chunkId} request body (M4a-CONTRACTS.md section 2.1): in-place content edit. */
+export interface EditChunkRequest {
+  content: string;
+}
+
+/** POST /api/v1/chunks/{chunkId}/toggle request body (M4a-CONTRACTS.md section 2.1). */
+export interface ToggleChunkRequest {
+  enabled: boolean;
+}
+
+/** POST /api/v1/chunks/merge request body (M4a-CONTRACTS.md section 2.1). */
+export interface MergeChunksRequest {
+  chunk_ids: string[];
+}
+
+/** POST /api/v1/chunks/{chunkId}/split request body (M4a-CONTRACTS.md section 2.1). */
+export interface SplitChunkRequest {
+  split_offsets: number[];
 }

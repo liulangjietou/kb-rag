@@ -1,12 +1,16 @@
 import type {
+  AnnotationType,
   ChatImportAction,
   ChunkType,
+  DocumentVersionStatus,
   EmbeddingStatus,
   FusionMode,
   IkDictStatus,
   IkDictType,
+  InheritStatus,
   ProcessStatus,
   RetrievalSource,
+  RollbackMode,
   ScoreType,
   ThresholdAppliedOn,
 } from '../api/types';
@@ -71,6 +75,40 @@ export const IK_DICT_TYPE_META: Record<IkDictType, { color: string; label: strin
 export const IK_DICT_STATUS_META: Record<IkDictStatus, { color: string; label: string }> = {
   ENABLED: { color: 'success', label: '已启用' },
   DISABLED: { color: 'default', label: '已停用' },
+};
+
+/**
+ * t_kb_document_version.status Tag meta (M4a-CONTRACTS.md section 0/1.2). ACTIVE is the one
+ * currently serving retrieval; READY versions are kept for instant rollback within the retention
+ * window; ARCHIVED versions had their chunk rows swept and need a REBUILD task to reactivate.
+ */
+export const DOCUMENT_VERSION_STATUS_META: Record<DocumentVersionStatus, TagMeta> = {
+  BUILDING: { color: 'processing', label: '构建中' },
+  BUILD_FAILED: { color: 'error', label: '构建失败' },
+  READY: { color: 'default', label: '就绪（未激活）' },
+  ACTIVE: { color: 'success', label: '当前激活' },
+  ARCHIVED: { color: 'default', label: '已归档' },
+};
+
+/** Activation rollback_mode Tag meta (M4a-CONTRACTS.md section 1.2). */
+export const ROLLBACK_MODE_META: Record<RollbackMode, TagMeta> = {
+  INSTANT: { color: 'success', label: '即时切换' },
+  REBUILD: { color: 'warning', label: '需重建' },
+};
+
+/** t_kb_annotation.annotation_type Tag meta (M4a-CONTRACTS.md section 2.4). */
+export const ANNOTATION_TYPE_META: Record<AnnotationType, TagMeta> = {
+  EDIT: { color: 'blue', label: '编辑' },
+  TOGGLE: { color: 'gold', label: '启/禁用' },
+  MERGE: { color: 'purple', label: '合并' },
+  SPLIT: { color: 'cyan', label: '拆分' },
+};
+
+/** t_kb_annotation.inherit_status Tag meta (M4a-CONTRACTS.md sections 2.3/2.4). */
+export const INHERIT_STATUS_META: Record<InheritStatus, TagMeta> = {
+  NOT_INHERITED: { color: 'warning', label: '未继承' },
+  AUTO_INHERITED: { color: 'success', label: '自动继承' },
+  REDONE: { color: 'processing', label: '已在新版本重做' },
 };
 
 /** Tag metadata shape shared by every enum lookup table in this module. */
