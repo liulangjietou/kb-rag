@@ -9,7 +9,7 @@ OpenAPI 接口契约、备份/预检脚本与总体文档。
 React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch 与 Milvus（检索引擎）/
 MinIO（对象存储）构建，全部通过 docker-compose 一键拉起中间件。**
 
-> 本仓库当前状态：M1 里程碑（最小可用闭环：上传 → 索引 → 检索）。
+> 本仓库当前状态：**M3 里程碑**（M1 上传→索引→检索最小闭环；M2 混合检索完整链路：改写/融合/重排/阈值/父子分片/ik 词典/metadata 过滤；M3 多模态与清洗：图片与扫描件 VLM、聊天记录导入、清洗规则、解析预览、告警 Webhook、Demo 一键导入）。
 > 完整契约见 [`docs/M1-CONTRACTS.md`](docs/M1-CONTRACTS.md)。
 
 ## 目录
@@ -22,6 +22,7 @@ MinIO（对象存储）构建，全部通过 docker-compose 一键拉起中间�
   - [启用 ik（M2）](#启用-ikm2)
 - [压测（M2）](#压测m2)
 - [备份与恢复](#备份与恢复)
+- [Demo 数据集与聊天记录映射（M3）](#demo-数据集与聊天记录映射m3)
 - [接口契约（OpenAPI）](#接口契约openapi)
 - [开源工程文档](#开源工程文档)
 
@@ -234,6 +235,22 @@ KB_ID=<目标知识库 kb_id> TOKEN=<登录 token> ./scripts/benchmark.sh
   M6 里程碑）
 - RTO 不设硬指标，但需实测端到端恢复时长并写入部署文档（见需求文档 §5，M6 验收含一次
   "备份-删库-恢复-检索可用"演练）
+
+## Demo 数据集与聊天记录映射（M3）
+
+- [`demo/`](demo/)：开箱即用的 Demo 文档集（pdf/docx/xlsx/md 各一，原创 RAG/知识库
+  技术说明）+ `manifest.json`（建议 query）+ `eval-cases.json`（示例评测集，本期只
+  分发、导入功能见 M4b）+ `tools/generate_demo_docs.py`（docx/pdf/xlsx 可复现生成
+  脚本）。详见 [`demo/README.md`](demo/README.md)。`DEMO_DATA_DIR` 环境变量指向本
+  目录（容器内默认 `/opt/kb-rag/demo`），供 `POST /api/v1/system/demo/import`
+  一键导入使用（`docs/M3-CONTRACTS.md` §3.7）。
+- [`mappings/chat/memotrace.yml`](mappings/chat/memotrace.yml)：聊天记录（微信
+  「留痕」/MemoTrace 类工具导出）列名映射模板，配合 kb-rag-parser
+  `POST /api/v1/parse/chat` 的 `mapping_profile` 参数使用；如何为新来源新增映射
+  档案见 [`mappings/README.md`](mappings/README.md)。
+- M3 新增环境变量（`.env.example`）：`VISION_MODEL`/`VISION_TIMEOUT_MS`（图片理解
+  VisionProvider 配置）、`SCANNED_PAGE_TEXT_THRESHOLD`（扫描页判定阈值）、
+  `MAX_IMAGES_PER_DOC`（单文档图片数上限）、`DEMO_DATA_DIR`。
 
 ## 接口契约（OpenAPI）
 

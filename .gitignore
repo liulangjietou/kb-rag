@@ -12,6 +12,10 @@ backups/
 volumes/
 data/
 
+# Python（demo/tools/generate_demo_docs.py 构建产物，M3）
+__pycache__/
+*.pyc
+
 # 操作系统 / 编辑器
 .DS_Store
 Thumbs.db

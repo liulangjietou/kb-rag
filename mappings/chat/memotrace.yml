@@ -1,0 +1,49 @@
+# kb-rag 聊天记录列名映射模板：memotrace（微信「留痕」类工具导出，M3 内置默认档案）
+#
+# 对应 docs/M3-CONTRACTS.md §2.2「聊天记录解析（新端点）」：
+#   POST /api/v1/parse/chat 的可选表单字段 `mapping_profile` 默认取本档案（profile: memotrace）。
+# kb-rag-parser 内置一份与本文件等价的默认档案；本文件是 deploy 仓维护的可编辑模板，
+# 未知来源新增映射档案时无需改 parser 代码，只需在 mappings/chat/ 下新增一份 yml
+# （新增方法见 mappings/README.md）。
+#
+# 候选列名按数组顺序做优先级匹配（第一个非空命中即用），列名匹配对大小写与首尾空格容错。
+# 「留痕/MemoTrace 真实导出样例待验证」（知识库需求文档 §12 遗留待办 1）：本档案依据
+# 公开的列名约定编写，用户提供真实导出样例后需回归校准，届时直接更新本文件即可。
+#
+# Author: owlzhangfq@gmail.com
+
+profile: memotrace
+description: "微信「留痕」/MemoTrace 类工具常见 CSV/Excel 导出列名映射"
+
+# 统一 ChatMessage 中间模型字段 <- 源文件候选列名（大小写/空格容错，见需求文档 §4.2）
+field_mapping:
+  session_id:
+    candidates: [room_name, talker, TalkerId]
+  session_name:
+    candidates: [NickName, Remark, room_name]
+  sender:
+    candidates: [Sender, NickName, talker]
+  is_self:
+    candidates: [IsSender, is_sender]
+  send_time:
+    candidates: [CreateTime, StrTime]
+  msg_type:
+    candidates: [Type, type_name]
+  content:
+    candidates: [StrContent, msg, content]
+
+# 时间解析策略（按顺序尝试，第一个能解析出合法时间戳的即采用）：
+#   1. epoch 秒 / 毫秒（数值型，按位数自动判别 10 位=秒、13 位=毫秒）
+#   2. 字符串格式：yyyy-MM-dd HH:mm:ss（其余常见格式由 parser 侧统一的时间解析器兜底尝试）
+# 全部尝试失败：该消息落 skipped.other 统计并记一条 info 日志（不中断整批解析）。
+time_parse:
+  epoch_auto_detect: true
+  string_formats:
+    - "yyyy-MM-dd HH:mm:ss"
+
+# 消息类型处理边界（与「不做音视频」的产品边界一致，见需求文档 §4.2）：
+#   - voice/video：直接跳过，计入响应 data.skipped 对应计数，不生成 ChatMessage
+#   - image：保留为 msg_type=image，content 为源文件里的原始占位描述文本
+#     （M3 不下载聊天记录内嵌的图片文件，仅透传占位文本）
+#   - other：无法归类的消息类型同样保留但计入 skipped.other 统计
+skip_msg_types: [voice, video]

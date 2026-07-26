@@ -86,7 +86,35 @@ apply at this project's current scale.
 PaddleOCR (planned, kb-rag-parser local OCR fallback)
 --------------------------------------------------------------------------
 License: Apache-2.0. Planned for kb-rag-parser as a local OCR fallback
-(see requirements doc §8 technology stack); not used in M1.
+(see requirements doc §8 technology stack); not used in M1, M2, or M3.
+M3 explicitly decided NOT to introduce PaddleOCR: scanned-page text
+extraction in M3 is handled entirely by the qwen-vl vision model (see the
+NOTICE entry below and M3-CONTRACTS.md §0 point 1). Local OCR remains a
+planned second-phase fallback for offline/air-gapped deployments where no
+vision model API is reachable.
+
+--------------------------------------------------------------------------
+Alibaba Cloud DashScope qwen-vl-max (hosted vision-language model service, M3)
+--------------------------------------------------------------------------
+Nature: this is a remote, hosted model API (Alibaba Cloud DashScope),
+not a bundled or redistributed piece of open-source software, and no
+DashScope source code or model weights are contained in this repository.
+It is called over HTTPS through the same Provider abstraction (D14) used
+for every other model capability (embedding/rerank/chat/vision), so it is
+disclosed here in the same spirit as the other third-party dependencies
+in this NOTICE file: usage of this project may depend on it, and its own
+terms of service (Alibaba Cloud DashScope service agreement) apply
+independently of this project's Apache-2.0 license.
+Usage in this project (see M3-CONTRACTS.md §3.1): kb-rag-server calls the
+DashScope OpenAI-compatible `chat/completions` endpoint with model
+`VISION_MODEL` (default `qwen-vl-max`) to (a) transcribe text on scanned
+pages that kb-parser rendered to an image (no local OCR engine involved,
+see the PaddleOCR entry above), and (b) generate a text proxy (description
++ OCR transcript) for embedded/standalone images. kb-rag-parser itself
+never calls qwen-vl or any other model provider (docs/M3-CONTRACTS.md §0/§1).
+Not a hard dependency lock-in: per D14, an OpenAI-compatible VisionProvider
+implementation is also available so self-hosted or alternative vision
+models can be used instead of DashScope.
 
 --------------------------------------------------------------------------
 Execution note

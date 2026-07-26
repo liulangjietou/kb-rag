@@ -8,6 +8,31 @@
 
 ### Added
 
+- （M3）`demo/`：4 篇原创 RAG/知识库技术说明文档（覆盖 pdf/docx/xlsx/md 各一，中文，
+  各篇 300-800 字）+ `demo/manifest.json`（文件名/标题/说明/建议 query 列表）+
+  `demo/eval-cases.json`（10 条示例评测集，span 锚定证据摘录 + 关联文件名，结构对应
+  需求文档 §6 t_kb_eval_case；本期只分发，导入功能排期 M4b）+ `demo/tools/generate_demo_docs.py`
+  （docx/pdf/xlsx 可复现生成脚本，pdf 内嵌一张自绘流水线示意图用于验证 VLM 图片解析
+  链路）+ `demo/README.md`
+- （M3）`mappings/chat/memotrace.yml`：微信「留痕」/MemoTrace 聊天记录列名映射模板
+  （对应 kb-rag-parser `POST /api/v1/parse/chat` 的 `mapping_profile` 默认档案，见
+  M3-CONTRACTS.md §2.2）+ `mappings/README.md`（如何为新来源新增映射档案）
+- （M3）`.env.example` 新增 `VISION_MODEL`/`VISION_TIMEOUT_MS`/
+  `SCANNED_PAGE_TEXT_THRESHOLD`/`MAX_IMAGES_PER_DOC`/`DEMO_DATA_DIR`
+- （M3）`docs/openapi/kb-parser.yaml` 同步 M3-CONTRACTS.md §2：`/api/v1/parse` 响应
+  新增 `pages[].scanned`、`data.images[]`（`kind=embedded|page_render`）、
+  `data.warnings[]`；新增 `POST /api/v1/parse/chat` 聊天记录（CSV/Excel）解析端点
+- （M3）`docs/openapi/kb-server.yaml` 同步 M3-CONTRACTS.md §3：`model-status` 新增
+  `vision_configured`/`vision_provider`/`vision_model`；新增解析预览与确认
+  （`GET /api/v1/documents/{docId}/preview`、`POST .../confirm`、`POST .../reparse`、
+  `POST /api/v1/kb/{kbId}/documents/confirm` 批量确认，`ProcessStatus` 增
+  `PENDING_CONFIRM`）；新增聊天记录导入（`POST /api/v1/kb/{kbId}/chat-imports` 匹配预览
+  + `.../confirm` 执行导入）；新增告警配置（`GET|PUT /api/v1/system/alert-config`、
+  `POST .../test`）；新增 Demo 一键导入（`POST /api/v1/system/demo/import`、
+  `GET /api/v1/system/demo/status`）；`IndexConfig` 新增 `clean_rules`/
+  `parse_preview_required`/`chat_aggregation`
+- （M3）`NOTICE` 增 DashScope qwen-vl-max（图片理解/OCR，M3-CONTRACTS.md §3.1）使用声明，
+  并说明 PaddleOCR 在 M1-M3 均未引入（本地 OCR 兜底二期再评估，M3 扫描件 OCR 由 qwen-vl 承担）
 - （M2）`es-ik/Dockerfile`：基于 `docker.elastic.co/elasticsearch/elasticsearch:8.11.4`
   安装 analysis-ik 插件（infinilabs 官方发布 zip，`IK_VERSION` 构建参数化，默认
   `8.11.4`）+ `docker-compose.es-ik.yml` override（build 该镜像替换 elasticsearch
@@ -42,6 +67,11 @@
 
 ### Notes
 
+- 本版本对应需求文档 v1.11 / M3-CONTRACTS.md 的 M3 里程碑增量（本仓库范围：Demo 文档集
+  与生成脚本、示例评测集、聊天记录列名映射模板、`.env.example` 新增变量、OpenAPI 契约
+  同步、NOTICE 声明）；`t_kb_image_asset` 表、`process_status` 增 `PENDING_CONFIRM` 等
+  Flyway V3 迁移脚本在 kb-rag-server 仓库，不在本仓库交付范围。M3 只做 Demo **文档集**
+  一键导入，示例评测集导入功能排期 M4b（需求文档同版本已同步修订 §10 M3/M4b 两行）
 - 本版本对应需求文档 v1.8 / M2-CONTRACTS.md v1.0 的 M2 里程碑增量（本仓库范围：
   es-ik 镜像与 compose override、benchmark 压测脚本、OpenAPI 契约同步）；
   `t_kb_ik_dict`/`retrieval_config` 等 Flyway V2 迁移脚本在 kb-rag-server 仓库，

@@ -1,12 +1,14 @@
 openapi: 3.0.3
 info:
   title: kb-rag-server API
-  description: 'kb-rag 管理台内部 API（M1 基线 + M2 增量）。
+  description: 'kb-rag 管理台内部 API（M1 基线 + M2 + M3 增量）。
 
 
-    本文件按 docs/M1-CONTRACTS.md §5 与 docs/M2-CONTRACTS.md §1.5/§3/§4/§6 定型的
+    本文件按 docs/M1-CONTRACTS.md §5、docs/M2-CONTRACTS.md §1.5/§3/§4/§6 与
 
-    端点与 DTO 编写，用于 kb-rag-server / kb-rag-web 之间的接口契约测试与前端 mock。
+    docs/M3-CONTRACTS.md §3 定型的端点与 DTO 编写，用于 kb-rag-server / kb-rag-web
+
+    之间的接口契约测试与前端 mock。
 
     M2 增量：search 新入参（改写/融合/重排/阈值/metadata_filter）与出参（applied、
 
@@ -16,10 +18,20 @@ info:
 
     插件而非管理台前端，免鉴权、纯文本响应，不纳入本文件的管理台 API 契约。
 
+    M3 增量：model-status 新增 vision_* 三字段；解析预览与确认（PENDING_CONFIRM 状态、
+
+    单个/批量确认、改规则重解析）；聊天记录导入（匹配预览 + 确认执行）；告警 Webhook
+
+    配置与测试；Demo 一键导入与状态查询；IndexConfig 新增 clean_rules/parse_preview_required/
+
+    chat_aggregation。kb-parser 侧 VLM 调用与图片/清洗均在 kb-rag-server 完成，parser 不
+
+    调用任何大模型（docs/M3-CONTRACTS.md §0/§1）。
+
     对外 API Key 网关（应用发布渠道）属于 M4c 范畴，不在本文件中。
 
     '
-  version: 0.2.0-m2
+  version: 0.3.0-m3
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -37,6 +49,14 @@ tags:
   description: 检索调试
 - name: dict
   description: ik 中文分词自定义词典管理（M2）
+- name: parse-preview
+  description: 解析预览与确认（M3，docs/M3-CONTRACTS.md §3.4）
+- name: chat-import
+  description: 聊天记录导入（M3，docs/M3-CONTRACTS.md §3.5）
+- name: alert
+  description: 告警 Webhook 配置（M3，docs/M3-CONTRACTS.md §3.6）
+- name: demo
+  description: Demo 一键导入（M3，docs/M3-CONTRACTS.md §3.7）
 - name: system
   description: 系统状态与健康检查
 security:
@@ -287,6 +307,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DocumentListResult'
+  /api/v1/kb/{kbId}/documents/confirm:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - parse-preview
+      summary: 批量确认解析预览
+      description: 'M3-CONTRACTS.md §3.4：body 可选 `doc_ids`，缺省时确认该知识库下全部
+        PENDING_CONFIRM 状态的文档。仅在知识库开启 `index_config.parse_preview_required`
+        时有意义；确认后各文档继续切分入库。
+        '
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmDocumentsRequest'
+      responses:
+        '200':
+          description: 已受理
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/documents/{docId}/reindex:
     parameters:
     - $ref: '#/components/parameters/DocId'
@@ -328,6 +376,73 @@ paths:
                 $ref: '#/components/schemas/ChunkListResult'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/preview:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    get:
+      tags:
+      - parse-preview
+      summary: 查看解析预览
+      description: 'M3-CONTRACTS.md §3.4：仅当文档 `process_status=PENDING_CONFIRM`
+        （知识库开启 `index_config.parse_preview_required` 时，清洗完成后管线暂停于此状态）
+        时有实际预览产物；预览内容（markdown、按页信息、图片预签名 URL 与 VLM 文本代理、
+        warnings）读自 MinIO 预览产物。
+        '
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentPreviewResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/confirm:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    post:
+      tags:
+      - parse-preview
+      summary: 确认解析预览，继续切分入库
+      description: 仅对 PENDING_CONFIRM 状态文档有效；确认后管线从清洗完成处继续切分/嵌入/双写。
+      responses:
+        '200':
+          description: 已受理
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/reparse:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    post:
+      tags:
+      - parse-preview
+      summary: 按清洗规则重解析（预览用）
+      description: 'M3-CONTRACTS.md §3.4：body 可选 `clean_rules` 覆盖，仅本次预览生效，
+        不修改知识库级配置；重解析完成后返回最新预览，文档保持/回到 PENDING_CONFIRM。
+        '
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReparseRequest'
+      responses:
+        '200':
+          description: 重解析完成，返回最新预览
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentPreviewResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/kb/{kbId}/search:
     parameters:
     - $ref: '#/components/parameters/KbId'
@@ -361,6 +476,75 @@ paths:
           $ref: '#/components/responses/NotFound'
         '502':
           $ref: '#/components/responses/UpstreamModelError'
+  /api/v1/kb/{kbId}/chat-imports:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - chat-import
+      summary: 聊天记录导入-匹配预览（不落库）
+      description: 'M3-CONTRACTS.md §3.5：multipart 上传聊天记录导出文件，服务端调用
+        kb-rag-parser `/api/v1/parse/chat` 端点解析后，与库内既有聊天文档做会话匹配，
+        仅返回匹配预览，不执行导入。逻辑文档标识 = 来源渠道 + session_id：已存在的会话
+        `action=NEW_VERSION`，新会话 `action=CREATE`。上传文件与解析结果暂存 MinIO，
+        返回的 `upload_token` 有效期 30 分钟，供 confirm 端点使用。
+        '
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                mapping_profile:
+                  type: string
+                  default: memotrace
+                  description: 列名映射档案名（对应 deploy 仓 mappings/chat/{mapping_profile}.yml）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatImportPreviewResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/chat-imports/confirm:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - chat-import
+      summary: 执行聊天记录导入
+      description: 'M3-CONTRACTS.md §3.5：`upload_token` 取自匹配预览接口返回值（30 分钟内
+        有效），可选 `session_ids` 只导入子集会话（缺省=预览返回的全部会话）。按会话聚合
+        （chat_aggregation:{window_minutes,max_messages}，无重叠顺切）生成 chunk_type=chat_log
+        的分片，metadata 写 session_id/session_name/sender/msg_time；聊天文本默认开启脱敏。
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatImportConfirmRequest'
+      responses:
+        '200':
+          description: 已受理，异步执行导入
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/dict/ik:
     get:
       tags:
@@ -441,6 +625,92 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelStatusResult'
+  /api/v1/system/alert-config:
+    get:
+      tags:
+      - alert
+      summary: 获取告警 Webhook 配置
+      description: M3-CONTRACTS.md §3.6：配置存 t_kb_system_config，未配置时 webhook_url 为 null。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertConfigResult'
+    put:
+      tags:
+      - alert
+      summary: 更新告警 Webhook 配置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertConfig'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertConfigResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/system/alert-config/test:
+    post:
+      tags:
+      - alert
+      summary: 发送测试告警消息
+      description: 'M3-CONTRACTS.md §3.6：按当前已保存的 webhook_url 发送一条测试消息
+        （`{"msgtype":"text","text":{"content":"..."}}`，兼容钉钉/企微/Slack）。未配置
+        webhook_url 时返回 INVALID_PARAM（管理台据此提示先填写 URL），不降级为 error 日志——
+        降级为 error 日志的场景专指真实告警触发时未配置 Webhook（见需求文档 §5）。
+        '
+      responses:
+        '200':
+          description: 已发送
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertTestResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/system/demo/import:
+    post:
+      tags:
+      - demo
+      summary: 一键导入 Demo 知识库
+      description: 'M3-CONTRACTS.md §3.7：创建知识库“Demo 知识库”并导入 `DEMO_DATA_DIR`
+        指向目录下 `manifest.json` 列出的文档集。幂等：已存在同名 Demo 知识库时直接返回其
+        kb_id，不重复导入。素材目录缺失时返回 INVALID_PARAM（管理台据此提示，`demo/status`
+        的 `available=false` 用于前端提前置灰按钮，避免用户点击后才看到这个错误）。
+        '
+      responses:
+        '200':
+          description: 已创建/已存在，异步执行导入
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DemoImportResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/system/demo/status:
+    get:
+      tags:
+      - demo
+      summary: Demo 导入状态
+      description: 'M3-CONTRACTS.md §3.7：`available=false` 表示未找到 `DEMO_DATA_DIR`
+        素材目录，前端据此置灰“一键导入 Demo”按钮；`imported=true` 时 `kb_id`/`doc_count`
+        为已导入的 Demo 知识库信息。
+        '
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DemoStatusResult'
   /actuator/health:
     get:
       tags:
@@ -708,12 +978,15 @@ components:
               $ref: '#/components/schemas/KnowledgeBase'
     ProcessStatus:
       type: string
-      description: 文档处理状态（t_kb_document.process_status）
+      description: 文档处理状态（t_kb_document.process_status）。M3 新增 PENDING_CONFIRM
+        （docs/M3-CONTRACTS.md §3.4）：仅当知识库开启 index_config.parse_preview_required
+        时，清洗完成后管线在此暂停等待人工确认，之后才继续切分入库。
       enum:
       - UPLOADED
       - PARSING
       - PARSE_FAILED
       - PARSED
+      - PENDING_CONFIRM
       - INDEXING
       - INDEXED
       - INDEX_FAILED
@@ -1128,7 +1401,9 @@ components:
 
         索引管线说明），M2 起可通过 `PUT /api/v1/kb/{kbId}/index-config` 编辑；
 
-        parent_child 为 M2 新增二级切分开关。
+        parent_child 为 M2 新增二级切分开关；clean_rules/parse_preview_required/
+
+        chat_aggregation 为 M3 新增（docs/M3-CONTRACTS.md §3.3/§3.4/§3.5）。
 
         '
       properties:
@@ -1142,6 +1417,89 @@ components:
           minimum: 0
         parent_child:
           $ref: '#/components/schemas/ParentChildConfig'
+        clean_rules:
+          $ref: '#/components/schemas/CleanRules'
+        parse_preview_required:
+          type: boolean
+          default: false
+          description: 'M3-CONTRACTS.md §3.4：默认 false，保证批量上传顺畅。开启后管线在清洗完成后
+            暂停，文档 process_status=PENDING_CONFIRM，需调用 confirm 端点才继续切分入库。
+            '
+        chat_aggregation:
+          $ref: '#/components/schemas/ChatAggregationConfig'
+    CleanRules:
+      type: object
+      description: 'M3-CONTRACTS.md §3.3：知识库级清洗规则，索引管线 clean 阶段按固定顺序执行——
+        去页眉页脚 → 去水印 → 正则替换 → 脱敏，每步可独立开关；参与 parse_fingerprint 计算
+        （六元组之一，见需求文档 §4.1），改清洗规则会正确标记文档 config_stale。
+        '
+      properties:
+        strip_header_footer:
+          type: boolean
+          default: false
+          description: 跨页重复行检测（同一文本在 >=60% 页面的首/末两行出现即视为页眉页脚并删除）
+        strip_watermark_patterns:
+          type: array
+          default: []
+          items:
+            type: string
+          description: 水印正则列表，匹配到的文本整体删除
+        regex_replacements:
+          type: array
+          default: []
+          items:
+            $ref: '#/components/schemas/RegexReplacement'
+        excel_header_join:
+          type: boolean
+          default: true
+          description: Excel/CSV 行级切分时是否把表头拼接进每一行
+        extract_metadata:
+          type: boolean
+          default: false
+        desensitize:
+          $ref: '#/components/schemas/DesensitizeConfig'
+    RegexReplacement:
+      type: object
+      properties:
+        pattern:
+          type: string
+        replacement:
+          type: string
+    DesensitizeConfig:
+      type: object
+      description: '正则掩码：手机号保留前 3 后 4、身份证保留前 6 后 4、银行卡保留后 4、邮箱保留域名。
+        聊天记录导入时默认开启（需求文档 §4.2）。
+        '
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        phone:
+          type: boolean
+          default: true
+        id_card:
+          type: boolean
+          default: true
+        bank_card:
+          type: boolean
+          default: true
+        email:
+          type: boolean
+          default: false
+    ChatAggregationConfig:
+      type: object
+      description: 'M3-CONTRACTS.md §3.5：聊天记录按“会话 + 时间窗口”聚合为 chunk_type=chat_log
+        的分片，一期固定无重叠顺切（步长=窗口，需求文档 v1.6 定），不支持重叠滑窗。
+        '
+      properties:
+        window_minutes:
+          type: integer
+          default: 60
+          minimum: 1
+        max_messages:
+          type: integer
+          default: 50
+          minimum: 1
     RebuildRequest:
       type: object
       description: M2-CONTRACTS.md §4：doc_ids 缺省 = 该知识库下全部 config_stale=1 文档
@@ -1151,6 +1509,73 @@ components:
           nullable: true
           items:
             type: string
+    ConfirmDocumentsRequest:
+      type: object
+      description: M3-CONTRACTS.md §3.4：doc_ids 缺省 = 该知识库下全部 PENDING_CONFIRM 状态文档
+      properties:
+        doc_ids:
+          type: array
+          nullable: true
+          items:
+            type: string
+    PreviewImage:
+      type: object
+      description: M3-CONTRACTS.md §3.4：预览产物中的图片，preview_url 为限时预签名 URL
+      properties:
+        image_id:
+          type: string
+        preview_url:
+          type: string
+        text_proxy:
+          type: string
+          nullable: true
+          description: VLM 生成的图片文本代理（描述 + OCR 文本）；未配置 VLM 或调用失败时为 null
+    DocumentPreview:
+      type: object
+      description: M3-CONTRACTS.md §3.4：解析预览产物（清洗完成后、切分之前的中间态）
+      properties:
+        markdown:
+          type: string
+        pages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParsePreviewPage'
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/PreviewImage'
+        warnings:
+          type: array
+          items:
+            type: string
+          default: []
+    ParsePreviewPage:
+      type: object
+      properties:
+        page_no:
+          type: integer
+        text:
+          type: string
+        scanned:
+          type: boolean
+          default: false
+    DocumentPreviewResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/DocumentPreview'
+    ReparseRequest:
+      type: object
+      description: 'M3-CONTRACTS.md §3.4：可选 clean_rules 覆盖，仅本次重解析预览生效，
+        不写回知识库 index_config。
+        '
+      properties:
+        clean_rules:
+          allOf:
+          - $ref: '#/components/schemas/CleanRules'
+          nullable: true
     IkDictType:
       type: string
       description: t_kb_ik_dict.dict_type（M2-CONTRACTS.md §3）
@@ -1256,6 +1681,15 @@ components:
         chat_model:
           type: string
           nullable: true
+        vision_configured:
+          type: boolean
+          description: M3-CONTRACTS.md §3.1：VisionProvider（DashScope qwen-vl-max）是否已配置
+        vision_provider:
+          type: string
+          nullable: true
+        vision_model:
+          type: string
+          nullable: true
     ModelStatusResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
@@ -1263,6 +1697,164 @@ components:
         properties:
           data:
             $ref: '#/components/schemas/ModelStatus'
+    ChatImportAction:
+      type: string
+      description: 'M3-CONTRACTS.md §3.5：逻辑文档标识 = 来源渠道 + session_id。CREATE=库内无匹配，
+        建新文档；NEW_VERSION=已存在同一 session_id 的聊天文档，生成新版本（全量替换，走 M1
+        版本机制）。
+        '
+      enum:
+      - CREATE
+      - NEW_VERSION
+    TimeRange:
+      type: object
+      description: epoch 毫秒时间范围（该会话内消息 send_time 的最小/最大值）
+      properties:
+        from:
+          type: integer
+          format: int64
+          nullable: true
+        to:
+          type: integer
+          format: int64
+          nullable: true
+    ChatImportSession:
+      type: object
+      description: M3-CONTRACTS.md §3.5：聊天记录导入匹配预览的单个会话条目
+      properties:
+        session_id:
+          type: string
+        session_name:
+          type: string
+        message_count:
+          type: integer
+        time_range:
+          $ref: '#/components/schemas/TimeRange'
+        matched_doc_id:
+          type: string
+          nullable: true
+          description: 库内已存在同一 session_id 的聊天文档 doc_id；无匹配为 null
+        action:
+          $ref: '#/components/schemas/ChatImportAction'
+    ChatImportPreviewData:
+      type: object
+      properties:
+        upload_token:
+          type: string
+          description: 上传文件与解析结果在 MinIO 的暂存凭证，有效期 30 分钟，供 confirm 端点使用
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatImportSession'
+    ChatImportPreviewResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/ChatImportPreviewData'
+    ChatImportConfirmRequest:
+      type: object
+      required:
+      - upload_token
+      properties:
+        upload_token:
+          type: string
+        session_ids:
+          type: array
+          nullable: true
+          description: 可选子集，缺省 = 匹配预览返回的全部会话
+          items:
+            type: string
+    AlertConfig:
+      type: object
+      description: 'M3-CONTRACTS.md §3.6：t_kb_system_config 存储的告警配置。触发源：
+        ①同类任务连续失败 >= task_fail_threshold；②最近 5 分钟检索降级率 >
+        degrade_rate_threshold；③双写积压 > sync_backlog_threshold（复用 M2 补偿扫描统计）。
+        同一告警类型 silence_minutes 内不重复发送；未配置 webhook_url 时触发降级为 error 日志。
+        '
+      properties:
+        webhook_url:
+          type: string
+          nullable: true
+        enabled:
+          type: boolean
+          default: false
+        task_fail_threshold:
+          type: integer
+          default: 3
+          minimum: 1
+        degrade_rate_threshold:
+          type: number
+          format: float
+          default: 0.3
+          minimum: 0
+          maximum: 1
+        sync_backlog_threshold:
+          type: integer
+          default: 1000
+          minimum: 1
+        silence_minutes:
+          type: integer
+          default: 30
+          minimum: 0
+    AlertConfigResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/AlertConfig'
+    AlertTestResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              delivered:
+                type: boolean
+              detail:
+                type: string
+                nullable: true
+                description: Webhook 端返回信息或失败原因摘要
+    DemoImportData:
+      type: object
+      properties:
+        kb_id:
+          type: string
+        doc_count:
+          type: integer
+    DemoImportResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/DemoImportData'
+    DemoStatus:
+      type: object
+      description: M3-CONTRACTS.md §3.7
+      properties:
+        available:
+          type: boolean
+          description: false 表示未找到 DEMO_DATA_DIR 素材目录，前端据此置灰“一键导入 Demo”按钮
+        imported:
+          type: boolean
+        kb_id:
+          type: string
+          nullable: true
+        doc_count:
+          type: integer
+          nullable: true
+    DemoStatusResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/DemoStatus'
     ComponentHealth:
       type: string
       enum:
