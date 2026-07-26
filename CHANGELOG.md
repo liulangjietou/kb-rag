@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### Added
+- M4c 应用发布与开放能力：应用与版本八状态机（单应用唯一 RELEASED）、发布门禁（同语料双跑/容差 ε/有效 case 交集/四情形 LOG_ONLY/force 留痕/首发基线）、对外 knowledge search+chat（API Key 哈希鉴权、app_scope、令牌桶限流、SSE 流式、注入防护 prompt）、API Key 管理、审计落库与 180 天归档、Flyway V6。
 - M4b 评测体系（docs/M4b-CONTRACTS.md）：评测集/case 的增删改查与分页、证据复核工作台
   （待复核 case 列表 + Top3 候选原文 + REANCHOR/DEPRECATE）、检索调试页一键收进评测集与
   检索结果反馈标注、Demo 示例评测集导入（按 file_name+content_hash_sha256 匹配库内文档、
