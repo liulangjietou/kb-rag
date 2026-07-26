@@ -14,6 +14,7 @@ import {
   Progress,
   Space,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -29,6 +30,7 @@ import { formatFileSize } from '../../utils/format';
 import { PROCESS_STATUS_META, metaOf } from '../../utils/statusMeta';
 import ChatImportWizard from './components/ChatImportWizard';
 import ChunkDrawer from './components/ChunkDrawer';
+import GraphTab from './components/GraphTab';
 import IndexConfigDrawer from './components/IndexConfigDrawer';
 import ParsePreviewDrawer from './components/ParsePreviewDrawer';
 import VersionDrawer from './components/VersionDrawer';
@@ -209,129 +211,146 @@ export default function KbDetailPage() {
         <Typography.Paragraph type="secondary">{kb.description}</Typography.Paragraph>
       )}
 
-      {staleDocs.length > 0 && (
-        <Alert
-          type="warning"
-          showIcon
-          message={`${staleDocs.length} 篇文档使用旧配置`}
-          description={
-            rebuilding ? (
-              <Progress
-                percent={Math.round(((rebuildInitialCount - remainingRebuildCount) / rebuildInitialCount) * 100)}
-                size="small"
-                status="active"
-              />
-            ) : (
-              '索引配置已变更，需要按新配置重建后才能生效'
-            )
-          }
-          action={
-            <Button size="small" type="primary" loading={rebuilding} disabled={rebuilding} onClick={handleRebuildStale}>
-              {rebuilding ? '重建中' : '按新配置重建'}
-            </Button>
-          }
-          style={{ marginBottom: 16 }}
-        />
-      )}
-
-      {pendingConfirmDocs.length > 0 && (
-        <Alert
-          type="info"
-          showIcon
-          message={`${pendingConfirmDocs.length} 篇文档待预览确认`}
-          description="已开启解析预览确认，文档清洗完成后会暂停在此状态；可逐篇预览后确认，或直接批量确认全部"
-          action={
-            <Button
-              size="small"
-              type="primary"
-              icon={<CheckOutlined />}
-              loading={batchConfirming}
-              onClick={handleBatchConfirm}
-            >
-              批量确认{selectedPendingIds.length > 0 ? `（${selectedPendingIds.length}）` : '（全部）'}
-            </Button>
-          }
-          style={{ marginBottom: 16 }}
-        />
-      )}
-
-      <Upload.Dragger {...uploadProps} style={{ marginBottom: 24 }}>
-        <p className="ant-upload-drag-icon">
-          <InboxOutlined />
-        </p>
-        <p className="ant-upload-text">点击或拖拽文件到此处上传</p>
-        <p className="ant-upload-hint">
-          支持 pdf / docx / txt / md / xlsx / csv，单文件不超过 100MB，可批量上传
-        </p>
-      </Upload.Dragger>
-
-      <Table<KbDocument>
-        rowKey="doc_id"
-        loading={loading}
-        dataSource={documents}
-        pagination={false}
-        rowSelection={{
-          selectedRowKeys: selectedPendingIds,
-          onChange: (keys) => setSelectedPendingIds(keys as string[]),
-          getCheckboxProps: (record) => ({ disabled: record.process_status !== 'PENDING_CONFIRM' }),
-        }}
-        columns={[
-          { title: '文件名', dataIndex: 'file_name' },
-          { title: '类型', dataIndex: 'file_ext', width: 80 },
+      <Tabs
+        items={[
           {
-            title: '大小',
-            dataIndex: 'file_size',
-            width: 100,
-            render: (size: number) => formatFileSize(size),
-          },
-          {
-            title: '处理状态',
-            dataIndex: 'process_status',
-            width: 160,
-            render: (status: KbDocument['process_status'], record: KbDocument) => {
-              const meta = metaOf(PROCESS_STATUS_META, status);
-              const tag = <Tag color={meta.color}>{meta.label}</Tag>;
-              return record.fail_reason ? (
-                <Tooltip title={record.fail_reason}>{tag}</Tooltip>
-              ) : (
-                tag
-              );
-            },
-          },
-          {
-            title: '索引配置',
-            dataIndex: 'config_stale',
-            width: 100,
-            render: (stale: boolean) => (stale ? <Tag color="warning">配置过期</Tag> : <Tag color="success">最新</Tag>),
-          },
-          {
-            title: '操作',
-            width: 260,
-            render: (_, record: KbDocument) => (
-              <Space>
-                <Button size="small" onClick={() => setChunkDoc(record)}>
-                  查看分片
-                </Button>
-                <Button size="small" onClick={() => setVersionDocId(record.doc_id)}>
-                  版本
-                </Button>
-                {record.process_status === 'PENDING_CONFIRM' && (
-                  <Button size="small" type="link" onClick={() => setPreviewDoc(record)}>
-                    预览确认
-                  </Button>
+            key: 'documents',
+            label: '文档管理',
+            children: (
+              <>
+                {staleDocs.length > 0 && (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message={`${staleDocs.length} 篇文档使用旧配置`}
+                    description={
+                      rebuilding ? (
+                        <Progress
+                          percent={Math.round(((rebuildInitialCount - remainingRebuildCount) / rebuildInitialCount) * 100)}
+                          size="small"
+                          status="active"
+                        />
+                      ) : (
+                        '索引配置已变更，需要按新配置重建后才能生效'
+                      )
+                    }
+                    action={
+                      <Button size="small" type="primary" loading={rebuilding} disabled={rebuilding} onClick={handleRebuildStale}>
+                        {rebuilding ? '重建中' : '按新配置重建'}
+                      </Button>
+                    }
+                    style={{ marginBottom: 16 }}
+                  />
                 )}
-                <Popconfirm
-                  title="确认重建该文档的解析与索引？"
-                  okText="重建"
-                  cancelText="取消"
-                  onConfirm={() => handleReindex(record.doc_id)}
-                >
-                  <Button size="small" icon={<ReloadOutlined />}>
-                    重建
-                  </Button>
-                </Popconfirm>
-              </Space>
+
+                {pendingConfirmDocs.length > 0 && (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message={`${pendingConfirmDocs.length} 篇文档待预览确认`}
+                    description="已开启解析预览确认，文档清洗完成后会暂停在此状态；可逐篇预览后确认，或直接批量确认全部"
+                    action={
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<CheckOutlined />}
+                        loading={batchConfirming}
+                        onClick={handleBatchConfirm}
+                      >
+                        批量确认{selectedPendingIds.length > 0 ? `（${selectedPendingIds.length}）` : '（全部）'}
+                      </Button>
+                    }
+                    style={{ marginBottom: 16 }}
+                  />
+                )}
+
+                <Upload.Dragger {...uploadProps} style={{ marginBottom: 24 }}>
+                  <p className="ant-upload-drag-icon">
+                    <InboxOutlined />
+                  </p>
+                  <p className="ant-upload-text">点击或拖拽文件到此处上传</p>
+                  <p className="ant-upload-hint">
+                    支持 pdf / docx / txt / md / xlsx / csv，单文件不超过 100MB，可批量上传
+                  </p>
+                </Upload.Dragger>
+
+                <Table<KbDocument>
+                  rowKey="doc_id"
+                  loading={loading}
+                  dataSource={documents}
+                  pagination={false}
+                  rowSelection={{
+                    selectedRowKeys: selectedPendingIds,
+                    onChange: (keys) => setSelectedPendingIds(keys as string[]),
+                    getCheckboxProps: (record) => ({ disabled: record.process_status !== 'PENDING_CONFIRM' }),
+                  }}
+                  columns={[
+                    { title: '文件名', dataIndex: 'file_name' },
+                    { title: '类型', dataIndex: 'file_ext', width: 80 },
+                    {
+                      title: '大小',
+                      dataIndex: 'file_size',
+                      width: 100,
+                      render: (size: number) => formatFileSize(size),
+                    },
+                    {
+                      title: '处理状态',
+                      dataIndex: 'process_status',
+                      width: 160,
+                      render: (status: KbDocument['process_status'], record: KbDocument) => {
+                        const meta = metaOf(PROCESS_STATUS_META, status);
+                        const tag = <Tag color={meta.color}>{meta.label}</Tag>;
+                        return record.fail_reason ? (
+                          <Tooltip title={record.fail_reason}>{tag}</Tooltip>
+                        ) : (
+                          tag
+                        );
+                      },
+                    },
+                    {
+                      title: '索引配置',
+                      dataIndex: 'config_stale',
+                      width: 100,
+                      render: (stale: boolean) => (stale ? <Tag color="warning">配置过期</Tag> : <Tag color="success">最新</Tag>),
+                    },
+                    {
+                      title: '操作',
+                      width: 260,
+                      render: (_, record: KbDocument) => (
+                        <Space>
+                          <Button size="small" onClick={() => setChunkDoc(record)}>
+                            查看分片
+                          </Button>
+                          <Button size="small" onClick={() => setVersionDocId(record.doc_id)}>
+                            版本
+                          </Button>
+                          {record.process_status === 'PENDING_CONFIRM' && (
+                            <Button size="small" type="link" onClick={() => setPreviewDoc(record)}>
+                              预览确认
+                            </Button>
+                          )}
+                          <Popconfirm
+                            title="确认重建该文档的解析与索引？"
+                            okText="重建"
+                            cancelText="取消"
+                            onConfirm={() => handleReindex(record.doc_id)}
+                          >
+                            <Button size="small" icon={<ReloadOutlined />}>
+                              重建
+                            </Button>
+                          </Popconfirm>
+                        </Space>
+                      ),
+                    },
+                  ]}
+                />
+              </>
             ),
+          },
+          {
+            key: 'graph',
+            label: '知识图谱',
+            children: kbId ? <GraphTab kbId={kbId} kb={kb} onKbChanged={loadKb} /> : null,
           },
         ]}
       />

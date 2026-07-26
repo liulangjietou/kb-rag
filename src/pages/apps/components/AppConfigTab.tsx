@@ -4,6 +4,7 @@ import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Collapse, Form, Input, InputNumber, Select, Slider, Space, Switch, Typography, message } from 'antd';
 import { createAppVersion } from '../../../api/app';
 import type { AppVersion, AppVersionConfig, FusionMode, KbRef, KnowledgeBase } from '../../../api/types';
+import { GRAPH_FUSION_MUTEX_HINT } from '../../../utils/statusMeta';
 import { resolveKbRefs } from '../../../utils/kbRefs';
 
 /** M5-CONTRACTS.md section 1: app versions may span 1..15 knowledge bases. */
@@ -128,11 +129,28 @@ export default function AppConfigTab({ appId, kbs, latestVersion, onVersionCreat
   const refusalEnabled = Form.useWatch('refusal_enabled', form) ?? false;
   const leakGuardEnabled = Form.useWatch('leak_guard_enabled', form) ?? false;
   const routingEnabled = Form.useWatch('routing_enabled', form) ?? false;
-  const kbRefs = Form.useWatch('kb_refs', form) ?? [];
+  const kbRefs: KbRef[] = Form.useWatch('kb_refs', form) ?? [];
+
+  // M7-CONTRACTS.md section 0.6/§4.4: this version's retrieval.fusion applies uniformly to every
+  // kb_ref's 库内融合, so a single graph_enabled kb anywhere in the list forces the whole picker
+  // to RRF -- surface which kb(s) triggered it rather than a bare disabled control.
+  const graphEnabledKbNames = kbRefs
+    .map((ref) => kbs.find((kb) => kb.kb_id === ref.kb_id))
+    .filter((kb): kb is KnowledgeBase => !!kb?.graph_enabled)
+    .map((kb) => kb.name);
+  const graphFusionMutex = graphEnabledKbNames.length > 0;
 
   useEffect(() => {
     form.setFieldsValue(latestVersion ? configToFormValues(latestVersion.config) : DEFAULT_VALUES);
   }, [latestVersion, form]);
+
+  // Same auto-correct as SearchPage: adding/keeping a graph_enabled kb while "加权归一化" is
+  // selected would be rejected by the server as INVALID_PARAM on version creation.
+  useEffect(() => {
+    if (graphFusionMutex && form.getFieldValue('fusion_mode') === 'weighted') {
+      form.setFieldsValue({ fusion_mode: 'rrf' });
+    }
+  }, [graphFusionMutex, form]);
 
   const handleCreateVersion = async () => {
     const values = await form.validateFields();
@@ -257,10 +275,19 @@ export default function AppConfigTab({ appId, kbs, latestVersion, onVersionCreat
               style={{ width: 240 }}
               options={[
                 { label: 'RRF（倒数排名融合）', value: 'rrf' },
-                { label: '加权归一化融合', value: 'weighted' },
+                { label: '加权归一化融合', value: 'weighted', disabled: graphFusionMutex },
               ]}
             />
           </Form.Item>
+          {graphFusionMutex && (
+            <Alert
+              type="info"
+              showIcon
+              style={{ marginBottom: 8, maxWidth: 480 }}
+              message={GRAPH_FUSION_MUTEX_HINT}
+              description={`已开启图路的知识库：${graphEnabledKbNames.join('、')}`}
+            />
+          )}
           {fusionMode === 'weighted' && (
             <Form.Item name="w_vec" label="向量路权重 w_vec（BM25 权重 = 1 - w_vec）" style={{ marginBottom: 8 }}>
               <Slider min={0} max={1} step={0.01} style={{ maxWidth: 400 }} marks={{ 0: '0', 0.5: '0.5', 1: '1' }} />

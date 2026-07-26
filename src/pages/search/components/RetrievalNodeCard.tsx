@@ -74,6 +74,12 @@ export default function RetrievalNodeCard({ node, rank, thresholdTag, selected, 
           {metadata.msg_time !== undefined && <Tag>{formatEpochMillis(metadata.msg_time)}</Tag>}
         </Space>
       )}
+      {metadata?.graph_score !== undefined && (
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+          图路：关联度 {formatScore(metadata.graph_score)} / 跳数 {metadata.graph_hops ?? '-'} / 实体{' '}
+          {metadata.graph_entities && metadata.graph_entities.length > 0 ? metadata.graph_entities.join('、') : '-'}
+        </Typography.Paragraph>
+      )}
       {node.image_urls.length > 0 && (
         <div style={{ marginBottom: 8 }}>
           <Image.PreviewGroup>

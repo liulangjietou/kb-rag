@@ -11,6 +11,7 @@ import type {
   EmbeddingStatus,
   EvalMode,
   FusionMode,
+  GraphTaskStatus,
   IkDictStatus,
   IkDictType,
   InheritStatus,
@@ -74,6 +75,13 @@ export const FUSION_MODE_META: Record<FusionMode, { color: string; label: string
   rrf: { color: 'processing', label: 'RRF（倒数排名融合）' },
   weighted: { color: 'processing', label: '加权归一化融合' },
 };
+
+/**
+ * M7-CONTRACTS.md section 0.6/§4.4: shared copy for every fusion_mode picker (SearchPage debug
+ * form, AppConfigTab) that must grey out "加权归一化融合" once the retrieval targets a
+ * graph_enabled knowledge base -- the server enforces the same rule as an INVALID_PARAM on save.
+ */
+export const GRAPH_FUSION_MUTEX_HINT = '开启图路的知识库库内融合强制为 RRF';
 
 export const IK_DICT_TYPE_META: Record<IkDictType, { color: string; label: string }> = {
   EXT: { color: 'success', label: '扩展词' },
@@ -201,6 +209,18 @@ export const API_KEY_STATUS_META: Record<ApiKeyStatus, TagMeta> = {
   DISABLED: { color: 'default', label: '已禁用' },
 };
 
+/**
+ * GraphTaskStatus Tag meta (M7-CONTRACTS.md section 0.10, GraphSummary.latest_task.status).
+ * Reuses the same four-state vocabulary as RUN_STATUS_META (see GraphTaskStatus's doc comment in
+ * api/types.ts) but kept as its own table since the two enums are unrelated server concepts.
+ */
+export const GRAPH_TASK_STATUS_META: Record<GraphTaskStatus, TagMeta> = {
+  PENDING: { color: 'default', label: '待执行' },
+  RUNNING: { color: 'processing', label: '抽取中' },
+  SUCCESS: { color: 'success', label: '已完成' },
+  FAILED: { color: 'error', label: '失败' },
+};
+
 /** Tag metadata shape shared by every enum lookup table in this module. */
 export interface TagMeta {
   color: string;
@@ -242,6 +262,11 @@ export const DEGRADED_REASON_LABELS: Record<string, string> = {
    * (one that was expected to exist) counts as this reason.
    */
   snapshot_index_missing: '快照索引缺失，已回退实时索引',
+  /**
+   * M7-CONTRACTS.md section 0.7: the kb has graph_enabled=true but Neo4j is unreachable/unconfigured
+   * at call time -- that route is skipped, the other two (vector/BM25) proceed unaffected.
+   */
+  graph_route_unavailable: '图检索路不可用，已降级双路',
 };
 
 export function describeDegradedReason(reason: string): string {

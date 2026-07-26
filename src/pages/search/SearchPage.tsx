@@ -23,7 +23,7 @@ import { search } from '../../api/search';
 import { listKnowledgeBases } from '../../api/kb';
 import type { FusionMode, KnowledgeBase, MetadataFilter, SearchRequest, SearchResponse } from '../../api/types';
 import { useModelStatus } from '../../context/ModelStatusContext';
-import { describeDegradedReason, describeThresholdApplied } from '../../utils/statusMeta';
+import { GRAPH_FUSION_MUTEX_HINT, describeDegradedReason, describeThresholdApplied } from '../../utils/statusMeta';
 import AppliedInfoBar from './components/AppliedInfoBar';
 import CollectToEvalModal from './components/CollectToEvalModal';
 import RetrievalNodeCard from './components/RetrievalNodeCard';
@@ -91,13 +91,24 @@ export default function SearchPage() {
   const [form] = Form.useForm<SearchFormValues>();
   const fusionMode = Form.useWatch('fusion_mode', form) ?? 'rrf';
   const thresholdEnabled = Form.useWatch('threshold_enabled', form) ?? false;
+  const selectedKbId = Form.useWatch('kb_id', form);
 
   const rewriteAvailable = modelStatus?.chat_configured ?? false;
   const rerankAvailable = modelStatus?.rerank_configured ?? false;
+  // M7-CONTRACTS.md section 0.6/§4.4: the selected kb's graph_enabled forces fusion_mode=rrf.
+  const selectedKbGraphEnabled = kbs.find((kb) => kb.kb_id === selectedKbId)?.graph_enabled ?? false;
 
   useEffect(() => {
     listKnowledgeBases().then(setKbs);
   }, []);
+
+  // Selecting a graph-enabled kb while "加权归一化" is still picked would otherwise submit a
+  // request the server rejects as INVALID_PARAM; snap back to RRF right away instead.
+  useEffect(() => {
+    if (selectedKbGraphEnabled && form.getFieldValue('fusion_mode') === 'weighted') {
+      form.setFieldsValue({ fusion_mode: 'rrf' });
+    }
+  }, [selectedKbGraphEnabled, form]);
 
   // rerank_enabled defaults to true only once a rerank model is confirmed configured
   // (M2-CONTRACTS.md section 1.5); model-status resolves asynchronously after mount, so sync
@@ -216,10 +227,13 @@ export default function SearchPage() {
                         optionType="button"
                         options={[
                           { label: 'RRF', value: 'rrf' },
-                          { label: '加权归一化', value: 'weighted' },
+                          { label: '加权归一化', value: 'weighted', disabled: selectedKbGraphEnabled },
                         ]}
                       />
                     </Form.Item>
+                    {selectedKbGraphEnabled && (
+                      <Typography.Text type="secondary">{GRAPH_FUSION_MUTEX_HINT}</Typography.Text>
+                    )}
                     {fusionMode === 'weighted' && (
                       <Form.Item
                         name="w_vec"

@@ -152,6 +152,15 @@ export interface KnowledgeBase {
   current_config_fingerprint: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * M7-CONTRACTS.md section 0.1/0.10: knowledge-base-level GraphRAG switch, stored in the
+   * server's KnowledgeBase.retrievalConfig JSON (default false). ASSUMPTION: returned inline on
+   * GET /kb and GET /kb/{kbId} -- same precedent as index_config/current_config_fingerprint above
+   * -- so the fusion-mode mutex hint in SearchPage/AppConfigTab doesn't need a dedicated per-kb
+   * round trip just to know whether graph routing is on. Absent on pre-M7 responses; read as
+   * `kb.graph_enabled ?? false`.
+   */
+  graph_enabled?: boolean;
 }
 
 export interface CreateKbRequest {
@@ -313,6 +322,16 @@ export interface RetrievalNodeMetadata {
    * search endpoint is unchanged and does not need it (always the page's one kb).
    */
   kb_id?: string;
+  /**
+   * M7-CONTRACTS.md section 0.8: graph route's path-internal ranking score (entity match score ×
+   * 1/(1+hops)), present only when the graph route contributed to this node (multi-entity hits on
+   * the same chunk already take the max on the server side per section 0.5).
+   */
+  graph_score?: number;
+  /** M7-CONTRACTS.md section 0.8: hop count from the query-matched entity to this chunk's source. */
+  graph_hops?: number;
+  /** M7-CONTRACTS.md section 0.8: matched entity names behind this hit, capped at 5. */
+  graph_entities?: string[];
   [key: string]: unknown;
 }
 
@@ -1327,4 +1346,126 @@ export interface AuditLogStats {
   avg_latency_ms: number;
   degraded_calls: number;
   error_calls: number;
+}
+
+// ---------------------------------------------------------------------------
+// GraphRAG (M7-CONTRACTS.md sections 0.1-0.10 / 2). Server delivered in parallel by another
+// agent; every shape below is this web's best-effort assumption per section 0.10's blueprint,
+// flagged for reconciliation once the real endpoints land.
+// ---------------------------------------------------------------------------
+
+/**
+ * t_kb_task status for GRAPH_EXTRACT/GRAPH_CLEANUP rows (M7-CONTRACTS.md section 0.3).
+ * ASSUMPTION: the contract says extraction progress is "入 t_kb_task 展示进度" but does not name
+ * the status enum; mirrored from RunStatus (the only other server-driven async-job status enum
+ * already in this codebase).
+ */
+export type GraphTaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
+
+/**
+ * t_kb_task.task_type values introduced by M7 (section 0.4: "TaskType 增 GRAPH_CLEANUP 或并入既有
+ * CLEANUP（实现自选，报告申报）"). Both are modelled so the web can display whichever one the
+ * server actually reports without a schema change later.
+ */
+export type GraphTaskType = 'GRAPH_EXTRACT' | 'GRAPH_CLEANUP';
+
+/**
+ * Latest graph task summary embedded in GraphSummary (section 0.10: "最近任务状态").
+ * ASSUMPTION: field names mirror EvalRun's status/fail_reason/timestamps shape.
+ * skipped_chunk_count surfaces the section 0.3 "非法 JSON/超长实体名/关系端点校验失败的分片跳过
+ * 并计数（不 fail 整个任务）" behavior so the progress alert can show it without it reading as a
+ * hard failure.
+ */
+export interface GraphTaskSummary {
+  task_id: string;
+  task_type: GraphTaskType;
+  status: GraphTaskStatus;
+  /** Chunks/batches the extraction pipeline skipped due to output validation (section 0.3), not a task failure. */
+  skipped_chunk_count?: number;
+  fail_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * GET /api/v1/kb/{kbId}/graph/summary response (section 0.10: "实体数/关系数/覆盖分片数/最近任务
+ * 状态"). ASSUMPTION: graph_enabled is folded into this same response (in addition to
+ * KnowledgeBase.graph_enabled) since the 知识图谱 tab's polling loop is the one place that needs
+ * both the switch state and the extraction progress refreshed in lockstep.
+ */
+export interface GraphSummary {
+  graph_enabled: boolean;
+  entity_count: number;
+  relation_count: number;
+  covered_chunk_count: number;
+  latest_task: GraphTaskSummary | null;
+}
+
+/** PUT /api/v1/kb/{kbId}/graph/config request body (section 0.10). */
+export interface UpdateGraphConfigRequest {
+  enabled: boolean;
+}
+
+/**
+ * POST /api/v1/kb/{kbId}/graph/extract response (section 0.10: "手动触发全量重抽").
+ * ASSUMPTION: mirrors ActivateVersionResponse's task_id-returning shape for an async server job;
+ * the web does not strictly need task_id back (it re-polls /graph/summary for latest_task) but
+ * keeping it lets the trigger button's success message reference the concrete task.
+ */
+export interface TriggerGraphExtractResponse {
+  task_id: string;
+}
+
+/**
+ * One (:Entity)-[:REL]->(:Entity) outgoing edge, embedded on GraphEntity below.
+ * ASSUMPTION: section 0.10 lists exactly 5 graph endpoints and none of them is a standalone
+ * "relations" listing, yet section 2's "简版可视化：以当前实体列表前 N 个实体的关系做...布局"
+ * requires edges between the top-N entities. Rather than inventing a 6th endpoint, `relations` is
+ * assumed bundled onto each GraphEntity row the entities endpoint already returns -- the server
+ * already has the entity's outgoing REL edges in hand when it resolves source_chunk_count from
+ * the same Neo4j node. Flagged for reconciliation with the server agent's actual response shape.
+ */
+export interface GraphEntityRelation {
+  target: string;
+  type: string;
+}
+
+/**
+ * GET /api/v1/kb/{kbId}/graph/entities item (section 0.10: "实体列表带来源分片数").
+ * `name` doubles as the row identifier -- entities have no dedicated id column per the graph
+ * model in section 0.2 (MERGE'd by (kb_id, name)), mirroring how IkDictEntry uses `word`.
+ */
+export interface GraphEntity {
+  name: string;
+  /** Freeform LLM-extracted type label (e.g. "人物"/"组织"/"地点"), not a closed enum -- never render through metaOf/a fixed color table. */
+  type: string;
+  source_chunk_count: number;
+  /** See GraphEntityRelation doc comment for the "no dedicated relations endpoint" assumption. */
+  relations: GraphEntityRelation[];
+}
+
+export interface ListGraphEntitiesParams {
+  query?: string;
+  page?: number;
+  /** Page size override; the visualization pulls one larger page (default 50) instead of the entity-list tab's own pagination size. */
+  size?: number;
+}
+
+/**
+ * GET /api/v1/kb/{kbId}/graph/entities/{entityName}/chunks item (section 0.10: "下钻来源分片
+ * （含所属文档版本）...复用 RetrievalNode 结构或简化行,报告申报"). Modelled as a simplified row
+ * rather than the full RetrievalNode (no score/retrieval_source -- this is a drill-down listing,
+ * not a ranked search result), denormalizing doc_file_name/document_version_label so the drawer's
+ * "含所属文档版本" requirement doesn't need N further per-row lookups against /documents or
+ * /versions.
+ */
+export interface GraphEntitySourceChunk {
+  chunk_id: string;
+  doc_id: string;
+  doc_file_name: string;
+  document_version_id: string;
+  /** Display label, e.g. "v3" (DocumentVersion.version) -- not the raw document_version_id. */
+  document_version_label: string;
+  content: string;
+  enabled: boolean;
 }
