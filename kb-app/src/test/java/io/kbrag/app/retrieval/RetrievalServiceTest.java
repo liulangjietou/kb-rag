@@ -1,6 +1,7 @@
 package io.kbrag.app.retrieval;
 
 import io.kbrag.app.alert.RetrievalDegradeMonitor;
+import io.kbrag.app.index.ActiveVersionResolver;
 import io.kbrag.app.index.EngineChunkCleaner;
 import io.kbrag.app.index.IndexAliasManager;
 import io.kbrag.app.kb.KnowledgeBaseService;
@@ -68,6 +69,8 @@ class RetrievalServiceTest {
     private static final String VERSION_ID = "dv_test";
     private static final String FULLTEXT_ALIAS = "kb_test_es";
     private static final String VECTOR_ALIAS = "kb_test_es";
+    private static final String SNAPSHOT_INDEX = "kb_test_none_s1";
+    private static final String FROZEN_VERSION_ID = "dv_frozen";
     private static final String KB_ID_2 = "kb_second";
     private static final String FULLTEXT_ALIAS_2 = "kb_second_es";
     private static final String VECTOR_ALIAS_2 = "kb_second_vec";
@@ -85,6 +88,7 @@ class RetrievalServiceTest {
     private EngineChunkCleaner engineChunkCleaner;
     private ObjectStorage objectStorage;
     private KbProperties properties;
+    private RetrievalIndexContextResolver indexContextResolver;
     private RetrievalService retrievalService;
 
     @BeforeEach
@@ -119,8 +123,13 @@ class RetrievalServiceTest {
         when(rerankService.candidateLimit()).thenReturn(50);
         when(rerankService.rerank(anyString(), anyList(), eq(false))).thenReturn(RerankOutcome.skipped());
 
-        retrievalService = new RetrievalService(knowledgeBaseService, documentMapper, chunkMapper,
-                fulltextStore, vectorStore, embeddingProvider, indexAliasManager,
+        // A real context resolver over mocked collaborators rather than a mocked one: which index a base is
+        // searched in and which versions it may see is the M6 decision under test in several cases below, and a
+        // stubbed resolver would let that decision be asserted against itself.
+        indexContextResolver = new RetrievalIndexContextResolver(indexAliasManager,
+                new ActiveVersionResolver(documentMapper, properties), fulltextStore, vectorStore);
+        retrievalService = new RetrievalService(knowledgeBaseService, chunkMapper,
+                fulltextStore, vectorStore, embeddingProvider, indexContextResolver,
                 new FusionRouter(List.of(new RrfFusion(), new WeightedFusion())),
                 new CrossKbRrfFusion(), new KbQuotaAllocator(), routingService,
                 rewriteService, rerankService, new ScoreThresholdPolicy(), new ParentChildMerger(),
@@ -511,6 +520,98 @@ class RetrievalServiceTest {
                 outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
         // A base with nothing indexed is not queried, and it also does not reserve any of the quota.
         verify(fulltextStore, never()).searchBm25(eq(FULLTEXT_ALIAS_2), any());
+    }
+
+    @Test
+    void shouldSearchTheFrozenSnapshotIndexForAReleasedVersion() {
+        when(embeddingProvider.isConfigured()).thenReturn(false);
+        givenSnapshotIndexPresent();
+        when(fulltextStore.searchBm25(eq(SNAPSHOT_INDEX), any()))
+                .thenReturn(List.of(new ScoredChunk("ck_frozen", 7.5d, RetrievalSource.BM25)));
+        when(chunkMapper.selectList(any()))
+                .thenReturn(List.of(chunk("ck_frozen", "corpus as released", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, snapshotCommand().build());
+
+        assertTrue(outcome.getDegraded().stream()
+                .noneMatch(marker -> marker.equals(DegradedReason.SNAPSHOT_INDEX_MISSING.code())));
+        assertEquals(List.of("ck_frozen"),
+                outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+        // The live alias is never touched, and the mandatory filter carries the frozen set rather than the
+        // current active version.
+        verify(fulltextStore, never()).searchBm25(eq(FULLTEXT_ALIAS), any());
+        ArgumentCaptor<FulltextQuery> query = ArgumentCaptor.forClass(FulltextQuery.class);
+        verify(fulltextStore).searchBm25(eq(SNAPSHOT_INDEX), query.capture());
+        assertEquals(List.of(FROZEN_VERSION_ID), query.getValue().getFilter().getDocumentVersionIds());
+    }
+
+    @Test
+    void shouldDegradeToTheLiveAliasWhenTheFrozenSnapshotIndexIsMissing() {
+        when(embeddingProvider.isConfigured()).thenReturn(false);
+        when(fulltextStore.indexExists(SNAPSHOT_INDEX)).thenReturn(false);
+        when(fulltextStore.searchBm25(eq(FULLTEXT_ALIAS), any()))
+                .thenReturn(List.of(new ScoredChunk("ck_1", 7.5d, RetrievalSource.BM25)));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_1", "current corpus", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, snapshotCommand().build());
+
+        assertTrue(outcome.getDegraded().contains(DegradedReason.SNAPSHOT_INDEX_MISSING.code()));
+        // Degraded but useful: the result really does come out of the live alias under the current active
+        // versions, not out of an error.
+        assertEquals(List.of("ck_1"),
+                outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+        ArgumentCaptor<FulltextQuery> query = ArgumentCaptor.forClass(FulltextQuery.class);
+        verify(fulltextStore).searchBm25(eq(FULLTEXT_ALIAS), query.capture());
+        assertEquals(List.of(VERSION_ID), query.getValue().getFilter().getDocumentVersionIds());
+    }
+
+    @Test
+    void shouldNotReportALegacyReleaseWithoutASnapshotAsDegraded() {
+        when(embeddingProvider.isConfigured()).thenReturn(false);
+        when(fulltextStore.searchBm25(eq(FULLTEXT_ALIAS), any()))
+                .thenReturn(List.of(new ScoredChunk("ck_1", 7.5d, RetrievalSource.BM25)));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_1", "current corpus", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID,
+                command().vectorRouteEnabled(false).build());
+
+        // A version released before index snapshots existed carries no override at all. Serving it from the
+        // live alias is its designed behaviour, so the response must stay clean.
+        assertTrue(outcome.getDegraded().isEmpty());
+        assertEquals(1, outcome.getNodes().size());
+    }
+
+    @Test
+    void shouldNeverSelfHealEngineHitsRecalledFromASnapshot() {
+        when(embeddingProvider.isConfigured()).thenReturn(false);
+        givenSnapshotIndexPresent();
+        when(fulltextStore.searchBm25(eq(SNAPSHOT_INDEX), any())).thenReturn(List.of(
+                new ScoredChunk("ck_live", 9.0d, RetrievalSource.BM25),
+                new ScoredChunk("ck_gone", 8.0d, RetrievalSource.BM25)));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_live", "still here", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, snapshotCommand().build());
+
+        // A snapshot legitimately holds chunks MySQL no longer has - merged, split or cleaned up after the
+        // release. Repairing by chunk id would delete those ids from the live indexes on the strength of what
+        // an old snapshot contains, which is data loss in an index nobody searched.
+        assertEquals(List.of("ck_live"),
+                outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+        verify(engineChunkCleaner, never()).removeAsync(anyString(), anyList());
+    }
+
+    /**
+     * Both stores are asked in lite mode because both routes name the same physical index.
+     */
+    private void givenSnapshotIndexPresent() {
+        when(fulltextStore.indexExists(SNAPSHOT_INDEX)).thenReturn(true);
+        when(vectorStore.indexExists(SNAPSHOT_INDEX)).thenReturn(true);
+    }
+
+    private RetrievalCommand.RetrievalCommandBuilder snapshotCommand() {
+        return command()
+                .indexOverride(Map.of(KB_ID, new RetrievalIndexOverride(SNAPSHOT_INDEX, SNAPSHOT_INDEX)))
+                .visibleVersionIdsOverride(Map.of(KB_ID, List.of(FROZEN_VERSION_ID)));
     }
 
     private void givenTwoBases() {

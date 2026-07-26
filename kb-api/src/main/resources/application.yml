@@ -181,6 +181,10 @@ kb:
     max-linked-kb: ${RETRIEVAL_MAX_LINKED_KB:15}
     routing-cache-ttl-minutes: ${RETRIEVAL_ROUTING_CACHE_TTL_MINUTES:10}
     routing-cache-max-size: ${RETRIEVAL_ROUTING_CACHE_MAX_SIZE:10000}
+    # The version visibility set is invalidated by every activation switch, so this expiry is only a safety net
+    # against a mutation path nobody wired to that invalidation.
+    visible-version-cache-ttl-minutes: ${RETRIEVAL_VISIBLE_VERSION_CACHE_TTL_MINUTES:5}
+    visible-version-cache-max-size: ${RETRIEVAL_VISIBLE_VERSION_CACHE_MAX_SIZE:1000}
   web:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:20002,http://127.0.0.1:20002}
   eval:
@@ -211,6 +215,16 @@ kb:
     audit-archive-prefix: ${AUDIT_ARCHIVE_PREFIX:audit/}
     # Width of the query_digest column; the digest is masked first and truncated to this afterwards.
     query-digest-max-length: ${AUDIT_QUERY_DIGEST_MAX_LENGTH:200}
+  app:
+    # Retired application versions per application whose index snapshot is kept. Every snapshot is a full copy
+    # of the corpus of every linked knowledge base, so this is the rollback depth traded against disk.
+    # The released version is never counted here and never cleaned up.
+    snapshot-retain-count: ${APP_SNAPSHOT_RETAIN_COUNT:3}
+    # Budget of one snapshot copy. The Elasticsearch clone hard links segments and finishes in milliseconds;
+    # this bounds the Milvus path, which copies entities.
+    snapshot-timeout-ms: ${APP_SNAPSHOT_TIMEOUT_MS:300000}
+    snapshot-cleanup-cron: ${APP_SNAPSHOT_CLEANUP_CRON:0 15 4 * * *}
+    snapshot-cleanup-enabled: ${APP_SNAPSHOT_CLEANUP_ENABLED:true}
 
 logging:
   level:

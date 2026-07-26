@@ -56,6 +56,21 @@ public class EsFulltextStore implements FulltextStore {
     }
 
     @Override
+    public void snapshotIndex(String sourceIndex, String targetIndex) {
+        indexAdmin.cloneIndex(sourceIndex, targetIndex);
+    }
+
+    @Override
+    public void dropIndex(String physicalIndexName) {
+        indexAdmin.deleteIndex(physicalIndexName);
+    }
+
+    @Override
+    public boolean indexExists(String physicalIndexName) {
+        return indexAdmin.indexExists(physicalIndexName);
+    }
+
+    @Override
     public List<ScoredChunk> searchBm25(String alias, FulltextQuery query) {
         List<Query> filters = indexAdmin.toFilters(query.getFilter());
         try {

@@ -67,9 +67,41 @@ public interface VectorStore {
     void updateEnabled(String alias, List<String> chunkIds, boolean enabled);
 
     /**
+     * Copies a physical index into a new, immutable one, requirement section 4.7 "index snapshot".
+     *
+     * <p>Addressed by physical name on both sides rather than by alias: the point of the operation is to
+     * produce an index the alias does <em>not</em> point at, so that a released application version keeps
+     * serving the corpus it was gated on while the live index goes on changing.
+     *
+     * <p>Implementations must be effectively synchronous - the caller freezes the resulting name into an
+     * application version the moment this returns, so a copy that is still running would be published as
+     * complete.
+     *
+     * @param sourceIndex physical name of the live index or collection
+     * @param targetIndex physical name of the snapshot to create
+     */
+    void snapshotIndex(String sourceIndex, String targetIndex);
+
+    /**
+     * Removes a physical index entirely, used to roll back a half built snapshot and to retire an expired
+     * one.
+     *
+     * @param physicalIndexName physical index or collection name, absent one treated as already removed
+     */
+    void dropIndex(String physicalIndexName);
+
+    /**
+     * Tells whether a physical index still exists.
+     *
+     * @param physicalIndexName physical index or collection name
+     * @return {@code true} when the engine still holds it
+     */
+    boolean indexExists(String physicalIndexName);
+
+    /**
      * Runs a kNN search with the mandatory version and enabled filter applied engine side.
      *
-     * @param alias alias of the target index
+     * @param alias alias of the target index, or the physical name of a snapshot index
      * @param query kNN request
      * @return candidates ordered by descending normalised score
      */

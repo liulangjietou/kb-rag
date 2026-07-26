@@ -41,7 +41,57 @@ public class IndexNaming {
      * @return physical index or collection name
      */
     public String vectorPhysicalName(String kbId, String embeddingSegment) {
-        return physicalName(kbId, embeddingSegment);
+        return physicalName(kbId, embeddingSegment, KbConstants.SNAPSHOT_SEGMENT_V1);
+    }
+
+    /**
+     * Builds the physical name of a release snapshot, requirement section 4.7 "index snapshot".
+     *
+     * <p>Only the snapshot segment changes: a snapshot of the full mode Elasticsearch index keeps the
+     * {@code bm25} segment and a snapshot of a Milvus collection keeps its embedding segment, so the name
+     * still tells which engine and which embedding space the data belongs to. The sequence is knowledge
+     * base level, which is what makes both engines of one release share the same {@code sN}.
+     *
+     * @param kbId             knowledge base business id
+     * @param embeddingSegment embedding segment of the source index, carried over unchanged
+     * @param sequence         knowledge base level snapshot sequence, one based
+     * @return physical snapshot index or collection name
+     */
+    public String snapshotPhysicalName(String kbId, String embeddingSegment, int sequence) {
+        return physicalName(kbId, embeddingSegment,
+                KbConstants.SNAPSHOT_SEGMENT_PREFIX + sequence);
+    }
+
+    /**
+     * Builds the snapshot segment of a sequence number.
+     *
+     * @param sequence knowledge base level snapshot sequence, one based
+     * @return snapshot segment, {@code s1} for the first snapshot
+     */
+    public String snapshotSegment(int sequence) {
+        return KbConstants.SNAPSHOT_SEGMENT_PREFIX + sequence;
+    }
+
+    /**
+     * Reads the sequence number back out of a snapshot segment.
+     *
+     * <p>The single parser of the segment, so the sequence derivation of the next snapshot cannot disagree
+     * with the way a name was built. A segment that is not a snapshot segment yields zero, which is what
+     * makes the live {@code v1} rows contribute nothing to the maximum.
+     *
+     * @param snapshotSegment snapshot segment of a registry row, {@code null} tolerated
+     * @return sequence number, zero when the segment is not a snapshot segment
+     */
+    public int snapshotSequenceOf(String snapshotSegment) {
+        if (snapshotSegment == null
+                || !snapshotSegment.startsWith(KbConstants.SNAPSHOT_SEGMENT_PREFIX)) {
+            return 0;
+        }
+        String digits = snapshotSegment.substring(KbConstants.SNAPSHOT_SEGMENT_PREFIX.length());
+        if (!digits.matches("^\\d+$")) {
+            return 0;
+        }
+        return Integer.parseInt(digits);
     }
 
     /**
@@ -56,8 +106,23 @@ public class IndexNaming {
      * @return physical index name
      */
     public String fulltextPhysicalName(String kbId, VectorEngine engine, String embeddingSegment) {
-        String segment = engine == VectorEngine.MILVUS ? KbConstants.EMBEDDING_SEGMENT_BM25 : embeddingSegment;
-        return physicalName(kbId, segment);
+        return physicalName(kbId, fulltextEmbeddingSegment(engine, embeddingSegment),
+                KbConstants.SNAPSHOT_SEGMENT_V1);
+    }
+
+    /**
+     * Embedding segment the full text index carries.
+     *
+     * <p>Exposed because the snapshot path needs the very same answer for the snapshot name: in full mode
+     * the Elasticsearch index only serves BM25 and takes {@code bm25}, in lite mode it also carries the
+     * vector and therefore keeps the embedding segment.
+     *
+     * @param engine           configured vector engine
+     * @param embeddingSegment embedding version segment, {@code none} in zero key mode
+     * @return embedding segment of the full text index name
+     */
+    public String fulltextEmbeddingSegment(VectorEngine engine, String embeddingSegment) {
+        return engine == VectorEngine.MILVUS ? KbConstants.EMBEDDING_SEGMENT_BM25 : embeddingSegment;
     }
 
     /**
@@ -100,10 +165,10 @@ public class IndexNaming {
         return builder.length() == 0 ? KbConstants.EMBEDDING_SEGMENT_NONE : builder.toString();
     }
 
-    private String physicalName(String kbId, String embeddingSegment) {
+    private String physicalName(String kbId, String embeddingSegment, String snapshotSegment) {
         return NAME_PREFIX + NAME_SEPARATOR + normalizeKbId(kbId)
                 + NAME_SEPARATOR + embeddingSegment
-                + NAME_SEPARATOR + KbConstants.SNAPSHOT_SEGMENT_V1;
+                + NAME_SEPARATOR + snapshotSegment;
     }
 
     /**

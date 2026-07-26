@@ -73,6 +73,28 @@ public class EsVectorStore implements VectorStore {
         indexAdmin.bulkUpdateEnabled(alias, chunkIds, enabled);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>In lite mode this is the same physical index the BM25 route snapshots, and the write targets of a
+     * knowledge base list it once, so one clone serves both routes rather than the operation being issued
+     * twice against the same pair of names.
+     */
+    @Override
+    public void snapshotIndex(String sourceIndex, String targetIndex) {
+        indexAdmin.cloneIndex(sourceIndex, targetIndex);
+    }
+
+    @Override
+    public void dropIndex(String physicalIndexName) {
+        indexAdmin.deleteIndex(physicalIndexName);
+    }
+
+    @Override
+    public boolean indexExists(String physicalIndexName) {
+        return indexAdmin.indexExists(physicalIndexName);
+    }
+
     @Override
     public List<ScoredChunk> search(String alias, VectorQuery query) {
         List<Query> filters = indexAdmin.toFilters(query.getFilter());

@@ -4,20 +4,17 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.kbrag.app.alert.RetrievalDegradeMonitor;
 import io.kbrag.app.index.EngineChunkCleaner;
-import io.kbrag.app.index.IndexAliasManager;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.constant.ChunkMetadataKeys;
 import io.kbrag.domain.entity.Chunk;
-import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.DegradedReason;
 import io.kbrag.domain.enums.FusionMode;
 import io.kbrag.domain.enums.RetrievalSource;
 import io.kbrag.domain.mapper.ChunkMapper;
-import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.model.FulltextQuery;
 import io.kbrag.domain.model.FusedChunk;
 import io.kbrag.domain.model.KbIndexConfig;
@@ -79,6 +76,12 @@ import java.util.Set;
  * built here, out of reach of request parameters, so a caller can never recall a chunk of an archived
  * version. The optional metadata filter can only narrow that set further.
  *
+ * <p><b>Live index or release snapshot, one pipeline.</b> Which indices a base is searched in and which
+ * document versions it may see are resolved once per base by {@link RetrievalIndexContextResolver} and then
+ * carried through unchanged. Everything below the resolution is blind to the difference, which is what makes
+ * "a released version searches its own frozen corpus" a property of the caller's context rather than a second
+ * retrieval path that could drift from the one the release gate measured (requirement section 4.7).
+ *
  * <p><b>MySQL is the fact source.</b> Text is always read from the database and never from a search
  * engine, so a stale engine copy cannot reach a caller. An engine hit whose row is <em>gone</em> is
  * dropped and scheduled for removal, which makes every search a small repair pass. An engine hit whose
@@ -122,12 +125,11 @@ public class RetrievalService {
     private static final int PRIMARY = 0;
 
     private final KnowledgeBaseService knowledgeBaseService;
-    private final DocumentMapper documentMapper;
     private final ChunkMapper chunkMapper;
     private final FulltextStore fulltextStore;
     private final VectorStore vectorStore;
     private final EmbeddingProvider embeddingProvider;
-    private final IndexAliasManager indexAliasManager;
+    private final RetrievalIndexContextResolver indexContextResolver;
     private final FusionRouter fusionRouter;
     private final CrossKbRrfFusion crossKbRrfFusion;
     private final KbQuotaAllocator kbQuotaAllocator;
@@ -197,10 +199,16 @@ public class RetrievalService {
         boolean vectorRouteRequested = !Boolean.FALSE.equals(command.getVectorRouteEnabled());
         boolean vectorRouteRan = vectorRouteRequested && embeddingProvider.isConfigured();
 
-        Map<String, List<String>> visibleByKb = visibleVersionIds(selected);
-        if (visibleByKb.isEmpty()) {
-            // Not one selected base holds an active version, so no route ever ran and none of them can be
-            // reported as degraded.
+        Map<String, RetrievalIndexContextResolver.IndexContext> contextByKb = indexContexts(selected, command);
+        // Resolved before the empty check: a released version whose snapshot index vanished has to report that
+        // fact even when the live fallback it landed on happens to hold no active version either.
+        if (contextByKb.values().stream().anyMatch(
+                RetrievalIndexContextResolver.IndexContext::snapshotDegraded)) {
+            addMarker(degraded, DegradedReason.SNAPSHOT_INDEX_MISSING.code());
+        }
+        Map<String, RetrievalIndexContextResolver.IndexContext> searchableByKb = searchable(contextByKb);
+        if (searchableByKb.isEmpty()) {
+            // Not one selected base holds a visible version, so no route ever ran.
             recordDegradation(!degraded.isEmpty());
             return new SearchOutcome(List.of(), degraded, applied(effectiveQuery,
                     settings.getFusion().getMode(), ThresholdTarget.NONE.code(), routing.getKbIds()));
@@ -218,11 +226,11 @@ public class RetrievalService {
         Map<String, List<FusedChunk>> rankedByKb = new LinkedHashMap<>();
         Map<String, Chunk> chunkById = new HashMap<>();
         for (KbTarget target : selected) {
-            List<String> visibleVersionIds = visibleByKb.get(target.kbId());
-            if (visibleVersionIds == null) {
+            RetrievalIndexContextResolver.IndexContext context = searchableByKb.get(target.kbId());
+            if (context == null) {
                 continue;
             }
-            KbRecall recall = recallWithinKb(target, effectiveQuery, queryVector, visibleVersionIds,
+            KbRecall recall = recallWithinKb(target, effectiveQuery, queryVector, context,
                     settings, command, bm25RouteRequested);
             chunkById.putAll(recall.chunkById());
             if (!recall.ranked().isEmpty()) {
@@ -299,27 +307,29 @@ public class RetrievalService {
      * @param target             knowledge base being searched
      * @param query              query the routes run with, already rewritten
      * @param queryVector        embedded query, {@code null} when the vector route does not run
-     * @param visibleVersionIds  version visibility set of this base
+     * @param context            indices and version visibility set this base is searched with
      * @param settings           effective retrieval parameters of the call
      * @param command            request parameters, read for the metadata filter
      * @param bm25RouteRequested {@code true} when the BM25 route runs
      * @return in base ranking of the live candidates plus their fact source rows
      */
     private KbRecall recallWithinKb(KbTarget target, String query, float[] queryVector,
-                                    List<String> visibleVersionIds, RetrievalSettings settings,
-                                    RetrievalCommand command, boolean bm25RouteRequested) {
+                                    RetrievalIndexContextResolver.IndexContext context,
+                                    RetrievalSettings settings, RetrievalCommand command,
+                                    boolean bm25RouteRequested) {
         String kbId = target.kbId();
         RetrievalFilter filter = RetrievalFilter.builder()
                 .kbId(kbId)
-                .documentVersionIds(visibleVersionIds)
+                .documentVersionIds(context.visibleVersionIds())
                 .enabledOnly(true)
                 .metadataFilter(command.getMetadataFilter())
                 .build();
-        Map<RetrievalSource, List<ScoredChunk>> routeResults = recall(kbId, query, queryVector, filter,
+        Map<RetrievalSource, List<ScoredChunk>> routeResults = recall(context, query, queryVector, filter,
                 settings.getRecallTopK(), bm25RouteRequested);
         List<FusedChunk> fused = fusionRouter.fuse(routeResults, settings.getFusion());
         Map<String, Chunk> chunkById = loadChunks(fused);
-        List<FusedChunk> live = dropDisabled(dropOrphans(kbId, fused, chunkById), chunkById);
+        List<FusedChunk> live = dropDisabled(
+                dropOrphans(kbId, fused, chunkById, !context.snapshotBound()), chunkById);
         return new KbRecall(live, chunkById);
     }
 
@@ -483,7 +493,11 @@ public class RetrievalService {
     /**
      * Issues the recall routes against one knowledge base.
      *
-     * @param kbId               knowledge base business id
+     * <p>Both routes address whatever the resolved context named - a live alias or a frozen snapshot index -
+     * without knowing which of the two it is. That is the point of resolving the context up front: the recall
+     * code has one shape, so a snapshot call and a live call provably run the same query.
+     *
+     * @param context            indices this base is searched in
      * @param query              query text of the BM25 route
      * @param queryVector        embedded query, {@code null} switches the vector route off
      * @param filter             mandatory engine side predicate
@@ -491,18 +505,19 @@ public class RetrievalService {
      * @param bm25RouteRequested {@code true} when the BM25 route runs
      * @return candidates per route
      */
-    private Map<RetrievalSource, List<ScoredChunk>> recall(String kbId, String query, float[] queryVector,
+    private Map<RetrievalSource, List<ScoredChunk>> recall(RetrievalIndexContextResolver.IndexContext context,
+                                                           String query, float[] queryVector,
                                                            RetrievalFilter filter, int recallTopK,
                                                            boolean bm25RouteRequested) {
         Map<RetrievalSource, List<ScoredChunk>> routeResults = new EnumMap<>(RetrievalSource.class);
         if (bm25RouteRequested) {
             routeResults.put(RetrievalSource.BM25, fulltextStore.searchBm25(
-                    indexAliasManager.fulltextAlias(kbId),
+                    context.fulltextIndex(),
                     FulltextQuery.builder().queryText(query).topK(recallTopK).filter(filter).build()));
         }
         if (queryVector != null) {
             routeResults.put(RetrievalSource.VECTOR, vectorStore.search(
-                    indexAliasManager.vectorAlias(kbId),
+                    context.vectorIndex(),
                     VectorQuery.builder().queryVector(queryVector).topK(recallTopK).filter(filter).build()));
         }
         return routeResults;
@@ -581,43 +596,44 @@ public class RetrievalService {
     }
 
     /**
-     * Collects the version visibility set of every selected knowledge base.
+     * Resolves the indices and the version visibility set of every selected knowledge base.
      *
-     * <p>Resolved before any engine call, and that ordering is the point: a base holding no active version
-     * cannot recall anything, so knowing it up front is what keeps the embedding call from being paid for
-     * a search that has no index to hit.
+     * <p>Resolved before any engine call, and that ordering is the point: a base with no visible version cannot
+     * recall anything, so knowing it up front is what keeps the embedding call from being paid for a search that
+     * has no index to hit.
      *
      * @param targets selected knowledge bases
-     * @return visibility set per knowledge base id, bases without any active version left out
+     * @param command request parameters, read for the snapshot overrides
+     * @return context per knowledge base id, in declaration order
      */
-    private Map<String, List<String>> visibleVersionIds(List<KbTarget> targets) {
-        Map<String, List<String>> visibleByKb = new LinkedHashMap<>(targets.size());
+    private Map<String, RetrievalIndexContextResolver.IndexContext> indexContexts(
+            List<KbTarget> targets, RetrievalCommand command) {
+        Map<String, RetrievalIndexContextResolver.IndexContext> contextByKb =
+                new LinkedHashMap<>(targets.size());
         for (KbTarget target : targets) {
-            List<String> visible = visibleVersionIds(target.kbId());
-            if (CollectionUtils.isEmpty(visible)) {
-                log.info("no active document version, kbId={}", target.kbId());
-                continue;
-            }
-            visibleByKb.put(target.kbId(), visible);
+            contextByKb.put(target.kbId(), indexContextResolver.resolve(target.kbId(), command));
         }
-        return visibleByKb;
+        return contextByKb;
     }
 
     /**
-     * Collects the version visibility set of a knowledge base.
+     * Keeps the contexts that can actually recall something.
      *
-     * <p>Management console calls have no application version context, so the set is the current
-     * active version of every document.
-     *
-     * @param kbId knowledge base business id
-     * @return active document version ids
+     * @param contextByKb resolved context per knowledge base id
+     * @return contexts holding at least one visible version, in the same order
      */
-    private List<String> visibleVersionIds(String kbId) {
-        List<Document> documents = documentMapper.selectList(new LambdaQueryWrapper<Document>()
-                .eq(Document::getKbId, kbId)
-                .isNotNull(Document::getCurrentVersionId));
-        // TODO(M4): cache the visibility set per knowledge base once document counts grow.
-        return documents.stream().map(Document::getCurrentVersionId).toList();
+    private Map<String, RetrievalIndexContextResolver.IndexContext> searchable(
+            Map<String, RetrievalIndexContextResolver.IndexContext> contextByKb) {
+        Map<String, RetrievalIndexContextResolver.IndexContext> searchable =
+                new LinkedHashMap<>(contextByKb.size());
+        contextByKb.forEach((kbId, context) -> {
+            if (CollectionUtils.isEmpty(context.visibleVersionIds())) {
+                log.info("no visible document version, kbId={}", kbId);
+                return;
+            }
+            searchable.put(kbId, context);
+        });
+        return searchable;
     }
 
     /**
@@ -683,14 +699,24 @@ public class RetrievalService {
     }
 
     /**
-     * Drops engine hits the fact source no longer owns and schedules their removal.
+     * Drops engine hits the fact source no longer owns and, on the live path only, schedules their removal.
      *
-     * @param kbId      knowledge base business id
-     * @param fused     fused candidates
-     * @param chunkById fact source rows that were found
+     * <p><b>Why self healing is switched off on the snapshot path.</b> The repair deletes by chunk id through the
+     * knowledge base's write targets, which are the <em>live</em> indices. A snapshot legitimately holds chunks
+     * MySQL no longer has - a chunk an operator merged or split after the release, a version the retention pass
+     * archived - so an absent row there is expected history rather than a stale write. Letting the repair run
+     * would delete those ids from the live indices on the strength of what an old snapshot happened to contain,
+     * which is data loss in a different index than the one that was searched. The hit is therefore dropped out of
+     * the ranking and nothing else happens.
+     *
+     * @param kbId        knowledge base business id
+     * @param fused       fused candidates
+     * @param chunkById   fact source rows that were found
+     * @param selfHealing {@code true} on the live path, where an absent row really is a stale engine copy
      * @return candidates backed by a live row, in the original order
      */
-    private List<FusedChunk> dropOrphans(String kbId, List<FusedChunk> fused, Map<String, Chunk> chunkById) {
+    private List<FusedChunk> dropOrphans(String kbId, List<FusedChunk> fused, Map<String, Chunk> chunkById,
+                                         boolean selfHealing) {
         List<FusedChunk> live = new ArrayList<>(fused.size());
         List<String> orphans = new ArrayList<>();
         for (FusedChunk candidate : fused) {
@@ -700,10 +726,16 @@ public class RetrievalService {
                 orphans.add(candidate.getChunkId());
             }
         }
-        if (!orphans.isEmpty()) {
-            log.info("engine hits without a live fact source row, kbId={}, count={}", kbId, orphans.size());
-            engineChunkCleaner.removeAsync(kbId, orphans);
+        if (orphans.isEmpty()) {
+            return live;
         }
+        if (!selfHealing) {
+            log.info("snapshot hits without a fact source row dropped without engine cleanup, kbId={}, count={}",
+                    kbId, orphans.size());
+            return live;
+        }
+        log.info("engine hits without a live fact source row, kbId={}, count={}", kbId, orphans.size());
+        engineChunkCleaner.removeAsync(kbId, orphans);
         return live;
     }
 

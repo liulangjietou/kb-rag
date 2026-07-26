@@ -237,6 +237,31 @@ public class AppVersionService {
      */
     @Transactional(rollbackFor = Exception.class)
     public AppVersion promote(String appVersionId, boolean forced, String operator) {
+        return promote(appVersionId, forced, operator, null);
+    }
+
+    /**
+     * Promotes a version to the released one, optionally installing the index snapshot it was frozen with.
+     *
+     * <p><b>Why the snapshot arrives as a parameter.</b> Creating it talks to search engines and can take
+     * minutes on the Milvus path, and this method owns a transaction that holds the unique released slot.
+     * Doing the copy inside would keep that lock for the duration of the copy and would make a failed copy
+     * indistinguishable from a failed state transition. So the copy happens first, outside, and what reaches
+     * here is the finished result - requirement section 4.7 "the snapshot is created before the version takes
+     * effect".
+     *
+     * <p>A {@code null} snapshot leaves both columns as they are, which is what a rollback needs: the target
+     * version already carries the snapshot of its own release and must serve exactly that corpus again.
+     *
+     * @param appVersionId version business id
+     * @param forced       {@code true} records that an operator released despite a non passing verdict
+     * @param operator     who performed the release, recorded with a forced release
+     * @param snapshot     frozen index snapshot and visibility set, {@code null} keeps the existing columns
+     * @return promoted version
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public AppVersion promote(String appVersionId, boolean forced, String operator,
+                              AppReleaseSnapshotService.ReleaseSnapshot snapshot) {
         AppVersion candidate = require(appVersionId);
         AppVersion previous = currentReleased(candidate.getAppId());
         if (previous != null && previous.getAppVersionId().equals(appVersionId)) {
@@ -250,10 +275,16 @@ public class AppVersionService {
         candidate.setForceReleased(forced ? FORCED : NOT_FORCED);
         candidate.setForceOperator(forced ? operator : null);
         candidate.setReleasedAt(LocalDateTime.now());
+        if (snapshot != null) {
+            candidate.setIndexSnapshots(JsonUtil.toJson(snapshot.indexSnapshots()));
+            candidate.setVisibleVersionIds(JsonUtil.toJson(snapshot.visibleVersionIds()));
+        }
         appVersionMapper.updateById(candidate);
-        log.info("application version released, appId={}, appVersionId={}, forced={}, superseded={}",
+        log.info("application version released, appId={}, appVersionId={}, forced={}, superseded={}, "
+                        + "snapshotIndexes={}",
                 candidate.getAppId(), appVersionId, forced,
-                previous == null ? null : previous.getAppVersionId());
+                previous == null ? null : previous.getAppVersionId(),
+                snapshot == null ? 0 : snapshot.indexSnapshots().size());
         return candidate;
     }
 
@@ -263,6 +294,11 @@ public class AppVersionService {
      *
      * <p>The gate is not re-run: the target configuration was already released once, so its verdict is
      * historical fact, and a rollback is by definition an operator restoring a known state under pressure.
+     *
+     * <p><b>No new index snapshot either</b>, requirement section 4.7 "rollback restores the historical
+     * knowledge state". The target keeps the snapshot of its own release, which is the entire mechanism by
+     * which a rollback restores what the corpus looked like then; snapshotting the live index here would roll
+     * the configuration back onto today's knowledge and defeat the purpose.
      *
      * @param appVersionId target version business id
      * @return restored version

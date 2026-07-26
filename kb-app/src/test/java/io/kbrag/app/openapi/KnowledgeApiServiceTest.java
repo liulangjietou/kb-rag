@@ -4,16 +4,19 @@ import io.kbrag.app.appcenter.AppService;
 import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.retrieval.AppliedInfo;
 import io.kbrag.app.retrieval.RetrievalCommand;
+import io.kbrag.app.retrieval.RetrievalIndexOverride;
 import io.kbrag.app.retrieval.RetrievalNodeView;
 import io.kbrag.app.retrieval.RetrievalService;
 import io.kbrag.app.retrieval.SearchOutcome;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.entity.App;
 import io.kbrag.domain.entity.AppVersion;
 import io.kbrag.domain.enums.AppVersionStatus;
 import io.kbrag.domain.enums.TargetStage;
 import io.kbrag.domain.model.AppConfigSnapshot;
+import io.kbrag.domain.model.AppIndexSnapshot;
 import io.kbrag.domain.model.AppPromptConfig;
 import io.kbrag.domain.model.ChatMessage;
 import io.kbrag.domain.model.KbRef;
@@ -58,6 +61,9 @@ class KnowledgeApiServiceTest {
     private static final String APP_ID = "app_1";
     private static final String KB_ID = "kb_1";
     private static final String VERSION_ID = "av_1";
+    private static final String SNAPSHOT_BM25_INDEX = "kb_1_bm25_s1";
+    private static final String SNAPSHOT_VECTOR_INDEX = "kb_1_tev4_s1";
+    private static final String FROZEN_VERSION = "dv_frozen";
 
     private AppService appService;
     private AppVersionService appVersionService;
@@ -97,6 +103,63 @@ class KnowledgeApiServiceTest {
         assertEquals("weighted", issued.getFusionMode());
         assertEquals(Boolean.TRUE, issued.getRerankEnabled());
         assertEquals(Boolean.FALSE, issued.getRewriteEnabled());
+    }
+
+    @Test
+    void shouldBindTheFrozenIndexSnapshotForAReleasedVersion() {
+        stubVersionWithSnapshot(AppVersionStatus.RELEASED);
+        stubSearch(node("doc_1", "第一段"));
+
+        service.search(principal(List.of()), command(null, null, null));
+
+        RetrievalCommand issued = capturedRetrieval();
+        // Requirement section 4.7: an external call against the released version reads the corpus its gate
+        // measured, addressed by physical name because a snapshot carries no alias.
+        assertEquals(new RetrievalIndexOverride(SNAPSHOT_BM25_INDEX, SNAPSHOT_VECTOR_INDEX),
+                issued.getIndexOverride().get(KB_ID));
+        assertEquals(List.of(FROZEN_VERSION), issued.getVisibleVersionIdsOverride().get(KB_ID));
+    }
+
+    @Test
+    void shouldNotBindASnapshotForABetaCallAgainstATestVersion() {
+        AppVersion version = stubVersionWithSnapshot(AppVersionStatus.TESTING);
+        stubSearch(node("doc_1", "第一段"));
+
+        service.search(principal(List.of()), command(null, null, null));
+
+        // A beta call is a gradual rollout against the current corpus, so it reads the live alias even if the
+        // row happened to carry frozen columns.
+        assertNull(capturedRetrieval().getIndexOverride());
+        assertNull(capturedRetrieval().getVisibleVersionIdsOverride());
+        assertEquals(AppVersionStatus.TESTING, version.getStatus());
+    }
+
+    @Test
+    void shouldNotBindASnapshotForALegacyReleaseThatFrozeNothing() {
+        stubVersion(AppVersionStatus.RELEASED);
+        stubSearch(node("doc_1", "第一段"));
+
+        service.search(principal(List.of()), command(null, null, null));
+
+        // A version released before this milestone has nothing frozen; falling back to the live alias is its
+        // designed behaviour rather than a fault.
+        assertNull(capturedRetrieval().getIndexOverride());
+        assertNull(capturedRetrieval().getVisibleVersionIdsOverride());
+    }
+
+    @Test
+    void shouldNotBindASnapshotForAConsolePreviewOfTheReleasedVersion() {
+        stubVersionWithSnapshot(AppVersionStatus.RELEASED);
+        stubSearch(node("doc_1", "第一段"));
+        when(chatProvider.isConfigured()).thenReturn(true);
+        when(chatProvider.complete(anyString(), anyList())).thenReturn("answer");
+
+        service.preview(APP_ID, VERSION_ID, command(null, null, null), null);
+
+        // The preview is how an operator proves the snapshot isolates the release: the same query has to return
+        // the newly indexed content here and not through the open API.
+        assertNull(capturedRetrieval().getIndexOverride());
+        assertNull(capturedRetrieval().getVisibleVersionIdsOverride());
     }
 
     @Test
@@ -322,6 +385,19 @@ class KnowledgeApiServiceTest {
         when(appVersionService.parseConfig(version)).thenReturn(snapshot());
     }
 
+    private AppVersion stubVersionWithSnapshot(AppVersionStatus status) {
+        AppVersion version = versionOf(status);
+        version.setIndexSnapshots(JsonUtil.toJson(List.of(
+                new AppIndexSnapshot(KB_ID, "es", SNAPSHOT_BM25_INDEX),
+                new AppIndexSnapshot(KB_ID, "milvus", SNAPSHOT_VECTOR_INDEX))));
+        version.setVisibleVersionIds(JsonUtil.toJson(Map.of(KB_ID, List.of(FROZEN_VERSION))));
+        when(appVersionService.resolveForCall(eq(APP_ID), any())).thenReturn(version);
+        when(appVersionService.require(VERSION_ID)).thenReturn(version);
+        when(appVersionService.requireNewest(APP_ID)).thenReturn(version);
+        when(appVersionService.parseConfig(version)).thenReturn(snapshot());
+        return version;
+    }
+
     private AppVersion versionOf(AppVersionStatus status) {
         AppVersion version = new AppVersion();
         version.setAppVersionId(VERSION_ID);
@@ -329,6 +405,18 @@ class KnowledgeApiServiceTest {
         version.setVersion("V2.0");
         version.setStatus(status);
         return version;
+    }
+
+    /**
+     * The retrieval command the service issued.
+     *
+     * @return issued command
+     */
+    private RetrievalCommand capturedRetrieval() {
+        ArgumentCaptor<RetrievalCommand> captor = ArgumentCaptor.forClass(RetrievalCommand.class);
+        verify(retrievalService, org.mockito.Mockito.atLeastOnce())
+                .search(eq(List.of(KbRef.of(KB_ID))), captor.capture());
+        return captor.getValue();
     }
 
     private void stubSearch(RetrievalNodeView... nodes) {

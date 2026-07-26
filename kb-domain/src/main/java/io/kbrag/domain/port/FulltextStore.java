@@ -60,9 +60,47 @@ public interface FulltextStore {
     void updateEnabled(String alias, List<String> chunkIds, boolean enabled);
 
     /**
+     * Copies a physical index into a new, immutable one, requirement section 4.7 "index snapshot".
+     *
+     * <p>Addressed by physical name on both sides rather than by alias: the point of the operation is to
+     * produce an index the alias does <em>not</em> point at, so that a released application version keeps
+     * serving the corpus it was gated on while the live index goes on changing.
+     *
+     * <p>Implementations must be effectively synchronous - the caller freezes the resulting name into an
+     * application version the moment this returns, so a copy that is still running would be published as
+     * complete.
+     *
+     * @param sourceIndex physical name of the live index
+     * @param targetIndex physical name of the snapshot to create
+     */
+    void snapshotIndex(String sourceIndex, String targetIndex);
+
+    /**
+     * Removes a physical index entirely, used to roll back a half built snapshot and to retire an expired
+     * one.
+     *
+     * <p>Never called on a live index: an index an alias points at is retired by repointing the alias, and
+     * dropping one would take the knowledge base offline.
+     *
+     * @param physicalIndexName physical index name, absent index treated as already removed
+     */
+    void dropIndex(String physicalIndexName);
+
+    /**
+     * Tells whether a physical index still exists.
+     *
+     * <p>The retrieval path asks before reading a snapshot index: a frozen name whose index was deleted out
+     * of band has to degrade to the live alias rather than fail the call.
+     *
+     * @param physicalIndexName physical index name
+     * @return {@code true} when the engine still holds it
+     */
+    boolean indexExists(String physicalIndexName);
+
+    /**
      * Runs a BM25 search with the mandatory version and enabled filter applied engine side.
      *
-     * @param alias alias of the target index
+     * @param alias alias of the target index, or the physical name of a snapshot index
      * @param query BM25 request
      * @return candidates ordered by descending raw BM25 score
      */

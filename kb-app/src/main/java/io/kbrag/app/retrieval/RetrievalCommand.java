@@ -7,6 +7,7 @@ import lombok.Getter;
 import lombok.ToString;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * One retrieval request as the caller expressed it.
@@ -85,4 +86,24 @@ public class RetrievalCommand {
      * single route after a zero key deployment gets its embedding model.
      */
     private final Boolean vectorRouteEnabled;
+
+    /**
+     * Physical indices to search per knowledge base id, replacing the live aliases, requirement section 4.7.
+     *
+     * <p>Set only when a released application version serves the call out of its frozen index snapshot. Unset
+     * everywhere else - a beta call against a test version, a chat preview, the console debug page, an
+     * evaluation run - because all of those are meant to observe the corpus as it is <em>now</em>, which is the
+     * whole reason the console can prove a snapshot isolates a release.
+     */
+    private final Map<String, RetrievalIndexOverride> indexOverride;
+
+    /**
+     * Version visibility set to filter with per knowledge base id, replacing the current active versions.
+     *
+     * <p>Travels with {@link #indexOverride} and is never used without it: a frozen set names the document
+     * versions a snapshot contains, so applying it to the live index would filter out everything indexed since
+     * the release, and applying today's active versions to a snapshot would match nothing at all. The two are a
+     * pair, and the retrieval service resolves them as one.
+     */
+    private final Map<String, List<String>> visibleVersionIdsOverride;
 }

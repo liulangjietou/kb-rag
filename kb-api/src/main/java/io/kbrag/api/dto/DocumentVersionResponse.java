@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.kbrag.app.document.DocumentVersionService;
 import io.kbrag.domain.entity.DocumentVersion;
 
+import java.util.List;
+
 /**
  * One row of the version management drawer.
  *
@@ -14,6 +16,10 @@ import io.kbrag.domain.entity.DocumentVersion;
  * @param chunkCount   chunks the version still owns
  * @param active       {@code true} when the document currently serves this version
  * @param rollbackMode {@code INSTANT} when activating it is a pointer switch, {@code REBUILD} otherwise
+ * @param pinned       {@code true} when an application version's index snapshot references this version, which
+ *                     makes the retention cleanup skip it, requirement section 4.1 "archiving protection"
+ * @param pinnedBy     application version business ids holding that reference, so the console can explain a
+ *                     disabled archive action instead of only greying it out
  * @param changelog    change note
  * @param createdAt    ISO creation timestamp
  *
@@ -27,6 +33,8 @@ public record DocumentVersionResponse(
         @JsonProperty("chunk_count") long chunkCount,
         boolean active,
         @JsonProperty("rollback_mode") String rollbackMode,
+        boolean pinned,
+        @JsonProperty("pinned_by") List<String> pinnedBy,
         String changelog,
         @JsonProperty("created_at") String createdAt) {
 
@@ -46,6 +54,8 @@ public record DocumentVersionResponse(
                 view.chunkCount(),
                 view.active(),
                 view.rollbackMode().name(),
+                view.pinned(),
+                view.pinnedBy(),
                 entity.getChangelog(),
                 entity.getCreatedAt() == null ? null : entity.getCreatedAt().toString());
     }

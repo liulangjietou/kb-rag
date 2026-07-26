@@ -41,6 +41,7 @@ public class ChunkIndexWriter {
     private static final int ENABLED = 1;
 
     private final IndexAliasManager indexAliasManager;
+    private final IndexSnapshotService indexSnapshotService;
     private final ChunkIndexSyncMapper chunkIndexSyncMapper;
 
     /**
@@ -93,6 +94,12 @@ public class ChunkIndexWriter {
      * <p>No synchronization row is touched: the row records whether the chunk reached the index, and a
      * flag update neither creates nor loses a projection.
      *
+     * <p><b>The release snapshots are updated too</b>, requirement section 4.5. Disabling is a quality stop,
+     * and a released version answering out of a frozen index is serving traffic just as much as the live
+     * alias is; a stop that only reached the live index would leave the content readable through the open API.
+     * This is the one operation that crosses into a snapshot - content edits deliberately do not, because a
+     * snapshot is supposed to hold the text of its release.
+     *
      * @param kbId     knowledge base business id
      * @param chunkIds chunk ids to update, ignored when empty
      * @param enabled  new retrieval switch value
@@ -102,6 +109,7 @@ public class ChunkIndexWriter {
             return;
         }
         indexAliasManager.updateEnabledEverywhere(kbId, chunkIds, enabled);
+        indexSnapshotService.broadcastEnabled(kbId, chunkIds, enabled);
         log.info("chunk enabled flag synced, kbId={}, chunks={}, enabled={}", kbId, chunkIds.size(), enabled);
     }
 

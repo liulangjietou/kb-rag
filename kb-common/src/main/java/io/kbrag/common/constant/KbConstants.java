@@ -92,8 +92,17 @@ public final class KbConstants {
     /** Initial document version number, see requirement section 4.1. */
     public static final String INITIAL_VERSION = "1.0";
 
-    /** Snapshot segment of a physical index name, fixed for M1. */
+    /** Snapshot segment of the live physical index, the one every alias points at. */
     public static final String SNAPSHOT_SEGMENT_V1 = "v1";
+
+    /**
+     * Prefix of the snapshot segment of a release snapshot index, followed by the knowledge base level
+     * sequence number ({@code s1}, {@code s2}, ...).
+     *
+     * <p>Also the marker that tells a snapshot registry row apart from a live one: the live segment is
+     * {@code v1}, so a prefix match on this letter is an exact predicate rather than a heuristic.
+     */
+    public static final String SNAPSHOT_SEGMENT_PREFIX = "s";
 
     /** Embedding version segment used when no embedding provider is configured. */
     public static final String EMBEDDING_SEGMENT_NONE = "none";

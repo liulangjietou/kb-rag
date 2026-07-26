@@ -17,6 +17,7 @@ import io.kbrag.domain.enums.TaskType;
 import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.mapper.DocumentVersionMapper;
 import io.kbrag.domain.mapper.KbTaskMapper;
+import io.kbrag.domain.port.VersionPinChecker;
 import io.kbrag.domain.service.BizIdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Version list, activation and the pre-flight check behind the confirmation dialog.
@@ -57,6 +59,7 @@ public class DocumentVersionService {
     private final VersionRetentionService versionRetentionService;
     private final AnnotationInheritanceService annotationInheritanceService;
     private final EvalCaseStalenessService evalCaseStalenessService;
+    private final VersionPinChecker versionPinChecker;
 
     /**
      * Lists the versions of a document, newest first.
@@ -74,12 +77,17 @@ public class DocumentVersionService {
         List<DocumentVersion> ordered = new ArrayList<>(versions);
         ordered.sort(Comparator.comparing(DocumentVersion::getId,
                 Comparator.nullsFirst(Long::compareTo)).reversed());
+        // Asked once for the whole document rather than once per row: the answer is a scan of the application
+        // versions holding a frozen visibility set, and repeating it per version would multiply that by the
+        // retention window for an answer that cannot differ between rows.
+        Map<String, List<String>> pinnedBy = versionPinChecker.pinnedBy(docId);
         List<VersionView> views = new ArrayList<>(ordered.size());
         for (DocumentVersion version : ordered) {
             long chunkCount = chunkCountOf(version.getVersionId());
+            List<String> pins = pinnedBy.getOrDefault(version.getVersionId(), List.of());
             views.add(new VersionView(version, chunkCount,
                     version.getVersionId().equals(document.getCurrentVersionId()),
-                    RollbackMode.resolve(version.getStatus(), chunkCount)));
+                    RollbackMode.resolve(version.getStatus(), chunkCount), pins));
         }
         return views;
     }
@@ -170,9 +178,20 @@ public class DocumentVersionService {
      * @param chunkCount   chunks the version still owns
      * @param active       {@code true} when the document points at this version
      * @param rollbackMode cost of activating it
+     * @param pinnedBy     application versions whose index snapshot references this version, requirement
+     *                     section 4.1 "archiving protection"; empty when nothing pins it
      */
     public record VersionView(DocumentVersion version, long chunkCount, boolean active,
-                              RollbackMode rollbackMode) {
+                              RollbackMode rollbackMode, List<String> pinnedBy) {
+
+        /**
+         * Tells whether the retention cleanup will skip this version.
+         *
+         * @return {@code true} when at least one application version references it
+         */
+        public boolean pinned() {
+            return !pinnedBy.isEmpty();
+        }
     }
 
     /**

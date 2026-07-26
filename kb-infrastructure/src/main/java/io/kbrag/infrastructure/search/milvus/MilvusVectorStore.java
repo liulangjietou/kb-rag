@@ -2,6 +2,7 @@ package io.kbrag.infrastructure.search.milvus;
 
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.constant.IndexFields;
 import io.kbrag.domain.enums.RetrievalSource;
 import io.kbrag.domain.enums.VectorEngine;
@@ -16,24 +17,32 @@ import io.kbrag.domain.port.VectorStore;
 import io.kbrag.domain.service.VectorScoreNormalizer;
 import io.milvus.client.MilvusServiceClient;
 import io.milvus.grpc.DataType;
+import io.milvus.grpc.DescribeCollectionResponse;
 import io.milvus.grpc.MutationResult;
 import io.milvus.grpc.SearchResults;
+import io.milvus.orm.iterator.QueryIterator;
 import io.milvus.param.IndexType;
 import io.milvus.param.MetricType;
 import io.milvus.param.R;
+import io.milvus.param.RpcStatus;
 import io.milvus.param.alias.AlterAliasParam;
 import io.milvus.param.alias.CreateAliasParam;
 import io.milvus.param.collection.CreateCollectionParam;
+import io.milvus.param.collection.DescribeCollectionParam;
+import io.milvus.param.collection.DropCollectionParam;
 import io.milvus.param.collection.FieldType;
+import io.milvus.param.collection.FlushParam;
 import io.milvus.param.collection.HasCollectionParam;
 import io.milvus.param.collection.LoadCollectionParam;
 import io.milvus.param.dml.DeleteParam;
 import io.milvus.param.dml.InsertParam;
+import io.milvus.param.dml.QueryIteratorParam;
 import io.milvus.param.dml.SearchParam;
 import io.milvus.param.dml.UpsertParam;
 import io.milvus.param.index.CreateIndexParam;
+import io.milvus.response.DescCollResponseWrapper;
+import io.milvus.response.QueryResultsWrapper;
 import io.milvus.response.SearchResultsWrapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -55,7 +64,6 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "kb.vector", name = "engine", havingValue = "milvus")
 public class MilvusVectorStore implements VectorStore {
 
@@ -66,7 +74,37 @@ public class MilvusVectorStore implements VectorStore {
     private static final String SEARCH_EXTRA_PARAM = "{\"ef\":64}";
     private static final String VECTOR_INDEX_NAME = "idx_vector";
 
+    /** Entities read back and inserted per batch of a snapshot copy. */
+    private static final int COPY_BATCH_SIZE = 500;
+
+    /**
+     * Predicate that matches every entity of a collection. Milvus requires an expression, and the primary key
+     * is a non empty varchar on every row this service writes.
+     */
+    private static final String COPY_ALL_EXPRESSION = IndexFields.CHUNK_ID + " != \"\"";
+
+    /**
+     * Complete field list of the collection, in the order the copy reads and writes it.
+     *
+     * <p>The same list the schema declares, so a snapshot cannot end up with a narrower field set than its
+     * source: a missing filterable field would make the mandatory version predicate unsatisfiable and the
+     * snapshot would recall nothing.
+     */
+    private static final List<String> COPY_FIELDS = List.of(
+            IndexFields.CHUNK_ID, IndexFields.KB_ID, IndexFields.DOC_ID, IndexFields.DOCUMENT_VERSION_ID,
+            IndexFields.PARENT_ID, IndexFields.CHUNK_TYPE, IndexFields.ENABLED, IndexFields.TAG_IDS,
+            IndexFields.SESSION_ID, IndexFields.SENDER, IndexFields.MSG_TIME, IndexFields.CHUNK_SEQ,
+            IndexFields.CONTENT, IndexFields.VECTOR);
+
     private final MilvusServiceClient client;
+
+    /** Budget of one snapshot copy, read once so the field list stays a plain value. */
+    private final long snapshotTimeoutMs;
+
+    public MilvusVectorStore(MilvusServiceClient client, KbProperties properties) {
+        this.client = client;
+        this.snapshotTimeoutMs = properties.getApp().getSnapshotTimeoutMs();
+    }
 
     @Override
     public String engine() {
@@ -79,18 +117,33 @@ public class MilvusVectorStore implements VectorStore {
             throw new BizException(ErrorCode.INTERNAL_ERROR, "milvus collection requires a vector dimension");
         }
         String collection = spec.getPhysicalIndexName();
+        provisionCollection(collection, spec.getDimension());
+        client.loadCollection(LoadCollectionParam.newBuilder().withCollectionName(collection).build());
+        bindAlias(collection, spec.getAliasName());
+        log.info("milvus collection ready, collection={}, alias={}", collection, spec.getAliasName());
+    }
+
+    /**
+     * Creates the collection with its indexes when it is missing, without touching any alias.
+     *
+     * <p>Shared by the live index provisioning and by the snapshot copy: the two must produce an identical
+     * schema and identical indexes, and the only thing that differs between them is whether an alias ends up
+     * pointing at the result.
+     *
+     * @param collection collection name
+     * @param dimension  vector dimension
+     */
+    private void provisionCollection(String collection, int dimension) {
         R<Boolean> exists = client.hasCollection(HasCollectionParam.newBuilder()
                 .withCollectionName(collection)
                 .build());
         checkResponse(exists, "has collection");
-        if (!Boolean.TRUE.equals(exists.getData())) {
-            createCollection(collection, spec.getDimension());
-            createVectorIndex(collection);
-            createScalarIndexes(collection);
+        if (Boolean.TRUE.equals(exists.getData())) {
+            return;
         }
-        client.loadCollection(LoadCollectionParam.newBuilder().withCollectionName(collection).build());
-        bindAlias(collection, spec.getAliasName());
-        log.info("milvus collection ready, collection={}, alias={}", collection, spec.getAliasName());
+        createCollection(collection, dimension);
+        createVectorIndex(collection);
+        createScalarIndexes(collection);
     }
 
     @Override
@@ -172,6 +225,134 @@ public class MilvusVectorStore implements VectorStore {
         }
         log.info("milvus enabled flag not mirrored, enforced by the fact source, "
                 + "collection={}, enabled={}, chunks={}", alias, enabled, chunkIds.size());
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p><b>A copy, not a hard link.</b> Milvus has no segment level clone, so the snapshot is created by
+     * reading every entity of the source collection and inserting it into a fresh one with the same schema.
+     * That is genuinely expensive - it is the storage and time cost requirement section 4.7 accepts when it
+     * says the release doubles storage - but it is also the only way to obtain an immutable copy that keeps
+     * serving after the live collection changes.
+     *
+     * <p><b>Why an iterator and not a paged query.</b> A Milvus query window is bounded (offset plus limit
+     * cannot exceed the configured maximum), so paging would silently stop copying a corpus larger than that
+     * window and produce a snapshot that looks complete while missing its tail. The iterator walks the whole
+     * collection instead.
+     *
+     * <p>The deadline bounds the whole walk rather than a single batch: what the caller needs protecting
+     * against is a release parked on a collection that answers each batch slowly.
+     *
+     * @param sourceIndex source collection name
+     * @param targetIndex snapshot collection name
+     */
+    @Override
+    public void snapshotIndex(String sourceIndex, String targetIndex) {
+        long deadline = System.currentTimeMillis() + snapshotTimeoutMs;
+        R<DescribeCollectionResponse> described = client.describeCollection(
+                DescribeCollectionParam.newBuilder().withCollectionName(sourceIndex).build());
+        checkResponse(described, "describe collection");
+        FieldType vectorField = new DescCollResponseWrapper(described.getData()).getVectorField();
+        if (vectorField == null) {
+            throw new BizException(ErrorCode.INTERNAL_ERROR,
+                    "milvus source collection carries no vector field");
+        }
+        // No alias is bound: a snapshot is addressed by its physical name precisely because the alias has to
+        // keep pointing at the live collection the knowledge base goes on writing to.
+        provisionCollection(targetIndex, vectorField.getDimension());
+        long copied = copyEntities(sourceIndex, targetIndex, deadline);
+        R<?> flushed = client.flush(FlushParam.newBuilder()
+                .withCollectionNames(List.of(targetIndex))
+                .build());
+        checkResponse(flushed, "flush snapshot collection");
+        client.loadCollection(LoadCollectionParam.newBuilder().withCollectionName(targetIndex).build());
+        log.info("milvus collection snapshotted, source={}, target={}, entities={}",
+                sourceIndex, targetIndex, copied);
+    }
+
+    @Override
+    public void dropIndex(String physicalIndexName) {
+        if (!indexExists(physicalIndexName)) {
+            log.info("milvus collection already absent, nothing to drop, collection={}", physicalIndexName);
+            return;
+        }
+        R<RpcStatus> dropped = client.dropCollection(DropCollectionParam.newBuilder()
+                .withCollectionName(physicalIndexName)
+                .build());
+        checkResponse(dropped, "drop collection");
+        log.info("milvus collection dropped, collection={}", physicalIndexName);
+    }
+
+    @Override
+    public boolean indexExists(String physicalIndexName) {
+        R<Boolean> exists = client.hasCollection(HasCollectionParam.newBuilder()
+                .withCollectionName(physicalIndexName)
+                .build());
+        checkResponse(exists, "has collection");
+        return Boolean.TRUE.equals(exists.getData());
+    }
+
+    /**
+     * Walks the source collection and inserts every entity into the target.
+     *
+     * @param sourceIndex source collection name
+     * @param targetIndex target collection name
+     * @param deadline    epoch millisecond the whole copy has to finish by
+     * @return entities copied
+     */
+    private long copyEntities(String sourceIndex, String targetIndex, long deadline) {
+        R<QueryIterator> iterator = client.queryIterator(QueryIteratorParam.newBuilder()
+                .withCollectionName(sourceIndex)
+                .withExpr(COPY_ALL_EXPRESSION)
+                .withOutFields(COPY_FIELDS)
+                .withBatchSize((long) COPY_BATCH_SIZE)
+                .build());
+        checkResponse(iterator, "open query iterator");
+        QueryIterator cursor = iterator.getData();
+        long copied = 0L;
+        try {
+            while (true) {
+                if (System.currentTimeMillis() >= deadline) {
+                    log.error("milvus snapshot copy exceeded its budget, errorCode={}, source={}, copied={}",
+                            ErrorCode.INTERNAL_ERROR, sourceIndex, copied);
+                    throw new BizException(ErrorCode.INTERNAL_ERROR, "milvus snapshot copy timed out");
+                }
+                List<QueryResultsWrapper.RowRecord> batch = cursor.next();
+                if (CollectionUtils.isEmpty(batch)) {
+                    return copied;
+                }
+                insertRows(targetIndex, batch);
+                copied += batch.size();
+            }
+        } finally {
+            cursor.close();
+        }
+    }
+
+    /**
+     * Inserts one batch of read back entities into the snapshot collection.
+     *
+     * <p>Built field by field from the very same field name list the live write uses, so a schema change has
+     * one place to be reflected and a snapshot can never end up with a narrower field set than its source.
+     *
+     * @param targetIndex target collection name
+     * @param rows        entities read from the source
+     */
+    private void insertRows(String targetIndex, List<QueryResultsWrapper.RowRecord> rows) {
+        List<InsertParam.Field> fields = new ArrayList<>(COPY_FIELDS.size());
+        for (String name : COPY_FIELDS) {
+            List<Object> values = new ArrayList<>(rows.size());
+            for (QueryResultsWrapper.RowRecord row : rows) {
+                values.add(row.get(name));
+            }
+            fields.add(new InsertParam.Field(name, values));
+        }
+        R<MutationResult> inserted = client.insert(InsertParam.newBuilder()
+                .withCollectionName(targetIndex)
+                .withFields(fields)
+                .build());
+        checkResponse(inserted, "insert snapshot entities");
     }
 
     @Override

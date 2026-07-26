@@ -83,6 +83,13 @@ public class VersionRetentionService {
                 new LambdaQueryWrapper<DocumentVersion>().eq(DocumentVersion::getDocId, docId));
         int retainCount = properties.getDoc().getVersion().resolvedRetainCount();
         Set<String> pinned = versionPinChecker.pinnedVersionIds(docId);
+        if (CollectionUtils.isNotEmpty(pinned)) {
+            // Requirement sections 4.1 and 4.7: a version an application version's index snapshot references
+            // keeps its chunks, because MySQL is where the snapshot reads its text from and archiving would
+            // turn a rollback onto that version into an empty answer.
+            log.info("document versions skipped by the retention window because a release snapshot references "
+                    + "them, docId={}, pinned={}", docId, pinned);
+        }
         List<DocumentVersion> archivable = retentionPolicy.selectArchivable(versions,
                 document.getCurrentVersionId(), retainCount, pinned);
         if (CollectionUtils.isEmpty(archivable)) {

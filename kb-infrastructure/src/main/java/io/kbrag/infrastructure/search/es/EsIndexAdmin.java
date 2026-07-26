@@ -79,6 +79,123 @@ public class EsIndexAdmin {
     }
 
     /**
+     * Clones a physical index into a new one, requirement section 4.7 "index snapshot".
+     *
+     * <p><b>Why a clone and not a reindex.</b> {@code _clone} hard links the Lucene segment files of the
+     * source, so the copy costs no re-analysis, no re-embedding and almost no time regardless of corpus
+     * size, and it reproduces the mapping - including the {@code dense_vector} field and its dimension -
+     * byte for byte. A reindex would re-analyse every document and could produce a different BM25 baseline
+     * than the one the release gate measured.
+     *
+     * <p><b>Why the source is blocked for writes.</b> Elasticsearch requires it: a clone hard links segments
+     * and can only guarantee a consistent copy while nothing is being written. The block is the reason a
+     * snapshot is a point in time rather than a smear across one, and it is what makes "the index the gate
+     * measured is the index the release serves" true.
+     *
+     * <p><b>Why the block is always lifted.</b> The source is the live index the whole knowledge base reads
+     * and writes through, so leaving it read only would take indexing offline for that base. The lift
+     * therefore runs in a finally block: a failed snapshot must cost a failed release, never a frozen
+     * knowledge base.
+     *
+     * <p>An already existing target is accepted as done rather than reported as a conflict, so retrying a
+     * release whose bookkeeping failed after a successful clone is not blocked forever.
+     *
+     * @param sourceIndex physical name of the live index
+     * @param targetIndex physical name of the snapshot to create
+     */
+    public void cloneIndex(String sourceIndex, String targetIndex) {
+        try {
+            blockWrites(sourceIndex, true);
+            try {
+                client.indices().clone(request -> request.index(sourceIndex).target(targetIndex));
+                log.info("es index cloned, source={}, target={}", sourceIndex, targetIndex);
+            } catch (Exception e) {
+                if (!isAlreadyExists(e)) {
+                    throw e;
+                }
+                log.info("es snapshot index already present, reused, target={}", targetIndex);
+            }
+            // The clone inherits the write block from its source, and a snapshot that cannot be written is
+            // still expected to accept the enabled flag broadcast of a quality stop.
+            blockWrites(targetIndex, false);
+        } catch (BizException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("clone es index failed, errorCode={}, source={}, target={}",
+                    ErrorCode.INTERNAL_ERROR, sourceIndex, targetIndex, e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "clone elasticsearch index failed", e);
+        } finally {
+            unblockWritesQuietly(sourceIndex);
+        }
+    }
+
+    /**
+     * Deletes a physical index, treating an absent one as already deleted.
+     *
+     * @param physicalIndexName physical index name
+     */
+    public void deleteIndex(String physicalIndexName) {
+        try {
+            if (!indexExists(physicalIndexName)) {
+                log.info("es index already absent, nothing to delete, index={}", physicalIndexName);
+                return;
+            }
+            client.indices().delete(request -> request.index(physicalIndexName));
+            log.info("es index deleted, index={}", physicalIndexName);
+        } catch (Exception e) {
+            log.error("delete es index failed, errorCode={}, index={}",
+                    ErrorCode.INTERNAL_ERROR, physicalIndexName, e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "delete elasticsearch index failed", e);
+        }
+    }
+
+    /**
+     * Tells whether a physical index exists.
+     *
+     * @param physicalIndexName physical index name
+     * @return {@code true} when the cluster holds it
+     */
+    public boolean indexExists(String physicalIndexName) {
+        try {
+            return client.indices().exists(request -> request.index(physicalIndexName)).value();
+        } catch (Exception e) {
+            log.error("es index existence check failed, errorCode={}, index={}",
+                    ErrorCode.INTERNAL_ERROR, physicalIndexName, e);
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "elasticsearch index existence check failed", e);
+        }
+    }
+
+    /**
+     * Turns the write block of an index on or off.
+     *
+     * @param index   physical index name
+     * @param blocked {@code true} makes the index reject writes
+     * @throws IOException when the settings update call fails
+     */
+    private void blockWrites(String index, boolean blocked) throws IOException {
+        client.indices().putSettings(request -> request
+                .index(index)
+                .settings(settings -> settings.blocks(blocks -> blocks.write(blocked))));
+    }
+
+    /**
+     * Lifts the write block without letting the attempt mask the original failure.
+     *
+     * @param index physical index name
+     */
+    private void unblockWritesQuietly(String index) {
+        try {
+            blockWrites(index, false);
+        } catch (Exception e) {
+            // Reported at error level rather than thrown: the caller is either finishing successfully or
+            // already carrying a more informative failure, and this one needs an operator either way -
+            // the live index of a knowledge base stays read only until it is lifted by hand.
+            log.error("es write block could not be lifted, errorCode={}, index={}",
+                    ErrorCode.INTERNAL_ERROR, index, e);
+        }
+    }
+
+    /**
      * Repoints the alias so that it resolves to exactly this physical index.
      *
      * <p>A plain putAlias only ever appends. As soon as the embedding version segment of the index

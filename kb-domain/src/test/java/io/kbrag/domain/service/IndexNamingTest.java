@@ -39,6 +39,38 @@ class IndexNamingTest {
     }
 
     @Test
+    void shouldNameSnapshotsByASequenceAndKeepTheEmbeddingSegment() {
+        assertEquals("kb_" + KB_SUFFIX + "_tev4_s1", naming.snapshotPhysicalName(KB_ID, "tev4", 1));
+        assertEquals("kb_" + KB_SUFFIX + "_tev4_s2", naming.snapshotPhysicalName(KB_ID, "tev4", 2));
+        // Full mode: the BM25 index keeps its bm25 segment in a snapshot too, so a snapshot name still says
+        // which engine and which scoring baseline the data belongs to.
+        assertEquals("kb_" + KB_SUFFIX + "_bm25_s3",
+                naming.snapshotPhysicalName(KB_ID, KbConstants.EMBEDDING_SEGMENT_BM25, 3));
+        // Zero key mode keeps the none placeholder.
+        assertEquals("kb_" + KB_SUFFIX + "_none_s1",
+                naming.snapshotPhysicalName(KB_ID, KbConstants.EMBEDDING_SEGMENT_NONE, 1));
+    }
+
+    @Test
+    void shouldReadTheSequenceBackOutOfASnapshotSegment() {
+        assertEquals(1, naming.snapshotSequenceOf(naming.snapshotSegment(1)));
+        assertEquals(42, naming.snapshotSequenceOf("s42"));
+        // The live segment must contribute nothing to the maximum the next sequence is derived from.
+        assertEquals(0, naming.snapshotSequenceOf(KbConstants.SNAPSHOT_SEGMENT_V1));
+        assertEquals(0, naming.snapshotSequenceOf("snapshot"));
+        assertEquals(0, naming.snapshotSequenceOf(null));
+    }
+
+    @Test
+    void shouldReportWhichEmbeddingSegmentTheFulltextIndexCarries() {
+        // Lite mode: one index serves both routes, so it keeps the embedding segment and a snapshot of it
+        // carries the vector field along.
+        assertEquals("tev4", naming.fulltextEmbeddingSegment(VectorEngine.ES, "tev4"));
+        assertEquals(KbConstants.EMBEDDING_SEGMENT_BM25,
+                naming.fulltextEmbeddingSegment(VectorEngine.MILVUS, "tev4"));
+    }
+
+    @Test
     void shouldKeepTheEmbeddingSegmentOnTheLiteFulltextIndex() {
         assertEquals("kb_" + KB_SUFFIX + "_tev4_v1",
                 naming.fulltextPhysicalName(KB_ID, VectorEngine.ES, "tev4"));

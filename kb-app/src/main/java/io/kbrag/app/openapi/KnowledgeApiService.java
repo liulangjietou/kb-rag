@@ -4,6 +4,7 @@ import io.kbrag.app.appcenter.AppService;
 import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.config.AsyncConfig;
 import io.kbrag.app.retrieval.RetrievalCommand;
+import io.kbrag.app.retrieval.RetrievalIndexOverride;
 import io.kbrag.app.retrieval.RetrievalNodeView;
 import io.kbrag.app.retrieval.RetrievalService;
 import io.kbrag.app.retrieval.SearchOutcome;
@@ -11,8 +12,10 @@ import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.context.RequestIdHolder;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.AppVersion;
+import io.kbrag.domain.enums.AppVersionStatus;
 import io.kbrag.domain.enums.TargetStage;
 import io.kbrag.domain.model.AppConfigSnapshot;
+import io.kbrag.domain.model.AppIndexSnapshot;
 import io.kbrag.domain.model.AppRoutingConfig;
 import io.kbrag.domain.model.ChatMessage;
 import io.kbrag.domain.model.KbRef;
@@ -29,8 +32,10 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -205,8 +210,12 @@ public class KnowledgeApiService {
         AppVersion version = appVersionId == null || appVersionId.isBlank()
                 ? appVersionService.requireNewest(appId)
                 : appVersionService.require(appVersionId);
+        // Deliberately not snapshot bound even when the previewed version is the released one: a preview exists
+        // to try a configuration against the corpus as it is now, and it is also how an operator proves a
+        // snapshot isolates a release - the same query returns the new content here and does not there
+        // (requirement section 4.4 "the console debug page takes the current active versions").
         ResolvedTarget target = new ResolvedTarget(version, appVersionService.parseConfig(version),
-                TargetStage.of(version.getStatus()));
+                TargetStage.of(version.getStatus()), false);
         requestOverridePolicy.validate(forbiddenKeysOf(command));
         KnowledgeCallResult retrieved = retrieve(target, command);
         if (listener == null) {
@@ -235,7 +244,23 @@ public class KnowledgeApiService {
         appService.require(command.getAppId());
         AppVersion version = appVersionService.resolveForCall(command.getAppId(), command.getAppVersion());
         return new ResolvedTarget(version, appVersionService.parseConfig(version),
-                TargetStage.of(version.getStatus()));
+                TargetStage.of(version.getStatus()), snapshotBound(version));
+    }
+
+    /**
+     * Decides whether a call is served out of the version's frozen index snapshot, requirement section 4.7.
+     *
+     * <p>Two conditions, both necessary. Only a <b>released</b> version serves a snapshot: a beta call against a
+     * test version is a gradual rollout against the current corpus, and a test version has no snapshot anyway
+     * since snapshots are created by the release. And only a version that actually <b>froze</b> one: a version
+     * released before this milestone carries nothing, which is a historical data shape rather than a fault, so
+     * it falls through to the live alias without a degradation marker.
+     *
+     * @param version version serving the call
+     * @return {@code true} when the frozen snapshot is what this call must read
+     */
+    private boolean snapshotBound(AppVersion version) {
+        return version.getStatus() == AppVersionStatus.RELEASED && version.hasIndexSnapshot();
     }
 
     /**
@@ -252,7 +277,7 @@ public class KnowledgeApiService {
             throw new BizException(ErrorCode.VERSION_NOT_PUBLISHED,
                     "应用版本未配置知识库，无法提供检索服务");
         }
-        SearchOutcome outcome = retrievalService.search(kbRefs, toRetrievalCommand(snapshot, command));
+        SearchOutcome outcome = retrievalService.search(kbRefs, toRetrievalCommand(snapshot, command, target));
         List<RetrievalNodeView> nodes = trim(outcome.getNodes(), command.getMaxContentLength());
         return KnowledgeCallResult.builder()
                 .nodes(nodes)
@@ -273,12 +298,17 @@ public class KnowledgeApiService {
      *
      * @param snapshot frozen configuration
      * @param command  call parameters
+     * @param target   resolved application version, read for the index snapshot binding
      * @return retrieval command
      */
-    private RetrievalCommand toRetrievalCommand(AppConfigSnapshot snapshot, KnowledgeCallCommand command) {
+    private RetrievalCommand toRetrievalCommand(AppConfigSnapshot snapshot, KnowledgeCallCommand command,
+                                                ResolvedTarget target) {
         KbRetrievalConfig retrieval = snapshot.retrievalOrDefaults();
         AppRoutingConfig routing = snapshot.routingOrDefaults();
         return RetrievalCommand.builder()
+                .indexOverride(target.snapshotBound() ? indexOverridesOf(target.version()) : null)
+                .visibleVersionIdsOverride(target.snapshotBound()
+                        ? target.version().visibleVersionIdMap() : null)
                 .routingEnabled(routing.isEnabled())
                 .routingPrompt(routing.getPrompt())
                 .query(command.getQuery())
@@ -294,6 +324,27 @@ public class KnowledgeApiService {
                 .rewriteEnabled(retrieval.getRewriteEnabled())
                 .metadataFilter(command.getMetadataFilter())
                 .build();
+    }
+
+    /**
+     * Groups the frozen snapshots of a version into the per knowledge base index override.
+     *
+     * @param version released version carrying a snapshot
+     * @return override per knowledge base id, bases without a usable snapshot left out
+     */
+    private Map<String, RetrievalIndexOverride> indexOverridesOf(AppVersion version) {
+        Map<String, List<AppIndexSnapshot>> byKb = new LinkedHashMap<>();
+        for (AppIndexSnapshot snapshot : version.indexSnapshotList()) {
+            byKb.computeIfAbsent(snapshot.kbId(), key -> new ArrayList<>()).add(snapshot);
+        }
+        Map<String, RetrievalIndexOverride> overrides = new LinkedHashMap<>(byKb.size());
+        byKb.forEach((kbId, snapshots) -> {
+            RetrievalIndexOverride override = RetrievalIndexOverride.of(snapshots);
+            if (override != null) {
+                overrides.put(kbId, override);
+            }
+        });
+        return overrides;
     }
 
     /**
@@ -478,10 +529,13 @@ public class KnowledgeApiService {
     /**
      * The application version one call resolved to, with its parsed snapshot and stage.
      *
-     * @param version  version row
-     * @param snapshot parsed configuration snapshot
-     * @param stage    stage the version is in, the audit dimension
+     * @param version       version row
+     * @param snapshot      parsed configuration snapshot
+     * @param stage         stage the version is in, the audit dimension
+     * @param snapshotBound {@code true} when the retrieval must read this version's frozen index snapshot
+     *                      instead of the live aliases
      */
-    private record ResolvedTarget(AppVersion version, AppConfigSnapshot snapshot, TargetStage stage) {
+    private record ResolvedTarget(AppVersion version, AppConfigSnapshot snapshot, TargetStage stage,
+                                  boolean snapshotBound) {
     }
 }

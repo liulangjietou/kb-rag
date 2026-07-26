@@ -37,6 +37,7 @@ public class DocumentVersionActivator {
 
     private final DocumentMapper documentMapper;
     private final DocumentVersionMapper documentVersionMapper;
+    private final ActiveVersionResolver activeVersionResolver;
 
     /**
      * Activates one version and points its document at it.
@@ -73,6 +74,10 @@ public class DocumentVersionActivator {
                 .set(Document::getConfigStale, NOT_STALE)
                 .set(Document::getCurrentVersionId, version.getVersionId())
                 .eq(Document::getDocId, document.getDocId()));
+        // The activation is the one event that changes the version visibility set of the knowledge base, so it
+        // is also the one place the cached set has to be dropped. An operator switching a version watches the
+        // debug page for the effect, and a stale set there is indistinguishable from a switch that never worked.
+        activeVersionResolver.invalidate(document.getKbId());
         log.info("document version activated, docId={}, versionId={}",
                 document.getDocId(), version.getVersionId());
     }

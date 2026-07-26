@@ -38,7 +38,17 @@ public enum DegradedReason {
     ROUTE_FALLBACK_ALL("route_fallback_all"),
 
     /** Score threshold not applied because the active score type is not comparable. */
-    THRESHOLD_INACTIVE("threshold_inactive");
+    THRESHOLD_INACTIVE("threshold_inactive"),
+
+    /**
+     * A released version's frozen snapshot index is gone from the engine, so the call was served from the
+     * live alias and the current active versions instead of the corpus the version was released on.
+     *
+     * <p>Only reported when a snapshot was recorded and turned out to be missing. A version released before
+     * index snapshots existed has nothing frozen and is served from the live alias by design, which is a
+     * historical data shape rather than a fault and carries no marker.
+     */
+    SNAPSHOT_INDEX_MISSING("snapshot_index_missing");
 
     private final String code;
 

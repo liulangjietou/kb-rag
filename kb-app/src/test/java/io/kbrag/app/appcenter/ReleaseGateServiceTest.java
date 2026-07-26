@@ -1,6 +1,8 @@
 package io.kbrag.app.appcenter;
 
 import io.kbrag.app.eval.EvalRunService;
+import io.kbrag.common.api.ErrorCode;
+import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.AppVersion;
@@ -13,6 +15,7 @@ import io.kbrag.domain.enums.GateVerdict;
 import io.kbrag.domain.enums.RunStatus;
 import io.kbrag.domain.mapper.EvalResultMapper;
 import io.kbrag.domain.model.AppConfigSnapshot;
+import io.kbrag.domain.model.AppIndexSnapshot;
 import io.kbrag.domain.model.EvalRetrievalConfig;
 import io.kbrag.domain.model.GateDecision;
 import io.kbrag.domain.model.GateReport;
@@ -24,9 +27,11 @@ import io.kbrag.domain.service.ReleaseGateJudge;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -37,6 +42,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -57,8 +63,17 @@ class ReleaseGateServiceTest {
     private static final String DATASET_ID = "evds_1";
     private static final String CANDIDATE_RUN = "evr_candidate";
     private static final String BASELINE_RUN = "evr_baseline";
+    private static final String KB_ID = "kb_1";
+    private static final String SNAPSHOT_INDEX = "kb_1_none_s1";
+
+    /** Frozen snapshot every successful release in this class is expected to install. */
+    private static final AppReleaseSnapshotService.ReleaseSnapshot RELEASE_SNAPSHOT =
+            new AppReleaseSnapshotService.ReleaseSnapshot(
+                    List.of(new AppIndexSnapshot(KB_ID, "es", SNAPSHOT_INDEX)),
+                    Map.of(KB_ID, List.of("dv_1")));
 
     private AppVersionService appVersionService;
+    private AppReleaseSnapshotService releaseSnapshotService;
     private EvalRunService evalRunService;
     private EvalResultMapper evalResultMapper;
     private EmbeddingProvider embeddingProvider;
@@ -69,15 +84,17 @@ class ReleaseGateServiceTest {
     @BeforeEach
     void setUp() {
         appVersionService = mock(AppVersionService.class);
+        releaseSnapshotService = mock(AppReleaseSnapshotService.class);
         evalRunService = mock(EvalRunService.class);
         evalResultMapper = mock(EvalResultMapper.class);
         embeddingProvider = mock(EmbeddingProvider.class);
         rerankProvider = mock(RerankProvider.class);
         properties = new KbProperties();
         properties.getGate().setMinCases(2);
-        service = new ReleaseGateService(appVersionService, evalRunService, evalResultMapper,
-                new GateMetricsRecomputer(), new ReleaseGateJudge(), embeddingProvider, rerankProvider,
-                properties);
+        when(releaseSnapshotService.freeze(any(), any())).thenReturn(RELEASE_SNAPSHOT);
+        service = new ReleaseGateService(appVersionService, releaseSnapshotService, evalRunService,
+                evalResultMapper, new GateMetricsRecomputer(), new ReleaseGateJudge(), embeddingProvider,
+                rerankProvider, properties);
     }
 
     @Test
@@ -90,7 +107,7 @@ class ReleaseGateServiceTest {
 
         verify(appVersionService).recordGate(eq(version), eq(AppVersionStatus.GATE_LOG_ONLY),
                 eq(GateVerdict.LOG_ONLY), eq(GateReason.NO_DATASET), anyString(), eq(null));
-        verify(appVersionService, never()).promote(anyString(), anyBoolean(), anyString());
+        verify(appVersionService, never()).promote(anyString(), anyBoolean(), anyString(), any());
     }
 
     @Test
@@ -103,7 +120,7 @@ class ReleaseGateServiceTest {
 
         verify(appVersionService).recordGate(eq(version), eq(AppVersionStatus.GATE_LOG_ONLY),
                 eq(GateVerdict.LOG_ONLY), eq(GateReason.NO_DATASET), anyString(), eq(null));
-        verify(appVersionService).promote(VERSION_ID, true, "admin");
+        verify(appVersionService).promote(VERSION_ID, true, "admin", RELEASE_SNAPSHOT);
     }
 
     @Test
@@ -114,8 +131,57 @@ class ReleaseGateServiceTest {
 
         service.release(VERSION_ID, false, "admin");
 
-        verify(appVersionService).promote(VERSION_ID, false, "admin");
+        verify(appVersionService).promote(VERSION_ID, false, "admin", RELEASE_SNAPSHOT);
         verify(evalRunService, never()).submit(anyString(), anyInt(), anyList(), anyBoolean());
+    }
+
+    @Test
+    void shouldFreezeTheIndexSnapshotBeforeTheVersionBecomesReleased() {
+        AppVersion version = versionOf(AppVersionStatus.GATE_PASSED, DATASET_ID);
+        version.setGateVerdict(GateVerdict.PASSED);
+        when(appVersionService.require(VERSION_ID)).thenReturn(version);
+        when(appVersionService.parseConfig(version)).thenReturn(snapshot());
+
+        service.release(VERSION_ID, false, "admin");
+
+        // Requirement section 4.7 fixes the order: the gate first, the snapshot second, the state transition
+        // third. Later would publish a version serving the live index for a moment.
+        InOrder order = inOrder(releaseSnapshotService, appVersionService);
+        order.verify(releaseSnapshotService).freeze(eq(version), any());
+        order.verify(appVersionService).promote(VERSION_ID, false, "admin", RELEASE_SNAPSHOT);
+    }
+
+    @Test
+    void shouldLeaveTheVersionInItsGateOutcomeStateWhenTheSnapshotFails() {
+        AppVersion version = versionOf(AppVersionStatus.GATE_PASSED, DATASET_ID);
+        version.setGateVerdict(GateVerdict.PASSED);
+        when(appVersionService.require(VERSION_ID)).thenReturn(version);
+        when(appVersionService.parseConfig(version)).thenReturn(snapshot());
+        when(releaseSnapshotService.freeze(any(), any()))
+                .thenThrow(new BizException(ErrorCode.INTERNAL_ERROR, "snapshot failed"));
+
+        assertThrows(BizException.class, () -> service.release(VERSION_ID, false, "admin"));
+
+        // Nothing was promoted and the status was never touched, so the version stays retryable exactly where
+        // the gate left it. The freeze itself rolled back whatever indices it had created.
+        verify(appVersionService, never()).promote(anyString(), anyBoolean(), any(), any());
+        assertEquals(AppVersionStatus.GATE_PASSED, version.getStatus());
+    }
+
+    @Test
+    void shouldRollBackTheFrozenIndexesWhenTheStateTransitionFails() {
+        AppVersion version = versionOf(AppVersionStatus.GATE_PASSED, DATASET_ID);
+        version.setGateVerdict(GateVerdict.PASSED);
+        when(appVersionService.require(VERSION_ID)).thenReturn(version);
+        when(appVersionService.parseConfig(version)).thenReturn(snapshot());
+        when(appVersionService.promote(anyString(), anyBoolean(), any(), any()))
+                .thenThrow(new BizException(ErrorCode.INTERNAL_ERROR, "released slot taken"));
+
+        assertThrows(BizException.class, () -> service.release(VERSION_ID, false, "admin"));
+
+        // A snapshot no version references is dead storage nothing would ever clean up, so it goes away with
+        // the failed transition.
+        verify(releaseSnapshotService).discard(RELEASE_SNAPSHOT);
     }
 
     @Test
@@ -128,7 +194,7 @@ class ReleaseGateServiceTest {
 
         // Forcing overrides a known verdict; re-running the comparison would replace the very evidence the
         // override is recorded against.
-        verify(appVersionService).promote(VERSION_ID, true, "admin");
+        verify(appVersionService).promote(VERSION_ID, true, "admin", RELEASE_SNAPSHOT);
         verify(evalRunService, never()).submit(anyString(), anyInt(), anyList(), anyBoolean());
     }
 
@@ -161,7 +227,7 @@ class ReleaseGateServiceTest {
 
         assertEquals(GateVerdict.PASSED, decision.verdict());
         assertEquals(GateReason.WITHIN_TOLERANCE, decision.reason());
-        verify(appVersionService).promote(VERSION_ID, false, null);
+        verify(appVersionService).promote(VERSION_ID, false, null, RELEASE_SNAPSHOT);
 
         ArgumentCaptor<String> runIdsCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> reportCaptor = ArgumentCaptor.forClass(String.class);
@@ -191,7 +257,7 @@ class ReleaseGateServiceTest {
         assertEquals(GateVerdict.BLOCKED, decision.verdict());
         assertEquals(GateReason.METRICS_REGRESSED, decision.reason());
         assertEquals(-1.0d, decision.hitRateDelta(), 1e-9d);
-        verify(appVersionService, never()).promote(anyString(), anyBoolean(), any());
+        verify(appVersionService, never()).promote(anyString(), anyBoolean(), any(), any());
     }
 
     @Test
@@ -234,7 +300,7 @@ class ReleaseGateServiceTest {
 
         assertEquals(GateVerdict.LOG_ONLY, decision.verdict());
         assertEquals(GateReason.RUN_FAILED, decision.reason());
-        verify(appVersionService, never()).promote(anyString(), anyBoolean(), any());
+        verify(appVersionService, never()).promote(anyString(), anyBoolean(), any(), any());
     }
 
     @Test
@@ -270,7 +336,7 @@ class ReleaseGateServiceTest {
 
         assertEquals(GateVerdict.PASSED, decision.verdict());
         assertEquals(GateReason.BASELINE_RECORDED, decision.reason());
-        verify(appVersionService).promote(VERSION_ID, false, null);
+        verify(appVersionService).promote(VERSION_ID, false, null, RELEASE_SNAPSHOT);
         // Only one run is submitted when there is nothing to compare against.
         ArgumentCaptor<List<EvalRetrievalConfig>> configs = configCaptor();
         verify(evalRunService).submit(eq(DATASET_ID), anyInt(), configs.capture(), eq(false));

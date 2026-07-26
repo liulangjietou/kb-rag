@@ -90,6 +90,57 @@ public class KbProperties {
     /** Open API policy: rate limit default, audit retention and archiving. */
     private OpenApi openApi = new OpenApi();
 
+    /** Application release policy: index snapshot timeout and retention. */
+    private App app = new App();
+
+    /**
+     * Application release policy, requirement section 4.7 "index snapshot".
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class App {
+
+        /** Smallest retention window that still keeps a rollback target besides the current release. */
+        private static final int MIN_SNAPSHOT_RETAIN_COUNT = 1;
+
+        /**
+         * Retired application versions per application whose index snapshots are kept.
+         *
+         * <p>Storage cost is the whole subject: every snapshot is a full copy of the corpus of every linked
+         * knowledge base, so keeping them forever multiplies disk by the release count. The released version
+         * is never counted here and never cleaned - only retired ones age out.
+         */
+        private int snapshotRetainCount = 3;
+
+        /**
+         * Budget of one snapshot copy in milliseconds.
+         *
+         * <p>Bounds the Milvus implementation, which copies entities rather than hard linking segments, so a
+         * release cannot park a request thread on a collection that stopped answering. The Elasticsearch
+         * clone is a segment level hard link and finishes in milliseconds.
+         */
+        private long snapshotTimeoutMs = 300000L;
+
+        /** {@code false} disables the snapshot retention pass, used by tests and read only replicas. */
+        private boolean snapshotCleanupEnabled = true;
+
+        /** Cron expression of the snapshot retention pass. */
+        private String snapshotCleanupCron = "0 15 4 * * *";
+
+        /**
+         * Retention window actually applied by the cleanup.
+         *
+         * <p>Clamped rather than validated at startup, the same reasoning as the document version window: a
+         * typo in a deployment knob must not keep the service from booting.
+         *
+         * @return retention window, at least one
+         */
+        public int resolvedSnapshotRetainCount() {
+            return Math.max(MIN_SNAPSHOT_RETAIN_COUNT, snapshotRetainCount);
+        }
+    }
+
     /**
      * Vector engine selection.
      */
@@ -608,6 +659,17 @@ public class KbProperties {
 
         /** Maximum entries kept in the routing decision cache. */
         private int routingCacheMaxSize = 10000;
+
+        /**
+         * Time to live of a cached version visibility set in minutes.
+         *
+         * <p>The set is invalidated the moment an activation switches it, so the expiry is only a safety net
+         * against a mutation path nobody wired to the invalidation; it is not what keeps the cache correct.
+         */
+        private int visibleVersionCacheTtlMinutes = 5;
+
+        /** Maximum knowledge bases whose version visibility set is cached. */
+        private int visibleVersionCacheMaxSize = 1000;
 
         /**
          * Multiplier applied to {@code top_n} when sizing the parent candidate target of the two

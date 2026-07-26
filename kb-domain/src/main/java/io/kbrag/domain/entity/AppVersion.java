@@ -2,14 +2,19 @@ package io.kbrag.domain.entity;
 
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.core.type.TypeReference;
+import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.enums.AppVersionStatus;
 import io.kbrag.domain.enums.GateReason;
 import io.kbrag.domain.enums.GateVerdict;
+import io.kbrag.domain.model.AppIndexSnapshot;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
 
 /**
  * One application version: a frozen configuration snapshot plus the state of its release, requirement
@@ -27,7 +32,7 @@ import java.time.LocalDateTime;
  */
 @Getter
 @Setter
-@ToString(callSuper = true, exclude = {"config", "gateReport"})
+@ToString(callSuper = true, exclude = {"config", "gateReport", "visibleVersionIds"})
 @TableName("t_kb_app_version")
 public class AppVersion extends BaseEntity {
 
@@ -90,11 +95,71 @@ public class AppVersion extends BaseEntity {
     private LocalDateTime releasedAt;
 
     /**
+     * JSON {@code {kbId: [documentVersionId, ...]}}: the document versions the release froze per knowledge
+     * base, requirement section 4.7 "version visibility set".
+     *
+     * <p>Blank for a version that was never released, and for a version released before index snapshots
+     * existed. Cleared again when the snapshot retention pass retires the snapshot, which is also what
+     * releases the archiving pin on those document versions.
+     */
+    @TableField("visible_version_ids")
+    private String visibleVersionIds;
+
+    /** JSON array of {@link io.kbrag.domain.model.AppIndexSnapshot}: the physical indices of the release. */
+    @TableField("index_snapshots")
+    private String indexSnapshots;
+
+    /**
      * Tells whether this version was released without a passing gate.
      *
      * @return {@code true} when a forced release is recorded on this row
      */
     public boolean forced() {
         return forceReleased != null && forceReleased == 1;
+    }
+
+    /**
+     * Frozen index snapshots of this version.
+     *
+     * <p><b>The single compatibility read of the column.</b> Three states collapse into one empty list: a
+     * version that was never released, a version released before this milestone, and a version whose
+     * snapshot the retention pass already retired. None of them is a fault, and every caller treats them
+     * identically - fall back to the live alias - so distinguishing them here would only invite a caller
+     * to branch on a difference that has no consequence.
+     *
+     * @return snapshots, empty when this version has none
+     */
+    public List<AppIndexSnapshot> indexSnapshotList() {
+        if (indexSnapshots == null || indexSnapshots.isBlank()) {
+            return List.of();
+        }
+        List<AppIndexSnapshot> parsed = JsonUtil.parse(indexSnapshots,
+                new TypeReference<List<AppIndexSnapshot>>() {
+                });
+        return parsed == null ? List.of() : parsed;
+    }
+
+    /**
+     * Frozen version visibility set of this version.
+     *
+     * @return document version ids per knowledge base id, empty when this version froze none
+     */
+    public Map<String, List<String>> visibleVersionIdMap() {
+        if (visibleVersionIds == null || visibleVersionIds.isBlank()) {
+            return Map.of();
+        }
+        Map<String, List<String>> parsed = JsonUtil.parse(visibleVersionIds,
+                new TypeReference<Map<String, List<String>>>() {
+                });
+        return parsed == null ? Map.of() : parsed;
+    }
+
+    /**
+     * Tells whether this version can serve a call out of its own frozen indices.
+     *
+     * @return {@code true} when both snapshot columns hold something usable
+     */
+    public boolean hasIndexSnapshot() {
+        return !indexSnapshotList().isEmpty() && !visibleVersionIdMap().isEmpty();
     }
 }

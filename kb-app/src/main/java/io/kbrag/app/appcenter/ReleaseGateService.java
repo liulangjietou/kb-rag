@@ -66,6 +66,7 @@ public class ReleaseGateService {
     private static final int HIT = 1;
 
     private final AppVersionService appVersionService;
+    private final AppReleaseSnapshotService releaseSnapshotService;
     private final EvalRunService evalRunService;
     private final EvalResultMapper evalResultMapper;
     private final GateMetricsRecomputer gateMetricsRecomputer;
@@ -105,10 +106,10 @@ public class ReleaseGateService {
         // operator overriding a known verdict, and re-running the comparison would replace the very evidence
         // the override is recorded against.
         if (force && version.getStatus().gateOutcome()) {
-            return appVersionService.promote(appVersionId, !isPassed(version), operator);
+            return promoteWithSnapshot(appVersionId, !isPassed(version), operator);
         }
         if (version.getStatus() == AppVersionStatus.GATE_PASSED) {
-            return appVersionService.promote(appVersionId, false, operator);
+            return promoteWithSnapshot(appVersionId, false, operator);
         }
         if (version.getGateDatasetId() == null || version.getGateDatasetId().isBlank()) {
             GateDecision decision = releaseGateJudge.judge(new ReleaseGateJudge.GateInput(
@@ -118,7 +119,7 @@ public class ReleaseGateService {
             appVersionService.recordGate(version, decision.verdict().status(), decision.verdict(),
                     decision.reason(), JsonUtil.toJson(reportOf(decision, null, 0, 0, 0.0d, null, null)), null);
             if (force) {
-                return appVersionService.promote(appVersionId, true, operator);
+                return promoteWithSnapshot(appVersionId, true, operator);
             }
             log.info("release requires an explicit forced release, appVersionId={}, reason={}",
                     appVersionId, decision.reason());
@@ -127,6 +128,38 @@ public class ReleaseGateService {
         appVersionService.markGating(version);
         runGateAsync(appVersionId);
         return appVersionService.require(appVersionId);
+    }
+
+    /**
+     * Freezes the index snapshot of a release and only then moves the version to {@code RELEASED},
+     * requirement section 4.7 "the snapshot is created after the gate and before the version takes effect".
+     *
+     * <p><b>The single door to a release.</b> Every path that promotes a version forward goes through here -
+     * a passing gate, a forced release over a verdict, a release with no data set bound - so no route can
+     * publish a version without a snapshot. A rollback deliberately does not: it reinstates a version that
+     * already owns one.
+     *
+     * <p><b>Failure leaves the version exactly where it was.</b> The snapshot is built before the state
+     * transition, so a copy that fails aborts before anything is written and the version stays in its gate
+     * outcome state, retryable. Should the transition itself fail afterwards - the released slot taken by a
+     * concurrent release, for instance - the indices just created are deleted again, because a snapshot no
+     * version references is dead storage that nothing would ever clean up.
+     *
+     * @param appVersionId version business id
+     * @param forced       {@code true} records a release over a non passing verdict
+     * @param operator     who performed the release
+     * @return promoted version
+     */
+    private AppVersion promoteWithSnapshot(String appVersionId, boolean forced, String operator) {
+        AppVersion version = appVersionService.require(appVersionId);
+        AppReleaseSnapshotService.ReleaseSnapshot snapshot =
+                releaseSnapshotService.freeze(version, appVersionService.parseConfig(version));
+        try {
+            return appVersionService.promote(appVersionId, forced, operator, snapshot);
+        } catch (Exception e) {
+            releaseSnapshotService.discard(snapshot);
+            throw e;
+        }
     }
 
     /**
@@ -202,7 +235,15 @@ public class ReleaseGateService {
                 decision.verdict(), decision.reason(), JsonUtil.toJson(report), JsonUtil.toJson(runIds));
 
         if (decision.verdict().autoReleasable()) {
-            appVersionService.promote(appVersionId, false, null);
+            try {
+                promoteWithSnapshot(appVersionId, false, null);
+            } catch (Exception e) {
+                // The verdict is already recorded and the version is sitting in GATE_PASSED, which is exactly
+                // the retryable state a failed snapshot is supposed to leave behind. Rethrowing would only let
+                // the async wrapper try to record a gate failure over a gate that in fact succeeded.
+                log.error("release blocked by a failed index snapshot, errorCode={}, appVersionId={}",
+                        ErrorCode.INTERNAL_ERROR, appVersionId, e);
+            }
         }
         log.info("release gate finished, appVersionId={}, verdict={}, reason={}, effectiveCases={}, epsilon={}",
                 appVersionId, decision.verdict(), decision.reason(),
