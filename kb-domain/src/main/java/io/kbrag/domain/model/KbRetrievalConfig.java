@@ -55,4 +55,24 @@ public class KbRetrievalConfig {
     /** Query rewrite switch. */
     @JsonProperty("rewrite_enabled")
     private Boolean rewriteEnabled;
+
+    /**
+     * Graph route switch of this knowledge base, requirement section 4.9. {@code null} and {@code false}
+     * both mean off, which is what keeps a base configured before M7 out of the graph pipeline.
+     *
+     * <p>Mutually exclusive with {@code fusion_mode=weighted}: the graph relevance and the two semantic
+     * scores have no common scale, so a weighted sum over three routes cannot be defined. The rule is
+     * enforced in one place, {@code GraphFusionPolicy}, and never re-checked downstream.
+     */
+    @JsonProperty("graph_enabled")
+    private Boolean graphEnabled;
+
+    /**
+     * Tells whether the graph route is switched on for this knowledge base.
+     *
+     * @return {@code true} only when an operator explicitly enabled it
+     */
+    public boolean graphEnabled() {
+        return Boolean.TRUE.equals(graphEnabled);
+    }
 }

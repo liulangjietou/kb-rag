@@ -153,6 +153,8 @@ class IndexSnapshotServiceTest {
                 snapshotRow("kb_alpha_bm25_s1", "s1", VectorEngine.ES),
                 snapshotRow("kb_alpha_tev4_s1", "s1", VectorEngine.MILVUS),
                 snapshotRow("kb_alpha_bm25_s2", "s2", VectorEngine.ES)));
+        when(fulltextStore.indexExists(anyString())).thenReturn(true);
+        when(vectorStore.indexExists(anyString())).thenReturn(true);
 
         service.broadcastEnabled(KB_ID, List.of("ck_1"), false);
 
@@ -168,6 +170,7 @@ class IndexSnapshotServiceTest {
         when(indexRegistryMapper.selectList(any())).thenReturn(List.of(
                 snapshotRow("kb_alpha_bm25_s1", "s1", VectorEngine.ES),
                 snapshotRow("kb_alpha_bm25_s2", "s2", VectorEngine.ES)));
+        when(fulltextStore.indexExists(anyString())).thenReturn(true);
         doThrow(new IllegalStateException("index closed"))
                 .when(fulltextStore).updateEnabled(eq("kb_alpha_bm25_s1"), anyList(), anyBoolean());
 
@@ -175,6 +178,23 @@ class IndexSnapshotServiceTest {
 
         // The live index is already updated and MySQL already says disabled, so a snapshot that cannot take the
         // flag must not stop the remaining ones from taking it.
+        verify(fulltextStore).updateEnabled("kb_alpha_bm25_s2", List.of("ck_1"), false);
+    }
+
+    @Test
+    void shouldNeverRecreateAMissingSnapshotIndexThroughTheBroadcast() {
+        when(indexRegistryMapper.selectList(any())).thenReturn(List.of(
+                snapshotRow("kb_alpha_bm25_s1", "s1", VectorEngine.ES),
+                snapshotRow("kb_alpha_bm25_s2", "s2", VectorEngine.ES)));
+        when(fulltextStore.indexExists("kb_alpha_bm25_s1")).thenReturn(false);
+        when(fulltextStore.indexExists("kb_alpha_bm25_s2")).thenReturn(true);
+
+        service.broadcastEnabled(KB_ID, List.of("ck_1"), false);
+
+        // A bulk update against a vanished snapshot name would make Elasticsearch auto create an empty index,
+        // which then satisfies the resolver's existence probe and silently defeats the snapshot_index_missing
+        // degradation. The broadcast must skip the gone index and still reach the surviving one.
+        verify(fulltextStore, never()).updateEnabled(eq("kb_alpha_bm25_s1"), anyList(), anyBoolean());
         verify(fulltextStore).updateEnabled("kb_alpha_bm25_s2", List.of("ck_1"), false);
     }
 

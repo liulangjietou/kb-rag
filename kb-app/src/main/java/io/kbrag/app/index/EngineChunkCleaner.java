@@ -5,6 +5,7 @@ import io.kbrag.app.config.AsyncConfig;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.domain.entity.ChunkIndexSync;
 import io.kbrag.domain.mapper.ChunkIndexSyncMapper;
+import io.kbrag.domain.port.GraphStore;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
@@ -36,9 +37,17 @@ public class EngineChunkCleaner {
 
     private final IndexAliasManager indexAliasManager;
     private final ChunkIndexSyncMapper chunkIndexSyncMapper;
+    private final GraphStore graphStore;
 
     /**
-     * Removes chunks from every engine target and drops their synchronization rows.
+     * Removes chunks from every derived store and drops their synchronization rows.
+     *
+     * <p><b>The graph is one of those derived stores</b> (requirement section 3, "the delete cascade
+     * includes Neo4j from M7"). It joins here rather than getting a cascade of its own for the reason this
+     * class exists at all: a document deletion, a version rebuild and the retrieval self healing pass all
+     * mean the same thing - these chunk ids are gone - and a second definition of "everywhere" would
+     * eventually cover one of the three and not the others. A deployment with no graph gets the disabled
+     * store and this line does nothing.
      *
      * @param kbId     knowledge base business id
      * @param chunkIds chunk ids to remove, ignored when empty
@@ -53,6 +62,7 @@ public class EngineChunkCleaner {
             chunkIndexSyncMapper.delete(new LambdaQueryWrapper<ChunkIndexSync>()
                     .in(ChunkIndexSync::getChunkId, batch));
         }
+        graphStore.deleteChunks(kbId, chunkIds);
         log.info("engine chunks removed, kbId={}, count={}", kbId, chunkIds.size());
     }
 

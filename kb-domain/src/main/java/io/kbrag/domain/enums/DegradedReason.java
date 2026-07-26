@@ -48,7 +48,17 @@ public enum DegradedReason {
      * index snapshots existed has nothing frozen and is served from the live alias by design, which is a
      * historical data shape rather than a fault and carries no marker.
      */
-    SNAPSHOT_INDEX_MISSING("snapshot_index_missing");
+    SNAPSHOT_INDEX_MISSING("snapshot_index_missing"),
+
+    /**
+     * The knowledge base has the graph route switched on but the graph is not reachable, so the call ran
+     * on the vector and BM25 routes alone, requirement section 4.9.
+     *
+     * <p>Reported for an unreachable or unconfigured graph only. A released version served from an index
+     * snapshot switches the graph route off by design - the graph holds active version semantics and has
+     * no frozen copy - which is a capability boundary rather than a fault and carries no marker.
+     */
+    GRAPH_ROUTE_UNAVAILABLE("graph_route_unavailable");
 
     private final String code;
 

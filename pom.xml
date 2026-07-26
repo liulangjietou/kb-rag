@@ -42,6 +42,7 @@
         <elasticsearch-java.version>8.13.4</elasticsearch-java.version>
         <milvus-sdk.version>2.4.9</milvus-sdk.version>
         <minio.version>8.5.17</minio.version>
+        <neo4j-java-driver.version>5.28.9</neo4j-java-driver.version>
         <commons-collections4.version>4.4</commons-collections4.version>
     </properties>
 
@@ -86,6 +87,11 @@
                 <groupId>io.minio</groupId>
                 <artifactId>minio</artifactId>
                 <version>${minio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.neo4j.driver</groupId>
+                <artifactId>neo4j-java-driver</artifactId>
+                <version>${neo4j-java-driver.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.commons</groupId>

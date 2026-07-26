@@ -148,7 +148,21 @@ public class IndexSnapshotService {
         }
         for (IndexRegistry snapshot : snapshots) {
             try {
-                if (VectorEngine.from(snapshot.getEngine()) == VectorEngine.ES) {
+                boolean esEngine = VectorEngine.from(snapshot.getEngine()) == VectorEngine.ES;
+                // A bulk update against a name that no longer exists would make Elasticsearch auto create
+                // an empty index under the snapshot's name. That empty index then satisfies the existence
+                // probe of the retrieval context resolver, so the snapshot_index_missing degradation would
+                // silently stop firing and released calls would read an empty snapshot as a valid one. The
+                // broadcast therefore refuses to touch a name whose index is gone instead of recreating it.
+                boolean exists = esEngine
+                        ? fulltextStore.indexExists(snapshot.getPhysicalIndexName())
+                        : vectorStore.indexExists(snapshot.getPhysicalIndexName());
+                if (!exists) {
+                    log.error("enabled flag broadcast skipped, snapshot index missing, errorCode={}, index={}",
+                            ErrorCode.INTERNAL_ERROR, snapshot.getPhysicalIndexName());
+                    continue;
+                }
+                if (esEngine) {
                     fulltextStore.updateEnabled(snapshot.getPhysicalIndexName(), chunkIds, enabled);
                 } else {
                     vectorStore.updateEnabled(snapshot.getPhysicalIndexName(), chunkIds, enabled);

@@ -185,6 +185,19 @@ kb:
     # against a mutation path nobody wired to that invalidation.
     visible-version-cache-ttl-minutes: ${RETRIEVAL_VISIBLE_VERSION_CACHE_TTL_MINUTES:5}
     visible-version-cache-max-size: ${RETRIEVAL_VISIBLE_VERSION_CACHE_MAX_SIZE:1000}
+  graph:
+    # Blank disables the whole graph capability: no driver is created, the health endpoint does not probe
+    # Neo4j, the graph route never runs and the extraction endpoint refuses. Everything else is unaffected.
+    uri: ${NEO4J_URI:}
+    user: ${NEO4J_USER:neo4j}
+    password: ${NEO4J_PASSWORD:}
+    # Relationship hops a matched entity is expanded by; the relevance of a hit decays as 1/(1+hops).
+    max-hops: ${GRAPH_MAX_HOPS:2}
+    entity-match-limit: ${GRAPH_ENTITY_MATCH_LIMIT:10}
+    # One model call carries exactly one chunk; the batch is how many of those are submitted together,
+    # and the concurrency is how many run at a time inside a batch.
+    extract-batch-size: ${GRAPH_EXTRACT_BATCH_SIZE:10}
+    extract-concurrency: ${GRAPH_EXTRACT_CONCURRENCY:2}
   web:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:20002,http://127.0.0.1:20002}
   eval:

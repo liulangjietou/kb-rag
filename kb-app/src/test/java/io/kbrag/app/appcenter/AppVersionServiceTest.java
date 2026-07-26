@@ -15,6 +15,7 @@ import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.service.BizIdGenerator;
+import io.kbrag.domain.service.GraphFusionPolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -61,7 +62,7 @@ class AppVersionServiceTest {
         properties = new KbProperties();
         when(bizIdGenerator.appVersionId()).thenReturn(VERSION_ID);
         service = new AppVersionService(appVersionMapper, knowledgeBaseService, evalDatasetService,
-                bizIdGenerator, properties);
+                bizIdGenerator, new GraphFusionPolicy(), properties);
     }
 
     @Test

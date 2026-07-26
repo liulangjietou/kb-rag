@@ -3,6 +3,8 @@ package io.kbrag.app.retrieval;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.kbrag.app.alert.RetrievalDegradeMonitor;
+import io.kbrag.app.graph.GraphRetrievalService;
+import io.kbrag.app.graph.GraphRouteOutcome;
 import io.kbrag.app.index.EngineChunkCleaner;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.exception.BizException;
@@ -17,6 +19,7 @@ import io.kbrag.domain.enums.RetrievalSource;
 import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.model.FulltextQuery;
 import io.kbrag.domain.model.FusedChunk;
+import io.kbrag.domain.model.GraphChunkRelevance;
 import io.kbrag.domain.model.KbIndexConfig;
 import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
@@ -103,6 +106,15 @@ public class RetrievalService {
     private static final String META_RERANK_SCORE = "rerank_score";
     private static final String META_VECTOR_RANK = "vector_rank";
     private static final String META_BM25_RANK = "bm25_rank";
+
+    /**
+     * Graph route detail, requirement section 4.9: the relevance the in base ranking used, the hop count
+     * that produced it and the entity names that reached the chunk. Present only on a node the graph route
+     * contributed, so a caller can tell a three route call from a two route one node by node.
+     */
+    private static final String META_GRAPH_SCORE = "graph_score";
+    private static final String META_GRAPH_HOPS = "graph_hops";
+    private static final String META_GRAPH_ENTITIES = "graph_entities";
     private static final String META_CHUNK_SEQ = "chunk_seq";
     private static final String META_CHILD_IDS = "child_ids";
     private static final String META_DISABLED_CHILD_IDS = "disabled_child_ids";
@@ -133,6 +145,7 @@ public class RetrievalService {
     private final FusionRouter fusionRouter;
     private final CrossKbRrfFusion crossKbRrfFusion;
     private final KbQuotaAllocator kbQuotaAllocator;
+    private final GraphRetrievalService graphRetrievalService;
     private final RoutingService routingService;
     private final RewriteService rewriteService;
     private final RerankService rerankService;
@@ -225,6 +238,7 @@ public class RetrievalService {
 
         Map<String, List<FusedChunk>> rankedByKb = new LinkedHashMap<>();
         Map<String, Chunk> chunkById = new HashMap<>();
+        Map<String, GraphChunkRelevance> graphEvidence = new HashMap<>();
         for (KbTarget target : selected) {
             RetrievalIndexContextResolver.IndexContext context = searchableByKb.get(target.kbId());
             if (context == null) {
@@ -233,6 +247,8 @@ public class RetrievalService {
             KbRecall recall = recallWithinKb(target, effectiveQuery, queryVector, context,
                     settings, command, bm25RouteRequested);
             chunkById.putAll(recall.chunkById());
+            graphEvidence.putAll(recall.graphEvidence());
+            addMarker(degraded, recall.degradedReason());
             if (!recall.ranked().isEmpty()) {
                 rankedByKb.put(target.kbId(), recall.ranked());
             }
@@ -245,7 +261,8 @@ public class RetrievalService {
         boolean parentChildEnabled = selected.stream()
                 .anyMatch(target -> target.indexConfig().parentChildEnabled());
 
-        List<RetrievalCandidate> candidates = selectCandidates(merged, chunkById, parentChildEnabled, settings);
+        List<RetrievalCandidate> candidates = selectCandidates(merged, chunkById, parentChildEnabled,
+                settings, graphEvidence);
         applyRerank(effectiveQuery, candidates, settings, command, primary.retrievalConfig(), degraded);
 
         candidates.sort(Comparator.comparingDouble(RetrievalCandidate::orderingScore).reversed()
@@ -326,11 +343,43 @@ public class RetrievalService {
                 .build();
         Map<RetrievalSource, List<ScoredChunk>> routeResults = recall(context, query, queryVector, filter,
                 settings.getRecallTopK(), bm25RouteRequested);
+        GraphRouteOutcome graph = recallGraph(target, query, filter, context, settings.getRecallTopK());
+        if (!graph.getCandidates().isEmpty()) {
+            routeResults.put(RetrievalSource.GRAPH, graph.getCandidates());
+        }
         List<FusedChunk> fused = fusionRouter.fuse(routeResults, settings.getFusion());
         Map<String, Chunk> chunkById = loadChunks(fused);
         List<FusedChunk> live = dropDisabled(
                 dropOrphans(kbId, fused, chunkById, !context.snapshotBound()), chunkById);
-        return new KbRecall(live, chunkById);
+        return new KbRecall(live, chunkById, graph.getEvidenceByChunk(), graph.getDegradedReason());
+    }
+
+    /**
+     * Runs the third route, requirement section 4.9.
+     *
+     * <p><b>The graph route is switched off on the snapshot path, and that is not a degradation.</b> A
+     * released application version answers out of a frozen index snapshot under a frozen version
+     * visibility set; the graph holds no frozen copy - its entities describe the corpus as it is now, and
+     * a version switch invalidates them - so there is nothing snapshot shaped for it to search. Running it
+     * anyway would let a released version recall passages of versions it was never gated on, which is the
+     * exact isolation requirement section 4.7 exists to guarantee. Reporting a marker would be equally
+     * wrong: the caller asked for a released version and got exactly what a released version is, so the
+     * response stays clean and the boundary is documented here and in the M7 contract instead.
+     *
+     * @param target     knowledge base being searched
+     * @param query      query the other routes ran with
+     * @param filter     the very predicate the engine side routes were filtered by
+     * @param context    indices and version visibility set this base is searched with
+     * @param recallTopK candidates the route contributes at most
+     * @return graph route outcome, empty when the route was not asked to run
+     */
+    private GraphRouteOutcome recallGraph(KbTarget target, String query, RetrievalFilter filter,
+                                          RetrievalIndexContextResolver.IndexContext context,
+                                          int recallTopK) {
+        if (!target.graphEnabled() || context.snapshotBound()) {
+            return GraphRouteOutcome.skipped();
+        }
+        return graphRetrievalService.recall(query, filter, recallTopK);
     }
 
     /**
@@ -444,15 +493,22 @@ public class RetrievalService {
         Boolean rewriteEnabled() {
             return retrievalConfig == null ? null : retrievalConfig.getRewriteEnabled();
         }
+
+        boolean graphEnabled() {
+            return retrievalConfig != null && retrievalConfig.graphEnabled();
+        }
     }
 
     /**
      * What one knowledge base contributed to a call.
      *
-     * @param ranked    in base ranking of the candidates a fact source row still backs
-     * @param chunkById fact source rows of this base's candidates
+     * @param ranked         in base ranking of the candidates a fact source row still backs
+     * @param chunkById      fact source rows of this base's candidates
+     * @param graphEvidence  graph route detail per chunk id, empty when the route did not run
+     * @param degradedReason marker of a route this base asked for and could not run, {@code null} otherwise
      */
-    private record KbRecall(List<FusedChunk> ranked, Map<String, Chunk> chunkById) {
+    private record KbRecall(List<FusedChunk> ranked, Map<String, Chunk> chunkById,
+                            Map<String, GraphChunkRelevance> graphEvidence, String degradedReason) {
     }
 
     /**
@@ -530,10 +586,12 @@ public class RetrievalService {
      * @param chunkById          fact source rows
      * @param parentChildEnabled {@code true} when at least one searched base splits into two levels
      * @param settings           effective retrieval parameters
+     * @param graphEvidence      graph route detail per chunk id, empty when no base ran the third route
      * @return mutable candidate list in fusion order
      */
     private List<RetrievalCandidate> selectCandidates(List<FusedChunk> live, Map<String, Chunk> chunkById,
-                                                      boolean parentChildEnabled, RetrievalSettings settings) {
+                                                      boolean parentChildEnabled, RetrievalSettings settings,
+                                                      Map<String, GraphChunkRelevance> graphEvidence) {
         int maxCandidates = Math.min(rerankService.candidateLimit(), live.size());
         int count = maxCandidates;
         if (parentChildEnabled) {
@@ -547,7 +605,10 @@ public class RetrievalService {
         List<RetrievalCandidate> candidates = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             FusedChunk fusedChunk = live.get(i);
-            candidates.add(new RetrievalCandidate(fusedChunk, chunkById.get(fusedChunk.getChunkId())));
+            RetrievalCandidate candidate =
+                    new RetrievalCandidate(fusedChunk, chunkById.get(fusedChunk.getChunkId()));
+            candidate.applyGraphEvidence(graphEvidence.get(fusedChunk.getChunkId()));
+            candidates.add(candidate);
         }
         return candidates;
     }
@@ -949,6 +1010,15 @@ public class RetrievalService {
         putIfPresent(scores, META_BM25_RANK, fused.getRouteRanks().get(RetrievalSource.BM25));
         putIfPresent(scores, META_NORM_BM25_SCORE, fused.normalizedScore(RetrievalSource.BM25));
         putIfPresent(scores, META_RERANK_SCORE, candidate.getRerankScore());
+        GraphChunkRelevance graph = candidate.getGraphEvidence();
+        if (graph != null) {
+            // The relevance is reported from the graph evidence rather than from the route score map: the
+            // two are the same number, and reading it from the object that also carries the hop count keeps
+            // the three keys of the debug row provably consistent with one another.
+            scores.put(META_GRAPH_SCORE, graph.score());
+            scores.put(META_GRAPH_HOPS, graph.hops());
+            scores.put(META_GRAPH_ENTITIES, graph.entityNames());
+        }
         return scores;
     }
 

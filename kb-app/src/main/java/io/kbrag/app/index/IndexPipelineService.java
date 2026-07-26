@@ -6,6 +6,7 @@ import io.kbrag.app.alert.TaskFailureTracker;
 import io.kbrag.app.annotation.AnnotationInheritanceService;
 import io.kbrag.app.config.AsyncConfig;
 import io.kbrag.app.eval.EvalCaseStalenessService;
+import io.kbrag.app.graph.GraphExtractionService;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
@@ -133,6 +134,7 @@ public class IndexPipelineService {
     private final AnnotationInheritanceService annotationInheritanceService;
     private final TaskFailureTracker taskFailureTracker;
     private final EvalCaseStalenessService evalCaseStalenessService;
+    private final GraphExtractionService graphExtractionService;
 
     /**
      * Queues a document version for indexing.
@@ -440,6 +442,10 @@ public class IndexPipelineService {
         annotationInheritanceService.inherit(document, version);
         evalCaseStalenessService.markStale(document.getDocId(), version.getVersionId());
         versionRetentionService.submit(document.getDocId());
+        // Requirement section 4.9: an activation is what invalidates the entities and relations the
+        // superseded versions contributed, otherwise the graph route would keep answering out of a corpus
+        // the other two routes can no longer see - version isolation broken from the side.
+        graphExtractionService.onVersionActivated(document, version);
     }
 
     /**

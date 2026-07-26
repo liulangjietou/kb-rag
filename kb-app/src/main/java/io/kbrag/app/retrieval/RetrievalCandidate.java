@@ -2,6 +2,7 @@ package io.kbrag.app.retrieval;
 
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.model.FusedChunk;
+import io.kbrag.domain.model.GraphChunkRelevance;
 import lombok.Getter;
 import lombok.ToString;
 
@@ -28,6 +29,15 @@ public final class RetrievalCandidate {
     /** Cross encoder score, {@code null} while the rerank stage has not run or degraded. */
     private Double rerankScore;
 
+    /**
+     * How the graph route reached this chunk, {@code null} when it did not, requirement section 4.9.
+     *
+     * <p>Kept next to the fusion evidence rather than folded into it: the fusion score is one number per
+     * route, while the hop count and the matched entity names are what actually explain the graph route
+     * to an operator, and they have no place in a score map.
+     */
+    private GraphChunkRelevance graphEvidence;
+
     public RetrievalCandidate(FusedChunk fused, Chunk chunk) {
         this.fused = fused;
         this.chunk = chunk;
@@ -49,6 +59,15 @@ public final class RetrievalCandidate {
      */
     public void applyRerankScore(double score) {
         this.rerankScore = score;
+    }
+
+    /**
+     * Attaches the graph route evidence of this chunk.
+     *
+     * @param evidence relevance detail, {@code null} when the graph route did not reach this chunk
+     */
+    public void applyGraphEvidence(GraphChunkRelevance evidence) {
+        this.graphEvidence = evidence;
     }
 
     /**

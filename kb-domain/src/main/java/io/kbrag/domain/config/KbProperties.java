@@ -81,6 +81,9 @@ public class KbProperties {
     /** Retrieval defaults. */
     private Retrieval retrieval = new Retrieval();
 
+    /** Knowledge graph connectivity and traversal defaults, requirement section 4.9. */
+    private Graph graph = new Graph();
+
     /** Evaluation execution policy. */
     private Eval eval = new Eval();
 
@@ -679,6 +682,49 @@ public class KbProperties {
 
         /** Lower bound of the parent candidate target. */
         private int parentCandidateFloor = 20;
+    }
+
+    /**
+     * Knowledge graph connectivity and traversal defaults, requirement section 4.9.
+     *
+     * <p>A blank {@link #uri} is the whole switch of the capability: no driver is created, the graph route
+     * never runs and the extraction task refuses to start, so a deployment without Neo4j behaves exactly
+     * like one that never heard of the graph - the same philosophy the blank model credential follows.
+     */
+    @Getter
+    @Setter
+    @ToString(exclude = "password")
+    public static class Graph {
+
+        /** Bolt URI, blank disables every graph capability. */
+        private String uri = "";
+
+        /** Bolt user. */
+        private String user = "neo4j";
+
+        /** Bolt password, blank for an unauthenticated local deployment. */
+        private String password = "";
+
+        /** Relationship hops the graph route expands a matched entity by. */
+        private int maxHops = 2;
+
+        /** Entities the full text index match of one query keeps, highest scoring first. */
+        private int entityMatchLimit = 10;
+
+        /** Chunks submitted to the extraction executor per batch. */
+        private int extractBatchSize = 10;
+
+        /** Chunks extracted concurrently inside one extraction task. */
+        private int extractConcurrency = 2;
+
+        /**
+         * Tells whether the deployment runs a graph at all.
+         *
+         * @return {@code true} when a Bolt URI is configured
+         */
+        public boolean configured() {
+            return uri != null && !uri.isBlank();
+        }
     }
 
     /**

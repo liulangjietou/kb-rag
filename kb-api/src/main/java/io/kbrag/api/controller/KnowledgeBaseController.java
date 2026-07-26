@@ -195,6 +195,7 @@ public class KnowledgeBaseController {
     }
 
     private KnowledgeBaseResponse toResponse(KnowledgeBase entity) {
-        return KnowledgeBaseResponse.from(entity, knowledgeBaseService.indexConfigOf(entity));
+        return KnowledgeBaseResponse.from(entity, knowledgeBaseService.indexConfigOf(entity),
+                knowledgeBaseService.retrievalConfigOf(entity));
     }
 }

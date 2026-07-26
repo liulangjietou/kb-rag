@@ -48,4 +48,14 @@ public class KbTask extends BaseEntity {
     /** Completion percentage between 0 and 100. */
     @TableField("progress")
     private Integer progress;
+
+    /**
+     * Units the task deliberately skipped, {@code null} for the task types that never skip anything.
+     *
+     * <p>Written by the graph extraction, requirement section 4.9: a chunk whose model answer fails the
+     * output validation is dropped and counted rather than failing the run, so the count is the only place
+     * a partially useful extraction differs from a complete one - and it has to survive a success.
+     */
+    @TableField("skipped_count")
+    private Integer skippedCount;
 }

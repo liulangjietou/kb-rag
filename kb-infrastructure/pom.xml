@@ -70,5 +70,13 @@
             <groupId>io.minio</groupId>
             <artifactId>minio</artifactId>
         </dependency>
+        <!--
+          Bolt driver of the knowledge graph, requirement section 4.9. Only loaded when NEO4J_URI is set:
+          a deployment without a graph never creates a driver, so the jar is inert rather than optional.
+        -->
+        <dependency>
+            <groupId>org.neo4j.driver</groupId>
+            <artifactId>neo4j-java-driver</artifactId>
+        </dependency>
     </dependencies>
 </project>

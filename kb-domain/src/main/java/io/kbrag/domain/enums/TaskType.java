@@ -17,5 +17,14 @@ public enum TaskType {
     REBUILD,
 
     /** Drop superseded physical indices and their sync records. */
-    CLEANUP
+    CLEANUP,
+
+    /**
+     * Extract entities and relations of a knowledge base into the graph, requirement section 4.9.
+     *
+     * <p>No sibling {@code GRAPH_CLEANUP} exists on purpose: graph removal is triggered by the removal of
+     * the chunks it traces back to, which already runs through one collaborator, so a task type of its own
+     * would only duplicate a lifecycle that is not the operator's to schedule.
+     */
+    GRAPH_EXTRACT
 }

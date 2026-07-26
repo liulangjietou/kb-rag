@@ -3,6 +3,7 @@ package io.kbrag.api.dto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.model.KbIndexConfig;
+import io.kbrag.domain.model.KbRetrievalConfig;
 
 /**
  * Knowledge base view.
@@ -17,6 +18,9 @@ import io.kbrag.domain.model.KbIndexConfig;
  * @param description             free text description
  * @param indexConfig             split and parent child parameters
  * @param currentConfigFingerprint fingerprint driving the document {@code config_stale} flag
+ * @param graphEnabled            graph route switch, inlined for the same reason the index configuration
+ *                                is: the console renders it on the knowledge base card and a second
+ *                                request per row would be N+1
  * @param createdAt               ISO creation timestamp
  *
  * @author owlzhangfq@gmail.com
@@ -27,22 +31,26 @@ public record KnowledgeBaseResponse(
         String description,
         @JsonProperty("index_config") KbIndexConfig indexConfig,
         @JsonProperty("current_config_fingerprint") String currentConfigFingerprint,
+        @JsonProperty("graph_enabled") boolean graphEnabled,
         @JsonProperty("created_at") String createdAt) {
 
     /**
      * Maps an entity onto its view.
      *
-     * @param entity      knowledge base entity
-     * @param indexConfig resolved index configuration
+     * @param entity          knowledge base entity
+     * @param indexConfig     resolved index configuration
+     * @param retrievalConfig resolved retrieval defaults
      * @return view
      */
-    public static KnowledgeBaseResponse from(KnowledgeBase entity, KbIndexConfig indexConfig) {
+    public static KnowledgeBaseResponse from(KnowledgeBase entity, KbIndexConfig indexConfig,
+                                             KbRetrievalConfig retrievalConfig) {
         return new KnowledgeBaseResponse(
                 entity.getKbId(),
                 entity.getName(),
                 entity.getDescription(),
                 indexConfig,
                 entity.getCurrentConfigFingerprint(),
+                retrievalConfig != null && retrievalConfig.graphEnabled(),
                 entity.getCreatedAt() == null ? null : entity.getCreatedAt().toString());
     }
 }

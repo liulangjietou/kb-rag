@@ -20,6 +20,7 @@ import io.kbrag.domain.model.AppRoutingConfig;
 import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.service.BizIdGenerator;
+import io.kbrag.domain.service.GraphFusionPolicy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
@@ -64,6 +65,7 @@ public class AppVersionService {
     private final KnowledgeBaseService knowledgeBaseService;
     private final EvalDatasetService evalDatasetService;
     private final BizIdGenerator bizIdGenerator;
+    private final GraphFusionPolicy graphFusionPolicy;
     private final KbProperties properties;
 
     /**
@@ -449,6 +451,12 @@ public class AppVersionService {
         if (target.getScoreThreshold() == null && kbRetrieval != null) {
             target.setScoreThreshold(kbRetrieval.getScoreThreshold());
         }
+        // The graph switch is a knowledge base property, never an application one: it decides what was
+        // extracted, not how a call is scored. It is copied into the snapshot so the frozen configuration
+        // records which routes the release gate measured, and so the very same mutual exclusion check the
+        // knowledge base write goes through also refuses a release that would fuse three routes by weight.
+        target.setGraphEnabled(kbRetrieval != null && kbRetrieval.graphEnabled());
+        graphFusionPolicy.requireCompatible(target);
         snapshot.setRetrieval(target);
         if (snapshot.getPrompt() == null) {
             snapshot.setPrompt(AppPromptConfig.defaults());

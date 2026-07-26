@@ -1,6 +1,8 @@
 package io.kbrag.app.retrieval;
 
 import io.kbrag.app.alert.RetrievalDegradeMonitor;
+import io.kbrag.app.graph.GraphRetrievalService;
+import io.kbrag.app.graph.GraphRouteOutcome;
 import io.kbrag.app.index.ActiveVersionResolver;
 import io.kbrag.app.index.EngineChunkCleaner;
 import io.kbrag.app.index.IndexAliasManager;
@@ -21,6 +23,8 @@ import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.model.FulltextQuery;
 import io.kbrag.domain.model.KbIndexConfig;
 import io.kbrag.domain.model.KbRef;
+import io.kbrag.domain.model.GraphChunkRelevance;
+import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.model.MetadataFilter;
 import io.kbrag.domain.model.ParentChildParams;
 import io.kbrag.domain.model.RetrievalFilter;
@@ -47,6 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -89,6 +94,7 @@ class RetrievalServiceTest {
     private ObjectStorage objectStorage;
     private KbProperties properties;
     private RetrievalIndexContextResolver indexContextResolver;
+    private GraphRetrievalService graphRetrievalService;
     private RetrievalService retrievalService;
 
     @BeforeEach
@@ -105,6 +111,7 @@ class RetrievalServiceTest {
         rerankService = mock(RerankService.class);
         engineChunkCleaner = mock(EngineChunkCleaner.class);
         objectStorage = mock(ObjectStorage.class);
+        graphRetrievalService = mock(GraphRetrievalService.class);
         properties = new KbProperties();
 
         when(knowledgeBaseService.require(KB_ID)).thenReturn(knowledgeBase(false));
@@ -122,6 +129,8 @@ class RetrievalServiceTest {
         when(rerankService.isAvailable()).thenReturn(false);
         when(rerankService.candidateLimit()).thenReturn(50);
         when(rerankService.rerank(anyString(), anyList(), eq(false))).thenReturn(RerankOutcome.skipped());
+        when(graphRetrievalService.recall(anyString(), any(), anyInt()))
+                .thenReturn(GraphRouteOutcome.skipped());
 
         // A real context resolver over mocked collaborators rather than a mocked one: which index a base is
         // searched in and which versions it may see is the M6 decision under test in several cases below, and a
@@ -131,7 +140,7 @@ class RetrievalServiceTest {
         retrievalService = new RetrievalService(knowledgeBaseService, chunkMapper,
                 fulltextStore, vectorStore, embeddingProvider, indexContextResolver,
                 new FusionRouter(List.of(new RrfFusion(), new WeightedFusion())),
-                new CrossKbRrfFusion(), new KbQuotaAllocator(), routingService,
+                new CrossKbRrfFusion(), new KbQuotaAllocator(), graphRetrievalService, routingService,
                 rewriteService, rerankService, new ScoreThresholdPolicy(), new ParentChildMerger(),
                 new DisabledChildVisibility(chunkMapper), engineChunkCleaner, objectStorage,
                 new RetrievalDegradeMonitor(properties), properties);
@@ -598,6 +607,124 @@ class RetrievalServiceTest {
         assertEquals(List.of("ck_live"),
                 outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
         verify(engineChunkCleaner, never()).removeAsync(anyString(), anyList());
+    }
+
+
+    @Test
+    void shouldFuseTheGraphRouteAsTheThirdRouteOfTheInBaseRanking() {
+        givenGraphEnabledBase();
+        givenDualRoute();
+        givenGraphRoute(List.of(
+                new ScoredChunk("ck_3", 0.4d, RetrievalSource.GRAPH),
+                new ScoredChunk("ck_1", 0.3d, RetrievalSource.GRAPH)),
+                Map.of("ck_3", new GraphChunkRelevance("ck_3", 0.4d, 1, List.of("Neo4j")),
+                        "ck_1", new GraphChunkRelevance("ck_1", 0.3d, 2, List.of("A", "B"))));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_1", "first chunk", null), chunk("ck_2", "second chunk", null),
+                chunk("ck_3", "graph only chunk", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().build());
+
+        // Reciprocal rank fusion over three lists: ck_1 is in all three, ck_2 and ck_3 lead one list each
+        // and tie on 1/(60+1), so the chunk id breaks the tie. ck_3 is reachable through the graph alone,
+        // which is what proves the third route took part in the in base fusion rather than being appended.
+        assertEquals(List.of("ck_1", "ck_2", "ck_3"),
+                outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+        assertEquals(RetrievalSource.GRAPH.code(),
+                outcome.getNodes().get(2).getRetrievalSource());
+        assertTrue(outcome.getDegraded().isEmpty());
+        assertEquals("rrf", outcome.getApplied().getFusionMode());
+    }
+
+    @Test
+    void shouldExposeTheGraphDetailOnTheNodesTheGraphRouteReached() {
+        givenGraphEnabledBase();
+        givenDualRoute();
+        givenGraphRoute(List.of(new ScoredChunk("ck_1", 0.4d, RetrievalSource.GRAPH)),
+                Map.of("ck_1", new GraphChunkRelevance("ck_1", 0.4d, 1, List.of("苹果公司", "乔布斯"))));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_1", "first chunk", null), chunk("ck_2", "second chunk", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().build());
+
+        Map<String, Object> reached = outcome.getNodes().get(0).getMetadata();
+        assertEquals("ck_1", outcome.getNodes().get(0).getChunkId());
+        assertEquals(0.4d, reached.get("graph_score"));
+        assertEquals(1, reached.get("graph_hops"));
+        assertEquals(List.of("苹果公司", "乔布斯"), reached.get("graph_entities"));
+        // A node the graph never reached carries none of the three keys, so a debug page can tell the
+        // two apart instead of reading a zero it cannot interpret.
+        Map<String, Object> untouched = outcome.getNodes().get(1).getMetadata();
+        assertFalse(untouched.containsKey("graph_score"));
+        assertFalse(untouched.containsKey("graph_hops"));
+        assertFalse(untouched.containsKey("graph_entities"));
+    }
+
+    @Test
+    void shouldDegradeToTheOtherTwoRoutesWhenTheGraphCannotBeReached() {
+        givenGraphEnabledBase();
+        givenDualRoute();
+        when(graphRetrievalService.recall(anyString(), any(), anyInt()))
+                .thenReturn(GraphRouteOutcome.degraded(DegradedReason.GRAPH_ROUTE_UNAVAILABLE.code()));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_1", "first chunk", null), chunk("ck_2", "second chunk", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().build());
+
+        assertEquals(List.of(DegradedReason.GRAPH_ROUTE_UNAVAILABLE.code()), outcome.getDegraded());
+        // The two engine routes are untouched: the graph points into a corpus, it does not hold it.
+        assertEquals(List.of("ck_1", "ck_2"),
+                outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+        assertEquals(0.91d, outcome.getNodes().get(0).getMetadata().get("vector_score"));
+    }
+
+    @Test
+    void shouldSwitchTheGraphRouteOffOnASnapshotContextWithoutReportingADegradation() {
+        givenGraphEnabledBase();
+        when(embeddingProvider.isConfigured()).thenReturn(false);
+        givenSnapshotIndexPresent();
+        when(fulltextStore.searchBm25(eq(SNAPSHOT_INDEX), any()))
+                .thenReturn(List.of(new ScoredChunk("ck_frozen", 7.5d, RetrievalSource.BM25)));
+        when(chunkMapper.selectList(any()))
+                .thenReturn(List.of(chunk("ck_frozen", "corpus as released", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, snapshotCommand().build());
+
+        // The graph only ever holds the active version, so a released version has nothing snapshot shaped
+        // to search. That is a capability boundary of the release contract, not a fault.
+        verify(graphRetrievalService, never()).recall(anyString(), any(), anyInt());
+        assertFalse(outcome.getDegraded().contains(DegradedReason.GRAPH_ROUTE_UNAVAILABLE.code()));
+        assertEquals(List.of("ck_frozen"),
+                outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+    }
+
+    @Test
+    void shouldNeverCallTheGraphRouteForABaseThatDidNotEnableIt() {
+        givenDualRoute();
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_1", "first chunk", null), chunk("ck_2", "second chunk", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().build());
+
+        verify(graphRetrievalService, never()).recall(anyString(), any(), anyInt());
+        assertTrue(outcome.getDegraded().isEmpty());
+    }
+
+    /**
+     * Makes the knowledge base ask for the graph route.
+     */
+    private void givenGraphEnabledBase() {
+        KnowledgeBase knowledgeBase = knowledgeBase(false);
+        KbRetrievalConfig retrievalConfig = new KbRetrievalConfig();
+        retrievalConfig.setGraphEnabled(true);
+        knowledgeBase.setRetrievalConfig(JsonUtil.toJson(retrievalConfig));
+        when(knowledgeBaseService.require(KB_ID)).thenReturn(knowledgeBase);
+    }
+
+    private void givenGraphRoute(List<ScoredChunk> candidates,
+                                 Map<String, GraphChunkRelevance> evidence) {
+        when(graphRetrievalService.recall(anyString(), any(), anyInt()))
+                .thenReturn(GraphRouteOutcome.of(candidates, evidence));
     }
 
     /**

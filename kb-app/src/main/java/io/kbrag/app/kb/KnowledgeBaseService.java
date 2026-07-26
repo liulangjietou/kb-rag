@@ -20,9 +20,11 @@ import io.kbrag.domain.model.KbIndexConfig;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.model.ParentChildParams;
 import io.kbrag.domain.port.ChatProvider;
+import io.kbrag.domain.port.GraphStore;
 import io.kbrag.domain.port.VisionProvider;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.FixedLengthTextSplitter;
+import io.kbrag.domain.service.GraphFusionPolicy;
 import io.kbrag.domain.service.VersionFingerprintFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -68,6 +70,8 @@ public class KnowledgeBaseService {
     private final VersionFingerprintFactory fingerprintFactory;
     private final VisionProvider visionProvider;
     private final ChatProvider chatProvider;
+    private final GraphFusionPolicy graphFusionPolicy;
+    private final GraphStore graphStore;
     private final KbProperties properties;
 
     /**
@@ -145,6 +149,51 @@ public class KnowledgeBaseService {
     }
 
     /**
+     * Reads the retrieval defaults of a knowledge base.
+     *
+     * @param knowledgeBase knowledge base aggregate
+     * @return retrieval defaults, never {@code null}
+     */
+    public KbRetrievalConfig retrievalConfigOf(KnowledgeBase knowledgeBase) {
+        KbRetrievalConfig config = JsonUtil.parse(knowledgeBase.getRetrievalConfig(), KbRetrievalConfig.class);
+        return config == null ? new KbRetrievalConfig() : config;
+    }
+
+    /**
+     * Tells whether a knowledge base asks for the graph route, requirement section 4.9.
+     *
+     * @param kbId knowledge base business id
+     * @return {@code true} when an operator switched the graph on for this base
+     */
+    public boolean graphEnabled(String kbId) {
+        return retrievalConfigOf(require(kbId)).graphEnabled();
+    }
+
+    /**
+     * Flips the graph switch of a knowledge base, requirement section 4.9.
+     *
+     * <p>Switching the graph off deliberately deletes nothing: the graph is expensive to rebuild - one
+     * model call per chunk - and an operator turning the route off to compare retrieval quality would
+     * otherwise pay for the whole extraction again when turning it back on. Only deleting a document or
+     * the knowledge base clears graph data, through the cascade the chunk removal already runs.
+     *
+     * @param kbId    knowledge base business id
+     * @param enabled new switch value
+     * @return retrieval configuration as it was stored
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public KbRetrievalConfig updateGraphEnabled(String kbId, boolean enabled) {
+        KnowledgeBase knowledgeBase = require(kbId);
+        KbRetrievalConfig config = retrievalConfigOf(knowledgeBase);
+        config.setGraphEnabled(enabled);
+        graphFusionPolicy.requireCompatible(config);
+        knowledgeBase.setRetrievalConfig(JsonUtil.toJson(config));
+        knowledgeBaseMapper.updateById(knowledgeBase);
+        log.info("knowledge base graph switch updated, kbId={}, enabled={}", kbId, enabled);
+        return config;
+    }
+
+    /**
      * Replaces the index configuration and marks the documents it invalidates.
      *
      * <p>The two operations belong to the same transaction: a fingerprint no document was compared
@@ -163,6 +212,9 @@ public class KnowledgeBaseService {
         knowledgeBase.setIndexConfig(JsonUtil.toJson(config));
         knowledgeBase.setCurrentConfigFingerprint(fingerprint);
         if (retrievalConfig != null) {
+            // The one place the graph route and weighted fusion are told apart, requirement section 4.4:
+            // nothing downstream re-checks it, so a stored configuration is valid by construction.
+            graphFusionPolicy.requireCompatible(retrievalConfig);
             knowledgeBase.setRetrievalConfig(JsonUtil.toJson(retrievalConfig));
         }
         knowledgeBaseMapper.updateById(knowledgeBase);
@@ -221,6 +273,10 @@ public class KnowledgeBaseService {
         removeChunks(kbId, new LambdaQueryWrapper<Chunk>().eq(Chunk::getKbId, kbId));
         documentMapper.delete(new LambdaQueryWrapper<Document>().eq(Document::getKbId, kbId));
         knowledgeBaseMapper.deleteById(knowledgeBase.getId());
+        // Requirement section 3 "delete cascade, Neo4j included from M7". Removing the chunks above already
+        // dropped their traceability edges; this clears whatever the graph still holds for the base - an
+        // entity of a version the retention pass had already archived, for instance - in one predicate.
+        graphStore.deleteKb(kbId);
         log.info("knowledge base deleted, kbId={}", kbId);
         // TODO(M4): schedule a CLEANUP task that drops the physical indices of this knowledge base.
     }

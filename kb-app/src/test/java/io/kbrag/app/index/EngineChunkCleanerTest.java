@@ -1,6 +1,7 @@
 package io.kbrag.app.index;
 
 import io.kbrag.domain.mapper.ChunkIndexSyncMapper;
+import io.kbrag.domain.port.GraphStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,13 +29,15 @@ class EngineChunkCleanerTest {
 
     private IndexAliasManager indexAliasManager;
     private ChunkIndexSyncMapper chunkIndexSyncMapper;
+    private GraphStore graphStore;
     private EngineChunkCleaner cleaner;
 
     @BeforeEach
     void setUp() {
         indexAliasManager = mock(IndexAliasManager.class);
         chunkIndexSyncMapper = mock(ChunkIndexSyncMapper.class);
-        cleaner = new EngineChunkCleaner(indexAliasManager, chunkIndexSyncMapper);
+        graphStore = mock(GraphStore.class);
+        cleaner = new EngineChunkCleaner(indexAliasManager, chunkIndexSyncMapper, graphStore);
     }
 
     @AfterEach
@@ -97,5 +100,22 @@ class EngineChunkCleanerTest {
         cleaner.removeAsync(KB_ID, CHUNK_IDS);
 
         verify(indexAliasManager, times(1)).deleteEverywhere(KB_ID, CHUNK_IDS);
+    }
+
+    @Test
+    void shouldRemoveTheChunksFromTheKnowledgeGraphAsWell() {
+        // Requirement section 3: from M7 the delete cascade includes Neo4j. It rides this collaborator so a
+        // document deletion, a version rebuild and the retrieval self healing pass provably clear the same
+        // set of derived stores.
+        cleaner.remove(KB_ID, CHUNK_IDS);
+
+        verify(graphStore).deleteChunks(KB_ID, CHUNK_IDS);
+    }
+
+    @Test
+    void shouldNotTouchTheGraphWhenThereIsNothingToRemove() {
+        cleaner.remove(KB_ID, List.of());
+
+        verify(graphStore, never()).deleteChunks(anyString(), any());
     }
 }
