@@ -460,7 +460,7 @@ def main() -> int:
     seed = int(cfg(args.seed, "SEED_BENCH_SEED", env_file, DEFAULT_SEED))
 
     mysql_host = cfg(args.mysql_host, "MYSQL_HOST", env_file, "127.0.0.1")
-    mysql_port = cfg(args.mysql_port, "MYSQL_PORT", env_file, 3306)
+    mysql_port = cfg(args.mysql_port, "MYSQL_PORT", env_file, 13306)
     mysql_db = cfg(args.mysql_db, "MYSQL_DB", env_file, "kb_rag")
     mysql_user = cfg(args.mysql_user, "MYSQL_USER", env_file, "kbrag")
     mysql_password = cfg(args.mysql_password, "MYSQL_PASSWORD", env_file, "")

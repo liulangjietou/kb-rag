@@ -129,7 +129,7 @@ check_port() {
   fi
 }
 
-check_port "MySQL"           "${MYSQL_PORT:-3306}"
+check_port "MySQL"           "${MYSQL_PORT:-13306}"
 check_port "Elasticsearch"   "${ES_PORT:-9200}"
 check_port "MinIO API"       "${MINIO_PORT:-9000}"
 check_port "MinIO Console"   "${MINIO_CONSOLE_PORT:-9001}"
