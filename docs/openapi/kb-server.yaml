@@ -88,7 +88,7 @@ info:
     server 对带 `ocr_source` 标记的页不再调 VLM。
 
     '
-  version: 0.9.0-m8
+  version: 0.10.0-m9
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -276,6 +276,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SourceMapping'
+  /api/v1/annotations/{annotationId}/migrate:
+    parameters:
+    - name: annotationId
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [annotation]
+      summary: 把待复核标注迁移到目标分片（M9，幂等）
+      description: 'M9-CONTRACTS.md §0.5：仅支持 TOGGLE/EDIT（MERGE/SPLIT 返回 INVALID_PARAM）；目标须与
+        标注同文档；重复迁移返回 already_migrated=true。无自动迁移、无批量端点。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_chunk_id]
+              properties:
+                target_chunk_id: {type: string}
+      responses:
+        '200':
+          description: 迁移结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  annotation_id: {type: string}
+                  target_chunk_id: {type: string}
+                  annotation_type: {type: string}
+                  inherit_status: {type: string}
+                  changed_chunk_ids: {type: array, items: {type: string}}
+                  already_migrated: {type: boolean}
   /api/v1/kb:
     post:
       tags:
@@ -2803,6 +2837,7 @@ components:
       - route_fallback_all
       - snapshot_index_missing
       - graph_route_unavailable
+      - image_understanding_unavailable
     GraphSummary:
       type: object
       description: M7 图谱概览（GraphSummaryResponse）
@@ -2891,6 +2926,8 @@ components:
           type: object
           description: 'M7 图路命中时含 graph_score/graph_hops/graph_entities（≤5 个实体名；未被图路命中时三键不出现）。
         M8 聊天分片含 window_seq 与 msg_span（会话内消息序号闭区间）；近重复归并存活者含 merged_window_chunk_ids（≤5，同会话窗口重叠率≥0.5 只留排名最高）。
+        M9 父子模式下发生精确剔除时含 redacted_child_count（被剔除的禁用子片段数；任一禁用子片
+        无偏移则整片回退且不带该键）。
         引擎侧固定字段（tag_ids/session_id/sender/msg_time 等，见 M1-CONTRACTS.md
 
             §6）+ M2 新增各路分数明细（M2-CONTRACTS.md §1.5，父子归并开启时另含
@@ -4907,6 +4944,14 @@ components:
           - $ref: '#/components/schemas/MetadataFilter'
           nullable: true
           description: 请求级覆盖白名单之一
+        images:
+          type: array
+          maxItems: 3
+          items: {type: string}
+          description: 'M9：可选图片（纯 base64，不收 URL——SSRF 面；单张解码 ≤5MB、总量 ≤10MB，越界
+            INVALID_PARAM）。VLM 转文本以「[图片内容] 」前缀拼接到 query 尾部（发生在改写之前）；零
+            Key/理解失败忽略全部图片并记 degraded=image_understanding_unavailable；纯图无文本且理解
+            失败返回 INVALID_PARAM。'
         max_content_length:
           type: integer
           nullable: true

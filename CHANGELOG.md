@@ -7,6 +7,13 @@
 ## [Unreleased]
 
 ### Added
+- M9 标注语义与图搜（docs/M9-CONTRACTS.md，二期收官批=清单项 5/6/7，至此二期 1-7 全部交付）：
+  父片精确剔除（t_kb_chunk 落 parent_start/end_offset V10——切分副产物+截取一致性校验；禁用子片
+  按偏移倒序剔除并以「（已省略被禁用内容）」替换、metadata 带 redacted_child_count；任一无偏移
+  整片回退；子编辑/合并拆分/父编辑三路失效单点）；标注相似度辅助迁移（对称 Dice 字符 3-gram、
+  同文档候选 top3 阈值 0.35、只推荐+migrate 幂等端点、不自动不批量）；图片 query（images 仅
+  base64 ≤3张/5MB/10MB，VLM 转文本前缀拼接在改写之前，degraded=image_understanding_unavailable，
+  纯图理解失败 INVALID_PARAM）；OpenAPI 升 0.10.0-m9、需求文档升 v1.15
 - M8 导入与解析增强（docs/M8-CONTRACTS.md，二期第一批=二期清单项 1/2/3/4）：聊天记录 TXT/HTML
   两种新格式（TXT 内置留痕/微信 PC 双行模板、HTML 内置留痕选择器模板，均按公开约定编写待真实样例
   校准；行首正则命名捕获组与 DOM 选择器随 mapping profile 承载可自定义；不匹配行>30% 报可操作错误）；
