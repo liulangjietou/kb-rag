@@ -122,7 +122,7 @@ public class KbProperties {
         /**
          * Budget of one snapshot copy in milliseconds.
          *
-         * <p>Bounds the Qdrant implementation, which copies entities rather than hard linking segments, so a
+         * <p>Bounds the Qdrant implementation, which copies points rather than hard linking segments, so a
          * release cannot park a request thread on a collection that stopped answering. The Elasticsearch
          * clone is a segment level hard link and finishes in milliseconds.
          */

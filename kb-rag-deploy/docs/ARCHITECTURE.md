@@ -74,7 +74,6 @@
 - **零 Key 启动**：不配任何模型 Key 也能完整跑通"上传→BM25 检索"。实现机制见 §3.3 的 `Unconfigured*Provider` 模式；检索自动降级 BM25 单路并透出 `degraded=[vector_route_unavailable]`。
 - **Neo4j 可选**：`profile=graph` 默认不启动；`NEO4J_URI` 留空即注入 `DisabledGraphStore`，图能力整体禁用、其余功能零影响（含显式排除 `Neo4jAutoConfiguration`，防止 driver 在 classpath 上导致健康探针误报 DOWN）。
 - **ik 词典热更新**：ES ik 插件远程词典指向 server 的免登录端点 `/internal/dict/ik/{ext|stop}.txt`（带 Last-Modified/ETag，约 60s 轮询）；词条以 DB（`t_kb_ik_dict`）为源，容器重建不丢。注意：切换 ik 镜像后存量索引 analyzer 仍是 standard，需触发重建才生效。
-- **qdrant-minio 与应用侧 MinIO 严禁复用**同一实例/bucket（compose 内已隔离为两个服务）。
 
 ---
 
@@ -173,7 +172,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 - `AppVersionService`：八状态机全部迁移收敛于 `transition` 一个方法，合法迁移定义在 `AppVersionStatus` 枚举上；"至多一个 RELEASED"由表上 `released_slot` 生成列 + 唯一索引双保险。
 - `ReleaseGateService`（`GATE_EXECUTOR`，与评测池分离防自等待死锁）：同语料同时刻双跑（候选配置 vs 当前正式版配置，复用 `EvalRunService`）；`ReleaseGateJudge`（纯函数，唯一裁决点，含 1e-9 浮点余量）三态裁决：通过 / 拦截 / 仅记录不拦截；`GateMetricsRecomputer` 在双方共同判定的 case 交集上重算指标，堵分母漂移。
-- `AppReleaseSnapshotService`：门禁裁决后、RELEASED 生效前，**同时冻结** `index_snapshots`（`IndexSnapshotService`：ES `_clone` / Qdrant queryIterator 拷贝，不挂别名）与 `visible_version_ids`——只冻结索引不冻结可见集正是"回滚后召回全空"缺陷的根源（v1.6 修复）。
+- `AppReleaseSnapshotService`：门禁裁决后、RELEASED 生效前，**同时冻结** `index_snapshots`（`IndexSnapshotService`：ES `_clone` / Qdrant scroll 游标拷贝，不挂别名）与 `visible_version_ids`——只冻结索引不冻结可见集正是"回滚后召回全空"缺陷的根源（v1.6 修复）。
 - 对外 API `/api/v1/knowledge/{search,chat}`：**独立的 `ApiKeyAuthFilter` servlet 过滤器链**（刻意不与管理台 Bearer 拦截器共用入口）；`ApiKeyFactory` 一把 Key 三形态（明文仅创建时返回一次 / SHA-256 digest 用于鉴权 / 前缀用于展示）；`ApiRateLimiter` 进程内令牌桶；`RequestOverridePolicy` 白名单只放 4 个响应形态参数（top_n/score_threshold/metadata_filter/max_content_length），越界拒绝而非忽略；`ApiAuditService` 异步落审计（拒绝也记录、401 不落 429 落）、`ApiAuditArchiveService` 定时归档 MinIO 后分批物理删除；`QueryDigestFactory` 对审计 query 无条件脱敏截断。
 - chat SSE 事件契约：`message_delta`* → `references`（元素为与 search nodes 同构的 RetrievalNode）→ `done`（含 request_id/用量/degraded）或 `error`；生成模型取应用版本快照配置，经 `ChatProviderFactory` 生效；`ChatPromptAssembler` 固定分隔符包裹检索内容（注入防线①）。
 

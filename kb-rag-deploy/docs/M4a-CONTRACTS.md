@@ -106,7 +106,7 @@
 
 ### 6.1 四项偏离（已接受）
 1. **chunk 行复用仍会重嵌入**（§1.1）。契约要求复用向量同步记录，但两个引擎 port 都是只写投影、无"读回向量"能力，MySQL 也不存向量。实现为：复用 `parsed.json` + 复制 chunk 行（真正省掉 parse 与 split），配置了 Provider 时向量重算；零 Key 下完全零成本。为这一个场景给两个引擎加向量读回接口，代价高于单文档嵌入费用。
-2. **Milvus 侧 `enabled` 标记不镜像**（§2.1）。Milvus 无 partial update，upsert 必须带向量而向量读不回来——镜像标记等于给"不重嵌入"的操作强加一次嵌入。ES 侧（含 lite 模式，即当前默认部署）走真正的 partial update 精确生效；Milvus 侧留 info 日志 + `TODO(M5)`。**正确性不依赖它**：检索链路已加固（见 6.2），禁用片最多浪费一个召回名额，不会泄漏。
+2. **两个引擎的 `enabled` 标记均原地镜像**（§2.1）。ES 侧（含 lite 模式，即当前默认部署）走 partial update 精确生效；向量侧通过 payload 原地更新同样精确生效，既不触碰向量、也不需要重新嵌入，因此"不重嵌入"的承诺得以保持。**正确性不依赖它**：检索链路已加固（见 6.2），即便引擎侧标记一时陈旧，禁用片最多浪费一个召回名额，不会泄漏。
 3. **语义校验落在应用服务入口而非 Controller**（§2.1）。"同文档/同版本/seq 连续"是对数据库行的断言、"offset 越界"需要库里的正文长度，Controller 拿不到。做法：Controller 用 bean validation 拦请求形状（body 缺失、数组为空），语义校验作为单一闸门放在每个操作入口——仍是全链路一处，无重复防御。
 4. **父片启用也级联子片**（§2.2）。契约只规定"禁用父片级联禁用子片"。实现为对称：只降不升会让重新启用的父片永久不可召回且毫无提示。需要单独排除的子片再单独禁用。
 
@@ -117,6 +117,5 @@
 `GET /documents/{docId}/annotations/pending-review` 首版响应缺 `inherit_status`（前端要显示继承状态 Tag），另缺 `kb_id/doc_id/chunk_text_hash/operator`。已补齐为"表列全集 + 派生的 version 与 excerpt"。
 
 ### 6.4 遗留（不阻塞 M4a 验收）
-- `MilvusVectorStore.updateEnabled`：待有 Milvus 环境时改为 query 取回实体再 upsert（`TODO(M5)`）
 - PARSED 级复用只复用 `parsed.json`，图片资产行仍按新版本重跑 VLM；解析指纹相同意味着文本代理必然一致，可进一步复制 `t_kb_image_asset` 行
 - `InheritStatus.REDONE` 语义为"被新版本同类操作取代"；若日后需要区分"自动继承"与"被取代"两种终态，需在 §2.4 增枚举值

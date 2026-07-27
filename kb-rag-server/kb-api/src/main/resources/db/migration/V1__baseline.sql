@@ -117,7 +117,7 @@ CREATE TABLE t_kb_chunk_index_sync
     id                  BIGINT       NOT NULL AUTO_INCREMENT,
     chunk_id            VARCHAR(64)  NOT NULL COMMENT 'chunk business id',
     physical_index_name VARCHAR(255) NOT NULL COMMENT 'physical index or collection name',
-    engine              VARCHAR(16)  NOT NULL COMMENT 'es/milvus',
+    engine              VARCHAR(16)  NOT NULL COMMENT 'es/qdrant',
     status              VARCHAR(32)  NOT NULL COMMENT 'PENDING/SYNCED/FAILED',
     retry_count         INT          NOT NULL DEFAULT 0,
     created_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -136,7 +136,7 @@ CREATE TABLE t_kb_index_registry
 (
     id                  BIGINT       NOT NULL AUTO_INCREMENT,
     kb_id               VARCHAR(64)  NOT NULL COMMENT 'owning knowledge base',
-    engine              VARCHAR(16)  NOT NULL COMMENT 'es/milvus',
+    engine              VARCHAR(16)  NOT NULL COMMENT 'es/qdrant',
     physical_index_name VARCHAR(255) NOT NULL COMMENT 'three segment physical name',
     alias_name          VARCHAR(255) NOT NULL COMMENT 'alias every read and write goes through',
     is_current          TINYINT      NOT NULL DEFAULT 0 COMMENT '1 when the alias points here',

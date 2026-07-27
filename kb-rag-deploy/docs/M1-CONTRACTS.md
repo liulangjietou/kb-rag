@@ -19,9 +19,9 @@
 ```
 MYSQL_HOST=127.0.0.1  MYSQL_PORT=13306  MYSQL_DB=kb_rag  MYSQL_USER=kbrag  MYSQL_PASSWORD=<gen>
 ES_URI=http://127.0.0.1:9200
-MILVUS_URI=http://127.0.0.1:19530          # lite 模式可空
+QDRANT_URI=http://127.0.0.1:6333           # lite 模式可空
 MINIO_ENDPOINT=http://127.0.0.1:9000  MINIO_ACCESS_KEY=..  MINIO_SECRET_KEY=..  MINIO_BUCKET=kb-files
-VECTOR_ENGINE=es                            # es|milvus（D16；lite 默认 es）
+VECTOR_ENGINE=es                            # es|qdrant（D16；lite 默认 es）
 DASHSCOPE_API_KEY=                          # 可空=零 Key 模式
 EMBEDDING_PROVIDER=dashscope  EMBEDDING_MODEL=text-embedding-v4  EMBEDDING_DIM=1024
 PARSER_BASE_URL=http://127.0.0.1:20001
@@ -39,7 +39,7 @@ M1 建表（其余表随 M2/M4 里程碑加 V2+ 迁移）：
 | t_kb_document | doc_id UK, kb_id IDX, file_name, file_ext, file_size, current_version_id, process_status(UPLOADED/PARSING/PARSE_FAILED/PARSED/INDEXING/INDEXED/INDEX_FAILED) IDX, config_stale TINYINT, fail_reason VARCHAR(1024) |
 | t_kb_document_version | version_id UK, doc_id IDX, version VARCHAR(16) (major.minor, 初始 1.0, UK(doc_id,version)), minio_object, parsed_object, content_hash VARCHAR(64) IDX, parse_fingerprint, chunk_fingerprint, embedding_version, status(BUILDING/BUILD_FAILED/READY/ACTIVE/ARCHIVED) IDX, changelog；UK(doc_id, status='ACTIVE') 用「唯一激活」以 active 标志列+唯一索引实现 |
 | t_kb_chunk | chunk_id UK, kb_id IDX, doc_id IDX, document_version_id IDX, content MEDIUMTEXT, chunk_text_hash VARCHAR(64) IDX, parent_id, seq, enabled TINYINT, embedding_status(PENDING/DONE/FAILED/SKIPPED) IDX, metadata JSON |
-| t_kb_chunk_index_sync | chunk_id, physical_index_name, engine(milvus/es), status(PENDING/SYNCED/FAILED) IDX, retry_count；UK(chunk_id, physical_index_name) |
+| t_kb_chunk_index_sync | chunk_id, physical_index_name, engine(qdrant/es), status(PENDING/SYNCED/FAILED) IDX, retry_count；UK(chunk_id, physical_index_name) |
 | t_kb_index_registry | kb_id IDX, engine, physical_index_name UK, alias_name, is_current TINYINT, embedding_provider, embedding_model, embedding_version, snapshot_version, schema_version, status(BUILDING/ACTIVE/PENDING_CLEANUP), task_id |
 | t_kb_task | task_id UK, task_type(PARSE/INDEX/REBUILD/CLEANUP), biz_id IDX, status(PENDING/RUNNING/SUCCESS/FAILED) IDX, retry_count, fail_reason, progress INT |
 | t_kb_admin_user | username UK, password_hash(BCrypt), must_change_password TINYINT, last_login_at |
@@ -51,14 +51,14 @@ M1 建表（其余表随 M2/M4 里程碑加 V2+ 迁移）：
 ## 3. 索引命名与别名（§4.3）
 
 - 物理名：`kb_{kbId}_{嵌入版本段}_{快照段}`；M1 快照段固定 `v1`
-- 嵌入版本段：完整模式 ES=`bm25`；lite ES=嵌入版本(如 `tev4`)；Milvus=嵌入版本；**零 Key=`none`（仅建全文 ES 索引，不建向量索引/字段）**
+- 嵌入版本段：完整模式 ES=`bm25`；lite ES=嵌入版本(如 `tev4`)；Qdrant=嵌入版本；**零 Key=`none`（仅建全文 ES 索引，不建向量索引/字段）**
 - 别名：`kb_{kbId}_{engine}`，读写一律走别名；注册于 t_kb_index_registry
 - ES mapping 固定字段（§6 引擎侧字段约定）：`chunk_id(keyword)`, `kb_id`, `doc_id`, `document_version_id`, `parent_id`, `chunk_type(keyword: text|image|chat_log)`, `enabled(boolean)`, `tag_ids(keyword[])`, `session_id`, `sender`, `msg_time(long)`, `chunk_seq(integer)`, `content(text, ik_max_word 若装了 ik，否则 standard 并 TODO 注明)`, `vector(dense_vector, dims=EMBEDDING_DIM, cosine)`（仅 lite+有 Key 时包含）
-- Milvus collection 同字段集（vector FloatVector, COSINE, HNSW）
+- Qdrant collection 同字段集（Cosine 距离，HNSW 索引，可过滤字段建 payload 索引）
 
 ## 4. kb-rag-server 结构（Maven 多模块）
 
-parent `kb-rag-server`：`kb-common`（Result/ErrorCode/JsonUtil/异常）、`kb-domain`（实体+Mapper+领域服务）、`kb-infrastructure`（ES/Milvus/MinIO/Provider/parser 客户端实现）、`kb-app`（管线编排、检索服务）、`kb-api`（Controller+DTO+启动类+Flyway 资源）。依赖方向 api→app→domain←infrastructure（infrastructure 实现 domain 接口，api 组装）。
+parent `kb-rag-server`：`kb-common`（Result/ErrorCode/JsonUtil/异常）、`kb-domain`（实体+Mapper+领域服务）、`kb-infrastructure`（ES/Qdrant/MinIO/Provider/parser 客户端实现）、`kb-app`（管线编排、检索服务）、`kb-api`（Controller+DTO+启动类+Flyway 资源）。依赖方向 api→app→domain←infrastructure（infrastructure 实现 domain 接口，api 组装）。
 
 核心接口（M1 定型，签名可微调但语义不变）：
 
@@ -70,7 +70,7 @@ public interface EmbeddingProvider {           // kb-domain
 }
 // RerankProvider/ChatProvider/VisionProvider 同风格，M1 只需接口 + 空实现占位（M2 落地）
 
-public interface VectorStore {                 // kb-domain；ES 与 Milvus 双实现
+public interface VectorStore {                 // kb-domain；ES 与 Qdrant 双实现
     void ensureIndex(IndexSpec spec);          // 幂等建索引+别名
     void upsert(String alias, List<ChunkRecord> records);
     void delete(String alias, List<String> chunkIds);
@@ -102,7 +102,7 @@ public interface FulltextStore { /* upsert/delete/searchBm25(alias, text, filter
   - 零 Key：BM25 单路，degraded=[vector_route_unavailable]
   - 强制过滤：document_version_id ∈ 激活版本 + enabled=true（引擎侧 filter）
 - `GET /api/v1/system/model-status` → {embedding_configured, vector_engine, provider, model}
-- `GET /actuator/health`（含 MySQL/ES/MinIO/Milvus(配置时) 探活）
+- `GET /actuator/health`（含 MySQL/ES/MinIO/Qdrant(配置时) 探活）
 
 ## 6. kb-rag-parser API
 
@@ -120,7 +120,7 @@ public interface FulltextStore { /* upsert/delete/searchBm25(alias, text, filter
 
 ## 8. kb-rag-deploy
 
-- `docker-compose.yml`（full：mysql8/es8.11+ik 说明/milvus-standalone(etcd+minio 复用应用 minio 需注意——**用独立 milvus-minio**)/minio/redis 可选/含 healthcheck+固定镜像 tag）
+- `docker-compose.yml`（full：mysql8/es8.11+ik 说明/qdrant(单容器自带存储)/minio/redis 可选/含 healthcheck+固定镜像 tag）
 - `docker-compose.lite.yml`（mysql/es/minio，8GB 档）
 - `.env.example`、`scripts/backup.sh` 骨架、`README.md`（快速启动：lite 优先、零 Key 路径与 DashScope 路径两条明路）、`docs/`（本契约、OpenAPI 骨架 openapi/kb-server.yaml 与 parser.yaml——按 §5/§6 写 M1 端点）
 - ES 中文分词：M1 允许 standard 分词器起步，README 注明 ik 安装步骤（M2 落地词典）

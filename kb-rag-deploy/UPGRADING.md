@@ -60,43 +60,6 @@ ES / Qdrant 的索引结构变更**不走迁移脚本**，官方迁移路径是"
 嵌入模型切换、lite → full 迁移同样复用这套"建新物理索引 → 回填 → 别名切换"
 的原语，具体流程见 README「快速启动」与 `docs/FLOWS.md` §5。
 
-## 从 Milvus 升级到 Qdrant（向量引擎替换）
-
-full 模式的向量引擎由 Milvus 换为 Qdrant，`VECTOR_ENGINE` 的合法取值从
-`es | milvus` 变为 `es | qdrant`。**lite 模式（`VECTOR_ENGINE=es`）不受影响**，
-无需任何操作。
-
-full 模式的升级不是原地切换：向量与其索引结构都存放在引擎内部，Milvus 的集合
-无法被 Qdrant 读取，必须按本文档上一节的原语从 MySQL 事实源重建。
-
-1. 停 kb-rag-server，`./scripts/backup.sh` 全量备份
-2. `.env` 改动：删除 `MILVUS_URI` / `MILVUS_TOKEN` / `MILVUS_PORT` /
-   `MILVUS_METRICS_PORT` / `MILVUS_MINIO_ACCESS_KEY` / `MILVUS_MINIO_SECRET_KEY`，
-   改为 `QDRANT_URI=http://127.0.0.1:6333`（按需加 `QDRANT_API_KEY`），
-   并把 `VECTOR_ENGINE=milvus` 改为 `VECTOR_ENGINE=qdrant`
-3. `docker compose -f docker-compose.yml up -d` 拉起 qdrant；Flyway 会自动应用
-   `V12__vector_engine_qdrant.sql`（只改字段注释，不动数据）
-4. 清理指向 Milvus 的索引台账——这些记录指向的集合已随 Milvus 下线而不可达，
-   留着会让检索路由到不存在的 collection：
-
-   ```sql
-   DELETE FROM t_kb_index_registry   WHERE engine = 'milvus';
-   DELETE FROM t_kb_chunk_index_sync WHERE engine = 'milvus';
-   ```
-
-5. 逐个知识库触发重建（管理台「知识库详情 → 索引配置 → 按新配置重建」，
-   或 `POST /api/v1/kb/{kbId}/rebuild`），等待状态回到「已就绪」
-6. 跑"上传 → 检索"冒烟，确认结果卡片同时出现向量分与 BM25 分
-7. 确认无误后删除 Milvus 的三个数据卷：
-
-   ```bash
-   docker volume rm kb_rag_milvus_data kb_rag_milvus_etcd_data kb_rag_milvus_minio_data
-   ```
-
-已发布的应用版本若冻结过 Milvus 索引快照，其快照集合同样不可达，需要重新发布
-一个基于 Qdrant 索引的版本；旧版本的 `t_kb_app_index_snapshot` 记录随第 4 步的
-台账清理一并失效。
-
 ## 升级步骤建议
 
 1. `./scripts/backup.sh` 全量备份

@@ -46,7 +46,7 @@ kb-infrastructure 实现 kb-domain 定义的端口接口，kb-app 只依赖端�
 - JDK 17
 - Maven 3.6+
 - MySQL 8、Elasticsearch 8.x、MinIO（必需）
-- Qdrant 2.4+（仅完整模式需要，轻量模式留空 `QDRANT_URI` 即可）
+- Qdrant 1.18+（仅完整模式需要，轻量模式留空 `QDRANT_URI` 即可）
 - Neo4j 5（仅 GraphRAG 需要，留空 `NEO4J_URI` 即整体关闭图能力，其余功能完全不受影响）
 
 ## 两种部署形态

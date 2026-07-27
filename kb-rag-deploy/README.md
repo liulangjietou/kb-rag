@@ -94,8 +94,8 @@ docker compose -f docker-compose.yml --profile redis up -d     # 含 redis（可
 `docker-compose.yml` 通过 Compose `include` 复用 `docker-compose.lite.yml` 的
 mysql/elasticsearch/minio 定义，额外叠加：
 
-- **qdrant-standalone**（v2.4.x）：自带独立 `etcd`（元数据）与独立 `qdrant-minio`
-  （向量分段对象存储），**不与应用侧 MinIO 混用**，避免两套业务的对象存储互相污染
+- **qdrant**（v1.18.x）：单容器自带存储，数据落在 `kb_rag_qdrant_data` 卷的
+  `/qdrant/storage`，不依赖额外的元数据服务或对象存储，也不占用应用侧 MinIO
 - **redis:7.2.x**：标注 optional，默认不随 `up` 启动，需 `--profile redis` 显式开启；
   单实例部署无需 Redis（`cache.provider=local`，见需求文档 §5 Redis 职责边界）
 

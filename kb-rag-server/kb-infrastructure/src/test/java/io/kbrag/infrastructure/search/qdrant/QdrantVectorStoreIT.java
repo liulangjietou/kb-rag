@@ -154,7 +154,7 @@ class QdrantVectorStoreIT {
         store.updateEnabled(ALIAS, List.of("ck_1"), true);
         List<ScoredChunk> hits = store.search(ALIAS, query(new float[]{1, 0, 0, 0}, filter(true, null, null)));
         assertEquals(1, hits.size());
-        // 向量若被擦除，分数就不会仍是完全匹配 —— 这正是 Milvus 实现做不到、只能留空实现的那一点
+        // 向量若被擦除，分数就不会仍是完全匹配 —— set payload 只改字段、不触碰向量
         assertEquals(EXACT_MATCH_SCORE, hits.get(0).getScore(), SCORE_TOLERANCE);
     }
 

@@ -9,15 +9,13 @@
 
 ### 变更（M9 之后）
 
-- **向量引擎由 Milvus 换为 Qdrant（不兼容变更）** `[schema]`：`VectorEngine` 枚举 `MILVUS` 改为
-  `QDRANT`，新增 `QdrantVectorStore`（走 Qdrant REST API，经 `spring-boot-starter-web` 已有的
-  `RestClient`，不引入 gRPC/protobuf 依赖），移除 `MilvusVectorStore` 与 `milvus-sdk-java`。
-  Flyway `V12__vector_engine_qdrant.sql` 只更新两张索引台账 `engine` 字段的注释，不改数据。
-  配置项 `kb.milvus.uri/token` 改为 `kb.qdrant.uri/api-key`（环境变量 `QDRANT_URI` /
-  `QDRANT_API_KEY`）
-- 分片启用开关在向量引擎侧真正生效：Milvus 无部分更新，`updateEnabled` 此前是空实现
-  （改一个布尔位需要连带重写向量，代价是重新嵌入），只靠 MySQL 事实源在检索后过滤，被禁用的
-  分片仍会占用召回预算。Qdrant 的 set payload 支持原地改字段且不触碰向量，该降级随之消除
+- **full 模式向量引擎定为 Qdrant（不兼容变更）**：`VectorEngine` 枚举取值为 `ES` / `QDRANT`，
+  向量路由由 `QdrantVectorStore` 承担——走 Qdrant REST API，复用 `spring-boot-starter-web` 已有的
+  `RestClient`，不引入 gRPC/protobuf 依赖。配置项为 `kb.qdrant.uri` / `kb.qdrant.api-key`
+  （环境变量 `QDRANT_URI` / `QDRANT_API_KEY`）
+- 分片启用开关在向量引擎侧真正生效：`updateEnabled` 通过 Qdrant 的 set payload 原地翻转标记，
+  既不触碰向量、也不需要重新嵌入，被禁用的分片不再占用召回预算（此前只靠 MySQL 事实源在
+  检索后过滤）
 
 ### 修复（M9 之后）
 
@@ -62,7 +60,7 @@
 ### 新增（M6）
 
 - `[schema]` Flyway `V7__app_index_snapshot.sql`：`t_kb_app_version` 增 `visible_version_ids` JSON（按库分组的 document_version 集合）与 `index_snapshots` JSON（`[{kb_id, engine, physical_index_name}]`）
-- 快照原语进端口：`FulltextStore` / `VectorStore` 各增 `snapshotIndex`、`dropIndex`、`indexExists`。Elasticsearch 走 `_clone`（段级硬链接，毫秒级；源索引写锁在 finally 必解——快照失败只赔发布不冻结知识库），Milvus 走 `queryIterator` 批量拷贝（避 offset 窗口截尾）
+- 快照原语进端口：`FulltextStore` / `VectorStore` 各增 `snapshotIndex`、`dropIndex`、`indexExists`。Elasticsearch 走 `_clone`（段级硬链接，毫秒级；源索引写锁在 finally 必解——快照失败只赔发布不冻结知识库），Qdrant 走 scroll 游标分页拷贝（避 offset 窗口截尾）
 - 快照物理索引命名 `kb_{kbId}_{嵌入段}_s{seq}`，`seq` 为库级自增序列；快照**不挂别名**、按物理名直查，实时索引与别名完全不动
 - 发布流程扩展（八状态机不变）：门禁裁决之后、`RELEASED` 生效之前，同时冻结物理索引与版本可见集。只冻结索引不冻结可见集正是「回滚后召回全空」缺陷的根源。任一库快照失败 → 发布中止、版本停留原状态可重试、本次已建的快照索引回滚删除
 - 检索调用上下文三分支收敛在 `RetrievalIndexContextResolver` 一处：经 `RELEASED` 版本调用取快照索引 + 固化可见集；`TESTING` 灰度 / chat-preview / 管理台调试 / 评测取实时别名 + 当前激活集合；M6 之前发布的旧 `RELEASED` 无快照数据则回退实时且**不记降级**（历史数据形态，不是故障）
@@ -161,7 +159,7 @@
 - 阈值语义定型：只作用于跨查询可比的分数（重排分 > 归一化 cosine），BM25 单路时失效并返回 `threshold_inactive`；`score_type` 扩展 `rerank | fused_rrf | fused_weighted`
 - 父子分片：两级切分复用既有定长策略，引擎只索引子片、父片正文只存 MySQL；检索后按 `parent_id` 归并（max 聚合），候选按「归并后父片数达标或子片数达上限」换算
 - search API 扩展：`score_threshold`、`fusion{mode,w_vec,rrf_k}`、`rerank_enabled`、`rewrite_enabled`、`messages`、`metadata_filter`；响应增 `applied` 信息条与各路原始分 / 归一化分 / 融合分 / 重排分
-- `metadata_filter` 引擎侧下推：Elasticsearch bool filter 与 Milvus expr 双实现；索引管线把 `chunk.metadata` 的固定键写入引擎字段
+- `metadata_filter` 引擎侧下推：Elasticsearch bool filter 与 Qdrant 结构化 filter 双实现；索引管线把 `chunk.metadata` 的固定键写入引擎字段
 - 双写补偿：`@Scheduled` 扫 `t_kb_chunk_index_sync`，按物理索引分组重推，重试上限后放弃并打错误日志；文档 / 知识库删除同步清理引擎；检索命中但事实源缺失时异步自愈删除
 - 配置变更与重建：`PUT /api/v1/kb/{kbId}/index-config` 重算指纹并刷新 `config_stale`，`POST /api/v1/kb/{kbId}/rebuild` 在同一物理索引内先写新片再删旧片
 - ik 词典：管理 CRUD + 启停 API，`/internal/dict/ik/{ext|stop}.txt` 免登录热更新通道（`Last-Modified` / `ETag`，未变更返回 304）
@@ -178,7 +176,7 @@
 - 异步索引管线：调用 parser 解析 → 按长度切分（默认 600 token / 重叠 100）→ 分片落库（含 `chunk_text_hash`）→ 写全文索引 →（有 Key 时）嵌入并写向量索引 → 按物理索引登记同步状态 → 版本激活
 - 检索 API：有 Key 走向量 + BM25 双路 RRF（k=60）融合，零 Key 走 BM25 单路并返回 `degraded=[vector_route_unavailable]`；两路均在引擎侧强制过滤激活版本与启用状态
 - Provider 抽象：嵌入（DashScope，OpenAI 兼容 HTTP 端点）落地，重排 / 对话 / 视觉三类接口与未配置占位实现就位
-- 引擎抽象：`VectorStore` 双实现（Elasticsearch dense_vector 与 Milvus），`FulltextStore` Elasticsearch 实现；向量分统一换算为标准 cosine 后线性映射到 `[0,1]`
+- 引擎抽象：`VectorStore` 双实现（Elasticsearch dense_vector 与 Qdrant），`FulltextStore` Elasticsearch 实现；向量分统一换算为标准 cosine 后线性映射到 `[0,1]`
 - `GET /api/v1/system/model-status`：向管理台透出是否配置嵌入模型与当前向量引擎
-- `GET /actuator/health`：含 MySQL、Elasticsearch、MinIO 探活，配置 Milvus 时增加 Milvus 探活
+- `GET /actuator/health`：含 MySQL、Elasticsearch、MinIO 探活，配置 Qdrant 时增加 Qdrant 探活
 - 统一响应包装、错误码枚举与 `request_id` 全链路透传（入口 filter 生成，写入 MDC 并透传至 parser）

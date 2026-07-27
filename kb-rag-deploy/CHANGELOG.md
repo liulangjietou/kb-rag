@@ -8,13 +8,12 @@
 
 ### Changed
 
-- **向量引擎由 Milvus 换为 Qdrant（不兼容变更）**：`VECTOR_ENGINE` 合法取值从 `es | milvus` 变为
-  `es | qdrant`。full 模式的 compose 由 `milvus-standalone` + 独立 `etcd` + 专属 `milvus-minio`
-  三个容器合并为单个 `qdrant`，内存档从 24GB 下调到 16GB；`.env` 的 `MILVUS_*` 一组变量替换为
-  `QDRANT_URI` / `QDRANT_API_KEY` / `QDRANT_PORT` / `QDRANT_GRPC_PORT`。lite 模式
-  （`VECTOR_ENGINE=es`）不受影响。已有 full 部署的升级路径见
-  [UPGRADING.md](UPGRADING.md)「从 Milvus 升级到 Qdrant」：向量存放在引擎内部，无法原地搬迁，
-  必须清理索引台账后从 MySQL 事实源重建
+- **full 模式向量引擎定为 Qdrant（不兼容变更）**：`VECTOR_ENGINE` 合法取值为 `es | qdrant`。
+  compose 中 full 模式在 lite 之上只叠加单个 `qdrant` 容器（自带存储，无需额外的元数据服务或
+  对象存储），内存档 16GB；对应的 `.env` 变量为 `QDRANT_URI` / `QDRANT_API_KEY` /
+  `QDRANT_PORT` / `QDRANT_GRPC_PORT`。lite 模式（`VECTOR_ENGINE=es`）不受影响。
+  切换向量引擎时向量数据无法原地搬迁，需清理索引台账后按 [UPGRADING.md](UPGRADING.md)
+  「ES / Qdrant：schema 变更走"从事实源重建 + 别名切换"」从 MySQL 事实源重建
 
 ### Fixed
 - 两处文档滞后于 M8 交付的修正：mappings/README.md「已知限制」仍写 TXT/HTML 降级二期，更新为
@@ -57,7 +56,7 @@
   （lite/full 及各自叠加 es-ik override 四组合）、`docs/openapi/*.yaml` 只读
   `yaml.safe_load` 语法校验（不改动 openapi 内容）、`scripts/*.sh` 的 `bash -n`
   语法校验。新增 `UPGRADING.md`：compose 镜像 tag 固定原则、MySQL 走 Flyway
-  自动迁移（禁手工 DDL、向后兼容一版、不可跨版本跳升）、ES/Milvus schema 变更走
+  自动迁移（禁手工 DDL、向后兼容一版、不可跨版本跳升）、ES/Qdrant schema 变更走
   "从事实源重建 + 别名切换"、升级前先跑 `scripts/backup.sh`、CHANGELOG 条目如何
   标注 schema 变更，对应需求文档 §5"升级与迁移"条款
 - M9 标注语义与图搜（docs/M9-CONTRACTS.md，二期收官批=清单项 5/6/7，至此二期 1-7 全部交付）：
@@ -95,7 +94,7 @@
   跳过并 error 日志，附回归单测
 - M6 索引快照发布（docs/M6-CONTRACTS.md）：发布门禁通过/force 之后、状态切 RELEASED 之前，对关联
   知识库的物理索引执行不可变快照（ES `_clone`：源索引临时置 `index.blocks.write=true` → clone →
-  两端解锁，段级硬链接毫秒级完成；Milvus 为同步批量读写拷贝）并固化当时的版本可见集
+  两端解锁，段级硬链接毫秒级完成；Qdrant 为同步批量读写拷贝）并固化当时的版本可见集
   （`visible_version_ids`）与快照索引清单（`index_snapshots`），任一库快照失败则发布中止、已建
   的本次快照回滚删除、版本停留在门禁结论状态可重试；经 RELEASED 版本（含 rollback 重新发布的
   历史版本）发起的对外调用固定检索这份快照与固化可见集，回滚即刻恢复历史知识状态，TESTING 灰度/
@@ -192,7 +191,7 @@
   关闭安全模块 + MinIO），全部服务带 healthcheck / restart: unless-stopped / 固定镜像 tag /
   命名 volume
 - `docker-compose.yml`：完整模式编排，在 lite 基础上（通过 Compose `include` 复用，避免
-  重复维护）叠加 Milvus 2.4.x standalone（独立 etcd + 独立 milvus-minio，与应用侧 MinIO
+  重复维护）叠加 Qdrant 1.18.x（单容器自带存储，无需额外元数据服务或对象存储，与应用侧 MinIO
   隔离）与 Redis 7.2.x（`--profile redis` 显式开启，标注 optional）
 - `.env.example`：契约 §1 全部环境变量 + docker-compose 专用变量，中文注释标注零 Key 模式
   下可空的变量
@@ -200,7 +199,7 @@
 - `scripts/backup.sh`：MySQL 全量 mysqldump + MinIO 数据卷全量导出，按份数轮转
 - `docs/openapi/kb-server.yaml`、`docs/openapi/kb-parser.yaml`：M1 端点 OpenAPI 3.0 契约
   （含 RetrievalNode、统一错误响应、degraded 枚举）
-- 开源工程基线文件：LICENSE (Apache-2.0)、NOTICE（MySQL/ES/Milvus/MinIO/Redis/MinerU
+- 开源工程基线文件：LICENSE (Apache-2.0)、NOTICE（MySQL/ES/Qdrant/MinIO/Redis/MinerU
   许可声明）、SECURITY.md、CONTRIBUTING.md、Issue/PR 模板
 
 ### Notes
@@ -214,7 +213,7 @@
   `restore.sh` 恢复 301 行 chunk/15 索引 → 检索命中非空）；seed 10 万分片压测
   P50=18.3/P95=39.0/P99=159.8ms，对比 100 分片基线 P50=19.9/P95=33.7/P99=128.8ms，
   **P95 劣化 15.9% ≤ 20% 验收阈值**，200/200 全 2xx。单测 606 项（新增 53）全过。Key 恢复后
-  补验：向量路快照检索、Milvus 快照（需 full 模式）。本仓库范围内本次同步完成 M6 OpenAPI
+  补验：向量路快照检索、Qdrant 快照（需 full 模式）。本仓库范围内本次同步完成 M6 OpenAPI
   增量（`docs/openapi/kb-server.yaml` → `0.7.0-m6`）；`t_kb_app_version` 新增
   `visible_version_ids`/`index_snapshots` 两列的 Flyway V7 迁移脚本在 kb-rag-server 仓库，
   不在本仓库交付范围；compose/`.env.example`/需求文档 v1.12 回补由主会话另行处理

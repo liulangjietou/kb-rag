@@ -58,7 +58,7 @@ public class QdrantVectorStore implements VectorStore {
     /** Cosine distance, the metric the score contract is stated in. */
     private static final String DISTANCE_COSINE = "Cosine";
 
-    /** HNSW build parameters, kept at the values the Milvus deployment used so recall is comparable. */
+    /** HNSW build parameters. */
     private static final int HNSW_M = 16;
     private static final int HNSW_EF_CONSTRUCT = 200;
 
@@ -68,7 +68,7 @@ public class QdrantVectorStore implements VectorStore {
     /** Points read back and written per batch of a snapshot copy. */
     private static final int COPY_BATCH_SIZE = 500;
 
-    /** Payload content is stored for debugging only; the cap mirrors what the Milvus schema allowed. */
+    /** Payload content is stored for debugging only, hence the cap. */
     private static final int CONTENT_MAX_LENGTH = 65535;
 
     /**
@@ -179,9 +179,9 @@ public class QdrantVectorStore implements VectorStore {
     /**
      * {@inheritDoc}
      *
-     * <p>Applied to the collection, unlike the Milvus adapter this replaces: Qdrant updates a payload
-     * field in place, so the retrieval switch is flipped without reading back or recomputing the
-     * embedding. The vector is not part of the request and is left untouched.
+     * <p>Applied to the collection: Qdrant updates a payload field in place, so the retrieval switch is
+     * flipped without reading back or recomputing the embedding. The vector is not part of the request
+     * and is left untouched.
      */
     @Override
     public void updateEnabled(String alias, List<String> chunkIds, boolean enabled) {

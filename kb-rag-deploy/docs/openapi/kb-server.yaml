@@ -3093,7 +3093,7 @@ components:
           type: string
     MetadataFilter:
       type: object
-      description: 'M2-CONTRACTS.md §1.5：映射为 ES bool filter / Qdrant expr，字段即
+      description: 'M2-CONTRACTS.md §1.5：映射为 ES bool filter / Qdrant 结构化 filter，字段即
 
         M1-CONTRACTS.md §6 引擎固定字段集（tag_ids/session_id/sender/msg_time）。
 

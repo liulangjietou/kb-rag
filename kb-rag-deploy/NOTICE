@@ -31,22 +31,18 @@ No source modification, no resale of the Elasticsearch server itself;
 usage is limited to client-side API calls.
 
 --------------------------------------------------------------------------
-Qdrant 2.4.x (qdrant-standalone, full mode only)
+Qdrant 1.18.x (full mode only)
 --------------------------------------------------------------------------
 License: Apache-2.0. No conflict with this project's Apache-2.0 license.
-Bundled dependencies for the standalone deployment:
-  - etcd (metadata store): Apache-2.0
-  - MinIO (Qdrant-internal object storage for segment data): see MinIO
-    entry below; deployed as a dedicated `qdrant-minio` instance, isolated
-    from the application-facing MinIO instance (never shared).
+Deployed as a single container with built-in storage; it requires no
+separate metadata store and no object storage of its own.
 
 --------------------------------------------------------------------------
 MinIO Server
 --------------------------------------------------------------------------
 License: GNU AGPL-3.0.
-Usage: MinIO is deployed as an independent container (both the
-application-facing `kb-rag-minio` instance and, in full mode, the
-Qdrant-dedicated `qdrant-minio` instance) and accessed exclusively through
+Usage: MinIO is deployed as an independent container (the
+application-facing `kb-rag-minio` instance) and accessed exclusively through
 its S3-compatible HTTP API. We do not modify or embed MinIO server source
 code, and do not create a derivative work of it; the server is orchestrated
 as a separate service in docker-compose. The MinIO client SDKs used by

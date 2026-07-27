@@ -13,7 +13,6 @@
 #   docker compose -f docker-compose.yml --profile redis up -d       # 含 redis
 #
 # 资源要求：建议 16GB 内存（需求文档 §5 资源要求矩阵：中间件约 4GB + kb-parser 8GB）。
-# 相比此前的 Milvus 编排下调，原因是 milvus-standalone + etcd + 专属 MinIO 三个容器合并为单个 qdrant。
 
 name: kb-rag-full
 
@@ -24,8 +23,7 @@ services:
   # ------------------------------------------------------------------
   # Qdrant 单机版：向量检索引擎（full 模式）
   #
-  # 单进程自带存储，不需要额外的元数据服务或对象存储——这也是它替换 Milvus 的主要理由：
-  # 原先的 milvus-standalone 必须搭配独立 etcd 与专属 MinIO 共三个容器，现在一个即可。
+  # 单进程自带存储，不需要额外的元数据服务或对象存储，full 模式因此只比 lite 多这一个容器。
   #
   # 数据落在 kb_rag_qdrant_data 卷的 /qdrant/storage 下，容器重建不丢数据。
   # QDRANT_API_KEY 留空即免鉴权（本机部署默认），填写后所有请求需带 api-key 头。

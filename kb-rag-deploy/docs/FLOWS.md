@@ -228,7 +228,7 @@ sequenceDiagram
     alt 通过 / force 放行
         J-->>AV: GATE_PASSED
         AV->>SN: 冻结发布快照
-        SN->>E: 每引擎建快照索引 kb_kbId_嵌入段_sN<br/>(ES _clone 毫秒级 / Qdrant queryIterator 拷贝, 不挂别名)
+        SN->>E: 每引擎建快照索引 kb_kbId_嵌入段_sN<br/>(ES _clone 毫秒级 / Qdrant scroll 游标拷贝, 不挂别名)
         SN->>AV: 同时固化 index_snapshots + visible_version_ids
         AV->>AV: transition → RELEASED, 原正式版 → SUPERSEDED
     else 拦截
