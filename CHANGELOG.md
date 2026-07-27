@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- SSE 流式端点（chat/chat-preview）上抛出的业务异常被内容协商吃成裸 500：Accept 仅为
+  text/event-stream 时 JSON 错误信封无法协商渲染，过期 token 的 401 语义被掩盖为
+  Internal Server Error；修复为对 stream-only Accept 手写 JSON 信封绕过协商
+  （kb-rag-server PR#15，用户实测发现）
+
 ### Added
 - M9 标注语义与图搜（docs/M9-CONTRACTS.md，二期收官批=清单项 5/6/7，至此二期 1-7 全部交付）：
   父片精确剔除（t_kb_chunk 落 parent_start/end_offset V10——切分副产物+截取一致性校验；禁用子片
