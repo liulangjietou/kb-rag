@@ -150,9 +150,14 @@ export default function ApiDebugTab({ appId, kbs }: ApiDebugTabProps) {
 
   const handleKeySelected = (keyId: string) => {
     const key = keys.find((k) => k.key_id === keyId);
-    if (key && (key.app_scope === null || key.app_scope.includes(appId))) {
-      // scope OK, no warning needed
-    } else if (key) {
+    if (!key) {
+      return;
+    }
+    // An EMPTY scope authorises every application -- that is how the server serialises the
+    // all-apps state (ApiKeyService.scopeOf maps a null column to []). Testing `=== null` here
+    // classified every unscoped key as denied and warned on the keys that would have worked.
+    const scopesAllApps = !key.app_scope || key.app_scope.length === 0;
+    if (!scopesAllApps && !key.app_scope.includes(appId)) {
       message.warning('该 Key 的 app_scope 未包含当前应用，请求预计会返回 403 APP_ACCESS_DENIED');
     }
   };
@@ -174,7 +179,7 @@ export default function ApiDebugTab({ appId, kbs }: ApiDebugTabProps) {
           <Form.Item name="key_id" label="选择 API Key（用于标识/校验 app_scope）" style={{ minWidth: 280 }}>
             <Select
               placeholder="请选择 API Key"
-              options={keys.map((k) => ({ label: `${k.name}（${k.prefix}****${k.last4}）`, value: k.key_id }))}
+              options={keys.map((k) => ({ label: `${k.name}（${k.prefix}）`, value: k.key_id }))}
               onChange={handleKeySelected}
             />
           </Form.Item>

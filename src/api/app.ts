@@ -29,7 +29,7 @@ export function createApp(payload: CreateAppRequest): Promise<KbApp> {
   return apiPost<KbApp>('/apps', payload);
 }
 
-/** ASSUMPTION: see UpdateAppRequest's doc comment in types.ts. */
+/** PUT /api/v1/apps/{appId}: name/description edit (AppController#update). */
 export function updateApp(appId: string, payload: UpdateAppRequest): Promise<KbApp> {
   return apiPut<KbApp>(`/apps/${appId}`, payload);
 }
@@ -48,9 +48,9 @@ export function listAppVersions(appId: string): Promise<AppVersion[]> {
 }
 
 /**
- * ASSUMPTION: section 2 does not name a single-version GET, but one is needed to poll gate
- * progress for exactly the version being watched (GATING -> terminal state) without re-fetching
- * and diffing the whole version list on every 3s tick.
+ * GET /api/v1/app-versions/{appVersionId} (AppVersionController#detail): polls gate progress for
+ * exactly the version being watched (GATING -> terminal state) without re-fetching and diffing the
+ * whole version list on every 3s tick.
  */
 export function getAppVersion(appVersionId: string): Promise<AppVersion> {
   return apiGet<AppVersion>(`/app-versions/${appVersionId}`);
@@ -81,7 +81,7 @@ export function rollbackAppVersion(appVersionId: string): Promise<AppVersion> {
   return apiPost<AppVersion>(`/app-versions/${appVersionId}/rollback`);
 }
 
-/** PUT /api/v1/app-versions/{vid}/gate-dataset (ASSUMPTION, see BindGateDatasetRequest's doc comment). */
+/** PUT /api/v1/app-versions/{vid}/gate-dataset (AppVersionController#gateDataset). */
 export function bindGateDataset(appVersionId: string, payload: BindGateDatasetRequest): Promise<AppVersion> {
   return apiPut<AppVersion>(`/app-versions/${appVersionId}/gate-dataset`, payload);
 }
@@ -92,12 +92,11 @@ export function bindGateDataset(appVersionId: string, payload: BindGateDatasetRe
 // ---------------------------------------------------------------------------
 
 /**
- * ASSUMPTION: neither section 2 nor 3 names an internal preview endpoint -- the external
- * `/api/v1/knowledge/chat` is API-Key-gated by its own filter chain (section 3: "独立过滤器链"),
- * so it cannot double as the admin-auth preview path. Modelled as a same-shape sibling endpoint
- * under the admin-auth `/apps` resource, keyed by app_id with an optional app_version override
- * (mirrors the external contract's own app_id + optional app_version so both call sites share one
- * request type, see ChatPreviewRequest).
+ * POST /api/v1/apps/{appId}/chat-preview (AppController#chatPreview). The external
+ * `/api/v1/knowledge/chat` is API-Key-gated by its own filter chain (section 3: "独立过滤器链") and
+ * cannot double as the admin-auth preview path, so the server exposes this same-shape sibling
+ * under the admin-auth `/apps` resource -- verified, including the optional app_version override
+ * both call sites share via ChatPreviewRequest.
  */
 export function chatPreview(appId: string, payload: ChatPreviewRequest): Promise<ChatResponse> {
   return apiPost<ChatResponse>(`/apps/${appId}/chat-preview`, { ...payload, stream: false });

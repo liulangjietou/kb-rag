@@ -1,6 +1,6 @@
 // Author: owlzhangfq@gmail.com
 import { streamChat, type ChatStreamHandlers } from './chatStream';
-import type { ChatRequest, ChatResponse, PublicSearchRequest, SearchResponse } from './types';
+import type { ChatRequest, ChatResponse, PublicSearchRequest, PublicSearchResponse } from './types';
 
 /**
  * Direct calls against the external, API-Key-gated endpoints (M4c-CONTRACTS.md section 3), used
@@ -52,8 +52,11 @@ async function postJson<T>(url: string, apiKey: string, body: unknown): Promise<
 }
 
 /** POST /api/v1/knowledge/search (M4c-CONTRACTS.md section 3), authenticated by the given API Key plaintext. */
-export function searchViaApiKey(apiKey: string, payload: PublicSearchRequest): Promise<PublicApiResult<SearchResponse>> {
-  return postJson<SearchResponse>('/api/v1/knowledge/search', apiKey, payload);
+export function searchViaApiKey(
+  apiKey: string,
+  payload: PublicSearchRequest,
+): Promise<PublicApiResult<PublicSearchResponse>> {
+  return postJson<PublicSearchResponse>('/api/v1/knowledge/search', apiKey, payload);
 }
 
 /** Non-streaming POST /api/v1/knowledge/chat (M4c-CONTRACTS.md section 3). */

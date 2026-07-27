@@ -1,6 +1,7 @@
+// Author: owlzhangfq@gmail.com
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { getCurrentUser } from '../api/auth';
+import { getCurrentUser, logout as revokeSession } from '../api/auth';
 import { clearToken, getToken, setToken as persistToken } from '../api/authStorage';
 
 interface AuthState {
@@ -64,6 +65,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    // Revoke server-side first, while the token is still in storage for the interceptor to attach.
+    // Local state is dropped regardless of the outcome: a failed revoke must not strand the
+    // operator in a session they asked to leave, and the interceptor already surfaced the error.
+    if (getToken()) {
+      revokeSession().catch(() => undefined);
+    }
     clearToken();
     setState({ token: null, username: null, mustChangePassword: false, initializing: false });
   }, []);

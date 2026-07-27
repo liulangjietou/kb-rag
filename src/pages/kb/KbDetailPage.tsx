@@ -1,3 +1,4 @@
+// Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeftOutlined,
@@ -179,7 +180,17 @@ export default function KbDetailPage() {
       try {
         const doc = await uploadDocument(kbId!, file as File);
         onSuccess?.(doc);
-        message.success(`${(file as File).name} 上传成功，正在处理`);
+        // The upload response carries what M4a's three-branch dedup actually decided
+        // (duplicated / new version / brand new document); reporting a flat "上传成功" hid the
+        // case where nothing was re-parsed because the content hash already existed.
+        const name = (file as File).name;
+        if (doc.duplicated) {
+          message.info(`${name} 内容与已有版本${doc.version ? ` ${doc.version}` : ''}一致，未重复建版`);
+        } else if (doc.version) {
+          message.success(`${name} 上传成功，已生成版本 ${doc.version}，正在处理`);
+        } else {
+          message.success(`${name} 上传成功，正在处理`);
+        }
         loadDocuments();
       } catch (err) {
         onError?.(err as Error);

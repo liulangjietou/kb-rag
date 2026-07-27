@@ -1,3 +1,4 @@
+// Author: owlzhangfq@gmail.com
 import { useEffect, useState } from 'react';
 import { Alert, Button, Drawer, Form, InputNumber, Space, Switch, Typography, message } from 'antd';
 import { updateIndexConfig } from '../../../api/kb';
@@ -20,8 +21,13 @@ const DEFAULT_CLEAN_RULES: CleanRules = {
   extract_metadata: false,
   desensitize: { enabled: false, phone: true, id_card: true, bank_card: true, email: false },
 };
-// M3-CONTRACTS.md section 3.5 chat_aggregation default window.
-const DEFAULT_CHAT_AGGREGATION: ChatAggregationConfig = { window_minutes: 60, max_messages: 50 };
+// M3-CONTRACTS.md section 3.5 chat_aggregation default window, window_overlap added by
+// M8-CONTRACTS.md section 0.5 (0 = the pre-M8 straight-cut behavior).
+const DEFAULT_CHAT_AGGREGATION: ChatAggregationConfig = {
+  window_minutes: 60,
+  max_messages: 50,
+  window_overlap: 0,
+};
 // M4a-CONTRACTS.md section 2.4 defaults.
 const DEFAULT_HIDE_PARENT_WITH_DISABLED_CHILD = false;
 const DEFAULT_INHERIT_DISABLE_ANNOTATION = true;
@@ -59,7 +65,14 @@ function toFormValues(config: IndexConfig | null): IndexConfigFormValues {
     child_overlap: config?.parent_child.child_overlap ?? DEFAULT_CHILD_OVERLAP,
     clean_rules: config?.clean_rules ?? DEFAULT_CLEAN_RULES,
     parse_preview_required: config?.parse_preview_required ?? false,
-    chat_aggregation: config?.chat_aggregation ?? DEFAULT_CHAT_AGGREGATION,
+    // Rebuilt field by field rather than passed through: a pre-M8 stored config has no
+    // window_overlap, and spreading it as-is would put `undefined` into the form and then into the
+    // PUT body, which the server reads as 0.
+    chat_aggregation: {
+      window_minutes: config?.chat_aggregation?.window_minutes ?? DEFAULT_CHAT_AGGREGATION.window_minutes,
+      max_messages: config?.chat_aggregation?.max_messages ?? DEFAULT_CHAT_AGGREGATION.max_messages,
+      window_overlap: config?.chat_aggregation?.window_overlap ?? DEFAULT_CHAT_AGGREGATION.window_overlap,
+    },
     hide_parent_with_disabled_child:
       config?.hide_parent_with_disabled_child ?? DEFAULT_HIDE_PARENT_WITH_DISABLED_CHILD,
     inherit_disable_annotation: config?.inherit_disable_annotation ?? DEFAULT_INHERIT_DISABLE_ANNOTATION,
@@ -87,6 +100,9 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
     setSubmitting(true);
     try {
       await updateIndexConfig(kbId, {
+        // The server replaces the whole index_config object from this body, so every key the kb
+        // already has must be present here -- including the ones this drawer has no control for.
+        split_strategy: indexConfig?.split_strategy,
         chunk_max_tokens: values.chunk_max_tokens,
         chunk_overlap: values.chunk_overlap,
         parent_child: {
@@ -191,7 +207,7 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
         <Form.Item
           name={['chat_aggregation', 'window_minutes']}
           label="聚合窗口（分钟）"
-          tooltip="按发送时间无重叠顺切窗口，超过窗口时长或消息数上限即切下一片"
+          tooltip="按发送时间顺切窗口，超过窗口时长或消息数上限即切下一片"
           rules={[{ required: true, message: '请输入聚合窗口分钟数' }]}
         >
           <InputNumber min={1} max={1440} style={{ width: '100%' }} />
@@ -202,6 +218,28 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
           rules={[{ required: true, message: '请输入单窗口最大消息数' }]}
         >
           <InputNumber min={1} max={1000} style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item
+          name={['chat_aggregation', 'window_overlap']}
+          label="窗口重叠消息数"
+          tooltip="下一窗口重复上一窗口末尾的若干条消息，避免跨窗口的问答被切断；0 为不重叠。须小于单窗口最大消息数的一半"
+          dependencies={[['chat_aggregation', 'max_messages']]}
+          rules={[
+            { required: true, message: '请输入窗口重叠消息数' },
+            // Mirrors the server's ChatAggregationParams.windowOverlapWithinBound so an invalid
+            // value is caught here instead of coming back as INVALID_PARAM.
+            ({ getFieldValue }) => ({
+              validator(_, value: number) {
+                const maxMessages = getFieldValue(['chat_aggregation', 'max_messages']) as number;
+                if (value == null || maxMessages == null || value * 2 < maxMessages) {
+                  return Promise.resolve();
+                }
+                return Promise.reject(new Error(`窗口重叠消息数须小于 ${Math.ceil(maxMessages / 2)}`));
+              },
+            }),
+          ]}
+        >
+          <InputNumber min={0} max={499} style={{ width: '100%' }} />
         </Form.Item>
 
         <Typography.Title level={5}>标注与父子片</Typography.Title>

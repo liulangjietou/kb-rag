@@ -153,7 +153,17 @@ export default function AppConfigTab({ appId, kbs, latestVersion, onVersionCreat
   const handleCreateVersion = async () => {
     const values = await form.validateFields();
     const config = formValuesToConfig(values);
-    await createAppVersion(appId, { ...config, changelog: values.changelog });
+    // chat_model (生成模型) and gate (门禁阈值) have no control on this form, but the server
+    // snapshots the version from this body alone -- a key absent here is stored as its default,
+    // not inherited from the version the form was pre-filled with. Carrying them over verbatim is
+    // what keeps "改一个检索参数再建版" from quietly reverting the app to the default chat model
+    // and dropping its gate thresholds.
+    await createAppVersion(appId, {
+      ...config,
+      chat_model: latestVersion?.config.chat_model,
+      gate: latestVersion?.config.gate,
+      changelog: values.changelog,
+    });
     message.success('已基于当前配置新建版本（草稿）');
     form.setFieldValue('changelog', undefined);
     onVersionCreated();

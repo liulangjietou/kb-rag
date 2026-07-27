@@ -170,9 +170,16 @@ export default function GraphTab({ kbId, kb, onKbChanged }: GraphTabProps) {
                   <Tag color="warning">跳过 {latestTask.skipped_chunk_count} 个分片（输出校验未通过）</Tag>
                 ) : null}
               </Space>
-              {taskInProgress && <Progress percent={99} status="active" showInfo={false} size="small" />}
-              {latestTask.status === 'FAILED' && latestTask.fail_reason && (
-                <Alert type="error" showIcon message={latestTask.fail_reason} />
+              {taskInProgress && (
+                <Progress
+                  percent={latestTask.progress ?? 99}
+                  status="active"
+                  showInfo={latestTask.progress != null}
+                  size="small"
+                />
+              )}
+              {latestTask.status === 'FAILED' && latestTask.error_message && (
+                <Alert type="error" showIcon message={latestTask.error_message} />
               )}
             </Space>
           )}

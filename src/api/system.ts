@@ -1,3 +1,4 @@
+// Author: owlzhangfq@gmail.com
 import { apiDelete, apiGet, apiPost, apiPut } from './request';
 import type {
   AlertConfig,
@@ -37,10 +38,9 @@ export function deleteIkDictEntry(word: string): Promise<void> {
 }
 
 /**
- * ASSUMPTION / GAP: M2-CONTRACTS.md section 3 only lists GET/POST/DELETE for `/api/v1/dict/ik`,
- * but the M2 web deliverable (section 5) explicitly asks for an enable/disable toggle on each
- * entry. There is no contracted endpoint for this, so a PUT is assumed here by symmetry with
- * the index-config PUT elsewhere in the contract; this needs backend confirmation/addition.
+ * PUT /api/v1/dict/ik/{word}: flips an entry between ENABLED and DISABLED. Verified against
+ * IkDictController#updateStatus -- the route the M2 web deliverable's toggle needs does exist,
+ * even though M2-CONTRACTS.md section 3 lists only GET/POST/DELETE.
  */
 export function updateIkDictStatus(word: string, status: IkDictStatus): Promise<void> {
   return apiPut<void>(`/dict/ik/${encodeURIComponent(word)}`, { status });

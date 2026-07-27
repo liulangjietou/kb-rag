@@ -33,6 +33,8 @@ export default function ChatImportWizard({ kbId, open, onClose, onImported }: Ch
   const [uploading, setUploading] = useState(false);
   const [uploadToken, setUploadToken] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ChatImportSessionPreview[]>([]);
+  /** Messages the parser dropped, keyed by reason (e.g. voice rows carrying no text). */
+  const [skipped, setSkipped] = useState<Record<string, number>>({});
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
@@ -46,6 +48,7 @@ export default function ChatImportWizard({ kbId, open, onClose, onImported }: Ch
   const reset = () => {
     setUploadToken(null);
     setSessions([]);
+    setSkipped({});
     setMappingId(undefined);
   };
 
@@ -66,6 +69,7 @@ export default function ChatImportWizard({ kbId, open, onClose, onImported }: Ch
         const result = await previewChatImport(kbId, file as File, mappingId);
         setUploadToken(result.upload_token);
         setSessions(result.sessions);
+        setSkipped(result.skipped ?? {});
         onSuccess?.(result);
       } catch (err) {
         onError?.(err as Error);
@@ -146,6 +150,25 @@ export default function ChatImportWizard({ kbId, open, onClose, onImported }: Ch
             description="已存在同一渠道+会话标识的文档将生成新版本，新会话将新建文档；确认后才会写入知识库"
             style={{ marginBottom: 16 }}
           />
+          {Object.keys(skipped).length > 0 && (
+            // The preview response reports what the parser dropped (voice/video rows and the like);
+            // leaving it unshown made a partial import look complete.
+            <Alert
+              type="warning"
+              showIcon
+              message="部分消息未纳入导入"
+              description={
+                <Space wrap>
+                  {Object.entries(skipped).map(([reason, count]) => (
+                    <Tag key={reason}>
+                      {reason}：{count} 条
+                    </Tag>
+                  ))}
+                </Space>
+              }
+              style={{ marginBottom: 16 }}
+            />
+          )}
           <Table<ChatImportSessionPreview>
             rowKey="session_id"
             size="small"

@@ -88,7 +88,7 @@ export default function AuditLogTab() {
             style={{ width: 220 }}
             allowClear
             placeholder="全部 Key"
-            options={keys.map((k) => ({ label: `${k.name}（${k.prefix}****${k.last4}）`, value: k.key_id }))}
+            options={keys.map((k) => ({ label: `${k.name}（${k.prefix}）`, value: k.key_id }))}
           />
         </Form.Item>
         <Form.Item name="target_stage" label="target_stage">

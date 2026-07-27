@@ -1,5 +1,6 @@
 // Shared type definitions mirroring kb-rag-deploy/docs/M1-CONTRACTS.md section 5 and
 // kb-rag-deploy/docs/M2-CONTRACTS.md sections 1/3/4 (REST API contract).
+// Author: owlzhangfq@gmail.com
 // Field names intentionally keep the backend's snake_case JSON casing so the payloads
 // can be typed as-is without a mapping layer.
 
@@ -94,25 +95,36 @@ export interface CleanRules {
 }
 
 /**
- * index_config.chat_aggregation (M3-CONTRACTS.md section 3.5): no-overlap sequential windowing
- * applied when slicing an imported chat session into chunk_type=chat_log chunks.
- * ASSUMPTION: the contract calls this "KB 级配置" without spelling out its exact JSON path;
- * nested under index_config alongside clean_rules/parse_preview_required since section 4 groups
- * all three ("清洗规则分组...解析预览开关、聊天聚合参数") under the same index-config drawer/API.
+ * index_config.chat_aggregation (M3-CONTRACTS.md section 3.5): sequential windowing applied when
+ * slicing an imported chat session into chunk_type=chat_log chunks. Nesting verified against
+ * KbIndexConfig.chatAggregation (server).
  */
 export interface ChatAggregationConfig {
   window_minutes: number;
   max_messages: number;
+  /**
+   * M8-CONTRACTS.md section 0.5: how many trailing messages the next window repeats. 0 = the
+   * pre-M8 straight-cut behavior. Server bound: window_overlap * 2 < max_messages, else
+   * INVALID_PARAM. MUST be sent on every index-config PUT -- the server replaces the whole
+   * chat_aggregation object, so omitting this silently resets a configured overlap back to 0.
+   */
+  window_overlap: number;
 }
 
 /**
- * t_kb_knowledge_base.index_config JSON (M1-CONTRACTS.md section 2).
- * ASSUMPTION: exact field names for the flat chunking params are not spelled out by the
- * contract beyond "分段长度/重叠" (M1 defaults: 600 token length / 100 overlap) and the
- * parent_child block (M2-CONTRACTS.md section 1.4); named here as chunk_max_tokens/chunk_overlap
- * to mirror the TokenEstimator-based pipeline description in M1-CONTRACTS.md section 4.
+ * t_kb_knowledge_base.index_config JSON (M1-CONTRACTS.md section 2). Field names verified against
+ * the server's KbIndexConfig (2026-07-27).
  */
 export interface IndexConfig {
+  /**
+   * Split strategy code (e.g. "fixed_length"), server-side KbIndexConfig.splitStrategy. Read-only
+   * for this web: there is no strategy picker in the index-config drawer yet, and a PUT that omits
+   * the key keeps the stored value (UpdateIndexConfigRequest.toIndexConfig falls back to current).
+   * Carried through the drawer's form state so a future picker has one place to write to.
+   */
+  split_strategy?: string;
+  /** Embedding model the current index was built with; server-assigned, never sent back on a PUT. */
+  embedding_model?: string;
   chunk_max_tokens: number;
   chunk_overlap: number;
   parent_child: ParentChildConfig;
@@ -136,29 +148,25 @@ export interface IndexConfig {
   inherit_disable_annotation: boolean;
 }
 
-/** PUT /api/v1/kb/{kbId}/index-config request body (M2-CONTRACTS.md section 4). */
-export type UpdateIndexConfigRequest = IndexConfig;
+/**
+ * PUT /api/v1/kb/{kbId}/index-config request body (M2-CONTRACTS.md section 4). embedding_model is
+ * server-owned and has no counterpart on UpdateIndexConfigRequest, so it is never sent back.
+ */
+export type UpdateIndexConfigRequest = Omit<IndexConfig, 'embedding_model'>;
 
+/** KnowledgeBaseResponse (server). Note there is no updated_at -- only created_at is exposed. */
 export interface KnowledgeBase {
   kb_id: string;
   name: string;
   description: string | null;
-  /**
-   * ASSUMPTION: GET /api/v1/kb and GET /api/v1/kb/{kbId} return the current index_config
-   * alongside the fingerprint so the M2 edit drawer can be pre-filled without a separate
-   * fetch; not explicitly listed in M1/M2-CONTRACTS.md's response shape.
-   */
+  /** Returned inline by GET /kb and GET /kb/{kbId} so the edit drawer needs no second fetch. */
   index_config: IndexConfig | null;
   current_config_fingerprint: string | null;
   created_at: string;
-  updated_at: string;
   /**
-   * M7-CONTRACTS.md section 0.1/0.10: knowledge-base-level GraphRAG switch, stored in the
-   * server's KnowledgeBase.retrievalConfig JSON (default false). ASSUMPTION: returned inline on
-   * GET /kb and GET /kb/{kbId} -- same precedent as index_config/current_config_fingerprint above
-   * -- so the fusion-mode mutex hint in SearchPage/AppConfigTab doesn't need a dedicated per-kb
-   * round trip just to know whether graph routing is on. Absent on pre-M7 responses; read as
-   * `kb.graph_enabled ?? false`.
+   * M7-CONTRACTS.md section 0.1/0.10: knowledge-base-level GraphRAG switch, stored in the server's
+   * KnowledgeBase.retrievalConfig JSON (default false). Always present on the response (the server
+   * emits a primitive boolean); optional here only so pre-M7 fixtures still type-check.
    */
   graph_enabled?: boolean;
 }
@@ -193,6 +201,11 @@ export const IN_PROGRESS_STATUSES: ProcessStatus[] = ['UPLOADED', 'PARSING', 'PA
 /** Process statuses that mean "the pipeline failed and fail_reason should be surfaced". */
 export const FAILED_STATUSES: ProcessStatus[] = ['PARSE_FAILED', 'INDEX_FAILED'];
 
+/**
+ * DocumentResponse (server). The four upload-only fields at the bottom are populated exclusively by
+ * POST /kb/{kbId}/documents (UploadOutcome) and are absent from the list/detail responses.
+ * No updated_at is exposed.
+ */
 export interface KbDocument {
   doc_id: string;
   kb_id: string;
@@ -204,20 +217,38 @@ export interface KbDocument {
   config_stale: boolean;
   fail_reason: string | null;
   created_at: string;
-  updated_at: string;
+  /** Upload only: id of the document version this upload created. */
+  version_id?: string;
+  /** Upload only: label of that version, e.g. "v2" (M4a-CONTRACTS.md section 1.1's three branches). */
+  version?: string;
+  /** Upload only: true when content_hash matched an existing version and nothing was re-parsed. */
+  duplicated?: boolean;
+  /** Upload only: set when the uploaded file duplicates a *different* document in the same kb. */
+  duplicate_of_doc_id?: string;
 }
 
 export type EmbeddingStatus = 'PENDING' | 'DONE' | 'FAILED' | 'SKIPPED';
 
+/**
+ * ChunkResponse (server). Deliberately carries neither kb_id nor doc_id -- both are already known
+ * from the route the caller used to fetch the chunk.
+ */
 export interface KbChunk {
   chunk_id: string;
-  kb_id: string;
-  doc_id: string;
   document_version_id: string;
   content: string;
+  chunk_type: ChunkType;
+  /** SHA-256 of the chunk text; the exact-match key annotation inheritance uses across versions. */
+  chunk_text_hash: string;
   parent_id: string | null;
   seq: number;
   enabled: boolean;
+  /**
+   * M4a-CONTRACTS.md section 2.2: ids of this chunk's disabled child chunks, computed server-side
+   * across the whole version (not just the current page). Always present, `[]` when there are none
+   * or when the chunk is not a parent.
+   */
+  disabled_child_ids: string[];
   embedding_status: EmbeddingStatus;
   metadata: Record<string, unknown> | null;
 }
@@ -277,13 +308,9 @@ export interface ChatMessage {
 
 /**
  * Extra fields the M2 retrieval pipeline adds onto RetrievalNode.metadata (M2-CONTRACTS.md
- * section 1.5): "响应 nodes[].metadata 增：norm_vector_score/norm_bm25_score/fused_score/rerank_score（存在时）".
- * ASSUMPTION: the raw (pre-normalization) per-route scores are not literally named in the contract,
- * but norm_vector_score/norm_bm25_score only make sense as normalized derivatives of raw
- * vector_score/bm25_score, so those two keys are assumed present alongside them when the
- * corresponding route contributed to the candidate. child_ids/children shape (parent/child
- * mode, section 1.4 "metadata 含 child_ids、每子片各路分") is likewise not given a concrete
- * schema by the contract; the shape below is this implementation's best-effort inference.
+ * section 1.5). Key names verified against RetrievalService's META_* constants: every score key
+ * below is written through putIfPresent, i.e. it is absent (never null) when the route that would
+ * produce it did not contribute to this candidate.
  */
 export interface RetrievalChildHit {
   chunk_id: string;
@@ -310,10 +337,22 @@ export interface RetrievalNodeMetadata {
   bm25_score?: number;
   norm_vector_score?: number;
   norm_bm25_score?: number;
+  /** 1-based rank this candidate held on the vector route before fusion. */
+  vector_rank?: number;
+  /** 1-based rank this candidate held on the BM25 route before fusion. */
+  bm25_rank?: number;
   fused_score?: number;
   rerank_score?: number;
+  /** Chunk sequence number within its document version. */
+  chunk_seq?: number;
   /** Present only in parent/child mode: ids of the child chunks merged into this parent node. */
   child_ids?: string[];
+  /**
+   * M4a-CONTRACTS.md section 2.2: ids of this parent's disabled child chunks. On a SEARCH node the
+   * flag lives here in metadata; on a GET /documents/{docId}/chunks row it is a TOP-LEVEL
+   * KbChunk.disabled_child_ids field instead. Two endpoints, two placements -- do not mix them up.
+   */
+  disabled_child_ids?: string[];
   /** Present only in parent/child mode: per-child-chunk score detail, see RetrievalChildHit. */
   children?: RetrievalChildHit[];
   /**
@@ -418,23 +457,33 @@ export interface SearchResponse {
   applied: SearchApplied;
 }
 
+/**
+ * POST /api/v1/knowledge/search response (KnowledgeSearchResponse): the admin SearchResponse plus
+ * which application version actually served the call. Only the external, API-Key-gated endpoint
+ * reports these two -- the admin debug search has no app version behind it.
+ */
+export interface PublicSearchResponse extends SearchResponse {
+  /** Version label that served this call, e.g. "V2.0". */
+  app_version: string;
+  /** 'release' when the current RELEASED version served it, 'beta' when an explicit TESTING one did. */
+  target_stage: AuditTargetStage;
+}
+
 // ---------------------------------------------------------------------------
 // System / model status
 // ---------------------------------------------------------------------------
 
 /** Per-model-kind configuration snapshot, used by the M2 settings page's three status cards. */
 /**
- * GET /api/v1/system/model-status response, extended for M2 (M2-CONTRACTS.md section 5
- * "模型状态卡片（embedding/rerank/chat 三卡，用扩展后的 model-status）").
- * ASSUMPTION: the concrete extended JSON shape isn't spelled out by the contract; the
- * top-level embedding_configured/provider/model fields are kept as-is for backward
- * compatibility with existing M1 call sites (MainLayout/SearchPage banners), and a
- * per-kind breakdown is added for the three cards.
+ * GET /api/v1/system/model-status response (M2-CONTRACTS.md section 5). Flat, one triple per model
+ * kind; verified field-for-field against the server's ModelStatusResponse.
  */
 export interface ModelStatus {
   embedding_configured: boolean;
   provider: string | null;
   model: string | null;
+  /** Embedding vector width the configured provider declares; 0 when no embedding model is set. */
+  dimension: number;
   rerank_configured: boolean;
   rerank_provider: string | null;
   rerank_model: string | null;
@@ -463,15 +512,16 @@ export type IkDictType = 'EXT' | 'STOP';
 export type IkDictStatus = 'ENABLED' | 'DISABLED';
 
 /**
- * t_kb_ik_dict row. ASSUMPTION: the table has no dedicated business `xxx_id` column per the
- * DDL sketch in M2-CONTRACTS.md section 3 ("word UK, dict_type=EXT|STOP, status=ENABLED/DISABLED,
- * 通用列"), so `word` (the unique key) is used as the entry identifier for delete/status calls
- * instead of an unexposed internal auto-increment id.
+ * t_kb_ik_dict row. The table has no business `xxx_id` column, so `word` (the unique key) is the
+ * entry identifier the delete/status routes take -- confirmed by IkDictController's `/{word}`
+ * path templates.
  */
 export interface IkDictEntry {
   word: string;
   dict_type: IkDictType;
   status: IkDictStatus;
+  /** Free-text note, max 512 chars server-side. */
+  remark: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -479,6 +529,7 @@ export interface IkDictEntry {
 export interface CreateIkDictEntryRequest {
   word: string;
   dict_type: IkDictType;
+  remark?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -496,11 +547,19 @@ export interface ParsedPage {
 export interface DocumentPreviewImage {
   image_id: string;
   preview_url: string;
+  /** Source page, absent for images that carry no page anchor. */
+  page_no?: number;
+  /** Image origin, e.g. an embedded figure vs a rendered scan page. */
+  kind?: string;
   text_proxy: string;
+  /** VLM proxy-text state; a failed/skipped image still lists here with an empty text_proxy. */
+  status?: string;
 }
 
 /** GET /api/v1/documents/{docId}/preview response. */
 export interface DocumentPreview {
+  doc_id: string;
+  process_status: ProcessStatus;
   markdown: string;
   pages: ParsedPage[];
   images: DocumentPreviewImage[];
@@ -535,11 +594,8 @@ export type SourceMappingType = 'csv' | 'xlsx' | 'txt' | 'html';
  * t_kb_source_mapping row (M8-CONTRACTS.md section 0.7: "行含 name UK、source_type(csv/xlsx/
  * txt/html)、profile_yaml 文本、is_builtin"; built-ins are seeded idempotently from the parser's
  * local yml at server startup and are "不可删可复制").
- * ASSUMPTION: the id column name is not spelled out anywhere except the `{mappingId}` path
- * template on the PUT/DELETE routes; `mapping_id` is assumed by symmetry with every other
- * `xxx_id` business identifier in this codebase (key_id/app_id/kb_id/doc_id/...). created_at/
- * updated_at are likewise assumed present by symmetry with every other managed-entity row
- * (IkDictEntry/ApiKey/...) even though the contract's row sketch omits timestamps.
+ * Verified field-for-field against the server's SourceMappingResponse: mapping_id as the id column
+ * plus both timestamps -- one of the few row types here that really does expose updated_at.
  */
 export interface SourceMapping {
   mapping_id: string;
@@ -560,20 +616,17 @@ export interface CreateSourceMappingRequest {
 
 /**
  * PUT /api/v1/source-mappings/{mappingId} request body.
- * ASSUMPTION: built-ins are read-only per section 0.7 ("不可改"), so the web only ever calls this
- * on a custom row; the shape mirrors CreateSourceMappingRequest since the contract does not carve
- * out a narrower partial-update shape (e.g. profile_yaml only).
+ * Built-ins are read-only per section 0.7 ("不可改"), so the web only ever calls this on a custom
+ * row. Shape verified against the server's SourceMappingRequest: the update body is the same
+ * full-row shape as create, there is no narrower partial-update schema.
  */
 export type UpdateSourceMappingRequest = CreateSourceMappingRequest;
 
 /**
  * POST /api/v1/source-mappings/{mappingId}/copy request body -- "复制为自定义" action on a
  * built-in row (section 0.7).
- * ASSUMPTION/GAP: the contract only states built-ins "可复制" without naming an endpoint or
- * request shape; modelled as its own action route (mirrors rotateApiKey's POST .../rotate
- * pattern elsewhere in this codebase) rather than overloading POST /source-mappings, since the
- * input here is "which built-in to clone" rather than a from-scratch profile_yaml. Flagged for
- * reconciliation with the server agent's actual route.
+ * Verified: the server does expose this as its own action route
+ * (SourceMappingController#copy + SourceMappingCopyRequest), taking an optional display name.
  */
 export interface CopySourceMappingRequest {
   /** Optional display name for the copy; omitted lets the server derive one (e.g. "{name} 副本"). */
@@ -586,10 +639,7 @@ export interface CopySourceMappingRequest {
 
 export type ChatImportAction = 'CREATE' | 'NEW_VERSION';
 
-/**
- * ASSUMPTION: the response sketch only says "时间范围" without naming keys; modelled as an
- * epoch-millis [from, to] pair to mirror msg_time (RetrievalNodeMetadata/MetadataFilter above).
- */
+/** Epoch-millis [from, to] pair, matching the server's ChatImportPreviewResponse.TimeRange. */
 export interface ChatImportTimeRange {
   from: number;
   to: number;
@@ -605,14 +655,17 @@ export interface ChatImportSessionPreview {
 }
 
 /**
- * POST /api/v1/kb/{kbId}/chat-imports response.
- * ASSUMPTION: the contract's JSON sketch only shows the `sessions` array, but the confirm step
- * requires an `upload_token` in its request body and the parsed upload is "暂存 MinIO...30 分钟",
- * so the preview response must hand that token back; assumed to sit alongside `sessions`.
+ * POST /api/v1/kb/{kbId}/chat-imports response. The upload_token sits alongside `sessions` and is
+ * what the confirm step replays against the MinIO staging area (30 min TTL).
  */
 export interface ChatImportPreviewResponse {
   upload_token: string;
   sessions: ChatImportSessionPreview[];
+  /**
+   * M3-CONTRACTS.md section 3.5: messages the parser dropped, keyed by reason (e.g. voice/video
+   * rows that carry no text) with the count per reason. Absent when nothing was skipped.
+   */
+  skipped?: Record<string, number>;
 }
 
 /** POST /api/v1/kb/{kbId}/chat-imports/confirm request body. */
@@ -651,10 +704,8 @@ export interface DemoStatus {
 }
 
 /**
- * POST /api/v1/system/demo/import response.
- * ASSUMPTION: the contract only specifies "返回其 kb_id" for the idempotent repeat-call case;
- * modelled as a minimal {kb_id} shape since the web action only needs the id to navigate to the
- * KB detail page, not a full KnowledgeBase payload.
+ * POST /api/v1/system/demo/import response -- a bare {kb_id}, verified against SystemController
+ * (which returns exactly `Map.of("kb_id", ...)` on both the first call and idempotent repeats).
  */
 export interface DemoImportResult {
   kb_id: string;
@@ -677,9 +728,8 @@ export type RollbackMode = 'INSTANT' | 'REBUILD';
 
 /**
  * GET /api/v1/documents/{docId}/versions list item (M4a-CONTRACTS.md section 1.2), extended by
- * M6-CONTRACTS.md section 0.8/2 with the AppVersionPinChecker's pin state.
- * ASSUMPTION: M6-CONTRACTS.md section 1 names these two fields but not their exact JSON shape
- * beyond "pinned（boolean...）与 pinned_by（引用它的 app_version_id 列表...）"; modelled as-is here.
+ * M6-CONTRACTS.md section 0.8/2 with the AppVersionPinChecker's pin state. pinned/pinned_by
+ * verified against DocumentVersionResponse (server).
  * pinned/pinned_by are display-only in this web -- archival/cleanup itself has no manual web entry
  * point (it is VersionRetentionService's automatic retention sweep, M4a-CONTRACTS.md section 1.3),
  * so there is nothing here for a pinned version to disable; the server-side pin check is what
@@ -716,14 +766,14 @@ export interface ActivateImpact {
 }
 
 /**
- * POST /api/v1/documents/{docId}/versions/{versionId}/activate response.
- * ASSUMPTION: the contract only spells out the REBUILD-mode body ("返回 {task_id}"); the
- * INSTANT-mode response shape ("同步原子切换并立即返回") is not given, so it is modelled here as
- * task_id: null so both branches share one response type and the caller only needs to check
- * whether task_id is present to decide whether to enter the polling flow.
+ * POST /api/v1/documents/{docId}/versions/{versionId}/activate response. Both branches share one
+ * shape: REBUILD returns a task_id to poll, INSTANT returns task_id null (the server marks the
+ * record @JsonInclude(ALWAYS) precisely so the key survives the global non-null serialization).
  */
 export interface ActivateVersionResponse {
   task_id: string | null;
+  /** Which branch actually ran; mirrors ActivateImpact.rollback_mode from the pre-flight check. */
+  rollback_mode: RollbackMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -785,31 +835,43 @@ export interface PendingAnnotation {
   kb_id: string;
   doc_id: string;
   document_version_id: string;
+  /** Label of the version the annotation was made on, e.g. "v2" -- not the raw document_version_id. */
+  version: string;
   chunk_id: string;
   annotation_type: AnnotationType;
   payload: AnnotationPayload;
+  /** Server-truncated excerpt of the annotated chunk's text ("原文摘录"). */
+  excerpt: string | null;
   chunk_text_hash: string;
   inherit_status: InheritStatus;
   operator: string;
   created_at: string;
-  updated_at: string;
   /**
-   * M9-CONTRACTS.md section 0.5. ASSUMPTION: the contract's response sketch only names the field
-   * without stating whether it is always present; modelled as always-present (server returns `[]`
-   * rather than omitting the key) since section 0.4 guarantees a short-text row still gets a
-   * (empty) verdict, not an absent field -- the pending-review workbench renders "无相似候选" off an
-   * empty array, not a missing key.
+   * M9-CONTRACTS.md section 0.5. Always present -- PendingAnnotationResponse maps a null suggestion
+   * list to `[]`, so the workbench renders "无相似候选" off an empty array, never a missing key.
    */
   suggestions: AnnotationMigrationSuggestion[];
+}
+
+/**
+ * POST /api/v1/annotations/{annotationId}/migrate response (M9-CONTRACTS.md section 0.5).
+ * `already_migrated` is how the idempotent repeat call reports itself: the row was already applied
+ * to this target, so nothing changed and changed_chunk_ids comes back empty.
+ */
+export interface AnnotationMigrationResult {
+  annotation_id: string;
+  target_chunk_id: string;
+  annotation_type: AnnotationType;
+  inherit_status: InheritStatus;
+  changed_chunk_ids: string[];
+  already_migrated: boolean;
 }
 
 /**
  * POST /api/v1/annotations/{annotationId}/migrate request body (M9-CONTRACTS.md section 0.5):
  * applies the pending row's edit/disable semantics onto `target_chunk_id` in the newly active
  * version and marks the original pending row processed; idempotent when repeated with the same
- * target. ASSUMPTION: the response shape is not spelled out; the workbench does not need it beyond
- * success/failure since it reloads the pending list afterwards (same pattern as editChunk/
- * activateVersion elsewhere in this codebase), so the call is typed as returning void.
+ * target. See AnnotationMigrationResult for what comes back.
  */
 export interface MigrateAnnotationRequest {
   target_chunk_id: string;
@@ -880,10 +942,8 @@ export interface EvalCaseEvidenceInput {
 /**
  * t_kb_eval_dataset row, extended with the list view's derived "最近一次 run 摘要"
  * (M4b-CONTRACTS.md section 2 dataset list bullet).
- * ASSUMPTION: the exact JSON key/shape of the run summary embedded in the list response is not
- * spelled out by the contract beyond "最近一次 run 摘要"; modelled as a minimal
- * {run_id, status, mode, finished_at} so the dataset table can show a status Tag without a
- * second round trip per row.
+ * Verified against EvalDatasetResponse.LastRunSummary: {run_id, status, mode, finished_at}, marked
+ * @JsonInclude(ALWAYS) server-side so the key is present (null) even on a dataset that never ran.
  */
 export interface EvalDatasetRunSummary {
   run_id: string;
@@ -901,7 +961,6 @@ export interface EvalDataset {
   case_count: number;
   last_run: EvalDatasetRunSummary | null;
   created_at: string;
-  updated_at: string;
 }
 
 /** POST /api/v1/kb/{kbId}/eval-datasets request body (M4b-CONTRACTS.md section 2). */
@@ -923,7 +982,6 @@ export interface EvalCase {
   source: CaseSource;
   note: string | null;
   created_at: string;
-  updated_at: string;
 }
 
 /**
@@ -963,10 +1021,7 @@ export interface CreateEvalCaseFromRetrievalRequest {
 /**
  * One Top-3 replacement candidate for a stale evidence, surfaced by GET
  * .../stale-cases (M4b-CONTRACTS.md section 2 "按重叠率取 Top3 候选供人工选择").
- * ASSUMPTION: exact field names are not given by the contract; modelled with the same
- * doc_id/span vocabulary as EvalCaseEvidence plus the source chunk_id (needed as a stable React
- * key and for potential future traceability) and overlap_ratio (the number the Top3 ranking and
- * the 0.5 threshold from section 3.2 are computed from).
+ * Verified against StaleCaseResponse.CandidateView: {doc_id, chunk_id, span, overlap_ratio}.
  */
 export interface StaleEvidenceCandidate {
   doc_id: string;
@@ -976,8 +1031,8 @@ export interface StaleEvidenceCandidate {
 }
 
 /**
- * ASSUMPTION: pairs one stale (no-longer-matching) evidence of a case with its Top-3 replacement
- * candidates; exact response shape is not given beyond the section 2 prose description.
+ * Pairs one stale (no-longer-matching) evidence of a case with its Top-3 replacement candidates;
+ * verified against StaleCaseResponse.StaleEvidenceView.
  */
 export interface StaleEvidenceReview {
   evidence: EvalCaseEvidence;
@@ -992,8 +1047,8 @@ export interface StaleCaseItem {
 
 /**
  * POST /api/v1/kb/{kbId}/eval-datasets/import-demo response (M4b-CONTRACTS.md section 2).
- * ASSUMPTION: the contract only describes the behavior ("匹配不到的 case 跳过并在响应列出，幂等");
- * modelled as the created/existing dataset id plus an import-count and a skipped-case reason list.
+ * Verified against ImportDemoEvalDatasetResponse: the created/existing dataset id plus an import
+ * count and a skipped-case reason list ({case_index, reason}).
  */
 export interface ImportDemoEvalDatasetSkippedCase {
   case_index: number;
@@ -1040,8 +1095,7 @@ export interface CreateEvalRunRequest {
 /**
  * POST /api/v1/eval-datasets/{datasetId}/runs/estimate response (M4b-CONTRACTS.md section 3.4
  * "返回预估调用次数（嵌入/重排/改写/judge 各自次数）").
- * ASSUMPTION: field names are not spelled out beyond that prose; named to mirror the four call
- * kinds it lists in that order.
+ * Verified against EvalRunEstimateResponse: the four call-count keys in exactly that order.
  */
 export interface EvalRunEstimate {
   embedding_calls: number;
@@ -1102,8 +1156,6 @@ export interface EvalRun {
   fail_reason: string | null;
   started_at: string | null;
   finished_at: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 /** t_kb_eval_result row (M4b-CONTRACTS.md section 1), used by the report's per-case drill-down table. */
@@ -1119,8 +1171,6 @@ export interface EvalResult {
   retry_count: number;
   judge_score: number | null;
   judge_reason: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 /**
@@ -1139,11 +1189,15 @@ export interface EvalRunCompareResult {
 // Application center: apps, versions, release gate (M4c-CONTRACTS.md sections 1/2)
 // ---------------------------------------------------------------------------
 
-/** t_kb_app row (M4c-CONTRACTS.md section 1). */
+/** t_kb_app row (M4c-CONTRACTS.md section 1), plus the denormalized pointer to its live version. */
 export interface KbApp {
   app_id: string;
   name: string;
   description: string | null;
+  /** Version label of this app's current RELEASED version, absent when nothing is released yet. */
+  released_version?: string;
+  /** app_version_id of that same version; absent for the same reason. */
+  released_version_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -1154,9 +1208,8 @@ export interface CreateAppRequest {
 }
 
 /**
- * ASSUMPTION: section 2 only lists the CRUD path prefix ("应用 CRUD `/api/v1/apps`") without
- * spelling out which verbs beyond create; a plain PUT for name/description edits mirrors every
- * other resource's CRUD shape in this codebase (e.g. kb.ts's create/get/delete trio).
+ * Verified: AppController exposes PUT /apps/{appId} taking UpdateAppRequest{name, description},
+ * the same shape as create.
  */
 export type UpdateAppRequest = CreateAppRequest;
 
@@ -1216,6 +1269,16 @@ export interface AppRoutingConfig {
   prompt: string | null;
 }
 
+/**
+ * t_kb_app_version.config.gate (server AppConfigSnapshot.GateThresholds): the per-version release
+ * gate floor. Absent/both-null means the version falls back to the first-release baseline rule
+ * instead of an explicit threshold (M4c-CONTRACTS.md section 2).
+ */
+export interface AppGateThresholds {
+  min_hit_rate?: number | null;
+  min_recall?: number | null;
+}
+
 export interface AppVersionConfig {
   /** 1..15 entries (M5-CONTRACTS.md section 1), replacing M4c's single kb_id. */
   kb_refs: KbRef[];
@@ -1223,6 +1286,16 @@ export interface AppVersionConfig {
   prompt: AppPromptConfig;
   /** Absent on pre-M5 snapshots; read as `config.routing?.enabled ?? false` / `?.prompt ?? null`. */
   routing?: AppRoutingConfig;
+  /**
+   * M4c-CONTRACTS.md section 1: the chat model frozen into this version's snapshot (resolved
+   * through ChatProviderFactory at call time). null/absent = the server default chat model.
+   * This web has no picker for it yet, but the value MUST be carried through when a new version is
+   * built from an existing one -- the server snapshots exactly what the request holds, so dropping
+   * the key silently reverts the app to the default model.
+   */
+  chat_model?: string | null;
+  /** Release gate floor; carried through for the same reason as chat_model above. */
+  gate?: AppGateThresholds | null;
   /**
    * @deprecated M4c-era single-kb snapshot field. Present only on versions created before M5;
    * never populated by this web's write path. Do not read directly -- go through
@@ -1260,13 +1333,8 @@ export interface AppVersionIndexSnapshot {
 
 /**
  * Per-kb "可见集文档版本数" summary for the version-list expanded row (M6-CONTRACTS.md section 2).
- * ASSUMPTION: M6-CONTRACTS.md section 1 explicitly leaves this field's server-side name undecided
- * ("visible_version_kb_count/每库版本数摘要...字段命名可在实现时定版但须回报"); this web
- * implementation assumes an array of {kb_id, version_count} -- mirroring the shape of
- * index_snapshots/KbRef rather than exposing the raw visible_version_ids id-list, since the
- * expanded row only needs a count per kb, not the full document_version_id set -- named
- * visible_version_kb_count after the server section's own suggested name. Field name to be
- * reconciled once the server side lands.
+ * The name M6-CONTRACTS.md section 1 left open was settled server-side as visible_version_kb_count
+ * carrying {kb_id, version_count} rows (VisibleVersionCountResponse) -- verified, matches.
  */
 export interface VisibleVersionKbCount {
   kb_id: string;
@@ -1274,10 +1342,35 @@ export interface VisibleVersionKbCount {
 }
 
 /**
- * t_kb_app_version row (M4c-CONTRACTS.md section 1). gate_run_ids is modelled as an ordered pair
- * [candidate_run_id, baseline_run_id] -- ASSUMPTION: the contract only says "同语料双跑...候选配置
- * 与当前 RELEASED 配置各一轮" and names the column gate_run_ids JSON without giving element order;
- * this ordering is what GateCompareDrawer's labels assume and is not a guaranteed backend contract.
+ * Structured gate report frozen on the version at gate time (server GateReport). Rendered by
+ * GateCompareDrawer alongside the two runs' metrics.
+ */
+export interface AppGateReport {
+  verdict: string;
+  reason: string;
+  message: string;
+  candidate: { hit_rate: number; recall: number } | null;
+  baseline: { hit_rate: number; recall: number } | null;
+  effective_cases: number;
+  total_cases: number;
+  stale_cases: number;
+  stale_ratio: number;
+  degraded_cases: number;
+  /** Tolerance the double-run comparison allowed, max(2pp, 1/N). */
+  epsilon: number;
+  hit_rate_delta: number | null;
+  recall_delta: number | null;
+  candidate_run_id: string;
+  baseline_run_id: string | null;
+  evaluated_at: string;
+  case_ids: string[];
+}
+
+/**
+ * t_kb_app_version row (M4c-CONTRACTS.md section 1). gate_run_ids is an ordered pair
+ * [candidate_run_id, baseline_run_id] -- VERIFIED against ReleaseGateService (server), which
+ * appends the candidate run first and the baseline second, omitting the second element entirely
+ * on a first release with no RELEASED predecessor to compare against.
  */
 export interface AppVersion {
   app_version_id: string;
@@ -1288,7 +1381,17 @@ export interface AppVersion {
   gate_dataset_id: string | null;
   gate_run_ids: string[] | null;
   gate_verdict: string | null;
+  /** Classified gate reason code, e.g. why a run was blocked or only logged. */
+  gate_reason?: string;
+  /** Human-readable rendering of gate_reason, ready to display as-is. */
+  gate_reason_message?: string;
+  gate_report?: AppGateReport;
+  /** True when a GATE_LOG_ONLY version was pushed through with force=true ("留痕放行"). */
+  force_released: boolean;
+  /** Operator who forced it; present only alongside force_released=true. */
+  force_operator?: string;
   changelog: string | null;
+  released_at?: string;
   created_at: string;
   updated_at: string;
   /**
@@ -1299,27 +1402,28 @@ export interface AppVersion {
    * third branch: this is a historical/in-progress data shape, not a degraded condition).
    */
   index_snapshots?: AppVersionIndexSnapshot[];
-  /** M6-CONTRACTS.md section 2; see VisibleVersionKbCount doc comment for the naming assumption. */
+  /** M6-CONTRACTS.md section 2; `[]` on versions with no frozen visible set. */
   visible_version_kb_count?: VisibleVersionKbCount[];
 }
 
 /**
  * POST /api/v1/apps/{id}/versions request body (M4c-CONTRACTS.md section 2: "从当前草稿配置建版").
- * ASSUMPTION: there is no separate persisted "draft config" resource on the app row in the
- * contract text; the web's 配置编辑 form holds the draft client-side and this call snapshots it
- * into a brand new DRAFT version, matching the section 4 UI description (配置编辑 + 版本列表 as two
- * panes of the same page rather than a bidirectional draft-sync API).
+ * There is no persisted server-side "draft config" resource: the 配置编辑 form holds the draft
+ * client-side and this call snapshots it into a brand new DRAFT version.
+ *
+ * The server maps this body through AppVersionConfigRequest#toSnapshot, which writes EVERY branch
+ * of the snapshot from what the request carries. A key the request omits is therefore stored as
+ * its default, not inherited from the version the form was pre-filled from -- which is why
+ * chat_model and gate must be round-tripped even though this web has no editor for them.
  */
 export interface CreateAppVersionRequest extends AppVersionConfig {
   changelog?: string;
 }
 
 /**
- * PUT /api/v1/app-versions/{vid}/gate-dataset request body.
- * ASSUMPTION: section 4 lists "绑定门禁评测集选择" as its own version-list-row action distinct
- * from version creation, but section 2/3 do not name a binding endpoint; modelled as a dedicated
- * PUT so binding can happen (and be changed) any time before `release` is called, consistent with
- * "绑定 gate_dataset 时进入 GATING" being described as a release-time trigger, not a creation-time one.
+ * PUT /api/v1/app-versions/{vid}/gate-dataset request body. Verified against
+ * AppVersionController#gateDataset + GateDatasetRequest: binding is its own route and can be
+ * changed any time before `release` is called.
  */
 export interface BindGateDatasetRequest {
   dataset_id: string | null;
@@ -1372,19 +1476,21 @@ export interface ChatResponse {
   request_id: string;
   degraded: string[];
   /**
-   * M5-CONTRACTS.md section 2.2 ("applied 增 routed_kb_ids"). ASSUMPTION: M4c's ChatResponse has
-   * no `applied` wrapper (unlike SearchResponse), so this sits as a top-level sibling of
-   * `degraded` rather than nested under one; the SSE `done` event mirrors it for the same reason
-   * (see ChatDoneEvent below).
+   * M5-CONTRACTS.md section 2.2: a TOP-LEVEL sibling of `degraded`, not nested under an `applied`
+   * wrapper (ChatResponse has none, unlike SearchResponse) -- this is the M5 主会话定版 and the SSE
+   * `done` event mirrors it (see ChatDoneEvent below).
    */
   routed_kb_ids: string[];
+  /** Version label that served this call; see PublicSearchResponse. */
+  app_version?: string;
+  /** 'release' | 'beta'; see PublicSearchResponse. */
+  target_stage?: AuditTargetStage;
 }
 
 /**
  * SSE event payload shapes for stream=true chat (M4c-CONTRACTS.md section 3: "message_delta* ->
- * references -> done(含 request_id/degraded) -> 或 error"). ASSUMPTION: field names inside each
- * frame's `data:` JSON are not spelled out beyond the event-name sequence; modelled as the minimal
- * shape each event name implies.
+ * references -> done(含 request_id/degraded) -> 或 error"). Verified against the server's
+ * SseChatStreamListener: event names and per-frame field names match exactly.
  */
 export interface ChatDeltaEvent {
   delta: string;
@@ -1407,33 +1513,37 @@ export interface ChatErrorEvent {
 // API Key management (M4c-CONTRACTS.md sections 1/3)
 // ---------------------------------------------------------------------------
 
-/**
- * t_kb_api_key.status. ASSUMPTION: the contract names the column ("status") but not its concrete
- * values; ENABLED/DISABLED mirrors IkDictStatus, the only other simple two-state status enum in
- * this codebase's contracts.
- */
+/** t_kb_api_key.status; ENABLED/DISABLED, verified against the server's ApiKeyStatus enum. */
 export type ApiKeyStatus = 'ENABLED' | 'DISABLED';
 
-/** t_kb_api_key row (M4c-CONTRACTS.md sections 1/3). app_scope null = every application. */
+/**
+ * t_kb_api_key row (M4c-CONTRACTS.md sections 1/3).
+ *
+ * `app_scope` is ALWAYS an array -- ApiKeyService.scopeOf maps a null/blank column to `[]`, and an
+ * EMPTY ARRAY means "authorises every application", the same thing sending null on the write side
+ * means. Never test it with `=== null`.
+ */
 export interface ApiKey {
   key_id: string;
   name: string;
-  /** Display-only prefix, e.g. "kb-sk-ab12"; the full secret is never returned again after creation/rotation. */
+  /**
+   * The masked display form of the secret, already complete: the server stores it pre-elided as
+   * "kb-sk-58e086…5a4a" (head + last 4). There is no separate last-4 field -- t_kb_api_key keeps
+   * only the hash, so the plaintext tail cannot be re-derived. Render this value verbatim; do not
+   * append a mask of your own.
+   */
   prefix: string;
-  /** Last 4 characters of the plaintext secret, shown alongside prefix per "列表(prefix+末4位)". */
-  last4: string;
   status: ApiKeyStatus;
   qps_limit: number;
-  app_scope: string[] | null;
+  app_scope: string[];
   last_used_at: string | null;
   created_at: string;
-  updated_at: string;
 }
 
 export interface CreateApiKeyRequest {
   name: string;
   qps_limit: number;
-  /** Omitted/null = all applications. */
+  /** Omitted/null/empty = all applications. */
   app_scope?: string[] | null;
 }
 
@@ -1448,9 +1558,8 @@ export interface ApiKeyCreatedResponse {
 }
 
 /**
- * ASSUMPTION: section 3 lists "app_scope 配置" as its own management bullet separate from create;
- * modelled as a dedicated scope-update endpoint so an existing key's scope can be edited without a
- * full rotate (which would also invalidate the currently distributed secret).
+ * PUT /api/v1/api-keys/{keyId}/scope body. Verified against ApiKeyController#updateScope: editing
+ * the scope does not rotate the secret. null/empty both mean "every application".
  */
 export interface UpdateApiKeyScopeRequest {
   app_scope: string[] | null;
@@ -1463,21 +1572,24 @@ export interface UpdateApiKeyScopeRequest {
 /** t_kb_api_audit_log.target_stage (M4c-CONTRACTS.md section 3). */
 export type AuditTargetStage = 'release' | 'beta';
 
-/**
- * t_kb_api_audit_log row (M4c-CONTRACTS.md section 1). ASSUMPTION: the contract does not name a
- * primary-key column for this table; audit_log_id follows the `xxx_id` convention used by every
- * other row type in this codebase (case_id, run_id, etc).
- */
+/** t_kb_api_audit_log row (M4c-CONTRACTS.md section 1), verified against ApiAuditLogResponse. */
 export interface ApiAuditLogEntry {
   audit_log_id: string;
   key_id: string;
+  app_id: string;
   app_version_id: string;
   target_stage: AuditTargetStage;
+  /** Which endpoint was called, e.g. "/api/v1/knowledge/search". */
+  endpoint: string;
   /** Already desensitized + truncated to 200 chars server-side (M4c-CONTRACTS.md section 1). */
   query_digest: string;
   hit_doc_ids: string[];
   latency_ms: number;
   degraded: string[];
+  /** Which of the four whitelisted override params the caller actually presented. */
+  override_keys: string[];
+  /** Business error code when the call failed; absent on success (401 is not audited, 429 is). */
+  error_code?: string;
   request_id: string;
   created_at: string;
 }
@@ -1493,11 +1605,8 @@ export interface AuditLogQueryParams {
 }
 
 /**
- * GET /api/v1/api-audit-logs/stats response.
- * ASSUMPTION: section 4 only asks for "调用量简单统计" without a response schema; modelled as the
- * smallest useful call-volume summary (bucketed identically to the log query's filters) so the
- * audit tab can show a headline row above the filtered table without paging through every row
- * client-side.
+ * GET /api/v1/api-audit-logs/stats response, verified against ApiAuditStatsResponse: the same
+ * filters as the log query, aggregated server-side.
  */
 export interface AuditLogStats {
   total_calls: number;
@@ -1507,56 +1616,49 @@ export interface AuditLogStats {
 }
 
 // ---------------------------------------------------------------------------
-// GraphRAG (M7-CONTRACTS.md sections 0.1-0.10 / 2). Server delivered in parallel by another
-// agent; every shape below is this web's best-effort assumption per section 0.10's blueprint,
-// flagged for reconciliation once the real endpoints land.
+// GraphRAG (M7-CONTRACTS.md sections 0.1-0.10 / 2). Shapes below were reconciled against the
+// delivered server endpoints (GraphController + GraphSummaryResponse/GraphEntityResponse).
 // ---------------------------------------------------------------------------
 
-/**
- * t_kb_task status for GRAPH_EXTRACT/GRAPH_CLEANUP rows (M7-CONTRACTS.md section 0.3).
- * ASSUMPTION: the contract says extraction progress is "入 t_kb_task 展示进度" but does not name
- * the status enum; mirrored from RunStatus (the only other server-driven async-job status enum
- * already in this codebase).
- */
+/** t_kb_task status for GRAPH_EXTRACT/GRAPH_CLEANUP rows (M7-CONTRACTS.md section 0.3). */
 export type GraphTaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
 
-/**
- * t_kb_task.task_type values introduced by M7 (section 0.4: "TaskType 增 GRAPH_CLEANUP 或并入既有
- * CLEANUP（实现自选，报告申报）"). Both are modelled so the web can display whichever one the
- * server actually reports without a schema change later.
- */
+/** t_kb_task.task_type values M7 introduced (section 0.4). */
 export type GraphTaskType = 'GRAPH_EXTRACT' | 'GRAPH_CLEANUP';
 
 /**
- * Latest graph task summary embedded in GraphSummary (section 0.10: "最近任务状态").
- * ASSUMPTION: field names mirror EvalRun's status/fail_reason/timestamps shape.
- * skipped_chunk_count surfaces the section 0.3 "非法 JSON/超长实体名/关系端点校验失败的分片跳过
- * 并计数（不 fail 整个任务）" behavior so the progress alert can show it without it reading as a
- * hard failure.
+ * Latest graph task summary embedded in GraphSummary (section 0.10: "最近任务状态"), mirroring the
+ * server's GraphSummaryResponse.GraphTask.
+ *
+ * Note the field names do NOT follow EvalRun's vocabulary: the task type is `type` (not
+ * task_type) and the failure text is `error_message` (not fail_reason). Reading the EvalRun names
+ * here silently yields undefined, which is exactly how the failure alert went missing.
  */
 export interface GraphTaskSummary {
   task_id: string;
-  task_type: GraphTaskType;
+  type: GraphTaskType;
   status: GraphTaskStatus;
-  /** Chunks/batches the extraction pipeline skipped due to output validation (section 0.3), not a task failure. */
+  /** Percent complete, 0-100; absent on tasks that have not reported progress yet. */
+  progress?: number;
+  /** Chunks the extraction pipeline skipped on output validation (section 0.3), not a task failure. */
   skipped_chunk_count?: number;
-  fail_reason: string | null;
+  /** Failure text, present only on FAILED tasks (the server omits nulls). */
+  error_message?: string;
   created_at: string;
-  updated_at: string;
 }
 
 /**
  * GET /api/v1/kb/{kbId}/graph/summary response (section 0.10: "实体数/关系数/覆盖分片数/最近任务
- * 状态"). ASSUMPTION: graph_enabled is folded into this same response (in addition to
- * KnowledgeBase.graph_enabled) since the 知识图谱 tab's polling loop is the one place that needs
- * both the switch state and the extraction progress refreshed in lockstep.
+ * 状态"). graph_enabled is carried here as well as on KnowledgeBase so the 知识图谱 tab's polling
+ * loop refreshes the switch state and the extraction progress in lockstep -- verified present on
+ * the server response. `latest_task` is omitted entirely (not null) when no task has ever run.
  */
 export interface GraphSummary {
   graph_enabled: boolean;
   entity_count: number;
   relation_count: number;
   covered_chunk_count: number;
-  latest_task: GraphTaskSummary | null;
+  latest_task?: GraphTaskSummary;
 }
 
 /** PUT /api/v1/kb/{kbId}/graph/config request body (section 0.10). */
@@ -1565,23 +1667,17 @@ export interface UpdateGraphConfigRequest {
 }
 
 /**
- * POST /api/v1/kb/{kbId}/graph/extract response (section 0.10: "手动触发全量重抽").
- * ASSUMPTION: mirrors ActivateVersionResponse's task_id-returning shape for an async server job;
- * the web does not strictly need task_id back (it re-polls /graph/summary for latest_task) but
- * keeping it lets the trigger button's success message reference the concrete task.
+ * POST /api/v1/kb/{kbId}/graph/extract response (section 0.10: "手动触发全量重抽"): a bare
+ * {task_id}, verified against GraphController#extract.
  */
 export interface TriggerGraphExtractResponse {
   task_id: string;
 }
 
 /**
- * One (:Entity)-[:REL]->(:Entity) outgoing edge, embedded on GraphEntity below.
- * ASSUMPTION: section 0.10 lists exactly 5 graph endpoints and none of them is a standalone
- * "relations" listing, yet section 2's "简版可视化：以当前实体列表前 N 个实体的关系做...布局"
- * requires edges between the top-N entities. Rather than inventing a 6th endpoint, `relations` is
- * assumed bundled onto each GraphEntity row the entities endpoint already returns -- the server
- * already has the entity's outgoing REL edges in hand when it resolves source_chunk_count from
- * the same Neo4j node. Flagged for reconciliation with the server agent's actual response shape.
+ * One (:Entity)-[:REL]->(:Entity) outgoing edge, embedded on GraphEntity below. Verified: the
+ * server bundles each entity's outgoing edges onto the entity row itself (GraphEntityResponse
+ * .relations), so the visualization needs no separate relations endpoint.
  */
 export interface GraphEntityRelation {
   target: string;

@@ -13,15 +13,14 @@ export function createApiKey(payload: CreateApiKeyRequest): Promise<ApiKeyCreate
   return apiPost<ApiKeyCreatedResponse>('/api-keys', payload);
 }
 
-/** GET /api/v1/api-keys. ASSUMPTION: modelled as a plain array, no paging named by the contract. */
+/** GET /api/v1/api-keys: a plain array, no paging (verified against ApiKeyController#list). */
 export function listApiKeys(): Promise<ApiKey[]> {
   return apiGet<ApiKey[]>('/api-keys');
 }
 
 /**
- * ASSUMPTION: the contract only says "禁用" (disable); modelled as a symmetric status PUT (mirrors
- * system.ts's updateIkDictStatus assumption) so the same list-page Switch control can both disable
- * and re-enable a key without a separate endpoint pair.
+ * PUT /api/v1/api-keys/{keyId}/status. Verified: the server does expose a symmetric status route
+ * (not a one-way "disable"), so the same list-page Switch both disables and re-enables a key.
  */
 export function updateApiKeyStatus(keyId: string, status: 'ENABLED' | 'DISABLED'): Promise<void> {
   return apiPut<void>(`/api-keys/${keyId}/status`, { status });
@@ -36,7 +35,7 @@ export function deleteApiKey(keyId: string): Promise<void> {
   return apiDelete<void>(`/api-keys/${keyId}`);
 }
 
-/** PUT /api/v1/api-keys/{keyId}/scope (ASSUMPTION, see UpdateApiKeyScopeRequest's doc comment in types.ts). */
+/** PUT /api/v1/api-keys/{keyId}/scope: edits an existing key's scope without rotating its secret. */
 export function updateApiKeyScope(keyId: string, payload: UpdateApiKeyScopeRequest): Promise<void> {
   return apiPut<void>(`/api-keys/${keyId}/scope`, payload);
 }

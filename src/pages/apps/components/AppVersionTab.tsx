@@ -105,6 +105,10 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
     }
   };
 
+  /** Appends the server's human-readable gate reason to a toast, when it sent one. */
+  const reasonSuffix = (version: AppVersion) =>
+    version.gate_reason_message ? `：${version.gate_reason_message}` : '';
+
   const handleRelease = async (versionId: string, force?: boolean) => {
     setActingVersionId(versionId);
     try {
@@ -114,9 +118,11 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
       } else if (updated.status === 'GATING') {
         message.info('已提交发布，门禁评测执行中');
       } else if (updated.status === 'GATE_LOG_ONLY') {
-        message.warning('门禁仅记录（未自动发布），可选择强制发布');
+        // gate_reason_message is the server's own rendering of gate_reason; showing the bare
+        // verdict enum instead left the operator with no way to tell *why* the gate landed here.
+        message.warning(`门禁仅记录（未自动发布），可选择强制发布${reasonSuffix(updated)}`);
       } else if (updated.status === 'GATE_BLOCKED') {
-        message.error('门禁拦截，未发布');
+        message.error(`门禁拦截，未发布${reasonSuffix(updated)}`);
       }
       setForceModalVersion(null);
       loadVersions();
@@ -152,7 +158,8 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
             render: (status: AppVersion['status'], record: AppVersion) => {
               const meta = metaOf(APP_VERSION_STATUS_META, status);
               const tag = <Tag color={meta.color}>{meta.label}</Tag>;
-              return record.gate_verdict ? <span title={record.gate_verdict}>{tag}</span> : tag;
+              const hint = record.gate_reason_message ?? record.gate_verdict;
+              return hint ? <span title={hint}>{tag}</span> : tag;
             },
           },
           {

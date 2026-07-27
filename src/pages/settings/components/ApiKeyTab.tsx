@@ -16,7 +16,7 @@ interface CreateApiKeyFormValues {
 
 /**
  * API Key 管理 tab (M4c-CONTRACTS.md sections 1/3/4): create (one-time plaintext + copy), list
- * (prefix + last4), disable/enable, rotate, delete, and app_scope multi-select.
+ * (the server's pre-elided prefix), disable/enable, rotate, delete, and app_scope multi-select.
  */
 export default function ApiKeyTab() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -126,13 +126,11 @@ export default function ApiKeyTab() {
         columns={[
           { title: '名称', dataIndex: 'name' },
           {
+            // `prefix` already arrives pre-elided as "kb-sk-58e086…5a4a"; the server keeps only the
+            // hash, so there is no separate last-4 field to append.
             title: 'Key',
             width: 180,
-            render: (_, record) => (
-              <Typography.Text code>
-                {record.prefix}****{record.last4}
-              </Typography.Text>
-            ),
+            render: (_, record) => <Typography.Text code>{record.prefix}</Typography.Text>,
           },
           {
             title: '状态',

@@ -1,3 +1,4 @@
+// Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
@@ -86,16 +87,6 @@ export default function ChunkDrawer({ docId, docName, onClose }: ChunkDrawerProp
     setEditingId(null);
   }, [docId, page]);
 
-  /**
-   * ASSUMPTION: M4a-CONTRACTS.md section 2.2 documents metadata.disabled_child_ids only on the
-   * search RetrievalNode response, not on GET /documents/{docId}/chunks. Rather than inventing a
-   * new backend field on this endpoint, disabled child ids are derived client-side from the
-   * chunks already loaded for the current page (parent_id match + enabled=false). KNOWN LIMIT:
-   * if a parent and some of its children land on different pages of this paginated list, the
-   * hint will under-report until both are loaded on the same page.
-   */
-  const childIdsOf = (chunk: KbChunk) => chunks.filter((c) => c.parent_id === chunk.chunk_id);
-  const isParent = (chunk: KbChunk) => chunks.some((c) => c.parent_id === chunk.chunk_id);
 
   const handleToggle = async (chunk: KbChunk, enabled: boolean) => {
     setSavingId(chunk.chunk_id);
@@ -231,11 +222,10 @@ export default function ChunkDrawer({ docId, docName, onClose }: ChunkDrawerProp
             itemLayout="vertical"
             dataSource={chunks}
             renderItem={(chunk) => {
-              const disabledChildIds = isParent(chunk)
-                ? childIdsOf(chunk)
-                    .filter((c) => !c.enabled)
-                    .map((c) => c.chunk_id)
-                : [];
+              // Server-computed over the whole document version (ChunkResponse.disabled_child_ids),
+              // not derived from the rows on this page -- deriving it under-reported whenever a
+              // parent and its children fell on different pages of this paginated list.
+              const disabledChildIds = chunk.disabled_child_ids;
               const isEditing = editingId === chunk.chunk_id;
               const isSaving = savingId === chunk.chunk_id;
               return (
