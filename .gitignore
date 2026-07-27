@@ -8,7 +8,8 @@ id_rsa*
 credentials*
 secrets*
 
-# ===== IDE 本地配置 =====
+# ===== IDE 与本地 Agent 配置 =====
+.claude/
 .idea/
 *.iml
 *.ipr
