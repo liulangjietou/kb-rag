@@ -1014,7 +1014,12 @@ export interface EvalRunConfig {
   mode: EvalMode;
   recall_top_k?: number;
   top_n?: number;
-  fusion?: FusionConfig;
+  /**
+   * Fusion strategy LITERAL ('rrf' | 'weighted'), matching the server's EvalRunSubmitRequest.
+   * The earlier FusionConfig object shape 500ed every HYBRID/HYBRID_RERANK estimate/submit
+   * (Jackson: cannot deserialize String from Object) -- the field was never an object server-side.
+   */
+  fusion?: FusionMode;
   score_threshold?: number | null;
   rewrite_enabled?: boolean;
 }
@@ -1164,7 +1169,14 @@ export interface AppRetrievalConfig {
   recall_top_k: number;
   top_n: number;
   score_threshold?: number | null;
-  fusion?: FusionConfig;
+  /**
+   * FLAT fusion fields, matching the server snapshot (KbRetrievalConfig: fusion_mode/w_vec/rrf_k).
+   * The earlier nested `fusion` object was silently dropped by the server on save (unknown field)
+   * and never present on read -- the app-center fusion setting was a no-op end to end.
+   */
+  fusion_mode?: FusionMode;
+  w_vec?: number;
+  rrf_k?: number;
   rerank_enabled?: boolean;
   rewrite_enabled?: boolean;
 }

@@ -56,7 +56,7 @@ function buildPayload(values: RunFormValues): CreateEvalRunRequest {
     top_n: values.top_n,
     score_threshold: values.score_threshold_enabled ? values.score_threshold : null,
     rewrite_enabled: values.rewrite_enabled,
-    fusion: mode === 'HYBRID' || mode === 'HYBRID_RERANK' ? { mode: 'rrf', rrf_k: 60 } : undefined,
+    fusion: mode === 'HYBRID' || mode === 'HYBRID_RERANK' ? 'rrf' : undefined,
   }));
   return {
     k: values.k,
