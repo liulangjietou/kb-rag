@@ -5,6 +5,7 @@ import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, Select, Sp
 import { listApiKeys } from '../../../api/apiKey';
 import { chatViaApiKey, searchViaApiKey, streamChatViaApiKey, type PublicApiResult } from '../../../api/publicApi';
 import type { ApiKey, ChatResponse, KnowledgeBase, RetrievalNode, SearchResponse } from '../../../api/types';
+import ImagePicker, { toImagesPayload, type PickedImage } from '../../../components/ImagePicker';
 import { kbNameOf } from '../../../utils/kbRefs';
 import { describeDegradedReason } from '../../../utils/statusMeta';
 
@@ -55,6 +56,8 @@ export default function ApiDebugTab({ appId, kbs }: ApiDebugTabProps) {
   const scoreThresholdValue = Form.useWatch('score_threshold', form);
   const maxContentLengthValue = Form.useWatch('max_content_length', form);
 
+  const [images, setImages] = useState<PickedImage[]>([]);
+
   const [searching, setSearching] = useState(false);
   const [searchResult, setSearchResult] = useState<PublicApiResult<SearchResponse> | null>(null);
 
@@ -78,8 +81,9 @@ export default function ApiDebugTab({ appId, kbs }: ApiDebugTabProps) {
       top_n: topNValue,
       score_threshold: thresholdEnabled ? scoreThresholdValue : undefined,
       max_content_length: maxContentLengthValue,
+      images: toImagesPayload(images),
     }),
-    [queryValue, appId, appVersionValue, topNValue, thresholdEnabled, scoreThresholdValue, maxContentLengthValue],
+    [queryValue, appId, appVersionValue, topNValue, thresholdEnabled, scoreThresholdValue, maxContentLengthValue, images],
   );
 
   const buildPayload = (values: DebugFormValues) => ({
@@ -89,6 +93,8 @@ export default function ApiDebugTab({ appId, kbs }: ApiDebugTabProps) {
     top_n: values.top_n,
     score_threshold: values.threshold_enabled ? values.score_threshold ?? null : undefined,
     max_content_length: values.max_content_length,
+    // M9-CONTRACTS.md section 0.6: same optional images field on both /knowledge/search and /chat.
+    images: toImagesPayload(images),
   });
 
   const handleSearch = async () => {
@@ -184,6 +190,10 @@ export default function ApiDebugTab({ appId, kbs }: ApiDebugTabProps) {
           <Input.TextArea rows={2} placeholder="输入需要检索/提问的内容" />
         </Form.Item>
 
+        <Form.Item label="图片（search/chat 均随请求 images 字段发送，VLM 转文本后拼入 query）" style={{ marginBottom: 8 }}>
+          <ImagePicker value={images} onChange={setImages} />
+        </Form.Item>
+
         <Space size="large" wrap>
           <Form.Item name="top_n" label="top_n（覆盖白名单）" style={{ marginBottom: 8 }}>
             <InputNumber min={1} max={50} style={{ width: 160 }} />
@@ -262,6 +272,12 @@ export default function ApiDebugTab({ appId, kbs }: ApiDebugTabProps) {
                           <Typography.Paragraph ellipsis={{ rows: 4, expandable: true, symbol: '展开' }} style={{ marginBottom: 0 }}>
                             {node.content}
                           </Typography.Paragraph>
+                          {/* M9-CONTRACTS.md section 0.3: parent/child precise-redaction hint, see RetrievalNodeCard's identical convention. */}
+                          {node.metadata?.redacted_child_count !== undefined && (
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              已剔除 {node.metadata.redacted_child_count} 段被禁用内容
+                            </Typography.Text>
+                          )}
                         </Card>
                       ))}
                     </>
@@ -324,6 +340,11 @@ export default function ApiDebugTab({ appId, kbs }: ApiDebugTabProps) {
                               <Typography.Paragraph ellipsis={{ rows: 3, expandable: true, symbol: '展开' }} style={{ marginBottom: 0 }}>
                                 {ref.content}
                               </Typography.Paragraph>
+                              {ref.metadata?.redacted_child_count !== undefined && (
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                  已剔除 {ref.metadata.redacted_child_count} 段被禁用内容
+                                </Typography.Text>
+                              )}
                             </Space>
                           </Card>
                         ))}

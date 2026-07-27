@@ -1,10 +1,11 @@
 // Author: owlzhangfq@gmail.com
 import { apiGet, apiPost, apiPut } from './request';
 import type {
-  Annotation,
   EditChunkRequest,
   KbChunk,
   MergeChunksRequest,
+  MigrateAnnotationRequest,
+  PendingAnnotation,
   SplitChunkRequest,
   ToggleChunkRequest,
 } from './types';
@@ -52,10 +53,21 @@ export function splitChunk(chunkId: string, payload: SplitChunkRequest): Promise
 }
 
 /**
- * GET /api/v1/documents/{docId}/annotations/pending-review (M4a-CONTRACTS.md section 2.3): the
- * old-version annotation list ("原文摘录、操作类型、是否已在新版本重做") surfaced by the version
- * management drawer's stale-annotation alert.
+ * GET /api/v1/documents/{docId}/annotations/pending-review (M4a-CONTRACTS.md section 2.3,
+ * suggestions extended by M9-CONTRACTS.md section 0.5): the old-version annotation list ("原文摘录、
+ * 操作类型、是否已在新版本重做") surfaced by the version management drawer's stale-annotation alert,
+ * now also carrying each row's migration candidates.
  */
-export function listPendingReviewAnnotations(docId: string): Promise<Annotation[]> {
-  return apiGet<Annotation[]>(`/documents/${docId}/annotations/pending-review`);
+export function listPendingReviewAnnotations(docId: string): Promise<PendingAnnotation[]> {
+  return apiGet<PendingAnnotation[]>(`/documents/${docId}/annotations/pending-review`);
+}
+
+/**
+ * POST /api/v1/annotations/{annotationId}/migrate (M9-CONTRACTS.md section 0.5): apply a pending
+ * annotation's edit/disable semantics onto a suggested target chunk and mark the pending row
+ * processed. Idempotent when repeated with the same target_chunk_id. Not a batch/auto-migrate
+ * endpoint -- every call is one operator-confirmed row (section 0.5: "不做自动迁移、不做批量端点").
+ */
+export function migrateAnnotation(annotationId: string, payload: MigrateAnnotationRequest): Promise<void> {
+  return apiPost<void>(`/annotations/${annotationId}/migrate`, payload);
 }

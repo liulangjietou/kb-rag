@@ -276,6 +276,11 @@ export const DEGRADED_REASON_LABELS: Record<string, string> = {
    * at call time -- that route is skipped, the other two (vector/BM25) proceed unaffected.
    */
   graph_route_unavailable: '图检索路不可用，已降级双路',
+  /**
+   * M9-CONTRACTS.md section 0.6: images param present but zero-Key/no-vision-model/timeout/failed
+   * for every image -- all images are dropped and retrieval falls back to text-only on `query`.
+   */
+  image_understanding_unavailable: '图片理解不可用，已忽略图片仅文本检索',
 };
 
 export function describeDegradedReason(reason: string): string {

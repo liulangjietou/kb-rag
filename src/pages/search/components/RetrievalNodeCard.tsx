@@ -91,6 +91,19 @@ export default function RetrievalNodeCard({ node, rank, thresholdTag, selected, 
           已归并重叠窗口 ×{metadata.merged_window_chunk_ids.length}（{metadata.merged_window_chunk_ids.join('、')}）
         </Typography.Paragraph>
       )}
+      {/*
+        M9-CONTRACTS.md section 0.3: parent/child precise-redaction hint -- present only when the
+        server actually cut disabled-child text out of this parent (hide_parent_with_disabled_child
+        =false kb, every disabled child had a non-null offset); a null-offset child instead forces a
+        whole-parent fallback with no redaction to report, so this key's absence covers both "nothing
+        to redact" and "fell back to the unmodified parent" -- there is no separate signal for the
+        latter on this node.
+      */}
+      {metadata?.redacted_child_count !== undefined && (
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+          已剔除 {metadata.redacted_child_count} 段被禁用内容
+        </Typography.Paragraph>
+      )}
       {metadata?.graph_score !== undefined && (
         <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
           图路：关联度 {formatScore(metadata.graph_score)} / 跳数 {metadata.graph_hops ?? '-'} / 实体{' '}

@@ -351,6 +351,15 @@ export interface RetrievalNodeMetadata {
    * "已归并重叠窗口 ×N" hint line sized off this array's length.
    */
   merged_window_chunk_ids?: string[];
+  /**
+   * M9-CONTRACTS.md section 0.3: present only when the server actually redacted disabled-child
+   * text out of this parent node (hide_parent_with_disabled_child=false kb, at least one disabled
+   * child chunk with non-null parent offsets) -- counts how many child segments were cut. Absent
+   * both when nothing was redacted and when a null-offset child forced the whole-parent fallback
+   * (section 0.3's "任一禁用子片偏移为 null -> 整片回退现状"), since that fallback returns the
+   * parent unmodified with no redaction to report.
+   */
+  redacted_child_count?: number;
   [key: string]: unknown;
 }
 
@@ -751,11 +760,27 @@ export interface AnnotationPayload {
 }
 
 /**
- * t_kb_annotation row, returned by GET /api/v1/documents/{docId}/annotations/pending-review
- * (M4a-CONTRACTS.md section 2.3): the old-version annotation list shown before a stale-annotation
- * activation warning is expanded.
+ * One migration candidate on a pending-review row (M9-CONTRACTS.md section 0.5): lazily computed
+ * per request (not persisted/cached -- the pending list is inherently low-traffic), ranked by the
+ * symmetric character 3-gram Dice coefficient (section 0.4) against every enabled chunk in the
+ * newly active version, top 3 with score >= kb.annotation.migration-min-score (default 0.35).
  */
-export interface Annotation {
+export interface AnnotationMigrationSuggestion {
+  chunk_id: string;
+  /** Truncated to <=120 characters server-side. */
+  content_preview: string;
+  /** Symmetric 3-gram Dice coefficient, 0..1 -- render as a percentage, never a raw 4-decimal score. */
+  score: number;
+}
+
+/**
+ * t_kb_annotation row, returned by GET /api/v1/documents/{docId}/annotations/pending-review
+ * (M4a-CONTRACTS.md section 2.3, suggestions added by M9-CONTRACTS.md section 0.5): the old-version
+ * annotation list shown before a stale-annotation activation warning is expanded. Renamed from the
+ * M4a-era `Annotation` to `PendingAnnotation` since this row shape is only ever returned by this one
+ * pending-review endpoint (not a general-purpose annotation type).
+ */
+export interface PendingAnnotation {
   annotation_id: string;
   kb_id: string;
   doc_id: string;
@@ -768,6 +793,26 @@ export interface Annotation {
   operator: string;
   created_at: string;
   updated_at: string;
+  /**
+   * M9-CONTRACTS.md section 0.5. ASSUMPTION: the contract's response sketch only names the field
+   * without stating whether it is always present; modelled as always-present (server returns `[]`
+   * rather than omitting the key) since section 0.4 guarantees a short-text row still gets a
+   * (empty) verdict, not an absent field -- the pending-review workbench renders "无相似候选" off an
+   * empty array, not a missing key.
+   */
+  suggestions: AnnotationMigrationSuggestion[];
+}
+
+/**
+ * POST /api/v1/annotations/{annotationId}/migrate request body (M9-CONTRACTS.md section 0.5):
+ * applies the pending row's edit/disable semantics onto `target_chunk_id` in the newly active
+ * version and marks the original pending row processed; idempotent when repeated with the same
+ * target. ASSUMPTION: the response shape is not spelled out; the workbench does not need it beyond
+ * success/failure since it reloads the pending list afterwards (same pattern as editChunk/
+ * activateVersion elsewhere in this codebase), so the call is typed as returning void.
+ */
+export interface MigrateAnnotationRequest {
+  target_chunk_id: string;
 }
 
 /** PUT /api/v1/chunks/{chunkId} request body (M4a-CONTRACTS.md section 2.1): in-place content edit. */
@@ -1280,6 +1325,15 @@ export interface PublicSearchRequest {
   metadata_filter?: MetadataFilter;
   top_n?: number;
   score_threshold?: number | null;
+  /**
+   * M9-CONTRACTS.md section 0.6: optional base64-encoded image list (no URLs -- an external URL is
+   * an SSRF surface), max 3 entries / 5MB decoded each / 10MB total; over the limit is INVALID_PARAM.
+   * Each entry is the raw base64 payload only (no `data:image/...;base64,` prefix). Server converts
+   * each image to text via VisionProvider and appends it to `query` before rewrite/retrieval;
+   * zero-Key/no-vision-model/timeout/failure degrades to text-only search with
+   * `degraded += image_understanding_unavailable` rather than failing the call outright.
+   */
+  images?: string[];
 }
 
 /** POST /api/v1/knowledge/chat request body (M4c-CONTRACTS.md section 3): same fields + stream. */

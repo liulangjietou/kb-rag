@@ -8,6 +8,7 @@ import {
   Empty,
   List,
   Modal,
+  Popconfirm,
   Progress,
   Space,
   Spin,
@@ -17,9 +18,10 @@ import {
   Typography,
   message,
 } from 'antd';
-import { listPendingReviewAnnotations } from '../../../api/annotation';
+import { listPendingReviewAnnotations, migrateAnnotation } from '../../../api/annotation';
 import { activateVersion, getActivateImpact, listDocumentVersions } from '../../../api/version';
-import type { ActivateImpact, Annotation, DocumentVersion, KbDocument } from '../../../api/types';
+import type { ActivateImpact, DocumentVersion, KbDocument, PendingAnnotation } from '../../../api/types';
+import { formatPercent } from '../../../utils/format';
 import {
   ANNOTATION_TYPE_META,
   DOCUMENT_VERSION_STATUS_META,
@@ -60,9 +62,10 @@ export default function VersionDrawer({ doc, onClose, onActivated }: VersionDraw
   const docId = doc?.doc_id ?? null;
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [loading, setLoading] = useState(false);
-  const [pendingAnnotations, setPendingAnnotations] = useState<Annotation[]>([]);
+  const [pendingAnnotations, setPendingAnnotations] = useState<PendingAnnotation[]>([]);
   const [pendingLoading, setPendingLoading] = useState(false);
   const [pendingExpanded, setPendingExpanded] = useState(false);
+  const [migratingKey, setMigratingKey] = useState<string | null>(null);
   const [impactLoadingVersionId, setImpactLoadingVersionId] = useState<string | null>(null);
   const [impactModal, setImpactModal] = useState<ImpactModalState | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -91,6 +94,23 @@ export default function VersionDrawer({ doc, onClose, onActivated }: VersionDraw
       setPendingLoading(false);
     }
   }, [docId]);
+
+  /**
+   * M9-CONTRACTS.md section 0.5: apply the pending row's edit/disable semantics onto the operator-
+   * confirmed target chunk, then reload the pending list -- migrate is idempotent server-side but
+   * the row still needs to disappear from this list once processed, which only a reload guarantees
+   * (the response shape carries no fields this UI needs to trust beyond success/failure).
+   */
+  const handleMigrate = async (annotationId: string, targetChunkId: string) => {
+    setMigratingKey(`${annotationId}:${targetChunkId}`);
+    try {
+      await migrateAnnotation(annotationId, { target_chunk_id: targetChunkId });
+      message.success('已迁移到目标分片');
+      await loadPending();
+    } finally {
+      setMigratingKey(null);
+    }
+  };
 
   useEffect(() => {
     if (!docId) {
@@ -203,6 +223,59 @@ export default function VersionDrawer({ doc, onClose, onActivated }: VersionDraw
                               >
                                 {excerpt}
                               </Typography.Paragraph>
+                            )}
+                            {/*
+                              M9-CONTRACTS.md section 0.5:辅助迁移建议 -- lazily computed per
+                              request, top-3 candidates in the newly active version ranked by
+                              symmetric 3-gram Dice similarity. Short excerpts (<10 normalized
+                              chars) or no candidate clearing the 0.35 floor come back as an empty
+                              array, rendered as the explicit "无相似候选" hint rather than nothing.
+                            */}
+                            {item.suggestions.length === 0 ? (
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                无相似候选（可能为短文本或改动过大）
+                              </Typography.Text>
+                            ) : (
+                              <List
+                                size="small"
+                                dataSource={item.suggestions}
+                                style={{ width: '100%' }}
+                                renderItem={(suggestion) => {
+                                  const migrateKey = `${item.annotation_id}:${suggestion.chunk_id}`;
+                                  return (
+                                    <List.Item
+                                      key={suggestion.chunk_id}
+                                      style={{ paddingLeft: 0, paddingRight: 0 }}
+                                      actions={[
+                                        <Popconfirm
+                                          key="migrate"
+                                          title="迁移到此分片？"
+                                          description="将该标注应用到此分片，原待复核记录将置为已处理"
+                                          okText="迁移"
+                                          cancelText="取消"
+                                          onConfirm={() => handleMigrate(item.annotation_id, suggestion.chunk_id)}
+                                        >
+                                          <Button size="small" type="link" loading={migratingKey === migrateKey}>
+                                            迁移到此分片
+                                          </Button>
+                                        </Popconfirm>,
+                                      ]}
+                                    >
+                                      <Space direction="vertical" size={0}>
+                                        <Space wrap>
+                                          <Tag color="cyan">相似度 {formatPercent(suggestion.score)}</Tag>
+                                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                            分片: {suggestion.chunk_id}
+                                          </Typography.Text>
+                                        </Space>
+                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                          {suggestion.content_preview}
+                                        </Typography.Text>
+                                      </Space>
+                                    </List.Item>
+                                  );
+                                }}
+                              />
                             )}
                           </Space>
                         </List.Item>

@@ -20,6 +20,11 @@ export function formatScore(score: number): string {
   return score.toFixed(4);
 }
 
+/** Formats a 0..1 ratio (e.g. M9's annotation-migration Dice score) as a rounded percentage, e.g. 0.357 -> "36%". */
+export function formatPercent(ratio: number): string {
+  return `${Math.round(ratio * 100)}%`;
+}
+
 /** Formats an epoch-millis timestamp (e.g. chat msg_time) as a locale date-time string. */
 export function formatEpochMillis(epochMillis: number | null | undefined): string {
   if (epochMillis === null || epochMillis === undefined || !Number.isFinite(epochMillis)) {

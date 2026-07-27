@@ -4,6 +4,7 @@ import { SendOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Empty, Input, Select, Space, Switch, Tag, Typography, message } from 'antd';
 import { chatPreview, listApps, streamChatPreview } from '../../api/app';
 import { listKnowledgeBases } from '../../api/kb';
+import ImagePicker, { toImagesPayload, type PickedImage } from '../../components/ImagePicker';
 import type { ChatMessage, KbApp, KnowledgeBase, RetrievalNode } from '../../api/types';
 import { kbNameOf } from '../../utils/kbRefs';
 import { describeDegradedReason } from '../../utils/statusMeta';
@@ -33,6 +34,7 @@ export default function ChatDebugPage() {
   const [appVersion, setAppVersion] = useState<string>('');
   const [streamEnabled, setStreamEnabled] = useState(true);
   const [input, setInput] = useState('');
+  const [images, setImages] = useState<PickedImage[]>([]);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [sending, setSending] = useState(false);
   const listEndRef = useRef<HTMLDivElement>(null);
@@ -55,8 +57,10 @@ export default function ChatDebugPage() {
     }
     const query = input.trim();
     const history: ChatMessage[] = turns.map((t) => ({ role: t.role, content: t.content }));
+    const imagesPayload = toImagesPayload(images);
     setTurns((prev) => [...prev, { role: 'user', content: query }]);
     setInput('');
+    setImages([]);
     setSending(true);
     try {
       if (streamEnabled) {
@@ -67,7 +71,7 @@ export default function ChatDebugPage() {
         });
         await streamChatPreview(
           appId,
-          { query, messages: history, app_version: appVersion || undefined },
+          { query, messages: history, app_version: appVersion || undefined, images: imagesPayload },
           {
             onDelta: (delta) =>
               setTurns((prev) => {
@@ -96,7 +100,12 @@ export default function ChatDebugPage() {
           },
         );
       } else {
-        const response = await chatPreview(appId, { query, messages: history, app_version: appVersion || undefined });
+        const response = await chatPreview(appId, {
+          query,
+          messages: history,
+          app_version: appVersion || undefined,
+          images: imagesPayload,
+        });
         setTurns((prev) => [
           ...prev,
           {
@@ -216,6 +225,12 @@ export default function ChatDebugPage() {
                           <Typography.Paragraph ellipsis={{ rows: 2, expandable: true, symbol: '展开' }} style={{ marginBottom: 0 }}>
                             {ref.content}
                           </Typography.Paragraph>
+                          {/* M9-CONTRACTS.md section 0.3: parent/child precise-redaction hint, see RetrievalNodeCard's identical convention. */}
+                          {ref.metadata?.redacted_child_count !== undefined && (
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              已剔除 {ref.metadata.redacted_child_count} 段被禁用内容
+                            </Typography.Text>
+                          )}
                         </Card>
                       ))}
                     </Space>
@@ -233,6 +248,9 @@ export default function ChatDebugPage() {
         </Card>
       )}
 
+      <div style={{ marginBottom: 8 }}>
+        <ImagePicker value={images} onChange={setImages} disabled={!appId} />
+      </div>
       <Space.Compact style={{ width: '100%' }}>
         <Input.TextArea
           rows={2}
