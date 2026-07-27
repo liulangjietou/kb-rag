@@ -7,10 +7,16 @@ OpenAPI 接口契约、备份/预检脚本与总体文档。
 
 一句话架构：**Java 主服务（检索/管理编排）+ Python 解析服务（文档转 Markdown）+
 React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch 与 Milvus（检索引擎）/
-MinIO（对象存储）构建，全部通过 docker-compose 一键拉起中间件。**
+MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 docker-compose 一键拉起中间件。**
 
-> 本仓库当前状态：**M4b 里程碑**（M1 上传→索引→检索最小闭环；M2 混合检索完整链路：改写/融合/重排/阈值/父子分片/ik 词典/metadata 过滤；M3 多模态与清洗：图片与扫描件 VLM、聊天记录导入、清洗规则、解析预览、告警 Webhook、Demo 一键导入；M4a 文档版本与分片标注：多版本管理、即时回退/归档重建回退、标注跨版本继承与待复核；M4b 评测体系：评测集/case 标注与证据复核工作台、评测运行配置矩阵与费用预估、命中判定与三层分组指标报告、Demo 评测集导入）。
-> 完整契约见 [`docs/M1-CONTRACTS.md`](docs/M1-CONTRACTS.md)。
+> 本仓库当前状态：**一期（M1-M7）已完成，二期进行中（M8 已完成、M9 开发中）**。
+> 一期交付上传解析→混合检索（向量+BM25+图路三路融合）→分片标注→评测闭环→应用发布→
+> 多知识库路由→索引快照回滚→GraphRAG 的完整链路；二期在此基础上增强聊天记录导入
+> （TXT/HTML 格式、本地 OCR 兜底、重叠滑窗归并、映射档案维护界面，M8 已完成）与标注
+> 语义/图搜能力（M9，开发中，其内容暂不纳入本文档范围）。
+> 各里程碑契约见 [`docs/M1-CONTRACTS.md`](docs/M1-CONTRACTS.md) ~
+> [`docs/M9-CONTRACTS.md`](docs/M9-CONTRACTS.md)；系统整体架构与核心流程图见
+> [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 与 [`docs/FLOWS.md`](docs/FLOWS.md)。
 
 ## 目录
 
@@ -21,9 +27,13 @@ MinIO（对象存储）构建，全部通过 docker-compose 一键拉起中间�
 - [中文分词（IK）](#中文分词ik)
   - [启用 ik（M2）](#启用-ikm2)
 - [压测（M2）](#压测m2)
+- [多知识库路由（M5）](#多知识库路由m5)
+- [应用发布与索引快照回滚（M6）](#应用发布与索引快照回滚m6)
 - [备份与恢复（M6）](#备份与恢复m6)
 - [压测种子数据（M6）](#压测种子数据m6)
+- [GraphRAG 知识图谱（M7，可选）](#graphrag-知识图谱m7可选)
 - [Demo 数据集与聊天记录映射（M3）](#demo-数据集与聊天记录映射m3)
+- [聊天记录格式扩展与映射维护（M8）](#聊天记录格式扩展与映射维护m8)
 - [接口契约（OpenAPI）](#接口契约openapi)
 - [开源工程文档](#开源工程文档)
 
@@ -107,6 +117,7 @@ lite → full 的索引迁移路径（切 `VECTOR_ENGINE=milvus` 后从 MySQL �
 | --- | --- | --- | --- |
 | lite（轻量，默认） | MySQL + Elasticsearch（BM25+向量双职责） + MinIO | 约 **8GB** | 本地开发、小规模自托管、开源试用第一印象 |
 | full（完整） | lite 全部 + Milvus standalone（独立 etcd/minio） + Redis（可选） | 建议 **24GB**（中间件约 12GB + kb-rag-parser 8GB） | 独立向量引擎、多实例部署 |
+| + graph（可选叠加，M7） | 在 lite 或 full 基础上 `--profile graph` 追加 Neo4j 5 | 额外约 **1GB**（512MB heap + 256MB pagecache，默认值可调） | 需要 GraphRAG 图检索能力时按需开启，不影响基线资源承诺 |
 
 kb-rag-parser 另分 CPU 档（最低 8GB 内存，100 页解析 SLA < 30min）与 GPU 档
 （≥8GB 显存，100 页 < 5min），详见需求文档 §5 资源要求矩阵；kb-rag-parser 的
@@ -119,7 +130,7 @@ containerize 与内存限制配置随后续里程碑（kb-rag-parser 仓库自�
 
 1. **应用侧契约变量**（`docs/M1-CONTRACTS.md` §1）：kb-rag-server / kb-rag-parser 直接消费，
    例如 `MYSQL_HOST` / `ES_URI` / `MILVUS_URI`（lite 模式可空） / `DASHSCOPE_API_KEY`
-   （可空 = 零 Key 模式）
+   （可空 = 零 Key 模式） / `NEO4J_URI`（可空 = 不使用图能力，M7）
 2. **docker-compose 专用变量**：仅供中间件容器初始化使用（如 `MYSQL_ROOT_PASSWORD`、
    各服务端口、Milvus 专属 MinIO 凭据、备份与预检相关配置）
 
@@ -220,8 +231,46 @@ KB_ID=<目标知识库 kb_id> TOKEN=<登录 token> ./scripts/benchmark.sh
 
 对指定知识库并发跑检索请求（默认 200 次、并发 5，query 从内置 10 条中文查询轮换，
 可用 `QUERY_FILE` 换成自定义语料），统计并输出 P50/P95/P99 延迟与错误数。
-**M2 验收口径：基础链路 P95 < 2s**（见 docs/M2-CONTRACTS.md §7）。参数与退出码
-说明见脚本头注释；服务未启动/`KB_ID`/`TOKEN` 有误时会给出明确报错而不是挂起或崩溃。
+**验收口径（需求文档 §5，M2 定版）：基础链路（多路召回+融合+重排，不含改写）
+P95 < 2s、完整链路（含 Query 改写）P95 < 3s**（见 docs/M2-CONTRACTS.md §7）。参数与
+退出码说明见脚本头注释；服务未启动/`KB_ID`/`TOKEN` 有误时会给出明确报错而不是挂起或崩溃。
+
+## 多知识库路由（M5）
+
+应用版本可挂 1..15 个知识库（`kb_refs`，含配额权重，正整数默认 1，
+`kb.retrieval.max-linked-kb` 控制挂载上限）；旧版仅存单 `kb_id` 的快照读侧兼容翻译，
+无需迁移。
+
+- 路由开关开启且应用挂 ≥2 库时，`RoutingService` 调用 ChatProvider 做 LLM 选库，
+  输出与候选知识库白名单求交集（注入防护③）；空交集/解析失败/超时/未配置对话模型
+  一律降级为检索全部关联库并记 `degraded=route_fallback_all`；决策结果按
+  query+候选集哈希缓存
+- 跨库检索基于库内排名做 Reciprocal Rank Fusion 合并（只用名次不用分数）；rerank
+  候选总预算（全局默认 50，非每库）按 `kb_refs` 权重比例分配到各库，向下取整、
+  余量归权重最高库
+- 对外/管理 `search`、`chat`、`chat-preview` 响应新增 `routed_kb_ids`
+  （`applied` 信息条或顶层，SSE `done` 事件同增）与 `RetrievalNode.metadata.kb_id`
+
+详见 [`docs/M5-CONTRACTS.md`](docs/M5-CONTRACTS.md)。
+
+## 应用发布与索引快照回滚（M6）
+
+应用版本发布门禁通过（或 force 放行）之后、状态切 `RELEASED` 之前，对关联知识库的
+物理索引执行一次**不可变快照**（ES `_clone`：源索引临时置只读 → clone → 两端解锁，
+段级硬链接毫秒级完成；Milvus 为同步批量拷贝），并固化当时的版本可见集
+`visible_version_ids`。
+
+- 经 `RELEASED` 版本发起的对外调用（含 rollback 重新发布的历史版本）固定检索这份
+  快照与固化可见集，**回滚即刻恢复历史知识状态**；`TESTING` 灰度/chat-preview/
+  管理台调试/评测仍走实时别名与当前激活集合，不受快照影响
+- 快照索引被误删时降级为实时别名检索，并记 `degraded=snapshot_index_missing`
+- 按应用保留最近 3 个 `SUPERSEDED` 版本快照，超出的由定时任务清理物理索引并解除
+  归档保护（pin）；`RELEASED` 快照永不清理
+- **验收口径（M6-CONTRACTS.md §4⑦）**：灌入 10 万分片种子数据后按 M2 同口径重跑
+  压测，P95 由 100 分片基线的 33.7ms 劣化至 39.0ms（**+15.9%**），未超过 **≤20%**
+  的验收阈值
+
+详见 [`docs/M6-CONTRACTS.md`](docs/M6-CONTRACTS.md)。
 
 ## 备份与恢复（M6）
 
@@ -257,6 +306,35 @@ python3 scripts/seed-bench.py --clean-only    # 压测结束后清理
 不依赖模型 Key。参数、依赖说明与验收口径见
 [`docs/backup-restore.md`](docs/backup-restore.md) 第 4 节。
 
+## GraphRAG 知识图谱（M7，可选）
+
+可选能力，**默认不开启**：compose 需显式加 `--profile graph` 才会启动 Neo4j，
+应用侧 `NEO4J_URI` 留空即代表不使用图能力，两者相互独立、互不阻塞，不影响
+lite 8GB / full 24GB 的资源承诺。
+
+```bash
+# lite 模式启用 Neo4j（full 模式同样适用，替换 -f 的 compose 文件即可）
+docker compose -f docker-compose.lite.yml --profile graph up -d
+```
+
+之后在 `.env` 中设置 `NEO4J_URI=bolt://localhost:7687`（及 `NEO4J_USER`/
+`NEO4J_PASSWORD`）并重启应用层即可启用图能力：
+
+- 知识库级实体/关系抽取（逐分片 LLM 抽取 JSON、输出强校验，非法项计入
+  `t_kb_task.skipped_count`）写入 Neo4j：`(:Entity)-[:REL]->(:Entity)` +
+  `(:Entity)-[:MENTIONED_IN]->(:Chunk)` 溯源边；Neo4j 为**可从 MySQL 全量重建的
+  派生存储**，文档/知识库删除会级联清理图数据
+- 检索侧作为库内第三路进 RRF：query 轻量切词 → Neo4j 实体名 fulltext（cjk 分析器）
+  匹配 → N 跳扩展（默认 2）→ 溯源回 chunk，关联度 = 匹配分/(1+跳数)；回溯的 chunk
+  仍需回 MySQL 事实源二次校验版本可见集与 `enabled`（图路不击穿版本隔离）；开启
+  图路的库，库内融合强制走 RRF（与加权融合互斥）
+- Neo4j 未配置/不可达时降级 `degraded=graph_route_unavailable`；快照上下文
+  （经 `RELEASED` 版本调用）图路直接关闭且不计降级（能力边界而非故障）
+- 管理端提供实体/关系抽取触发、抽取概要、实体列表与实体关联分片查询五个端点，
+  以及知识图谱可视化页（前端零依赖 SVG 力导向布局）
+
+详见 [`docs/M7-CONTRACTS.md`](docs/M7-CONTRACTS.md)。
+
 ## Demo 数据集与聊天记录映射（M3）
 
 - [`demo/`](demo/)：开箱即用的 Demo 文档集（pdf/docx/xlsx/md 各一，原创 RAG/知识库
@@ -273,6 +351,31 @@ python3 scripts/seed-bench.py --clean-only    # 压测结束后清理
   VisionProvider 配置）、`SCANNED_PAGE_TEXT_THRESHOLD`（扫描页判定阈值）、
   `MAX_IMAGES_PER_DOC`（单文档图片数上限）、`DEMO_DATA_DIR`。
 
+## 聊天记录格式扩展与映射维护（M8）
+
+在 M3 的 CSV/Excel 基础上，聊天记录导入新增 **TXT / HTML** 两种格式
+（`file_ext=txt|html`），复用既有两步式导入（preview → confirm）。
+
+- TXT 内置两种行模板（留痕/MemoTrace 风格的换行式、微信 PC 端风格的同行式），
+  HTML 内置留痕导出的 DOM 选择器模板（仅标准库解析，剥离 `script`/`style`，
+  不加载任何远程资源）；两者均按公开约定编写，**真实导出样例到位后再校准**
+  （见 `docs/M8-CONTRACTS.md` §5），行首正则/DOM 选择器均可通过映射档案自定义
+- 不匹配任何内置/自定义模板的行数占比 > 30% 时判定解析失败并报可操作错误，
+  避免拿错格式静默产出垃圾分片
+- 映射档案不再只是仓库内静态文件：管理台"系统设置 → 导入映射"tab 提供 CRUD
+  （新建/编辑/复制内置模板/删除自定义），后端 `t_kb_source_mapping` 表启动时从
+  仓库内置模板种子化（幂等，只补缺不覆盖，`is_builtin=true` 的内置模板不可删）；
+  `mappings/chat/memotrace.yml` 等本地 yml 文件继续作为内置模板的种子来源
+- 聊天聚合新增重叠滑窗 `window_overlap`（消息数，默认 0=兼容既有顺切逻辑）；
+  检索侧对同一会话且消息区间 `msg_span` 重叠率 ≥0.5 的命中做近重复归并（只保留
+  排名最高者，被并者进 `metadata.merged_window_chunk_ids` 供调试页展示）
+- kb-rag-parser 新增可选本地 OCR 兜底：`OCR_ENGINE=none|paddle`（默认 `none`，
+  `.env.example` 同名变量）；扫描页三级次序为 server 侧 VLM（有 Key）→ parser 侧
+  PaddleOCR（`OCR_ENGINE=paddle` 且已装 `requirements-ocr.txt`）→ 跳过并降级；
+  未装依赖时设为 `paddle` 会在 parser 启动时 fast-fail 并给出安装指引
+
+详见 [`docs/M8-CONTRACTS.md`](docs/M8-CONTRACTS.md)。
+
 ## 接口契约（OpenAPI）
 
 - [`docs/openapi/kb-server.yaml`](docs/openapi/kb-server.yaml)：kb-rag-server 管理台
@@ -288,20 +391,30 @@ python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb
 python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb-parser.yaml
 ```
 
-对外 API Key 开放平台网关是后续里程碑（M4c）范畴，不在本文件中。
+对外 API Key 开放平台网关（应用发布、API Key 管理、限流、审计）已随 M4c 交付，
+契约详见 [`docs/M4c-CONTRACTS.md`](docs/M4c-CONTRACTS.md)，端点已同步进
+`docs/openapi/kb-server.yaml`。
 
 ## 开源工程文档
 
 - [LICENSE](LICENSE)（Apache-2.0）
 - [NOTICE](NOTICE)：第三方依赖许可声明（MySQL / Elasticsearch / Milvus / MinIO /
-  Redis / MinerU 预留 / PaddleOCR 预留）
+  Neo4j / Redis / MinerU 预留未集成 / PaddleOCR）
 - [SECURITY.md](SECURITY.md)：漏洞报告渠道
 - [CONTRIBUTING.md](CONTRIBUTING.md)：分支模型、提交规范、PR 自查清单
 - [CHANGELOG.md](CHANGELOG.md)
+- [UPGRADING.md](UPGRADING.md)：升级指引（镜像 tag、Flyway 迁移、ES/Milvus schema
+  变更、备份先行）
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：系统架构总览（组件拓扑、领域端口、
+  检索链路、数据模型）
+- [docs/FLOWS.md](docs/FLOWS.md)：核心流程图（上传索引、检索、发布快照、图路等）
 - [docs/M1-CONTRACTS.md](docs/M1-CONTRACTS.md)：M1 各仓库实现的唯一共同契约
 
 ## 文档
 
-- [知识库需求文档（v1.9，唯一事实源）](docs/知识库需求文档.md)
-- [M1 开发契约](docs/M1-CONTRACTS.md) / [M2 开发契约](docs/M2-CONTRACTS.md)
+- [知识库需求文档（v1.14，唯一事实源）](docs/知识库需求文档.md)
+- [系统架构总览（ARCHITECTURE.md）](docs/ARCHITECTURE.md) /
+  [核心流程图（FLOWS.md）](docs/FLOWS.md)
+- [M1](docs/M1-CONTRACTS.md) ~ [M9 开发契约](docs/M9-CONTRACTS.md)（按里程碑记录
+  实现细节与已接受偏离）
 - [OpenAPI 定义](docs/openapi/)

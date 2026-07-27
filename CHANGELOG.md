@@ -34,6 +34,22 @@
   （kb-rag-server PR#15，用户实测发现）
 
 ### Added
+- 开源发布就绪：README 通读全文并核对滞后——状态行由"M4b 里程碑"更新为"一期
+  （M1-M7）已完成、二期进行中（M8 已完成、M9 开发中）"；补齐此前缺失的对应章节
+  （多知识库路由 M5、应用发布与索引快照回滚 M6、GraphRAG 知识图谱 M7 可选启用、
+  聊天记录 TXT/HTML 格式与映射档案维护 M8）；"总体文档"导航补
+  `docs/ARCHITECTURE.md`/`docs/FLOWS.md` 链接；修正两处滞后表述（"对外 API Key
+  开放平台网关是后续里程碑 M4c 范畴"已随 M4c 交付、"开源工程文档"小节里概括
+  NOTICE 内容的 PaddleOCR 一词由"预留"改为如实反映 M8 起已是可选依赖，NOTICE.md
+  正文本身留待独立的许可合规复核）；性能数字统一为已验收口径（M2 基础链路 P95<2s /
+  完整链路含改写 P95<3s，M6 十万分片压测 P95 劣化 15.9%≤20%，出处 M2/M6-CONTRACTS.md）。
+  新增 `.github/workflows/ci.yml`：push/PR 触发校验 `docker compose config -q`
+  （lite/full 及各自叠加 es-ik override 四组合）、`docs/openapi/*.yaml` 只读
+  `yaml.safe_load` 语法校验（不改动 openapi 内容）、`scripts/*.sh` 的 `bash -n`
+  语法校验。新增 `UPGRADING.md`：compose 镜像 tag 固定原则、MySQL 走 Flyway
+  自动迁移（禁手工 DDL、向后兼容一版、不可跨版本跳升）、ES/Milvus schema 变更走
+  "从事实源重建 + 别名切换"、升级前先跑 `scripts/backup.sh`、CHANGELOG 条目如何
+  标注 schema 变更，对应需求文档 §5"升级与迁移"条款
 - M9 标注语义与图搜（docs/M9-CONTRACTS.md，二期收官批=清单项 5/6/7，至此二期 1-7 全部交付）：
   父片精确剔除（t_kb_chunk 落 parent_start/end_offset V10——切分副产物+截取一致性校验；禁用子片
   按偏移倒序剔除并以「（已省略被禁用内容）」替换、metadata 带 redacted_child_count；任一无偏移

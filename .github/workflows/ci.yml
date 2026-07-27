@@ -1,0 +1,56 @@
+name: CI
+
+# 本仓库不含应用代码，CI 只做部署配置与契约文件的语法/一致性校验：
+#   - docker-compose 语法校验（lite/full 基线 + es-ik override 叠加组合）
+#   - docs/openapi/*.yaml 只读 YAML 语法校验（不修改文件内容）
+#   - scripts/*.sh 语法校验（bash -n，不实际执行脚本）
+# 与 CONTRIBUTING.md「提交 PR 前自查清单」保持一致，只是把这些自查命令搬到 CI 里跑一遍。
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    name: Validate deploy configs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 全部 compose 变量均带 ${VAR:-默认值}，无需 .env 文件即可通过语法校验
+      # （真实部署仍必须 cp .env.example .env 并替换占位口令，见 README/preflight.sh）
+      - name: docker compose config -q (lite)
+        run: docker compose -f docker-compose.lite.yml config -q
+
+      - name: docker compose config -q (full)
+        run: docker compose -f docker-compose.yml config -q
+
+      - name: docker compose config -q (lite + es-ik override)
+        run: docker compose -f docker-compose.lite.yml -f docker-compose.es-ik.yml config -q
+
+      - name: docker compose config -q (full + es-ik override)
+        run: docker compose -f docker-compose.yml -f docker-compose.es-ik.yml config -q
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      # 只读语法校验（yaml.safe_load），不改动 docs/openapi/ 下任何文件
+      - name: Validate OpenAPI YAML syntax (kb-server)
+        run: python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb-server.yaml
+
+      - name: Validate OpenAPI YAML syntax (kb-parser)
+        run: python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb-parser.yaml
+
+      - name: Validate shell scripts syntax (bash -n)
+        run: |
+          set -e
+          for f in scripts/*.sh; do
+            echo "bash -n $f"
+            bash -n "$f"
+          done
