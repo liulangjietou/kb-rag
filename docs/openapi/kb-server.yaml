@@ -67,7 +67,7 @@ info:
     的固化可见集引用即 pin，归档保留清理跳过之。同 PR 补 M5 遗漏的 `route_fallback_all` 枚举值。
 
     '
-  version: 0.8.0-m7
+  version: 0.9.0-m8
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -169,6 +169,92 @@ paths:
                 $ref: '#/components/schemas/UserInfoResult'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/v1/source-mappings:
+    get:
+      tags: [source-mapping]
+      summary: 导入映射列表（内置在前，组内按名称升序）
+      parameters:
+      - name: source_type
+        in: query
+        schema: {type: string, enum: [csv, xlsx, txt, html]}
+      responses:
+        '200':
+          description: 裸数组（内置+自定义总量小，不分页）
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SourceMapping'
+    post:
+      tags: [source-mapping]
+      summary: 新建自定义映射
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceMappingRequest'
+      responses:
+        '200':
+          description: 新建行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceMapping'
+  /api/v1/source-mappings/{mappingId}:
+    parameters:
+    - name: mappingId
+      in: path
+      required: true
+      schema: {type: string}
+    put:
+      tags: [source-mapping]
+      summary: 全量替换自定义映射（内置行返回 INVALID_PARAM）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceMappingRequest'
+      responses:
+        '200':
+          description: 更新后的行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceMapping'
+    delete:
+      tags: [source-mapping]
+      summary: 删除自定义映射（内置行返回 INVALID_PARAM）
+      responses:
+        '200':
+          description: 已删除
+  /api/v1/source-mappings/{mappingId}/copy:
+    parameters:
+    - name: mappingId
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [source-mapping]
+      summary: 复制为自定义映射
+      description: body 可省略；name 缺省生成「副本-原名」，已占用则追加序号。
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+      responses:
+        '200':
+          description: 复制出的自定义行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceMapping'
   /api/v1/kb:
     post:
       tags:
@@ -2401,6 +2487,26 @@ components:
         description:
           type: string
           nullable: true
+    SourceMapping:
+      type: object
+      description: 'M8 导入映射行（t_kb_source_mapping）：聊天导入解析档案，profile_yaml 为完整 YAML（csv/xlsx
+        列名映射；txt.patterns 行模板正则含命名组 send_time/sender；html 选择器 message/sender/time/content）。
+        内置行不可改删、可复制；schema 属主为 kb-rag-parser，server 不复刻结构校验（M8-CONTRACTS.md §5）。'
+      properties:
+        mapping_id: {type: string}
+        name: {type: string}
+        source_type: {type: string, enum: [csv, xlsx, txt, html]}
+        profile_yaml: {type: string}
+        is_builtin: {type: boolean}
+        created_at: {type: string}
+        updated_at: {type: string}
+    SourceMappingRequest:
+      type: object
+      required: [name, source_type, profile_yaml]
+      properties:
+        name: {type: string}
+        source_type: {type: string, enum: [csv, xlsx, txt, html]}
+        profile_yaml: {type: string}
     KnowledgeBase:
       type: object
       properties:
@@ -2759,6 +2865,7 @@ components:
         metadata:
           type: object
           description: 'M7 图路命中时含 graph_score/graph_hops/graph_entities（≤5 个实体名；未被图路命中时三键不出现）。
+        M8 聊天分片含 window_seq 与 msg_span（会话内消息序号闭区间）；近重复归并存活者含 merged_window_chunk_ids（≤5，同会话窗口重叠率≥0.5 只留排名最高）。
         引擎侧固定字段（tag_ids/session_id/sender/msg_time 等，见 M1-CONTRACTS.md
 
             §6）+ M2 新增各路分数明细（M2-CONTRACTS.md §1.5，父子归并开启时另含

@@ -7,6 +7,18 @@
 ## [Unreleased]
 
 ### Added
+- M8 导入与解析增强（docs/M8-CONTRACTS.md，二期第一批=二期清单项 1/2/3/4）：聊天记录 TXT/HTML
+  两种新格式（TXT 内置留痕/微信 PC 双行模板、HTML 内置留痕选择器模板，均按公开约定编写待真实样例
+  校准；行首正则命名捕获组与 DOM 选择器随 mapping profile 承载可自定义；不匹配行>30% 报可操作错误）；
+  PaddleOCR 本地兜底（parser 可选依赖 requirements-ocr.txt，OCR_ENGINE=paddle 三级次序
+  VLM→本地 OCR→跳过降级，未装依赖启动 fast-fail；实测校准为 paddlepaddle 3.3.1 + paddleocr 3.3.3
+  的 3.x API）；聊天聚合重叠滑窗（window_overlap，默认 0 全兼容）与检索侧近重复归并（同会话
+  msg_span 重叠率≥0.5 留最高分、merged_window_chunk_ids 留痕）；字段映射维护界面
+  （t_kb_source_mapping 建表 V9+内置模板种子化+CRUD/复制端点+系统设置 tab）；OpenAPI 升 0.9.0-m8
+- M8 期间修复两个遗留缺陷：①（M7）NEO4J_URI 为空时 Spring Boot Neo4j 自动配置默认连
+  localhost:7687 并注册健康探测致整体 DOWN，破坏"空 URI 零影响"契约——排除该自动配置；
+  ②（既有）UpdateIndexConfigRequest 的清洗与聊天聚合校验被父子分片 early-return 短路、
+  单层库从未生效——校验上移为无条件执行
 - M7 GraphRAG（docs/M7-CONTRACTS.md，一期收官）：知识库级实体/关系抽取（逐分片 LLM 抽取 JSON、
   注入防护分隔声明、输出强校验跳过计数落库 `t_kb_task.skipped_count`）入 Neo4j（`(:Entity)-[:REL]->
   (:Entity)`、`(:Entity)-[:MENTIONED_IN]->(:Chunk)` 溯源边，Neo4j 为可从 MySQL 重建的派生存储）；
