@@ -83,15 +83,27 @@ USD 20 million requires a separate commercial license" clause does not
 apply at this project's current scale.
 
 --------------------------------------------------------------------------
-PaddleOCR (planned, kb-rag-parser local OCR fallback)
+PaddleOCR 3.3.x (optional dependency, kb-rag-parser local OCR fallback, M8)
 --------------------------------------------------------------------------
-License: Apache-2.0. Planned for kb-rag-parser as a local OCR fallback
-(see requirements doc §8 technology stack); not used in M1, M2, or M3.
-M3 explicitly decided NOT to introduce PaddleOCR: scanned-page text
-extraction in M3 is handled entirely by the qwen-vl vision model (see the
-NOTICE entry below and M3-CONTRACTS.md §0 point 1). Local OCR remains a
-planned second-phase fallback for offline/air-gapped deployments where no
-vision model API is reachable.
+License: Apache-2.0 (both paddleocr and its runtime dependency
+paddlepaddle). No conflict with this project's Apache-2.0 license.
+Status: integrated in M8 as an OPTIONAL dependency of kb-rag-parser
+(`requirements-ocr.txt`, pinned to paddlepaddle==3.3.1 + paddleocr==3.3.3;
+not installed by default, to keep the base image small). It is toggled by
+the parser environment variable `OCR_ENGINE=none|paddle` (default `none`,
+which leaves pre-M8 behavior unchanged); `OCR_ENGINE=paddle` without the
+optional dependencies installed fails fast at startup with an actionable
+error. When enabled, scanned pages rendered by the parser are OCR'd
+locally with the ch_PP-OCRv4 model and marked `ocr_source: paddle`, and
+kb-rag-server then skips the hosted vision-model call for those pages
+(fallback order: server-side VLM if an API key is configured -> local
+PaddleOCR -> skip with degradation counter; see M8-CONTRACTS.md §0 point 4).
+This serves offline/air-gapped deployments where no vision model API is
+reachable. PP-OCRv4 model weights are NOT redistributed in this
+repository; they are downloaded on first use from the upstream model
+source (HuggingFace by default, or ModelScope via
+`PADDLE_PDX_MODEL_SOURCE=ModelScope`), so fully offline deployments must
+pre-seed the model cache directory.
 
 --------------------------------------------------------------------------
 Alibaba Cloud DashScope qwen-vl-max (hosted vision-language model service, M3)
@@ -108,8 +120,9 @@ independently of this project's Apache-2.0 license.
 Usage in this project (see M3-CONTRACTS.md §3.1): kb-rag-server calls the
 DashScope OpenAI-compatible `chat/completions` endpoint with model
 `VISION_MODEL` (default `qwen-vl-max`) to (a) transcribe text on scanned
-pages that kb-parser rendered to an image (no local OCR engine involved,
-see the PaddleOCR entry above), and (b) generate a text proxy (description
+pages that kb-parser rendered to an image (unless, from M8 on, the page
+was already OCR'd by the optional local PaddleOCR fallback — see the
+PaddleOCR entry above), and (b) generate a text proxy (description
 + OCR transcript) for embedded/standalone images. kb-rag-parser itself
 never calls qwen-vl or any other model provider (docs/M3-CONTRACTS.md §0/§1).
 Not a hard dependency lock-in: per D14, an OpenAI-compatible VisionProvider

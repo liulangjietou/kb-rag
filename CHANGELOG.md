@@ -7,6 +7,11 @@
 ## [Unreleased]
 
 ### Fixed
+- 两处文档滞后于 M8 交付的修正：mappings/README.md「已知限制」仍写 TXT/HTML 降级二期，更新为
+  M8 已交付（内置 liuhen_txt/liuhen_html 模板、自定义正则/选择器）并补充映射档案 CRUD 界面与
+  t_kb_source_mapping 的指引；NOTICE 的 PaddleOCR 条目从"planned, not used"更新为 M8 已集成的
+  可选依赖（requirements-ocr.txt、OCR_ENGINE 开关、模型权重不随仓分发），并同步修正 qwen-vl
+  条目中"no local OCR engine involved"的过期交叉引用
 - fusion 字段两处形状错位（kb-rag-web PR#14，用户实测报告）：①评测估算/提交把 fusion 发成
   {mode,rrf_k} 对象而 server 是字符串字面量，勾选混合检索/混合+重排即 Jackson 500；②应用配置页
   读写嵌套 retrieval.fusion 对象而 server 快照是扁平 fusion_mode/w_vec/rrf_k，未知字段被静默丢弃
