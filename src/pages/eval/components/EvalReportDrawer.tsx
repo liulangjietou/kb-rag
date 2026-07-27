@@ -4,7 +4,7 @@ import { DownloadOutlined } from '@ant-design/icons';
 import { Alert, Drawer, Empty, Radio, Space, Spin, Table, Tag, Typography, message } from 'antd';
 import { listAllEvalCases } from '../../../api/evalCase';
 import { compareEvalRuns, getEvalRun, listAllEvalResults } from '../../../api/evalRun';
-import type { EvalCase, EvalResult, EvalRun, KMetricSet, MetricGroupKey, MetricPoint } from '../../../api/types';
+import type { EvalCase, EvalResult, EvalRun, KMetricSet, MetricGroupKey, MetricNumberKey } from '../../../api/types';
 import { downloadCsv } from '../../../utils/csv';
 import { METRIC_GROUP_META, RUN_STATUS_META, metaOf } from '../../../utils/statusMeta';
 
@@ -15,7 +15,7 @@ interface EvalReportDrawerProps {
   onClose: () => void;
 }
 
-const METRIC_LABELS: Record<keyof KMetricSet, string> = {
+const METRIC_LABELS: Record<MetricNumberKey, string> = {
   recall: 'Recall',
   precision: 'Precision',
   hit_rate: 'Hit Rate',
@@ -30,15 +30,17 @@ interface DrilldownRow {
   perRun: Map<string, EvalResult | undefined>;
 }
 
-function formatMetricPoint(point: MetricPoint | undefined): string {
-  if (!point) {
+function formatMetricValue(set: KMetricSet | undefined, key: MetricNumberKey): string {
+  const value = set?.[key];
+  if (value === undefined || value === null) {
     return '-';
   }
-  const value = `${(point.value * 100).toFixed(1)}%`;
-  if (point.ci_low !== undefined && point.ci_high !== undefined) {
-    return `${value} (95%CI ${(point.ci_low * 100).toFixed(1)}%~${(point.ci_high * 100).toFixed(1)}%)`;
+  const pct = `${(value * 100).toFixed(1)}%`;
+  const ci = key === 'recall' ? set?.recall_ci : key === 'hit_rate' ? set?.hit_rate_ci : undefined;
+  if (ci) {
+    return `${pct} (95%CI ${(ci.low * 100).toFixed(1)}%~${(ci.high * 100).toFixed(1)}%)`;
   }
-  return value;
+  return pct;
 }
 
 /** Groups one case into the report's 全体/span级/文档级/单轮/多轮 buckets (a case belongs to 3 of the 5). */
@@ -128,7 +130,7 @@ export default function EvalReportDrawer({ datasetId, runIds, onClose }: EvalRep
   }, [runs, group]);
 
   const metricRows = useMemo(() => {
-    const metricKeys = Object.keys(METRIC_LABELS) as (keyof KMetricSet)[];
+    const metricKeys = Object.keys(METRIC_LABELS) as MetricNumberKey[];
     return kKeys.flatMap((k) =>
       metricKeys.map((metricKey) => ({
         key: `${metricKey}@${k}`,
@@ -158,7 +160,7 @@ export default function EvalReportDrawer({ datasetId, runIds, onClose }: EvalRep
     const header = ['指标', ...runs.map((run) => run.retrieval_config.label)];
     const rows = metricRows.map((row) => [
       row.label,
-      ...runs.map((run) => formatMetricPoint(run.metrics?.[group]?.[row.k]?.[row.metricKey])),
+      ...runs.map((run) => formatMetricValue(run.metrics?.[group]?.[row.k], row.metricKey)),
     ]);
     downloadCsv(`eval-metrics-${group}.csv`, [header, ...rows]);
   };
@@ -259,7 +261,7 @@ export default function EvalReportDrawer({ datasetId, runIds, onClose }: EvalRep
                   key: run.run_id,
                   width: 200,
                   render: (_: unknown, row: (typeof metricRows)[number]) =>
-                    formatMetricPoint(run.metrics?.[group]?.[row.k]?.[row.metricKey]),
+                    formatMetricValue(run.metrics?.[group]?.[row.k], row.metricKey),
                 })),
               ]}
             />

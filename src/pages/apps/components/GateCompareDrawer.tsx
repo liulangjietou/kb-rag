@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Descriptions, Drawer, Empty, Radio, Space, Spin, Table, Tag, Typography, message } from 'antd';
 import { compareEvalRuns } from '../../../api/evalRun';
-import type { EvalRun, KMetricSet, MetricGroupKey, MetricPoint } from '../../../api/types';
+import type { EvalRun, KMetricSet, MetricGroupKey, MetricNumberKey } from '../../../api/types';
 import { APP_VERSION_STATUS_META, METRIC_GROUP_META, RUN_STATUS_META, metaOf } from '../../../utils/statusMeta';
 import type { AppVersion } from '../../../api/types';
 
@@ -12,7 +12,7 @@ interface GateCompareDrawerProps {
   onClose: () => void;
 }
 
-const METRIC_LABELS: Record<keyof KMetricSet, string> = {
+const METRIC_LABELS: Record<MetricNumberKey, string> = {
   recall: 'Recall',
   precision: 'Precision',
   hit_rate: 'Hit Rate',
@@ -22,15 +22,17 @@ const METRIC_LABELS: Record<keyof KMetricSet, string> = {
 
 const GROUP_OPTIONS: MetricGroupKey[] = ['all', 'span', 'document', 'single_turn', 'multi_turn'];
 
-function formatMetricPoint(point: MetricPoint | undefined): string {
-  if (!point) {
+function formatMetricValue(set: KMetricSet | undefined, key: MetricNumberKey): string {
+  const value = set?.[key];
+  if (value === undefined || value === null) {
     return '-';
   }
-  const value = `${(point.value * 100).toFixed(1)}%`;
-  if (point.ci_low !== undefined && point.ci_high !== undefined) {
-    return `${value} (95%CI ${(point.ci_low * 100).toFixed(1)}%~${(point.ci_high * 100).toFixed(1)}%)`;
+  const pct = `${(value * 100).toFixed(1)}%`;
+  const ci = key === 'recall' ? set?.recall_ci : key === 'hit_rate' ? set?.hit_rate_ci : undefined;
+  if (ci) {
+    return `${pct} (95%CI ${(ci.low * 100).toFixed(1)}%~${(ci.high * 100).toFixed(1)}%)`;
   }
-  return value;
+  return pct;
 }
 
 /**
@@ -87,7 +89,7 @@ export default function GateCompareDrawer({ version, onClose }: GateCompareDrawe
   }, [runs, group]);
 
   const metricRows = useMemo(() => {
-    const metricKeys = Object.keys(METRIC_LABELS) as (keyof KMetricSet)[];
+    const metricKeys = Object.keys(METRIC_LABELS) as MetricNumberKey[];
     return kKeys.flatMap((k) =>
       metricKeys.map((metricKey) => ({
         key: `${metricKey}@${k}`,
@@ -164,7 +166,7 @@ export default function GateCompareDrawer({ version, onClose }: GateCompareDrawe
                       key: run.run_id,
                       width: 220,
                       render: (_: unknown, row: (typeof metricRows)[number]) =>
-                        formatMetricPoint(run.metrics?.[group]?.[row.k]?.[row.metricKey]),
+                        formatMetricValue(run.metrics?.[group]?.[row.k], row.metricKey),
                     })),
                   ]}
                 />

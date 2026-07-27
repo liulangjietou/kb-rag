@@ -1046,27 +1046,35 @@ export interface EvalRunEstimate {
 }
 
 /** One (value, optional Wilson 95% CI) metric point (M4b-CONTRACTS.md section 3.3). CI is present only for proportion-type metrics (recall/precision/hit_rate), not MRR/NDCG. */
-export interface MetricPoint {
-  value: number;
-  ci_low?: number;
-  ci_high?: number;
+/** Wilson interval bounds as the server emits them (EvalMetricsAtK: {low, high}). */
+export interface MetricCiBounds {
+  low: number;
+  high: number;
 }
 
-/** The five metrics computed per K per group (M4b-CONTRACTS.md section 3.3). */
+/** Metric keys that hold a plain number in KMetricSet. */
+export type MetricNumberKey = 'recall' | 'precision' | 'hit_rate' | 'mrr' | 'ndcg';
+
+/**
+ * The five metrics computed per K per group (M4b-CONTRACTS.md section 3.3), in the FLAT shape the
+ * server actually serialises: plain numbers plus sibling `*_ci` interval objects for the two
+ * proportion metrics. The earlier per-metric {value, ci_low, ci_high} wrapper was an unreconciled
+ * assumption and rendered every cell as NaN% against the real backend.
+ */
 export interface KMetricSet {
-  recall: MetricPoint;
-  precision: MetricPoint;
-  hit_rate: MetricPoint;
-  mrr: MetricPoint;
-  ndcg: MetricPoint;
+  recall: number;
+  precision: number;
+  hit_rate: number;
+  mrr: number;
+  ndcg: number;
+  recall_ci?: MetricCiBounds;
+  hit_rate_ci?: MetricCiBounds;
 }
 
 /**
  * t_kb_eval_run.metrics JSON (M4b-CONTRACTS.md section 3.3): keyed by group then by K (K as a
  * string key, e.g. "5") since a run can report metrics for more than one K per group.
- * ASSUMPTION: the contract specifies the grouping and the metric set but not the literal nesting
- * shape; this is this implementation's best-effort structure, accessed defensively (optional
- * chaining) everywhere it is read since the backend is not implemented yet.
+ * Shape verified against the live backend (2026-07-27): group -> K(string) -> flat KMetricSet.
  */
 export type EvalMetrics = Partial<Record<MetricGroupKey, Record<string, KMetricSet>>>;
 
