@@ -1,0 +1,266 @@
+# Every value is injected from an environment variable with a working local default, so the service
+# starts with no .env file. Variable names follow the deployment contract.
+server:
+  port: ${SERVER_PORT:20000}
+
+spring:
+  application:
+    name: kb-rag-server
+  autoconfigure:
+    # The neo4j-java-driver on the classpath makes Spring Boot auto create a Driver against its default
+    # bolt://localhost:7687 whenever our own conditional driver backs off (blank NEO4J_URI), and the
+    # actuator then registers a neo4j health probe that reports DOWN on every graph-less deployment -
+    # defeating the "blank URI leaves everything else untouched" contract (M7-CONTRACTS.md 0.1). The
+    # graph stack is wired exclusively through GraphStoreConfig, so the auto configuration is excluded.
+    exclude:
+      - org.springframework.boot.autoconfigure.neo4j.Neo4jAutoConfiguration
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:kb_rag}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USER:kbrag}
+    password: ${MYSQL_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: ${MYSQL_POOL_SIZE:10}
+      connection-timeout: 10000
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+  servlet:
+    multipart:
+      # Kept slightly above the application level limit so the upload validator, not the container,
+      # produces the error message.
+      max-file-size: ${UPLOAD_MAX_FILE_SIZE:110MB}
+      max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:110MB}
+  jackson:
+    default-property-inclusion: non_null
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    default-enum-type-handler: org.apache.ibatis.type.EnumTypeHandler
+  global-config:
+    banner: false
+    db-config:
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+  health:
+    defaults:
+      enabled: true
+
+kb:
+  vector:
+    engine: ${VECTOR_ENGINE:es}
+  es:
+    uri: ${ES_URI:http://127.0.0.1:9200}
+    username: ${ES_USERNAME:}
+    password: ${ES_PASSWORD:}
+    content-analyzer: ${ES_CONTENT_ANALYZER:ik_max_word}
+    fallback-analyzer: standard
+    number-of-shards: ${ES_NUMBER_OF_SHARDS:1}
+    number-of-replicas: ${ES_NUMBER_OF_REPLICAS:0}
+  milvus:
+    uri: ${MILVUS_URI:}
+    token: ${MILVUS_TOKEN:}
+  minio:
+    endpoint: ${MINIO_ENDPOINT:http://127.0.0.1:9000}
+    access-key: ${MINIO_ACCESS_KEY:}
+    secret-key: ${MINIO_SECRET_KEY:}
+    bucket: ${MINIO_BUCKET:kb-files}
+    presigned-ttl-minutes: ${MINIO_PRESIGNED_TTL_MINUTES:30}
+  embedding:
+    provider: ${EMBEDDING_PROVIDER:dashscope}
+    model: ${EMBEDDING_MODEL:text-embedding-v4}
+    dimension: ${EMBEDDING_DIM:1024}
+    # Blank switches the deployment to zero key mode: embedding is skipped and retrieval runs BM25 only.
+    api-key: ${DASHSCOPE_API_KEY:}
+    base-url: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    batch-size: ${EMBEDDING_BATCH_SIZE:10}
+    timeout-ms: ${EMBEDDING_TIMEOUT_MS:30000}
+  rerank:
+    provider: ${RERANK_PROVIDER:dashscope}
+    model: ${RERANK_MODEL:gte-rerank-v2}
+    # Blank disables the rerank stage; the retrieval pipeline then keeps the fusion order.
+    api-key: ${RERANK_API_KEY:${DASHSCOPE_API_KEY:}}
+    # DashScope exposes rerank outside the OpenAI compatible surface, so this is a full URL.
+    url: ${RERANK_URL:https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}
+    timeout-ms: ${RERANK_TIMEOUT_MS:1500}
+    candidate-limit: ${RERANK_CANDIDATE_LIMIT:50}
+  chat:
+    provider: ${CHAT_PROVIDER:dashscope}
+    model: ${CHAT_MODEL:qwen-plus}
+    # Blank disables the query rewrite stage.
+    api-key: ${CHAT_API_KEY:${DASHSCOPE_API_KEY:}}
+    base-url: ${CHAT_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    timeout-ms: ${CHAT_TIMEOUT_MS:3000}
+    # Read ceiling of answer generation only; routing/rewrite keep their own shorter future budgets.
+    generate-timeout-ms: ${CHAT_GENERATE_TIMEOUT_MS:60000}
+    temperature: ${CHAT_TEMPERATURE:0.0}
+    max-tokens: ${CHAT_MAX_TOKENS:128}
+    # Generation budget of the open chat endpoint; max-tokens above sizes a one line query rewrite and would
+    # cut every answer off mid sentence.
+    answer-max-tokens: ${CHAT_ANSWER_MAX_TOKENS:1024}
+  vision:
+    provider: ${VISION_PROVIDER:dashscope}
+    model: ${VISION_MODEL:qwen-vl-max}
+    # Blank stores images without a textual proxy; the rest of the document is still indexed.
+    api-key: ${VISION_API_KEY:${DASHSCOPE_API_KEY:}}
+    base-url: ${VISION_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+    # Image understanding is slower than text completion, hence the wider budget.
+    timeout-ms: ${VISION_TIMEOUT_MS:20000}
+    temperature: ${VISION_TEMPERATURE:0.0}
+    max-tokens: ${VISION_MAX_TOKENS:1024}
+  image:
+    standalone-extensions: ${IMAGE_STANDALONE_EXTENSIONS:png,jpg,jpeg,webp,bmp,gif}
+    max-per-document: ${MAX_IMAGES_PER_DOC:100}
+    max-image-size-mb: ${MAX_IMAGE_SIZE_MB:10}
+  chat-import:
+    default-mapping-profile: ${CHAT_MAPPING_PROFILE:memotrace}
+    upload-token-ttl-minutes: ${CHAT_UPLOAD_TOKEN_TTL_MINUTES:30}
+    # A chat log is personal data by nature, so masking is on for this path by default.
+    desensitize-default: ${CHAT_DESENSITIZE_DEFAULT:true}
+  alert:
+    degrade-window-minutes: ${ALERT_DEGRADE_WINDOW_MINUTES:5}
+    degrade-min-samples: ${ALERT_DEGRADE_MIN_SAMPLES:20}
+    evaluation-interval-ms: ${ALERT_EVALUATION_INTERVAL_MS:60000}
+    webhook-timeout-ms: ${ALERT_WEBHOOK_TIMEOUT_MS:3000}
+  demo:
+    # Local development points at the deployment repository; a container mounts the set and overrides this.
+    data-dir: ${DEMO_DATA_DIR:/Users/zhangfuqiang/AI/kb-rag/kb-rag-deploy/demo}
+    knowledge-base-name: ${DEMO_KB_NAME:Demo 知识库}
+  sync:
+    compensation-enabled: ${SYNC_COMPENSATION_ENABLED:true}
+    compensation-interval-ms: ${SYNC_COMPENSATION_INTERVAL_MS:30000}
+    pending-timeout-minutes: ${SYNC_PENDING_TIMEOUT_MINUTES:5}
+    max-retry: ${SYNC_MAX_RETRY:5}
+    batch-size: ${SYNC_BATCH_SIZE:500}
+  parser:
+    base-url: ${PARSER_BASE_URL:http://127.0.0.1:20001}
+    timeout-ms: ${PARSER_TIMEOUT_MS:300000}
+  auth:
+    token-ttl-hours: ${AUTH_TOKEN_TTL_HOURS:24}
+    max-failed-attempts: ${AUTH_MAX_FAILED_ATTEMPTS:5}
+    lock-minutes: ${AUTH_LOCK_MINUTES:15}
+    bootstrap-username: ${AUTH_BOOTSTRAP_USERNAME:admin}
+  upload:
+    max-file-size-mb: ${UPLOAD_MAX_FILE_SIZE_MB:100}
+    allowed-extensions: ${UPLOAD_ALLOWED_EXTENSIONS:pdf,docx,txt,md,xlsx,csv,png,jpg,jpeg,webp,bmp,gif}
+  doc:
+    version:
+      # Non active READY versions kept per document; the older ones are archived and lose their chunks,
+      # while their original file and parse artifact stay so they can still be rebuilt. Clamped to 1-20.
+      retain-count: ${DOC_VERSION_RETAIN_COUNT:3}
+  split:
+    max-tokens: ${SPLIT_MAX_TOKENS:600}
+    overlap-tokens: ${SPLIT_OVERLAP_TOKENS:100}
+    # Defaults of a freshly created knowledge base; each one can override them per knowledge base.
+    parent-child-enabled: ${SPLIT_PARENT_CHILD_ENABLED:false}
+    parent-max-tokens: ${SPLIT_PARENT_MAX_TOKENS:1200}
+    child-max-tokens: ${SPLIT_CHILD_MAX_TOKENS:400}
+    child-overlap: ${SPLIT_CHILD_OVERLAP:50}
+  retrieval:
+    rrf-k: ${RETRIEVAL_RRF_K:60}
+    default-recall-top-k: ${RETRIEVAL_RECALL_TOP_K:50}
+    default-top-n: ${RETRIEVAL_TOP_N:5}
+    max-recall-top-k: ${RETRIEVAL_MAX_RECALL_TOP_K:100}
+    max-top-n: ${RETRIEVAL_MAX_TOP_N:20}
+    fusion-mode: ${RETRIEVAL_FUSION_MODE:rrf}
+    w-vec: ${RETRIEVAL_W_VEC:0.6}
+    # Off by default: a rewrite costs a model call on every search.
+    rewrite-enabled: ${RETRIEVAL_REWRITE_ENABLED:false}
+    rewrite-timeout-ms: ${RETRIEVAL_REWRITE_TIMEOUT_MS:800}
+    rewrite-cache-ttl-minutes: ${RETRIEVAL_REWRITE_CACHE_TTL_MINUTES:10}
+    rewrite-cache-max-size: ${RETRIEVAL_REWRITE_CACHE_MAX_SIZE:10000}
+    rewrite-max-length: ${RETRIEVAL_REWRITE_MAX_LENGTH:512}
+    rewrite-max-history-turns: ${RETRIEVAL_REWRITE_MAX_HISTORY_TURNS:6}
+    # On by default, but only takes effect when a rerank model is configured.
+    rerank-enabled: ${RETRIEVAL_RERANK_ENABLED:true}
+    parent-candidate-factor: ${RETRIEVAL_PARENT_CANDIDATE_FACTOR:3}
+    parent-candidate-floor: ${RETRIEVAL_PARENT_CANDIDATE_FLOOR:20}
+    max-linked-kb: ${RETRIEVAL_MAX_LINKED_KB:15}
+    routing-cache-ttl-minutes: ${RETRIEVAL_ROUTING_CACHE_TTL_MINUTES:10}
+    routing-cache-max-size: ${RETRIEVAL_ROUTING_CACHE_MAX_SIZE:10000}
+    # The version visibility set is invalidated by every activation switch, so this expiry is only a safety net
+    # against a mutation path nobody wired to that invalidation.
+    visible-version-cache-ttl-minutes: ${RETRIEVAL_VISIBLE_VERSION_CACHE_TTL_MINUTES:5}
+    visible-version-cache-max-size: ${RETRIEVAL_VISIBLE_VERSION_CACHE_MAX_SIZE:1000}
+    # Image query, requirement section 4.8. Every image costs a vision round trip before the search starts,
+    # so the count is the latency budget and the two byte ceilings are the memory budget of one request.
+    image-query-max-count: ${IMAGE_QUERY_MAX_COUNT:3}
+    image-query-max-bytes: ${IMAGE_QUERY_MAX_BYTES:5242880}
+    image-query-max-total-bytes: ${IMAGE_QUERY_MAX_TOTAL_BYTES:10485760}
+  annotation:
+    # Lowest Dice coefficient a cross version migration recommendation must reach. Nothing is migrated
+    # automatically, so a low value only lengthens the list an operator reads.
+    migration-min-score: ${ANNOTATION_MIGRATION_MIN_SCORE:0.35}
+  graph:
+    # Blank disables the whole graph capability: no driver is created, the health endpoint does not probe
+    # Neo4j, the graph route never runs and the extraction endpoint refuses. Everything else is unaffected.
+    uri: ${NEO4J_URI:}
+    user: ${NEO4J_USER:neo4j}
+    password: ${NEO4J_PASSWORD:}
+    # Relationship hops a matched entity is expanded by; the relevance of a hit decays as 1/(1+hops).
+    max-hops: ${GRAPH_MAX_HOPS:2}
+    entity-match-limit: ${GRAPH_ENTITY_MATCH_LIMIT:10}
+    # One model call carries exactly one chunk; the batch is how many of those are submitted together,
+    # and the concurrency is how many run at a time inside a batch.
+    extract-batch-size: ${GRAPH_EXTRACT_BATCH_SIZE:10}
+    extract-concurrency: ${GRAPH_EXTRACT_CONCURRENCY:2}
+  web:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:20002,http://127.0.0.1:20002}
+  eval:
+    # Blank keeps the judge on the generation/rewrite chat model; set to grade with an independent model.
+    judge-model: ${EVAL_JUDGE_MODEL:}
+    offline-timeout-ms: ${EVAL_OFFLINE_TIMEOUT_MS:10000}
+    concurrency: ${EVAL_CONCURRENCY:4}
+    overlap-threshold: ${EVAL_OVERLAP_THRESHOLD:0.5}
+    degraded-retry: ${EVAL_DEGRADED_RETRY:2}
+  gate:
+    # Below this many effective cases the dual run comparison is recorded instead of decided on.
+    min-cases: ${GATE_MIN_CASES:50}
+    # Tolerance floor in percentage points; the effective tolerance is max(this / 100, 1 / effectiveCases).
+    epsilon-pp: ${GATE_EPSILON_PP:2}
+    # Pending review ratio above which the evaluation data set counts as invalid for gating.
+    stale-ratio: ${GATE_STALE_RATIO:0.15}
+    run-timeout-ms: ${GATE_RUN_TIMEOUT_MS:1800000}
+    poll-interval-ms: ${GATE_POLL_INTERVAL_MS:2000}
+  open-api:
+    # Token bucket rate assigned to a freshly created API key, in requests per second.
+    rate-limit-default: ${API_RATE_LIMIT_DEFAULT:10}
+    retry-after-seconds: ${API_RATE_LIMIT_RETRY_AFTER_SECONDS:1}
+    # Days an audit row stays queryable before it is archived to object storage and deleted.
+    audit-retention-days: ${AUDIT_RETENTION_DAYS:180}
+    audit-archive-batch-size: ${AUDIT_ARCHIVE_BATCH_SIZE:5000}
+    audit-archive-cron: ${AUDIT_ARCHIVE_CRON:0 30 3 * * *}
+    audit-archive-enabled: ${AUDIT_ARCHIVE_ENABLED:true}
+    audit-archive-prefix: ${AUDIT_ARCHIVE_PREFIX:audit/}
+    # Width of the query_digest column; the digest is masked first and truncated to this afterwards.
+    query-digest-max-length: ${AUDIT_QUERY_DIGEST_MAX_LENGTH:200}
+  app:
+    # Retired application versions per application whose index snapshot is kept. Every snapshot is a full copy
+    # of the corpus of every linked knowledge base, so this is the rollback depth traded against disk.
+    # The released version is never counted here and never cleaned up.
+    snapshot-retain-count: ${APP_SNAPSHOT_RETAIN_COUNT:3}
+    # Budget of one snapshot copy. The Elasticsearch clone hard links segments and finishes in milliseconds;
+    # this bounds the Milvus path, which copies entities.
+    snapshot-timeout-ms: ${APP_SNAPSHOT_TIMEOUT_MS:300000}
+    snapshot-cleanup-cron: ${APP_SNAPSHOT_CLEANUP_CRON:0 15 4 * * *}
+    snapshot-cleanup-enabled: ${APP_SNAPSHOT_CLEANUP_ENABLED:true}
+
+logging:
+  level:
+    root: info
+    io.kbrag: info
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] [%X{requestId}] %logger{36} - %msg%n"

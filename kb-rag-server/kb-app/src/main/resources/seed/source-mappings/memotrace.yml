@@ -1,0 +1,47 @@
+# Column-name mapping profile for MemoTrace-style WeChat chat exports (csv/xlsx).
+# Verbatim copy of the parser's app/mappings/memotrace.yml: the parser keeps the file
+# as its own default, this copy is what seeds t_kb_source_mapping so an operator can
+# read and clone it from the console.
+#
+# Candidates are tried in order; matching is case-insensitive and ignores whitespace,
+# so header variants such as "Create Time" and "createtime" both resolve to send_time.
+#
+# NOTE: written from publicly documented MemoTrace/WeChat export column conventions;
+# has NOT yet been validated against a real exported sample.
+
+session_id:
+  - room_name
+  - talker
+  - TalkerId
+
+session_name:
+  - NickName
+  - Remark
+  - room_name
+
+sender:
+  - Sender
+  - NickName
+  - talker
+
+is_self:
+  - IsSender
+  - is_sender
+
+send_time:
+  - CreateTime
+  - StrTime
+
+msg_type:
+  - Type
+  - type_name
+
+content:
+  - StrContent
+  - msg
+  - content
+
+msg_id:
+  - MsgSvrID
+  - msg_id
+  - MsgId

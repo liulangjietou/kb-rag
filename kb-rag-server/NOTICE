@@ -1,0 +1,228 @@
+kb-rag-server
+Copyright 2026 kb-rag contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This file lists the third-party components this service depends on and the
+compliance posture behind each choice. It is derived from the dependencies that
+are actually packaged into kb-api/target/kb-rag-server.jar, not from a wish list:
+every entry below was checked against the published pom or jar manifest of the
+exact version this project pins. It must be kept in sync whenever a dependency
+is added, removed or its license terms change (see requirements doc 12.1).
+
+Reproduce the packaged set with:
+
+    mvn -B -ntp -DskipTests package
+    unzip -l kb-api/target/kb-rag-server.jar | grep BOOT-INF/lib/
+
+==========================================================================
+1. Direct dependencies declared by this project
+==========================================================================
+
+--------------------------------------------------------------------------
+Spring Boot 3.3.9 and Spring Framework 6.1.17
+--------------------------------------------------------------------------
+Components: spring-boot, spring-boot-autoconfigure, spring-boot-actuator,
+spring-core, spring-context, spring-beans, spring-web, spring-webmvc,
+spring-aop, spring-jdbc, spring-tx, spring-expression, spring-jcl,
+spring-security-crypto (BCrypt password hashing only, not Spring Security),
+tomcat-embed-core / -el / -websocket 10.1.36.
+License: Apache-2.0. No conflict with this project's Apache-2.0 license.
+
+--------------------------------------------------------------------------
+Elasticsearch Java client 8.13.4
+--------------------------------------------------------------------------
+Components: co.elastic.clients:elasticsearch-java,
+org.elasticsearch.client:elasticsearch-rest-client.
+License: Apache-2.0 (verified in the published pom).
+The Elasticsearch *server* is a separate concern: it is triple-licensed
+(Elastic License 2.0 / SSPL / AGPLv3), runs as an independent unmodified
+container orchestrated by kb-rag-deploy, and is reached only over its HTTP
+REST API. This repository contains no Elasticsearch server source and does
+not redistribute or resell it. Only the client library is a dependency, and
+that library is Apache-2.0.
+
+--------------------------------------------------------------------------
+Milvus Java SDK 2.4.9
+--------------------------------------------------------------------------
+Component: io.milvus:milvus-sdk-java.
+License: Apache-2.0 (verified in the published pom).
+Used only in full mode (blank MILVUS_URI leaves the client unbuilt).
+The SDK ships a bulk writer that pulls the Parquet / Hadoop / cloud-SDK
+stack; this project writes through the regular upsert path only, so that
+transitive stack is excluded in kb-infrastructure/pom.xml. The exclusion is
+a size and dependency-hygiene decision, not a licensing one.
+The Milvus server itself is Apache-2.0 and runs as an independent container.
+
+--------------------------------------------------------------------------
+MinIO Java SDK 8.5.17
+--------------------------------------------------------------------------
+Component: io.minio:minio.
+License: Apache-2.0 (verified in the published pom).
+The MinIO *server* is licensed GNU AGPL-3.0. It is deployed as an
+independent container and reached exclusively through its S3-compatible
+HTTP API; this project neither modifies nor embeds MinIO server source and
+does not create a derivative work of it. Only the Apache-2.0 client SDK is
+a dependency of this service.
+
+--------------------------------------------------------------------------
+Neo4j Java Driver 5.28.9
+--------------------------------------------------------------------------
+Components: org.neo4j.driver:neo4j-java-driver plus its
+neo4j-bolt-connection-* modules 6.0.2.
+License: Apache-2.0 (verified in the published parent pom and jar manifest).
+Only loaded when NEO4J_URI is set: a deployment without a knowledge graph
+never creates a driver, so the jar is inert rather than optional. The Neo4j
+*server* is not required and, when used, runs as an independent container
+(Community Edition, GPLv3) reached over the Bolt protocol.
+
+--------------------------------------------------------------------------
+MyBatis-Plus 3.5.7 and MyBatis 3.5.16
+--------------------------------------------------------------------------
+Components: com.baomidou:mybatis-plus* (core / annotation / extension /
+spring-boot3-starter), org.mybatis:mybatis, org.mybatis:mybatis-spring,
+com.github.jsqlparser:jsqlparser 4.9.
+License: Apache-2.0 for MyBatis-Plus, MyBatis and mybatis-spring (verified
+in the published poms and jar manifests). JSQLParser is dual-licensed
+Apache-2.0 / LGPL-2.1 and is used here under the Apache-2.0 option.
+
+--------------------------------------------------------------------------
+Caffeine 3.1.8
+--------------------------------------------------------------------------
+Component: com.github.ben-manes.caffeine:caffeine.
+License: Apache-2.0 (verified in the published pom).
+In-process cache for query rewrite, knowledge base routing and the version
+visibility set. The version is managed by the Spring Boot bill of materials
+so the cache library stays aligned with what the framework already pulls in.
+
+--------------------------------------------------------------------------
+Flyway 10.10.0
+--------------------------------------------------------------------------
+Components: org.flywaydb:flyway-core, org.flywaydb:flyway-mysql.
+License: Apache-2.0 (verified in the published parent pom).
+
+--------------------------------------------------------------------------
+MySQL Connector/J 8.3.0
+--------------------------------------------------------------------------
+Component: com.mysql:mysql-connector-j (runtime scope).
+License: GPL-2.0 WITH Universal FOSS Exception, Version 1.0 (as declared in
+the published pom). The FOSS Exception is what permits an Apache-2.0
+project to depend on and distribute the unmodified driver; it is used as a
+JDBC driver over the standard wire protocol with no source modification.
+Deployments that prefer to avoid the GPL lineage entirely can drop the jar
+and supply another MySQL-compatible driver at runtime.
+The MySQL *server* (GPL-2.0, Community Edition) runs as an independent
+unmodified container and is reached only through SQL over JDBC.
+
+--------------------------------------------------------------------------
+Apache Commons
+--------------------------------------------------------------------------
+Components: commons-lang3 3.14.0, commons-collections4 4.4, commons-codec
+1.16.1, commons-io 2.16.1, commons-compress 1.27.1, commons-text 1.10.0,
+commons-pool2 2.12.1.
+License: Apache-2.0.
+
+--------------------------------------------------------------------------
+Jackson 2.17.3
+--------------------------------------------------------------------------
+Components: jackson-core, jackson-databind, jackson-annotations,
+jackson-datatype-jsr310, jackson-datatype-jdk8, jackson-dataformat-toml,
+jackson-module-parameter-names.
+License: Apache-2.0.
+
+--------------------------------------------------------------------------
+Project Lombok 1.18.36
+--------------------------------------------------------------------------
+Component: org.projectlombok:lombok (version managed by Spring Boot 3.3.9).
+License: MIT (verified in the published pom).
+Compile-time only: declared `provided` and explicitly excluded from the
+Spring Boot repackaged jar, so it is not redistributed with this product.
+
+==========================================================================
+2. Notable transitive dependencies
+==========================================================================
+
+Apache-2.0
+  HikariCP 5.1.0, Guava 33.3.1-jre, Gson 2.10.1, gRPC Java 1.59.1
+  (grpc-api/core/stub/protobuf/netty-shaded/util/context), Netty 4.1.118,
+  OkHttp 4.12.0 and Okio 3.6.0, Kotlin stdlib 1.9.25, Apache HttpComponents
+  (httpclient 4.5.14, httpcore 4.4.16, httpasyncclient, httpcore-nio),
+  Micrometer 1.13.11, OpenTelemetry API 1.38.0, SnakeYAML 2.2, snappy-java
+  1.1.10.7, Hibernate Validator 8.0.2, jakarta.validation-api 3.0.2,
+  JBoss Logging 3.5.3, ClassMate 1.7.0, Log4j API 2.23.1 and log4j-to-slf4j,
+  Reactor Core 3.6.14, simple-xml-safe 2.7.1, error_prone_annotations,
+  j2objc-annotations, JSR-305 annotations, PerfMark API, plexus-utils,
+  JetBrains annotations, protobuf common protos.
+
+MIT
+  SLF4J API 2.0.16 and jul-to-slf4j, Checker Framework qualifiers 3.37.0,
+  animal-sniffer-annotations 1.23.
+
+BSD-3-Clause
+  Protocol Buffers Java 3.24.0.
+
+Bouncy Castle Licence (MIT-style)
+  bcprov-jdk18on 1.78.1 (pulled in by the MinIO SDK).
+
+EPL-1.0 / LGPL-2.1 (dual)
+  Logback 1.5.16 (logback-classic, logback-core). Used unmodified as the
+  SLF4J backend via its published binaries; no Logback source is included
+  or modified. Deployments preferring another backend can swap it out
+  through the standard Spring Boot logging starter exclusion.
+
+EPL-2.0 / GPL-2.0-with-Classpath-Exception (dual)
+  jakarta.annotation-api 2.1.1, jakarta.json-api 2.1.3, Eclipse Parsson
+  1.0.5 (JSON-P implementation used by the Elasticsearch client).
+
+CC0 / Public Domain, BSD-2-Clause
+  LatencyUtils 2.0.3 (CC0), HdrHistogram 2.2.2 (CC0 / BSD-2-Clause).
+
+MIT-0
+  reactive-streams 1.0.4.
+
+==========================================================================
+3. Test-scope dependencies (not redistributed)
+==========================================================================
+
+spring-boot-starter-test brings JUnit 5 (EPL-2.0), Mockito (MIT),
+AssertJ (Apache-2.0), Hamcrest (BSD-3-Clause), Awaitility (Apache-2.0),
+JSONassert (Apache-2.0), XMLUnit (Apache-2.0), JsonPath and json-smart
+(Apache-2.0), and jakarta.xml.bind-api (BSD-3-Clause). None of them ship in
+the runnable jar.
+
+==========================================================================
+4. Hosted model services (not bundled software)
+==========================================================================
+
+Alibaba Cloud DashScope (embedding / rerank / chat / vision)
+
+This project calls hosted model APIs over HTTPS. No vendor SDK is involved:
+the calls are plain HTTP through Spring's RestClient, so DashScope
+contributes no jar, no source and no license obligation to this
+distribution. It is disclosed here because using this project may depend on
+it and the provider's own terms of service apply independently of this
+project's Apache-2.0 license.
+
+Every model capability goes through a port interface in kb-domain
+(EmbeddingProvider / RerankProvider / ChatProvider / VisionProvider), and
+the embedding, chat and vision paths speak the OpenAI-compatible protocol,
+so changing one base URL points them at Azure OpenAI, Ollama, vLLM or any
+other compatible endpoint. Leaving the credentials blank is a supported
+deployment shape, not a failure: the service starts and runs BM25-only
+retrieval.
+
+Note on LangChain4j: the requirements document lists it among candidate
+technologies, but this service does **not** depend on it. The model
+integrations are hand-written HTTP clients behind the ports above, and no
+LangChain4j artifact appears in the build or the packaged jar. It is
+recorded here so a future reader does not add a NOTICE entry for a
+dependency that is not there.
+
+==========================================================================
+5. Execution note
+==========================================================================
+
+Before adding any new third-party dependency, confirm license compatibility
+with Apache-2.0 distribution first, and update this file in the same change.
+Run a dependency license scan as part of the release checklist
+(see requirements doc 12.1).

@@ -1,0 +1,599 @@
+package io.kbrag.infrastructure.search.milvus;
+
+import io.kbrag.common.api.ErrorCode;
+import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.constant.IndexFields;
+import io.kbrag.domain.enums.RetrievalSource;
+import io.kbrag.domain.enums.VectorEngine;
+import io.kbrag.domain.model.ChunkRecord;
+import io.kbrag.domain.model.HealthStatus;
+import io.kbrag.domain.model.IndexSpec;
+import io.kbrag.domain.model.MetadataFilter;
+import io.kbrag.domain.model.RetrievalFilter;
+import io.kbrag.domain.model.ScoredChunk;
+import io.kbrag.domain.model.VectorQuery;
+import io.kbrag.domain.port.VectorStore;
+import io.kbrag.domain.service.VectorScoreNormalizer;
+import io.milvus.client.MilvusServiceClient;
+import io.milvus.grpc.DataType;
+import io.milvus.grpc.DescribeCollectionResponse;
+import io.milvus.grpc.MutationResult;
+import io.milvus.grpc.SearchResults;
+import io.milvus.orm.iterator.QueryIterator;
+import io.milvus.param.IndexType;
+import io.milvus.param.MetricType;
+import io.milvus.param.R;
+import io.milvus.param.RpcStatus;
+import io.milvus.param.alias.AlterAliasParam;
+import io.milvus.param.alias.CreateAliasParam;
+import io.milvus.param.collection.CreateCollectionParam;
+import io.milvus.param.collection.DescribeCollectionParam;
+import io.milvus.param.collection.DropCollectionParam;
+import io.milvus.param.collection.FieldType;
+import io.milvus.param.collection.FlushParam;
+import io.milvus.param.collection.HasCollectionParam;
+import io.milvus.param.collection.LoadCollectionParam;
+import io.milvus.param.dml.DeleteParam;
+import io.milvus.param.dml.InsertParam;
+import io.milvus.param.dml.QueryIteratorParam;
+import io.milvus.param.dml.SearchParam;
+import io.milvus.param.dml.UpsertParam;
+import io.milvus.param.index.CreateIndexParam;
+import io.milvus.response.DescCollResponseWrapper;
+import io.milvus.response.QueryResultsWrapper;
+import io.milvus.response.SearchResultsWrapper;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.collections4.CollectionUtils;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
+
+/**
+ * Milvus backed vector route, used by the full deployment where Elasticsearch only serves BM25.
+ *
+ * <p>Score conversion. Milvus returns the raw cosine similarity in {@code [-1,1]}, so the
+ * implementation only applies the shared linear mapping to {@code [0,1]}. Combined with the
+ * Elasticsearch implementation, which first restores the raw cosine from its own {@code (1+cos)/2}
+ * score, a score threshold means exactly the same thing in both deployment modes.
+ *
+ * @author owlzhangfq@gmail.com
+ */
+@Slf4j
+@Component
+@ConditionalOnProperty(prefix = "kb.vector", name = "engine", havingValue = "milvus")
+public class MilvusVectorStore implements VectorStore {
+
+    private static final int VARCHAR_MAX_LENGTH = 64;
+    private static final int CONTENT_MAX_LENGTH = 65535;
+    private static final int TAG_MAX_CAPACITY = 32;
+    private static final String HNSW_EXTRA_PARAM = "{\"M\":16,\"efConstruction\":200}";
+    private static final String SEARCH_EXTRA_PARAM = "{\"ef\":64}";
+    private static final String VECTOR_INDEX_NAME = "idx_vector";
+
+    /** Entities read back and inserted per batch of a snapshot copy. */
+    private static final int COPY_BATCH_SIZE = 500;
+
+    /**
+     * Predicate that matches every entity of a collection. Milvus requires an expression, and the primary key
+     * is a non empty varchar on every row this service writes.
+     */
+    private static final String COPY_ALL_EXPRESSION = IndexFields.CHUNK_ID + " != \"\"";
+
+    /**
+     * Complete field list of the collection, in the order the copy reads and writes it.
+     *
+     * <p>The same list the schema declares, so a snapshot cannot end up with a narrower field set than its
+     * source: a missing filterable field would make the mandatory version predicate unsatisfiable and the
+     * snapshot would recall nothing.
+     */
+    private static final List<String> COPY_FIELDS = List.of(
+            IndexFields.CHUNK_ID, IndexFields.KB_ID, IndexFields.DOC_ID, IndexFields.DOCUMENT_VERSION_ID,
+            IndexFields.PARENT_ID, IndexFields.CHUNK_TYPE, IndexFields.ENABLED, IndexFields.TAG_IDS,
+            IndexFields.SESSION_ID, IndexFields.SENDER, IndexFields.MSG_TIME, IndexFields.CHUNK_SEQ,
+            IndexFields.CONTENT, IndexFields.VECTOR);
+
+    private final MilvusServiceClient client;
+
+    /** Budget of one snapshot copy, read once so the field list stays a plain value. */
+    private final long snapshotTimeoutMs;
+
+    public MilvusVectorStore(MilvusServiceClient client, KbProperties properties) {
+        this.client = client;
+        this.snapshotTimeoutMs = properties.getApp().getSnapshotTimeoutMs();
+    }
+
+    @Override
+    public String engine() {
+        return VectorEngine.MILVUS.code();
+    }
+
+    @Override
+    public void ensureIndex(IndexSpec spec) {
+        if (!spec.hasVectorField()) {
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "milvus collection requires a vector dimension");
+        }
+        String collection = spec.getPhysicalIndexName();
+        provisionCollection(collection, spec.getDimension());
+        client.loadCollection(LoadCollectionParam.newBuilder().withCollectionName(collection).build());
+        bindAlias(collection, spec.getAliasName());
+        log.info("milvus collection ready, collection={}, alias={}", collection, spec.getAliasName());
+    }
+
+    /**
+     * Creates the collection with its indexes when it is missing, without touching any alias.
+     *
+     * <p>Shared by the live index provisioning and by the snapshot copy: the two must produce an identical
+     * schema and identical indexes, and the only thing that differs between them is whether an alias ends up
+     * pointing at the result.
+     *
+     * @param collection collection name
+     * @param dimension  vector dimension
+     */
+    private void provisionCollection(String collection, int dimension) {
+        R<Boolean> exists = client.hasCollection(HasCollectionParam.newBuilder()
+                .withCollectionName(collection)
+                .build());
+        checkResponse(exists, "has collection");
+        if (Boolean.TRUE.equals(exists.getData())) {
+            return;
+        }
+        createCollection(collection, dimension);
+        createVectorIndex(collection);
+        createScalarIndexes(collection);
+    }
+
+    @Override
+    public void upsert(String alias, List<ChunkRecord> records) {
+        if (CollectionUtils.isEmpty(records)) {
+            return;
+        }
+        List<InsertParam.Field> fields = new ArrayList<>();
+        fields.add(new InsertParam.Field(IndexFields.CHUNK_ID,
+                records.stream().map(ChunkRecord::getChunkId).collect(Collectors.toList())));
+        fields.add(new InsertParam.Field(IndexFields.KB_ID,
+                records.stream().map(ChunkRecord::getKbId).collect(Collectors.toList())));
+        fields.add(new InsertParam.Field(IndexFields.DOC_ID,
+                records.stream().map(ChunkRecord::getDocId).collect(Collectors.toList())));
+        fields.add(new InsertParam.Field(IndexFields.DOCUMENT_VERSION_ID,
+                records.stream().map(ChunkRecord::getDocumentVersionId).collect(Collectors.toList())));
+        fields.add(new InsertParam.Field(IndexFields.PARENT_ID,
+                records.stream().map(record -> nullToEmpty(record.getParentId())).collect(Collectors.toList())));
+        fields.add(new InsertParam.Field(IndexFields.CHUNK_TYPE,
+                records.stream().map(record -> nullToEmpty(record.getChunkType())).collect(Collectors.toList())));
+        fields.add(new InsertParam.Field(IndexFields.ENABLED,
+                records.stream().map(ChunkRecord::isEnabled).collect(Collectors.toList())));
+        fields.add(new InsertParam.Field(IndexFields.TAG_IDS,
+                records.stream().map(record -> record.getTagIds() == null
+                        ? List.<String>of() : record.getTagIds()).collect(Collectors.toList())));
+        fields.add(new InsertParam.Field(IndexFields.SESSION_ID,
+                records.stream().map(record -> nullToEmpty(record.getSessionId())).collect(Collectors.toList())));
+        fields.add(new InsertParam.Field(IndexFields.SENDER,
+                records.stream().map(record -> nullToEmpty(record.getSender())).collect(Collectors.toList())));
+        fields.add(new InsertParam.Field(IndexFields.MSG_TIME,
+                records.stream().map(record -> record.getMsgTime() == null ? 0L : record.getMsgTime())
+                        .collect(Collectors.toList())));
+        fields.add(new InsertParam.Field(IndexFields.CHUNK_SEQ,
+                records.stream().map(record -> record.getChunkSeq() == null ? 0 : record.getChunkSeq())
+                        .collect(Collectors.toList())));
+        fields.add(new InsertParam.Field(IndexFields.CONTENT,
+                records.stream().map(record -> truncate(record.getContent())).collect(Collectors.toList())));
+        fields.add(new InsertParam.Field(IndexFields.VECTOR,
+                records.stream().map(record -> toFloatList(record.getVector())).collect(Collectors.toList())));
+
+        R<MutationResult> response = client.upsert(UpsertParam.newBuilder()
+                .withCollectionName(alias)
+                .withFields(fields)
+                .build());
+        checkResponse(response, "upsert");
+    }
+
+    @Override
+    public void delete(String alias, List<String> chunkIds) {
+        if (CollectionUtils.isEmpty(chunkIds)) {
+            return;
+        }
+        R<MutationResult> response = client.delete(DeleteParam.newBuilder()
+                .withCollectionName(alias)
+                .withExpr(inExpression(IndexFields.CHUNK_ID, chunkIds))
+                .build());
+        checkResponse(response, "delete");
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p><b>Not applied to the collection.</b> Milvus has no partial update: {@code upsert} replaces the
+     * whole entity and therefore needs the embedding, which lives only inside this collection and is
+     * never read back. Re-embedding on a toggle is exactly the cost the operation is defined not to pay.
+     *
+     * <p>Correctness does not depend on the flag being mirrored here. MySQL is the fact source and the
+     * retrieval pipeline drops a disabled chunk after loading its row, so a stale {@code true} in the
+     * collection can only waste a slot of the recall budget, never surface disabled text. The
+     * Elasticsearch side of the same knowledge base is updated in place, so the BM25 route stays exact.
+     *
+     * <p>TODO(M5): read the entity back with a query on {@code vector} and re-upsert it, once a Milvus
+     * deployment exists to verify the round trip against.
+     */
+    @Override
+    public void updateEnabled(String alias, List<String> chunkIds, boolean enabled) {
+        if (CollectionUtils.isEmpty(chunkIds)) {
+            return;
+        }
+        log.info("milvus enabled flag not mirrored, enforced by the fact source, "
+                + "collection={}, enabled={}, chunks={}", alias, enabled, chunkIds.size());
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p><b>A copy, not a hard link.</b> Milvus has no segment level clone, so the snapshot is created by
+     * reading every entity of the source collection and inserting it into a fresh one with the same schema.
+     * That is genuinely expensive - it is the storage and time cost requirement section 4.7 accepts when it
+     * says the release doubles storage - but it is also the only way to obtain an immutable copy that keeps
+     * serving after the live collection changes.
+     *
+     * <p><b>Why an iterator and not a paged query.</b> A Milvus query window is bounded (offset plus limit
+     * cannot exceed the configured maximum), so paging would silently stop copying a corpus larger than that
+     * window and produce a snapshot that looks complete while missing its tail. The iterator walks the whole
+     * collection instead.
+     *
+     * <p>The deadline bounds the whole walk rather than a single batch: what the caller needs protecting
+     * against is a release parked on a collection that answers each batch slowly.
+     *
+     * @param sourceIndex source collection name
+     * @param targetIndex snapshot collection name
+     */
+    @Override
+    public void snapshotIndex(String sourceIndex, String targetIndex) {
+        long deadline = System.currentTimeMillis() + snapshotTimeoutMs;
+        R<DescribeCollectionResponse> described = client.describeCollection(
+                DescribeCollectionParam.newBuilder().withCollectionName(sourceIndex).build());
+        checkResponse(described, "describe collection");
+        FieldType vectorField = new DescCollResponseWrapper(described.getData()).getVectorField();
+        if (vectorField == null) {
+            throw new BizException(ErrorCode.INTERNAL_ERROR,
+                    "milvus source collection carries no vector field");
+        }
+        // No alias is bound: a snapshot is addressed by its physical name precisely because the alias has to
+        // keep pointing at the live collection the knowledge base goes on writing to.
+        provisionCollection(targetIndex, vectorField.getDimension());
+        long copied = copyEntities(sourceIndex, targetIndex, deadline);
+        R<?> flushed = client.flush(FlushParam.newBuilder()
+                .withCollectionNames(List.of(targetIndex))
+                .build());
+        checkResponse(flushed, "flush snapshot collection");
+        client.loadCollection(LoadCollectionParam.newBuilder().withCollectionName(targetIndex).build());
+        log.info("milvus collection snapshotted, source={}, target={}, entities={}",
+                sourceIndex, targetIndex, copied);
+    }
+
+    @Override
+    public void dropIndex(String physicalIndexName) {
+        if (!indexExists(physicalIndexName)) {
+            log.info("milvus collection already absent, nothing to drop, collection={}", physicalIndexName);
+            return;
+        }
+        R<RpcStatus> dropped = client.dropCollection(DropCollectionParam.newBuilder()
+                .withCollectionName(physicalIndexName)
+                .build());
+        checkResponse(dropped, "drop collection");
+        log.info("milvus collection dropped, collection={}", physicalIndexName);
+    }
+
+    @Override
+    public boolean indexExists(String physicalIndexName) {
+        R<Boolean> exists = client.hasCollection(HasCollectionParam.newBuilder()
+                .withCollectionName(physicalIndexName)
+                .build());
+        checkResponse(exists, "has collection");
+        return Boolean.TRUE.equals(exists.getData());
+    }
+
+    /**
+     * Walks the source collection and inserts every entity into the target.
+     *
+     * @param sourceIndex source collection name
+     * @param targetIndex target collection name
+     * @param deadline    epoch millisecond the whole copy has to finish by
+     * @return entities copied
+     */
+    private long copyEntities(String sourceIndex, String targetIndex, long deadline) {
+        R<QueryIterator> iterator = client.queryIterator(QueryIteratorParam.newBuilder()
+                .withCollectionName(sourceIndex)
+                .withExpr(COPY_ALL_EXPRESSION)
+                .withOutFields(COPY_FIELDS)
+                .withBatchSize((long) COPY_BATCH_SIZE)
+                .build());
+        checkResponse(iterator, "open query iterator");
+        QueryIterator cursor = iterator.getData();
+        long copied = 0L;
+        try {
+            while (true) {
+                if (System.currentTimeMillis() >= deadline) {
+                    log.error("milvus snapshot copy exceeded its budget, errorCode={}, source={}, copied={}",
+                            ErrorCode.INTERNAL_ERROR, sourceIndex, copied);
+                    throw new BizException(ErrorCode.INTERNAL_ERROR, "milvus snapshot copy timed out");
+                }
+                List<QueryResultsWrapper.RowRecord> batch = cursor.next();
+                if (CollectionUtils.isEmpty(batch)) {
+                    return copied;
+                }
+                insertRows(targetIndex, batch);
+                copied += batch.size();
+            }
+        } finally {
+            cursor.close();
+        }
+    }
+
+    /**
+     * Inserts one batch of read back entities into the snapshot collection.
+     *
+     * <p>Built field by field from the very same field name list the live write uses, so a schema change has
+     * one place to be reflected and a snapshot can never end up with a narrower field set than its source.
+     *
+     * @param targetIndex target collection name
+     * @param rows        entities read from the source
+     */
+    private void insertRows(String targetIndex, List<QueryResultsWrapper.RowRecord> rows) {
+        List<InsertParam.Field> fields = new ArrayList<>(COPY_FIELDS.size());
+        for (String name : COPY_FIELDS) {
+            List<Object> values = new ArrayList<>(rows.size());
+            for (QueryResultsWrapper.RowRecord row : rows) {
+                values.add(row.get(name));
+            }
+            fields.add(new InsertParam.Field(name, values));
+        }
+        R<MutationResult> inserted = client.insert(InsertParam.newBuilder()
+                .withCollectionName(targetIndex)
+                .withFields(fields)
+                .build());
+        checkResponse(inserted, "insert snapshot entities");
+    }
+
+    @Override
+    public List<ScoredChunk> search(String alias, VectorQuery query) {
+        SearchParam param = SearchParam.newBuilder()
+                .withCollectionName(alias)
+                .withMetricType(MetricType.COSINE)
+                .withOutFields(List.of(IndexFields.CHUNK_ID))
+                .withTopK(query.getTopK())
+                .withVectors(List.of(toFloatList(query.getQueryVector())))
+                .withVectorFieldName(IndexFields.VECTOR)
+                .withExpr(buildFilterExpression(query))
+                .withParams(SEARCH_EXTRA_PARAM)
+                .build();
+        R<SearchResults> response = client.search(param);
+        checkResponse(response, "search");
+        SearchResultsWrapper wrapper = new SearchResultsWrapper(response.getData().getResults());
+        List<SearchResultsWrapper.IDScore> hits = wrapper.getIDScore(0);
+        List<ScoredChunk> results = new ArrayList<>(hits.size());
+        for (SearchResultsWrapper.IDScore hit : hits) {
+            results.add(new ScoredChunk(hit.getStrID(),
+                    VectorScoreNormalizer.fromMilvusScore(hit.getScore()), RetrievalSource.VECTOR));
+        }
+        return results;
+    }
+
+    @Override
+    public HealthStatus healthCheck() {
+        try {
+            R<?> version = client.getVersion();
+            return version.getStatus() == R.Status.Success.getCode()
+                    ? HealthStatus.up("milvus reachable")
+                    : HealthStatus.down("milvus responded with status " + version.getStatus());
+        } catch (Exception e) {
+            log.error("milvus health check failed, errorCode={}", ErrorCode.INTERNAL_ERROR, e);
+            return HealthStatus.down("milvus unreachable");
+        }
+    }
+
+    private void createCollection(String collection, int dimension) {
+        List<FieldType> fields = new ArrayList<>();
+        fields.add(FieldType.newBuilder().withName(IndexFields.CHUNK_ID).withDataType(DataType.VarChar)
+                .withMaxLength(VARCHAR_MAX_LENGTH).withPrimaryKey(true).withAutoID(false).build());
+        fields.add(varchar(IndexFields.KB_ID));
+        fields.add(varchar(IndexFields.DOC_ID));
+        fields.add(varchar(IndexFields.DOCUMENT_VERSION_ID));
+        fields.add(varchar(IndexFields.PARENT_ID));
+        fields.add(varchar(IndexFields.CHUNK_TYPE));
+        fields.add(FieldType.newBuilder().withName(IndexFields.ENABLED)
+                .withDataType(DataType.Bool).build());
+        fields.add(FieldType.newBuilder().withName(IndexFields.TAG_IDS)
+                .withDataType(DataType.Array)
+                .withElementType(DataType.VarChar)
+                .withMaxCapacity(TAG_MAX_CAPACITY)
+                .withMaxLength(VARCHAR_MAX_LENGTH)
+                .build());
+        fields.add(varchar(IndexFields.SESSION_ID));
+        fields.add(varchar(IndexFields.SENDER));
+        fields.add(FieldType.newBuilder().withName(IndexFields.MSG_TIME)
+                .withDataType(DataType.Int64).build());
+        fields.add(FieldType.newBuilder().withName(IndexFields.CHUNK_SEQ)
+                .withDataType(DataType.Int32).build());
+        fields.add(FieldType.newBuilder().withName(IndexFields.CONTENT)
+                .withDataType(DataType.VarChar).withMaxLength(CONTENT_MAX_LENGTH).build());
+        fields.add(FieldType.newBuilder().withName(IndexFields.VECTOR)
+                .withDataType(DataType.FloatVector).withDimension(dimension).build());
+
+        R<?> response = client.createCollection(CreateCollectionParam.newBuilder()
+                .withCollectionName(collection)
+                .withFieldTypes(fields)
+                .withEnableDynamicField(false)
+                .build());
+        checkResponse(response, "create collection");
+    }
+
+    private void createVectorIndex(String collection) {
+        R<?> response = client.createIndex(CreateIndexParam.newBuilder()
+                .withCollectionName(collection)
+                .withFieldName(IndexFields.VECTOR)
+                .withIndexName(VECTOR_INDEX_NAME)
+                .withIndexType(IndexType.HNSW)
+                .withMetricType(MetricType.COSINE)
+                .withExtraParam(HNSW_EXTRA_PARAM)
+                .build());
+        checkResponse(response, "create vector index");
+    }
+
+    /**
+     * Creates scalar indexes on the mandatory filter fields.
+     *
+     * <p>Filtering works without them, they only keep the mandatory version and enabled predicates
+     * cheap, so a failure is logged and does not abort index creation.
+     *
+     * @param collection collection name
+     */
+    private void createScalarIndexes(String collection) {
+        List<String> scalarFields = List.of(IndexFields.KB_ID, IndexFields.DOC_ID,
+                IndexFields.DOCUMENT_VERSION_ID, IndexFields.ENABLED);
+        for (String field : scalarFields) {
+            try {
+                R<?> response = client.createIndex(CreateIndexParam.newBuilder()
+                        .withCollectionName(collection)
+                        .withFieldName(field)
+                        .withIndexName("idx_" + field)
+                        .withIndexType(IndexType.INVERTED)
+                        .build());
+                if (response.getStatus() != R.Status.Success.getCode()) {
+                    log.info("skip scalar index, collection={}, field={}, status={}",
+                            collection, field, response.getStatus());
+                }
+            } catch (Exception e) {
+                log.info("skip scalar index, collection={}, field={}, reason={}",
+                        collection, field, e.getMessage());
+            }
+        }
+    }
+
+    private void bindAlias(String collection, String alias) {
+        R<?> created = client.createAlias(CreateAliasParam.newBuilder()
+                .withCollectionName(collection)
+                .withAlias(alias)
+                .build());
+        if (created.getStatus() == R.Status.Success.getCode()) {
+            return;
+        }
+        R<?> altered = client.alterAlias(AlterAliasParam.newBuilder()
+                .withCollectionName(collection)
+                .withAlias(alias)
+                .build());
+        checkResponse(altered, "alter alias");
+    }
+
+    /**
+     * Builds the boolean expression Milvus evaluates before the kNN search.
+     *
+     * <p>The mandatory version and enabled predicates come first, the optional caller supplied
+     * predicates are appended with AND semantics, mirroring what the Elasticsearch adapter does with
+     * its filter clause list so both engines narrow the candidate set identically.
+     *
+     * @param query kNN request
+     * @return Milvus filter expression
+     */
+    private String buildFilterExpression(VectorQuery query) {
+        RetrievalFilter filter = query.getFilter();
+        List<String> predicates = new ArrayList<>();
+        predicates.add(equalsExpression(IndexFields.KB_ID, filter.getKbId()));
+        if (filter.isEnabledOnly()) {
+            predicates.add(IndexFields.ENABLED + " == true");
+        }
+        if (CollectionUtils.isNotEmpty(filter.getDocumentVersionIds())) {
+            predicates.add(inExpression(IndexFields.DOCUMENT_VERSION_ID, filter.getDocumentVersionIds()));
+        }
+        appendMetadataPredicates(predicates, filter.getMetadataFilter());
+        return String.join(" && ", predicates);
+    }
+
+    /**
+     * Appends the optional caller supplied predicates.
+     *
+     * @param predicates predicate list being built
+     * @param metadata   caller supplied filter, {@code null} or empty adds nothing
+     */
+    private void appendMetadataPredicates(List<String> predicates, MetadataFilter metadata) {
+        if (metadata == null || metadata.isEmpty()) {
+            return;
+        }
+        if (CollectionUtils.isNotEmpty(metadata.getTagIds())) {
+            // tag_ids is an array field, so membership is expressed with array_contains_any.
+            predicates.add("array_contains_any(" + IndexFields.TAG_IDS + ", "
+                    + arrayLiteral(metadata.getTagIds()) + ")");
+        }
+        if (metadata.getSessionId() != null && !metadata.getSessionId().isBlank()) {
+            predicates.add(equalsExpression(IndexFields.SESSION_ID, metadata.getSessionId()));
+        }
+        if (metadata.getSender() != null && !metadata.getSender().isBlank()) {
+            predicates.add(equalsExpression(IndexFields.SENDER, metadata.getSender()));
+        }
+        if (metadata.getMsgTimeFrom() != null) {
+            predicates.add(IndexFields.MSG_TIME + " >= " + metadata.getMsgTimeFrom());
+        }
+        if (metadata.getMsgTimeTo() != null) {
+            predicates.add(IndexFields.MSG_TIME + " <= " + metadata.getMsgTimeTo());
+        }
+    }
+
+    private String equalsExpression(String field, String value) {
+        return field + " == " + quote(value);
+    }
+
+    private String inExpression(String field, List<String> values) {
+        return field + " in " + arrayLiteral(values);
+    }
+
+    private String arrayLiteral(List<String> values) {
+        return values.stream().map(this::quote).collect(Collectors.joining(", ", "[", "]"));
+    }
+
+    /**
+     * Quotes a literal for the Milvus expression language.
+     *
+     * <p>Identifiers reaching this method are generated business ids, but tag ids and session ids
+     * arrive from the caller, so the escaping is applied unconditionally rather than trusting the
+     * source of each value.
+     *
+     * @param value literal value
+     * @return quoted and escaped literal
+     */
+    private String quote(String value) {
+        String escaped = value.replace("\\", "\\\\").replace("\"", "\\\"");
+        return "\"" + escaped + "\"";
+    }
+
+    private FieldType varchar(String name) {
+        return FieldType.newBuilder().withName(name).withDataType(DataType.VarChar)
+                .withMaxLength(VARCHAR_MAX_LENGTH).build();
+    }
+
+    private List<Float> toFloatList(float[] vector) {
+        List<Float> values = new ArrayList<>(vector.length);
+        for (float value : vector) {
+            values.add(value);
+        }
+        return values;
+    }
+
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String truncate(String content) {
+        if (content == null) {
+            return "";
+        }
+        return content.length() > CONTENT_MAX_LENGTH ? content.substring(0, CONTENT_MAX_LENGTH) : content;
+    }
+
+    private void checkResponse(R<?> response, String action) {
+        if (response.getStatus() != R.Status.Success.getCode()) {
+            log.error("milvus {} failed, errorCode={}, status={}, message={}",
+                    action, ErrorCode.INTERNAL_ERROR, response.getStatus(), response.getMessage());
+            throw new BizException(ErrorCode.INTERNAL_ERROR, "milvus " + action + " failed");
+        }
+    }
+}

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞报告
+    url: https://github.com/liulangjietou/kb-rag-server/security/advisories/new
+    about: 请勿通过公开 Issue 报告安全漏洞，详见 SECURITY.md
+  - name: 部署与环境问题
+    url: https://github.com/liulangjietou/kb-rag-deploy/issues
+    about: docker-compose、环境变量、中间件编排相关的问题请提到 kb-rag-deploy
