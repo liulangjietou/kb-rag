@@ -9,6 +9,27 @@ kb-rag 知识库项目的 Python 文档解析微服务（M1 基线 + M3 多模�
 - PyMuPDF（pdf）/ python-docx（docx）/ openpyxl（xlsx）/ 标准库 csv（csv）/ 标准库 html.parser（html 聊天记录）/ PyYAML（聊天列名映射/行模板/DOM 选择器档案）
 - 可选：PaddleOCR（`requirements-ocr.txt`，`OCR_ENGINE=paddle` 时才需要，默认不装）
 
+## 许可注意
+
+本项目以 Apache-2.0 发布（见 `LICENSE`），但 `requirements.txt` 中的 pdf 解析依赖
+**PyMuPDF（1.28.0）实际许可为 GNU AGPL-3.0**（Artifex 双重许可：AGPL-3.0 或付费的 Artifex
+商业许可，本项目使用的是免费的 AGPL-3.0 分发；许可信息以 `pip show pymupdf` 与 PyPI 官方元数据
+为准，完整核实记录见 `NOTICE`）。`app/parsers/pdf.py` 直接依赖 `pymupdf`/`fitz`，是 pdf 解析
+路径不可或缺的一环，而非可隔离的子进程或独立服务。
+
+AGPL-3.0 与本项目 Apache-2.0 的整体许可目标之间存在**尚未解决**的合规关系：AGPL-3.0 要求，若
+包含 AGPL-3.0 代码的程序以网络服务形式对外提供，须向该服务的使用者提供该程序（含本服务自身代码
+及所有修改）的完整对应源代码。这是否可接受、如何处理，是**项目 Owner 需要做出的决策**，本文档
+不代为下结论、也不淡化这一事实。可能的方向包括（不分先后、不隐含推荐）：
+
+1. 接受本服务（kb-rag-parser）组件按 AGPL-3.0 义务分发/运营，kb-rag 项目其余部分仍保持
+   Apache-2.0；
+2. 更换 pdf 解析库为许可更宽松的替代方案（如基于 PDFium 的 `pypdfium2`、基于 pdfminer.six 的
+   `pdfplumber` 等），代价是需要重新验证解析行为与质量；
+3. 向 Artifex 购买 PyMuPDF 商业许可，以消除 AGPL-3.0 的网络服务义务。
+
+在项目 Owner 做出决策前，请按实际承担 AGPL-3.0 义务对待本服务的分发与部署。
+
 ## 快速启动
 
 ```bash
@@ -208,4 +229,18 @@ M8（M8-CONTRACTS.md §0.1/§0.2/§0.3/§0.4，均待真实样例到位后校准
 - txt 不匹配行占比的分母只统计非空行，且仅把"当前尚无任何消息已开始时的不匹配行"计入分子；已开始的消息体续行（多行归并的正常情形）不计入分子。这是为了让"多行消息体"这一正常情形不误触发 30% 失败线，同时仍能在真正文不对题的文件上正确触发（详见 `app/chat/txt_adapter.py` 模块 docstring）。
 - html/txt 一个文件固定产出单一 `ChatSession`（`session_id`/`session_name` 取文件名 stem），不像 csv/xlsx 支持同文件多会话（多房间）——txt/html 导出本身通常就是单个会话的逐条转储，真实样例若显示需要多会话拆分（如按分隔符/标题行），届时再补。
 - html `message` 选择器匹配零节点、txt 无 `txt:` patterns 配置，均视为配置/格式错误直接 fast-fail（`PARSE_FAILED`），不静默返回空会话——避免误配置被当作"这个文件恰好没有消息"。
-- PaddleOCR 版本选型：`requirements-ocr.txt` 固定 `paddleocr==2.7.3` + `paddlepaddle==2.6.2`（CPU）+ `ch_PP-OCRv4` 模型，依据 PaddleOCR 2.x 系列公开 API（`PaddleOCR(...).ocr(...)`）编写，尚未在本机实际 `pip install` 验证（`paddlepaddle` 是平台相关 wheel）；本仓库测试环境未安装该可选依赖，OCR 真实推理用例标记 `skipif` 自动跳过，验收前需按目标部署环境实跑一次并按需重新钉版本。
+- PaddleOCR 版本选型：`requirements-ocr.txt` 固定 `paddleocr==3.3.3` + `paddlepaddle==3.3.1`（CPU）+ `ch_PP-OCRv4` 模型。原拟 `paddlepaddle==2.6.2`/`paddleocr==2.7.3` 在 macOS arm64 + Python 3.13 无可用 wheel 不可装，实测后改钉上述版本，`app/ocr/engine.py` 已适配 PaddleOCR 3.x API（`use_textline_orientation`/`predict()`/`rec_texts`，关闭文档级预处理模型——本引擎只处理已摆正的单页渲染图）。已在 M8 验收（2026-07-27）实机 `pip install -r requirements-ocr.txt` 并对扫描 PDF 页跑通真实推理（产出文本且 `ocr_source=paddle`）。本仓库默认测试环境（`requirements.txt`）不装该可选依赖，OCR 真实推理用例按依赖是否安装标记 `skipif` 自动跳过；模型默认从 HuggingFace 拉取，部分网络不可达时可设 `PADDLE_PDX_MODEL_SOURCE=ModelScope`，纯离线部署须预置模型缓存目录。
+
+## 文档导航
+
+本仓库只维护自身的 README/CHANGELOG 与代码内 docstring；跨仓库的架构总览、端到端业务流程与
+里程碑契约集中维护在 [kb-rag-deploy](https://github.com/liulangjietou/kb-rag-deploy) 仓库：
+
+- 整体架构（本服务在 kb-rag 系统中的定位、与 kb-rag-server 的调用关系）：
+  `docs/ARCHITECTURE.md` §4（kb-rag-parser 架构）
+- 端到端业务流程（文档导入、聊天记录导入等完整链路，本服务只是其中一环）：`docs/FLOWS.md`
+- 各里程碑契约（本服务行为的规范来源，本仓库的实现与偏离说明均以其为准）：
+  `docs/M1-CONTRACTS.md`、`docs/M3-CONTRACTS.md`、`docs/M8-CONTRACTS.md`
+- 接口契约（OpenAPI）：`docs/openapi/kb-parser.yaml`
+- 贡献与安全：本仓库的 `CONTRIBUTING.md` / `SECURITY.md`；跨仓库通用约定另见
+  kb-rag-deploy 仓库同名文件

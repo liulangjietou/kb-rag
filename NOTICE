@@ -1,0 +1,185 @@
+kb-rag-parser
+Copyright 2026 kb-rag contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project depends on third-party open-source Python packages (see
+requirements.txt / requirements-ocr.txt). This NOTICE file lists every
+package pinned in those two files and the compliance posture behind each.
+It must be kept in sync whenever a dependency is added, removed, or its
+license terms change.
+
+Licenses below were verified against the actual installed package metadata
+(`pip show <package>`, PyPI `License`/`License-Expression`/classifiers
+fields) for the exact pinned versions in requirements.txt /
+requirements-ocr.txt, not merely inferred from the project's public
+reputation.
+
+============================================================================
+requirements.txt
+============================================================================
+
+--------------------------------------------------------------------------
+PyMuPDF (import name `fitz`/`pymupdf`) 1.28.0  --  pdf parsing
+--------------------------------------------------------------------------
+*** ATTENTION: this dependency is NOT Apache-2.0-compatible in the usual
+    permissive sense. See the "Compliance note" below. ***
+
+License, as reported by the installed package's own metadata
+(`pip show pymupdf`, PyPI `info.license` field for pymupdf==1.28.0):
+
+    "Dual Licensed - GNU AFFERO GPL 3.0 or Artifex Commercial License"
+
+PyMuPDF is published by Artifex Software under a dual-license model: it is
+available under the GNU Affero General Public License v3.0 (AGPL-3.0), or
+under a commercial license purchased from Artifex for projects that cannot
+or do not want to comply with the AGPL-3.0's copyleft/network-use-triggers-
+source-disclosure terms. This project uses the free (AGPL-3.0) distribution
+of the package; no commercial license has been purchased.
+
+Usage in this project: `app/parsers/pdf.py` imports `pymupdf`/`fitz` for
+all pdf text-layer extraction and scanned-page-to-PNG rendering; it is a
+direct, non-optional runtime dependency of the pdf parsing path (not an
+isolated subprocess or separate service).
+
+Compliance note (informational, NOT a resolution -- this is a decision for
+the project Owner, not something this NOTICE file settles unilaterally):
+AGPL-3.0 requires that if a program incorporating AGPL-3.0-licensed code is
+made available as a network service, the complete corresponding source of
+that program (including this service's own source) must be made available
+to users of that service under the AGPL-3.0. This is a materially
+different obligation than this project's stated Apache-2.0 licensing goal
+for kb-rag as a whole, and the two are not straightforwardly reconcilable
+by just adding this NOTICE entry. Directionally, the options available to
+the project Owner include (non-exhaustive, no preference implied):
+  (a) accept that the kb-rag-parser service component is distributed/
+      operated under AGPL-3.0 obligations (e.g. publish its source,
+      including any modifications, to users of the network service) while
+      the rest of the kb-rag project remains Apache-2.0;
+  (b) replace PyMuPDF with a differently-licensed pdf parsing library
+      (e.g. pypdfium2 (Apache-2.0/BSD-3-Clause via PDFium), pdfplumber
+      (MIT, itself built on pdfminer.six), or another Apache-2.0/MIT/BSD
+      alternative), at the cost of re-validating parsing behavior/quality;
+  (c) purchase an Artifex commercial license for PyMuPDF to remove the
+      AGPL-3.0 network-service obligation.
+This NOTICE deliberately does not pick one of the above; see also
+README.md's "许可注意" section, which surfaces this same open item to
+anyone integrating or redistributing this service. Until the project Owner
+decides, treat this service as carrying an AGPL-3.0 obligation in practice.
+
+--------------------------------------------------------------------------
+FastAPI 0.140.0  --  HTTP framework
+--------------------------------------------------------------------------
+License: MIT (verified via `pip show fastapi` -> License-Expression: MIT).
+No conflict with Apache-2.0 distribution.
+
+--------------------------------------------------------------------------
+Uvicorn 0.51.0 (installed with the `[standard]` extra)  --  ASGI server
+--------------------------------------------------------------------------
+License: BSD-3-Clause (verified via `pip show uvicorn` -> License-Expression:
+BSD-3-Clause). No conflict with Apache-2.0 distribution. The `[standard]`
+extra pulls in additional packages (e.g. uvloop, httptools, websockets,
+watchfiles) that are themselves permissively licensed (BSD/MIT/Apache-2.0
+family); not individually itemized here as they are uvicorn's own declared
+optional dependencies, not something this project chose independently.
+
+--------------------------------------------------------------------------
+python-multipart 0.0.32  --  multipart/form-data upload parsing (used by
+FastAPI's `UploadFile`)
+--------------------------------------------------------------------------
+License: Apache-2.0 (verified via `pip show python-multipart` ->
+License-Expression: Apache-2.0). No conflict with Apache-2.0 distribution.
+
+--------------------------------------------------------------------------
+Pydantic 2.13.4  --  request/response models (app/models.py)
+--------------------------------------------------------------------------
+License: MIT (verified via `pip show pydantic` -> License-Expression: MIT).
+No conflict with Apache-2.0 distribution.
+
+--------------------------------------------------------------------------
+python-docx 1.2.0  --  docx parsing (app/parsers/docx.py)
+--------------------------------------------------------------------------
+License: MIT (verified via `pip show python-docx` -> License: MIT). No
+conflict with Apache-2.0 distribution.
+
+--------------------------------------------------------------------------
+openpyxl 3.1.5  --  xlsx parsing (app/parsers/excel.py)
+--------------------------------------------------------------------------
+License: MIT (verified via `pip show openpyxl` -> License: MIT). No
+conflict with Apache-2.0 distribution.
+
+--------------------------------------------------------------------------
+lxml 6.1.1  --  transitive dependency of python-docx / openpyxl's XML
+handling
+--------------------------------------------------------------------------
+License: BSD-3-Clause (verified via `pip show lxml` -> License:
+BSD-3-Clause). No conflict with Apache-2.0 distribution. Not pinned
+directly for its own sake -- present because python-docx/openpyxl require
+it; its XXE-hardening posture (`resolve_entities=False` defaults in the
+versions this project uses) is documented in app/security.py.
+
+--------------------------------------------------------------------------
+defusedxml 0.7.1  --  standard-library XML hardening (app/security.py,
+`defuse_stdlib()`)
+--------------------------------------------------------------------------
+License: PSFL (Python Software Foundation License, verified via
+`pip show defusedxml` -> License: PSFL). PSFL is a permissive,
+OSI-approved, BSD-style license; no conflict with Apache-2.0 distribution.
+
+--------------------------------------------------------------------------
+PyYAML 6.0.3  --  chat mapping profile parsing (app/mappings/*.yml,
+app/chat/mapping.py)
+--------------------------------------------------------------------------
+License: MIT (verified via `pip show PyYAML` -> License: MIT). No conflict
+with Apache-2.0 distribution.
+
+--------------------------------------------------------------------------
+pytest 9.1.1 / httpx 0.28.1  --  test-only dependencies
+--------------------------------------------------------------------------
+License: MIT (pytest, verified via `pip show pytest` -> License-Expression:
+MIT) / BSD-3-Clause (httpx, verified via `pip show httpx` -> License: BSD-
+3-Clause; required by FastAPI's `TestClient`). Both are listed in
+requirements.txt as they are needed to run this repository's own test
+suite, but are not imported by the running `app/` service code and are not
+part of what actually gets deployed/distributed as the service. No
+conflict with Apache-2.0 distribution.
+
+============================================================================
+requirements-ocr.txt (optional; only installed when OCR_ENGINE=paddle is
+actually used, see app/ocr/engine.py and README.md)
+============================================================================
+
+--------------------------------------------------------------------------
+paddlepaddle 3.3.1  --  PaddleOCR's deep-learning inference backend
+--------------------------------------------------------------------------
+License: Apache License 2.0 (verified via PyPI metadata for
+paddlepaddle==3.3.1: `info.license` = "Apache Software License", and its
+`License :: OSI Approved :: Apache Software License` classifier). No
+conflict with Apache-2.0 distribution.
+
+--------------------------------------------------------------------------
+paddleocr 3.3.3  --  local/offline scanned-page OCR fallback
+(app/ocr/engine.py, M8-CONTRACTS.md §0.4)
+--------------------------------------------------------------------------
+License: Apache License 2.0 (verified via PyPI metadata for
+paddleocr==3.3.3: `info.license` = "Apache License 2.0"). No conflict with
+Apache-2.0 distribution.
+
+Usage in this project: optional dependency, not installed by default (see
+requirements-ocr.txt's own header comment and README.md's `OCR_ENGINE`
+section). Only exercised when an operator explicitly sets
+`OCR_ENGINE=paddle` and installs `requirements-ocr.txt`; runs entirely
+locally/offline against PDF page renders produced by this service, with no
+outbound network calls made by this service itself during OCR inference
+(model weight files may be downloaded once on first use by the paddleocr/
+paddlepaddle libraries themselves from their configured model source --
+see README.md for the `PADDLE_PDX_MODEL_SOURCE` operational note for
+network-restricted environments).
+
+--------------------------------------------------------------------------
+Execution note
+--------------------------------------------------------------------------
+Before adding any new third-party dependency, confirm license compatibility
+with Apache-2.0 distribution first (or, if it is not compatible, document
+the resulting obligation as explicitly as the PyMuPDF entry above); update
+this NOTICE file in the same change.

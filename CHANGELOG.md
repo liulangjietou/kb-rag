@@ -2,6 +2,25 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式。
 
+## [未发布] - M8
+
+### 新增
+
+- `POST /api/v1/parse/chat` 的 `file_ext` 扩展至 `txt`/`html`（M8-CONTRACTS.md §0.1/§0.2，csv/xlsx 列名映射不变）：
+  - **TXT 行模式**（`app/chat/txt_adapter.py`）：逐行匹配 mapping profile `txt:` 段的有序行首正则列表（命名捕获组 `send_time`/`sender`，可选 `content`），内置 `liuhen`（`YYYY-MM-DD HH:MM:SS 发送人` 换行消息体）与 `wechat_pc`（`发送人 (时间):` 同行/换行消息体）两种模板；不匹配任何模板的行归并为上一条消息的续行；不匹配行占比 > 30%（分母只计非空行，分子不含已开始消息的续行）判定为格式/模板选错，直接返回 `PARSE_FAILED` 并给出可操作提示。固定解析为单一 `ChatSession`（`session_id`/`session_name` 取文件名 stem）。
+  - **HTML DOM 选择器**（`app/chat/html_adapter.py`）：仅用标准库 `html.parser`（不引入 bs4），解析前剥离 `<script>`/`<style>` 内容，绝不请求任何远程资源（`<img src>` 只判断是否存在，从不下载）。消息节点/发送人/时间/正文由 mapping profile `html:` 段的选择器定位（`tag`/`.class`/`#id`/`tag.class` 最小选择器子集），内置"留痕"模板；图片消息节点转固定 `content="[IMAGE]"` 占位（`msg_type=image`），语音/视频消息整条跳过并计入 `skipped`（与 csv/xlsx 语义一致）；`message` 选择器零匹配判定为选择器/模板选错，返回 `PARSE_FAILED`。同样固定解析为单一 `ChatSession`。
+- `profile_yaml` 请求内联映射档案（`multipart/form-data` 可选字段，M8-CONTRACTS.md §0.7）：若提供则整份 YAML 优先于 `mapping_profile` 对应的本地文件生效，本地 `app/mappings/*.yml` 仅作为种子/默认内容；`mapping_profile` 省略时按 `file_ext` 取内置默认（csv/xlsx -> `memotrace`，txt -> `liuhen_txt`，html -> `liuhen_html`）。
+- **PaddleOCR 本地 OCR 兜底**（`app/ocr/engine.py`，M8-CONTRACTS.md §0.4）：新环境变量 `OCR_ENGINE`（`none`\|`paddle`，默认 `none`）与 `OCR_TIMEOUT_S`（默认 30 秒）。扫描页 OCR 三级次序：kb-rag-server 侧 VLM（有 Key，现状）→ 本服务 PaddleOCR 兜底（`OCR_ENGINE=paddle` 且已装可选依赖，离线/零 Key）→ 跳过并降级（现状）。`OCR_ENGINE=paddle` 但未安装 `requirements-ocr.txt` 时，应用启动即 fast-fail 报可操作错误，不拖到首次遇到扫描页才失败。本服务 OCR 成功识别的扫描页，`pages[].text` 回填为 OCR 结果，`pages[].ocr_source` 置为 `"paddle"`；kb-rag-server 对带 `ocr_source` 的页不再调用 VLM。单页 OCR 超时/异常按页跳过并计数，不影响整篇文档。
+- 新增可选依赖文件 `requirements-ocr.txt`：`paddlepaddle==3.3.1` + `paddleocr==3.3.3`（CPU 推理，`ch_PP-OCRv4` 中英文模型），默认不随 `requirements.txt`/Dockerfile 基础镜像安装，仅在需要 `OCR_ENGINE=paddle` 时显式 `pip install -r requirements-ocr.txt`。
+- `app/mappings/` 新增内置映射档案：`liuhen_txt.yml`（TXT 行模板：`liuhen` + `wechat_pc`）、`liuhen_html.yml`（HTML DOM 选择器：留痕导出模板）；连同既有 `memotrace.yml` 构成三份内置模板。
+- pytest 新增：TXT 双模板正例、自定义正则覆盖、30% 不匹配失败线、多行消息体归并；HTML 留痕模板正例、script/style 安全剥离、图片/语音/视频消息语义、选择器零匹配失败；`profile_yaml` 优先于本地 `mapping_profile` 文件；`OCR_ENGINE` 三态（`none` 与现状一致、`paddle` 未装依赖启动 fast-fail、装依赖后真实推理产出 `ocr_source=paddle`——真实 PaddleOCR 推理用例按依赖是否安装 `skipif` 自动跳过）。
+
+### 已知限制 / 待校准
+
+- `liuhen_txt`/`liuhen_html` 映射档案与 `memotrace` 同样依据公开约定（留痕/MemoTrace、微信 PC 端导出格式的公开资料）编写，尚未用真实导出样例校准，详见各 yml 文件顶部说明。
+- TXT/HTML 固定解析为单一 `ChatSession`，不支持同文件多会话拆分；csv/xlsx 仍支持多会话（多房间）。真实样例若显示需要多会话拆分（如按分隔符/标题行区分），届时再补。
+- `requirements-ocr.txt` 的版本选型（`paddlepaddle==3.3.1`/`paddleocr==3.3.3`）是在 macOS arm64 + Python 3.13 环境实测校准的结果（原拟 `paddlepaddle==2.6.2`/`paddleocr==2.7.3` 在该平台无可用 wheel），并已适配 PaddleOCR 3.x API；部署到实际目标环境前建议重新验证一次安装与推理。
+
 ## [0.2.0] - M3
 
 ### 新增
