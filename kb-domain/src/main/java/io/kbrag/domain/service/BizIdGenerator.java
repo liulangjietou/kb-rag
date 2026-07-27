@@ -163,6 +163,15 @@ public class BizIdGenerator {
         return generate(KbConstants.API_AUDIT_LOG_ID_PREFIX);
     }
 
+    /**
+     * Generates a chat import mapping profile id.
+     *
+     * @return prefixed identifier
+     */
+    public String sourceMappingId() {
+        return generate(KbConstants.SOURCE_MAPPING_ID_PREFIX);
+    }
+
     private String generate(String prefix) {
         String random = UUID.randomUUID().toString().replace("-", "").substring(0, RANDOM_LENGTH);
         return prefix + KbConstants.ID_SEPARATOR + random;

@@ -1,0 +1,23 @@
+# Node-selector mapping profile for 留痕 style HTML chat transcripts
+# (M8-CONTRACTS.md 0.2).
+#
+# Copy of the parser's built-in html profile: the parser keeps the file as its default
+# for a .html upload, this copy is what seeds t_kb_source_mapping so an operator can read
+# and clone it from the console.
+#
+# message is the selector of one message node; sender, time and content are resolved
+# inside it. image is optional and turns an image node into the [IMAGE] placeholder the
+# rest of the pipeline already handles; voice and video are optional and skipped.
+#
+# Remote resources are never loaded and script/style nodes are stripped before the
+# selectors run. That is a parser side safety rule and deliberately not configurable.
+#
+# NOTE: written from publicly documented 留痕 export conventions; NOT yet validated
+# against a real exported sample.
+
+html:
+  message: 'div.message'
+  sender: '.sender'
+  time: '.time'
+  content: '.content'
+  image: 'img'

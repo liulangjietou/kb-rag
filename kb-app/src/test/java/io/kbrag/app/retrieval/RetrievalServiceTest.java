@@ -142,6 +142,7 @@ class RetrievalServiceTest {
                 new FusionRouter(List.of(new RrfFusion(), new WeightedFusion())),
                 new CrossKbRrfFusion(), new KbQuotaAllocator(), graphRetrievalService, routingService,
                 rewriteService, rerankService, new ScoreThresholdPolicy(), new ParentChildMerger(),
+                new NearDuplicateWindowMerger(),
                 new DisabledChildVisibility(chunkMapper), engineChunkCleaner, objectStorage,
                 new RetrievalDegradeMonitor(properties), properties);
     }
@@ -384,6 +385,105 @@ class RetrievalServiceTest {
         assertEquals(2, outcome.getNodes().size());
         assertEquals(List.of("ck_1", "ck_2"),
                 outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+    }
+
+    @Test
+    void shouldReturnOneNodeForTwoOverlappingChatWindows() {
+        when(embeddingProvider.isConfigured()).thenReturn(false);
+        when(fulltextStore.searchBm25(anyString(), any())).thenReturn(List.of(
+                new ScoredChunk("ck_w1", 9.0d, RetrievalSource.BM25),
+                new ScoredChunk("ck_w2", 4.0d, RetrievalSource.BM25)));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chatWindow("ck_w1", 0, 3), chatWindow("ck_w2", 2, 5)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().build());
+
+        assertEquals(1, outcome.getNodes().size());
+        RetrievalNodeView node = outcome.getNodes().get(0);
+        assertEquals("ck_w1", node.getChunkId());
+        assertEquals(List.of("ck_w2"), node.getMetadata().get("merged_window_chunk_ids"));
+        // The stored window facts still travel to the caller: the debug page names the window a result
+        // came from, and the merged list is only readable next to them.
+        assertEquals(0, node.getMetadata().get("window_seq"));
+        assertEquals(List.of(0, 3), node.getMetadata().get("msg_span"));
+    }
+
+    @Test
+    void shouldNotMergeChatWindowsThatShareTooLittle() {
+        when(embeddingProvider.isConfigured()).thenReturn(false);
+        when(fulltextStore.searchBm25(anyString(), any())).thenReturn(List.of(
+                new ScoredChunk("ck_w1", 9.0d, RetrievalSource.BM25),
+                new ScoredChunk("ck_w2", 4.0d, RetrievalSource.BM25)));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chatWindow("ck_w1", 0, 3), chatWindow("ck_w2", 3, 6)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().build());
+
+        assertEquals(2, outcome.getNodes().size());
+        assertFalse(outcome.getNodes().get(0).getMetadata().containsKey("merged_window_chunk_ids"));
+    }
+
+    @Test
+    void shouldLeaveASearchWithoutChatWindowsUntouched() {
+        givenDualRoute();
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_1", "first chunk", null), chunk("ck_2", "second chunk", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().build());
+
+        // A chunk without a message span can neither absorb nor be absorbed, so a knowledge base holding
+        // no chat import is provably unaffected by the stage.
+        assertEquals(2, outcome.getNodes().size());
+        assertFalse(outcome.getNodes().get(0).getMetadata().containsKey("merged_window_chunk_ids"));
+        assertFalse(outcome.getNodes().get(1).getMetadata().containsKey("merged_window_chunk_ids"));
+    }
+
+    @Test
+    void shouldDropNearDuplicateWindowsBeforeTheyReachTheRerankStage() {
+        when(embeddingProvider.isConfigured()).thenReturn(false);
+        when(rerankService.isAvailable()).thenReturn(true);
+        when(rerankService.rerank(anyString(), anyList(), eq(true)))
+                .thenAnswer(invocation -> RerankOutcome.applied(
+                        ((List<String>) invocation.getArgument(1)).stream().map(text -> 1.0d).toList()));
+        when(fulltextStore.searchBm25(anyString(), any())).thenReturn(List.of(
+                new ScoredChunk("ck_w1", 9.0d, RetrievalSource.BM25),
+                new ScoredChunk("ck_w2", 4.0d, RetrievalSource.BM25)));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chatWindow("ck_w1", 0, 3), chatWindow("ck_w2", 2, 5)));
+
+        retrievalService.search(KB_ID, command().rerankEnabled(true).build());
+
+        // The duplicate never reaches the cross encoder: reranking it would pay twice for one passage and
+        // the parent merge that follows would then be grouping a candidate that is already redundant.
+        ArgumentCaptor<List<String>> captor = ArgumentCaptor.forClass(List.class);
+        verify(rerankService).rerank(anyString(), captor.capture(), eq(true));
+        assertEquals(1, captor.getValue().size());
+    }
+
+    @Test
+    void shouldMergeNearDuplicateWindowsBeforeTheParentMerge() {
+        when(knowledgeBaseService.require(KB_ID)).thenReturn(knowledgeBase(true));
+        when(knowledgeBaseService.indexConfigOf(any(KnowledgeBase.class))).thenReturn(indexConfig(true));
+        when(embeddingProvider.isConfigured()).thenReturn(false);
+        when(fulltextStore.searchBm25(anyString(), any())).thenReturn(List.of(
+                new ScoredChunk("ck_w1", 9.0d, RetrievalSource.BM25),
+                new ScoredChunk("ck_w2", 4.0d, RetrievalSource.BM25)));
+        Chunk first = chatWindow("ck_w1", 0, 3);
+        Chunk second = chatWindow("ck_w2", 2, 5);
+        first.setParentId("ck_parent");
+        second.setParentId("ck_parent");
+        when(chunkMapper.selectList(any())).thenReturn(List.of(first, second,
+                chunk("ck_parent", "the whole conversation", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().build());
+
+        // The two windows share a parent, so the parent merge alone would have grouped them and reported
+        // both as matched children. The near duplicate stage runs first, so only the surviving window is
+        // ever a member - the two reductions answer different questions and are applied in this order.
+        assertEquals(1, outcome.getNodes().size());
+        assertEquals(List.of("ck_w1"), outcome.getNodes().get(0).getMetadata().get("child_ids"));
+        assertEquals(List.of("ck_w2"),
+                outcome.getNodes().get(0).getMetadata().get("merged_window_chunk_ids"));
     }
 
     @Test
@@ -804,6 +904,23 @@ class RetrievalServiceTest {
         document.setKbId(KB_ID);
         document.setCurrentVersionId(VERSION_ID);
         return document;
+    }
+
+    /**
+     * An indexed chat aggregation window, carrying the conversation and the message range the near
+     * duplicate merging keys on.
+     *
+     * @param chunkId   chunk business id
+     * @param spanStart first message index of the window, inclusive
+     * @param spanEnd   last message index of the window, inclusive
+     * @return chat log chunk
+     */
+    private Chunk chatWindow(String chunkId, int spanStart, int spanEnd) {
+        Chunk chunk = chunk(chunkId, "chat window " + chunkId, null);
+        chunk.setChunkType(ChunkType.CHAT_LOG);
+        chunk.setMetadata("{\"session_id\":\"session_1\",\"window_seq\":0,\"msg_span\":["
+                + spanStart + "," + spanEnd + "]}");
+        return chunk;
     }
 
     private Chunk chunk(String chunkId, String content, String parentId) {

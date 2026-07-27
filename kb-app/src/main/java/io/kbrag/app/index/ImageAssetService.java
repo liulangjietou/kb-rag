@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Stores the images of a document version and turns each one into a textual proxy.
@@ -86,6 +87,9 @@ public class ImageAssetService {
         if (CollectionUtils.isEmpty(images)) {
             return List.of();
         }
+        // Pages the parser already read with its own OCR engine: their rendered image is stored like any
+        // other, but describing it would ask a vision model to transcribe text the artifact already holds.
+        Set<Integer> ocrPages = parsed.ocrPageNumbers();
         int limit = properties.getImage().getMaxPerDocument();
         long maxBytes = (long) properties.getImage().getMaxImageSizeMb() * BYTES_PER_MB;
         List<ImageAsset> assets = new ArrayList<>(Math.min(images.size(), limit));
@@ -102,7 +106,7 @@ public class ImageAssetService {
                 warnings.add("image " + image.getImageId() + " skipped, size out of bounds");
                 continue;
             }
-            assets.add(persist(document, version, image));
+            assets.add(persist(document, version, image, ocrPages));
         }
         log.info("image assets materialized, docId={}, versionId={}, images={}, visionConfigured={}",
                 document.getDocId(), version.getVersionId(), assets.size(), visionProvider.isConfigured());
@@ -128,7 +132,7 @@ public class ImageAssetService {
                 .mediaType(mediaTypeOf(document.getFileExt()))
                 .content(content)
                 .build();
-        return persist(document, version, image);
+        return persist(document, version, image, Set.of());
     }
 
     /**
@@ -162,10 +166,11 @@ public class ImageAssetService {
      * @param document document record
      * @param version  version being built
      * @param image    parser supplied image
+     * @param ocrPages page numbers an OCR engine already read
      * @return persisted asset row
      */
     private ImageAsset persist(Document document, DocumentVersion version,
-                               ParsedDocument.ParsedImage image) {
+                               ParsedDocument.ParsedImage image, Set<Integer> ocrPages) {
         String mediaType = image.getMediaType() == null || image.getMediaType().isBlank()
                 ? DEFAULT_MEDIA_TYPE : image.getMediaType();
         String objectKey = String.format(OBJECT_KEY_TEMPLATE, document.getKbId(), document.getDocId(),
@@ -184,9 +189,31 @@ public class ImageAssetService {
         asset.setObjectKey(objectKey);
         asset.setMediaType(mediaType);
         asset.setBytes((long) image.getContent().length);
-        describe(asset, image.getContent(), mediaType);
+        if (alreadyRead(asset, ocrPages)) {
+            asset.setStatus(ImageAssetStatus.SKIPPED);
+            log.info("page already read by the parser OCR engine, vision call skipped, objectKey={}",
+                    asset.getObjectKey());
+        } else {
+            describe(asset, image.getContent(), mediaType);
+        }
         imageAssetMapper.insert(asset);
         return asset;
+    }
+
+    /**
+     * Tells whether the text of a rendered page was already produced without a vision model.
+     *
+     * <p>Only a page render qualifies. An embedded illustration on an OCR read page is still a picture
+     * whose description carries information the OCR text does not, so it goes through the vision model as
+     * it always did.
+     *
+     * @param asset    asset being built
+     * @param ocrPages page numbers an OCR engine already read
+     * @return {@code true} when the vision call would only repeat what the parser already returned
+     */
+    private boolean alreadyRead(ImageAsset asset, Set<Integer> ocrPages) {
+        return asset.getKind() == ImageAssetKind.PAGE_RENDER && asset.getPageNo() != null
+                && ocrPages.contains(asset.getPageNo());
     }
 
     /**

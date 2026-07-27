@@ -11,7 +11,9 @@ import lombok.Setter;
 import lombok.ToString;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Parser service response: the merged markdown, the per page text and the extracted images.
@@ -73,6 +75,24 @@ public class ParsedDocument {
     }
 
     /**
+     * Page numbers an OCR engine already read.
+     *
+     * <p>The rendered image of such a page is stored like any other, but it is not described again: the
+     * vision model would produce a second transcription of text the artifact already holds.
+     *
+     * @return one based page numbers, empty when no page was OCR read
+     */
+    public Set<Integer> ocrPageNumbers() {
+        Set<Integer> pageNumbers = new HashSet<>();
+        for (ParsedPage page : pagesOrEmpty()) {
+            if (page.ocrApplied()) {
+                pageNumbers.add(page.getPageNo());
+            }
+        }
+        return pageNumbers;
+    }
+
+    /**
      * Images, never {@code null}.
      *
      * @return extracted images
@@ -113,6 +133,25 @@ public class ParsedDocument {
         /** Set when the page carries no usable text layer and was rendered as an image instead. */
         @JsonProperty("scanned")
         private boolean scanned;
+
+        /**
+         * Engine that produced the text of a scanned page, {@code null} when none did.
+         *
+         * <p>Set by the parser when its own local OCR already read the page, which is what tells this side
+         * that the rendered page image no longer needs a vision model call: the text is in
+         * {@link #text} already, so paying a second engine for the same page would buy nothing.
+         */
+        @JsonProperty("ocr_source")
+        private String ocrSource;
+
+        /**
+         * Tells whether the page was already read by an OCR engine.
+         *
+         * @return {@code true} when the parser back filled the text itself
+         */
+        public boolean ocrApplied() {
+            return ocrSource != null && !ocrSource.isBlank();
+        }
     }
 
     /**

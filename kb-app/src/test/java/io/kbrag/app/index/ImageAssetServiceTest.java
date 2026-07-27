@@ -212,6 +212,69 @@ class ImageAssetServiceTest {
         assertFalse(service.isStandaloneImage(null));
     }
 
+    @Test
+    void shouldNotDescribeAPageTheParserOcrEngineAlreadyRead() {
+        when(visionProvider.isConfigured()).thenReturn(true);
+
+        service.materialize(document("pdf"), version(),
+                ocrParsed(1, image("img_1", 1, "PAGE_RENDER")), new ArrayList<>());
+
+        // The OCR text is already in the parse artifact, so the vision call would only transcribe the same
+        // page a second time and be billed for it.
+        verify(visionProvider, never()).describeImage(any(), anyString());
+        assertEquals(ImageAssetStatus.SKIPPED, captureAsset().getStatus());
+    }
+
+    @Test
+    void shouldStillDescribeAnIllustrationOnAnOcrReadPage() {
+        when(visionProvider.isConfigured()).thenReturn(true);
+        when(visionProvider.describeImage(any(), anyString())).thenReturn("a chart");
+
+        service.materialize(document("pdf"), version(),
+                ocrParsed(1, image("img_1", 1, "EMBEDDED")), new ArrayList<>());
+
+        // An embedded picture is not the page: its description carries information the OCR text does not.
+        verify(visionProvider).describeImage(any(), anyString());
+        assertEquals("a chart", captureAsset().getTextProxy());
+    }
+
+    @Test
+    void shouldDescribeAPageRenderOfAPageNoOcrEngineRead() {
+        when(visionProvider.isConfigured()).thenReturn(true);
+        when(visionProvider.describeImage(any(), anyString())).thenReturn("page text");
+
+        service.materialize(document("pdf"), version(),
+                ocrParsed(2, image("img_1", 1, "PAGE_RENDER")), new ArrayList<>());
+
+        verify(visionProvider).describeImage(any(), anyString());
+    }
+
+    private ImageAsset captureAsset() {
+        ArgumentCaptor<ImageAsset> captor = ArgumentCaptor.forClass(ImageAsset.class);
+        verify(imageAssetMapper).insert(captor.capture());
+        return captor.getValue();
+    }
+
+    /**
+     * A parse result whose page was read by the parser's own OCR engine.
+     *
+     * @param ocrPageNo page the engine read
+     * @param images    images of the document
+     * @return parse result
+     */
+    private ParsedDocument ocrParsed(int ocrPageNo, ParsedDocument.ParsedImage... images) {
+        return ParsedDocument.builder()
+                .markdown("body")
+                .images(List.of(images))
+                .pages(List.of(ParsedDocument.ParsedPage.builder()
+                        .pageNo(ocrPageNo)
+                        .text("recognised text")
+                        .scanned(true)
+                        .ocrSource("paddle")
+                        .build()))
+                .build();
+    }
+
     private ParsedDocument parsed(ParsedDocument.ParsedImage... images) {
         return ParsedDocument.builder().markdown("body").images(List.of(images)).build();
     }

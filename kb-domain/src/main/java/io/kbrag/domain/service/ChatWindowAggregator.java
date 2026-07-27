@@ -16,13 +16,16 @@ import java.util.Set;
 /**
  * Cuts a conversation into consecutive windows.
  *
- * <p><b>No overlap, on purpose.</b> A sliding window over chat messages would replay nearly every turn
- * in two chunks: turns are short, so the overlap would be a large share of each window and would double
- * the index for no recall benefit. The requirement fixes the sequential cut for the first release.
- *
  * <p>A window closes on whichever bound comes first, the elapsed time since its own first message or the
  * message ceiling. Closing on elapsed time measured from the window start rather than from the previous
  * message is what keeps a long silence from being swallowed into one enormous window.
+ *
+ * <p><b>Overlap slides the start, it does not extend the window.</b> With
+ * {@code window_overlap = k} the next window begins {@code k} messages before the previous one ended, so
+ * every window still respects both closing bounds and only its starting point moves. Extending a closed
+ * window backwards instead would produce windows above the configured message ceiling, which is the one
+ * number an operator sizes the chunk budget with. {@code window_overlap = 0} reproduces the sequential cut
+ * of the first release exactly, which is why it stays the default.
  *
  * <p>Messages without a timestamp are kept and treated as belonging to the window being filled: dropping
  * them would lose content, and a chat export with a broken time column is common enough that it must not
@@ -36,6 +39,9 @@ public class ChatWindowAggregator {
 
     private static final long MILLIS_PER_MINUTE = 60_000L;
     private static final String UNKNOWN_SENDER = "unknown";
+
+    /** Smallest number of messages a window may advance by, which guarantees the walk terminates. */
+    private static final int MIN_STEP = 1;
 
     /**
      * Aggregates one conversation.
@@ -52,33 +58,52 @@ public class ChatWindowAggregator {
         ChatAggregationParams effective = params == null ? ChatAggregationParams.defaults() : params;
         long windowMillis = effective.effectiveWindowMinutes() * MILLIS_PER_MINUTE;
         int maxMessages = effective.effectiveMaxMessages();
+        int overlap = effective.effectiveWindowOverlap();
 
         List<ParsedChatFile.ChatMessageRecord> ordered = sortByTime(messages);
         List<ChatWindow> windows = new ArrayList<>();
-        List<ParsedChatFile.ChatMessageRecord> buffer = new ArrayList<>();
-        Long windowStart = null;
+        int start = 0;
+        while (start < ordered.size()) {
+            int end = closeWindow(ordered, start, windowMillis, maxMessages);
+            windows.add(toWindow(windows.size(), ordered.subList(start, end), start));
+            if (end >= ordered.size()) {
+                break;
+            }
+            start += Math.max(MIN_STEP, end - start - overlap);
+        }
+        log.info("chat messages aggregated, messages={}, windows={}, windowMinutes={}, maxMessages={}, "
+                        + "windowOverlap={}",
+                ordered.size(), windows.size(), effective.effectiveWindowMinutes(), maxMessages, overlap);
+        return windows;
+    }
 
-        for (ParsedChatFile.ChatMessageRecord message : ordered) {
-            Long sendTime = message.getSendTime();
+    /**
+     * Finds where the window starting at one message has to close.
+     *
+     * @param ordered      conversation in chronological order
+     * @param start        index of the first message of the window
+     * @param windowMillis elapsed time bound in milliseconds
+     * @param maxMessages  message bound
+     * @return exclusive end index, always greater than {@code start}
+     */
+    private int closeWindow(List<ParsedChatFile.ChatMessageRecord> ordered, int start, long windowMillis,
+                            int maxMessages) {
+        Long windowStart = null;
+        int end = start;
+        while (end < ordered.size()) {
+            Long sendTime = ordered.get(end).getSendTime();
             boolean timeBoundReached = windowStart != null && sendTime != null
                     && sendTime - windowStart >= windowMillis;
-            boolean countBoundReached = buffer.size() >= maxMessages;
-            if (!buffer.isEmpty() && (timeBoundReached || countBoundReached)) {
-                windows.add(toWindow(windows.size(), buffer));
-                buffer = new ArrayList<>();
-                windowStart = null;
+            boolean countBoundReached = end - start >= maxMessages;
+            if (timeBoundReached || countBoundReached) {
+                break;
             }
             if (windowStart == null && sendTime != null) {
                 windowStart = sendTime;
             }
-            buffer.add(message);
+            end++;
         }
-        if (!buffer.isEmpty()) {
-            windows.add(toWindow(windows.size(), buffer));
-        }
-        log.info("chat messages aggregated, messages={}, windows={}, windowMinutes={}, maxMessages={}",
-                ordered.size(), windows.size(), effective.effectiveWindowMinutes(), maxMessages);
-        return windows;
+        return end;
     }
 
     /**
@@ -95,7 +120,15 @@ public class ChatWindowAggregator {
         return ordered;
     }
 
-    private ChatWindow toWindow(int seq, List<ParsedChatFile.ChatMessageRecord> buffer) {
+    /**
+     * Builds one window out of the messages it covers.
+     *
+     * @param seq        zero based position of the window inside the conversation
+     * @param buffer     messages of the window, in chronological order
+     * @param spanStart  zero based index of the first message inside the conversation
+     * @return window carrying its filterable facts and its message span
+     */
+    private ChatWindow toWindow(int seq, List<ParsedChatFile.ChatMessageRecord> buffer, int spanStart) {
         Set<String> senders = new LinkedHashSet<>();
         long start = Long.MAX_VALUE;
         long end = Long.MIN_VALUE;
@@ -110,7 +143,7 @@ public class ChatWindowAggregator {
         }
         long resolvedStart = start == Long.MAX_VALUE ? 0L : start;
         long resolvedEnd = end == Long.MIN_VALUE ? resolvedStart : end;
-        return new ChatWindow(seq, resolvedStart, resolvedEnd, new ArrayList<>(senders),
-                new ArrayList<>(buffer));
+        return new ChatWindow(seq, resolvedStart, resolvedEnd, spanStart, spanStart + buffer.size() - 1,
+                new ArrayList<>(senders), new ArrayList<>(buffer));
     }
 }

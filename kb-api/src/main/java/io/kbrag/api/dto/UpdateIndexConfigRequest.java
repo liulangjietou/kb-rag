@@ -127,6 +127,10 @@ public record UpdateIndexConfigRequest(
         if (config.getChunkOverlap() >= config.getChunkMaxTokens()) {
             throw BizException.invalidParam("chunk_overlap must be smaller than chunk_max_tokens");
         }
+        // Checked for every knowledge base rather than only for a two level one: cleaning and chat
+        // aggregation apply whatever the splitter does, so running them inside the parent child branch
+        // left an uncompilable pattern and an impossible window reachable through a single level base.
+        validateCleaning(config);
         ParentChildParams params = config.parentChildOrDisabled();
         if (!params.isEnabled()) {
             return;
@@ -137,7 +141,6 @@ public record UpdateIndexConfigRequest(
         if (params.getChildOverlap() >= params.getChildMaxTokens()) {
             throw BizException.invalidParam("child_overlap must be smaller than child_max_tokens");
         }
-        validateCleaning(config);
     }
 
     /**
@@ -160,6 +163,14 @@ public record UpdateIndexConfigRequest(
         ChatAggregationParams aggregation = config.chatAggregationOrDefaults();
         if (aggregation.getWindowMinutes() <= 0 || aggregation.getMaxMessages() <= 0) {
             throw BizException.invalidParam("chat_aggregation window_minutes and max_messages must be positive");
+        }
+        // The only gate on the overlap. The aggregator clamps rather than checks, so an operator finds out
+        // here that the value is impossible instead of silently getting a different window shape than the
+        // one they configured.
+        if (!aggregation.windowOverlapWithinBound()) {
+            throw BizException.invalidParam("chat_aggregation window_overlap must be between 0 and "
+                    + aggregation.maxWindowOverlap() + " for max_messages "
+                    + aggregation.effectiveMaxMessages());
         }
     }
 

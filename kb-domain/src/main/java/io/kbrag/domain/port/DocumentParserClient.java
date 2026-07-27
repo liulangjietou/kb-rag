@@ -27,13 +27,23 @@ public interface DocumentParserClient {
     /**
      * Parses a chat export into conversations.
      *
+     * <p><b>The mapping profile travels as content, not as a reference.</b> The profiles are maintained in
+     * the console and held in MySQL, so sending only their name would ask the parser to resolve a file it
+     * does not have. The name is still sent alongside: it identifies the profile in the parser's log lines,
+     * and it is what the parser falls back to resolving locally when this side has no body for it - which is
+     * how an import naming a profile that was never seeded keeps working.
+     *
      * @param fileName       original file name, forwarded for diagnostics
-     * @param fileExt        lower case extension without the dot, {@code csv} or {@code xlsx}
+     * @param fileExt        lower case extension without the dot, {@code csv}, {@code xlsx}, {@code txt} or
+     *                       {@code html}
+     * @param mappingProfile mapping profile name, {@code null} selects the parser default
+     * @param profileYaml    full YAML body of the profile, {@code null} letting the parser resolve the name
+     *                       against its own copies
      * @param content        raw file bytes
-     * @param mappingProfile column mapping profile name, {@code null} selects the parser default
      * @return conversations and the counters of the messages that were dropped
      */
-    ParsedChatFile parseChat(String fileName, String fileExt, byte[] content, String mappingProfile);
+    ParsedChatFile parseChat(String fileName, String fileExt, byte[] content, String mappingProfile,
+                             String profileYaml);
 
     /**
      * Probes parser connectivity.

@@ -15,10 +15,12 @@ import io.kbrag.domain.constant.ChunkMetadataKeys;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.DocumentVersion;
+import io.kbrag.domain.entity.SourceMapping;
 import io.kbrag.domain.enums.ChunkType;
 import io.kbrag.domain.enums.DocumentVersionStatus;
 import io.kbrag.domain.enums.EmbeddingStatus;
 import io.kbrag.domain.enums.ProcessStatus;
+import io.kbrag.domain.enums.SourceMappingType;
 import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.mapper.DocumentVersionMapper;
@@ -83,7 +85,15 @@ public class ChatImportService {
     private static final String SOURCE_OBJECT_TEMPLATE = "kb/%s/chat-import/%s/source.%s";
     private static final String CONTENT_TYPE_JSON = "application/json";
     private static final String CONTENT_TYPE_OCTET_STREAM = "application/octet-stream";
-    private static final List<String> SUPPORTED_EXTENSIONS = List.of("csv", "xlsx");
+
+    /**
+     * Chat export extensions the parser has an adapter for.
+     *
+     * <p>Extending the list is the whole of what a new export format costs on this side: the adapter, the
+     * line templates and the node selectors all live in the parser and in the mapping profile, and the
+     * intermediate model the pipeline consumes is the same whichever of them produced it.
+     */
+    private static final List<String> SUPPORTED_EXTENSIONS = List.of("csv", "xlsx", "txt", "html");
     private static final String CHAT_FILE_EXT = "chat";
     private static final int ENABLED = 1;
 
@@ -94,6 +104,7 @@ public class ChatImportService {
     private final DocumentParserClient parserClient;
     private final KnowledgeBaseService knowledgeBaseService;
     private final ChatUploadTokenStore uploadTokenStore;
+    private final SourceMappingService sourceMappingService;
     private final ChatSessionMatcher sessionMatcher;
     private final ChatWindowAggregator windowAggregator;
     private final ChatWindowRenderer windowRenderer;
@@ -115,16 +126,16 @@ public class ChatImportService {
      * @param kbId           target knowledge base
      * @param fileName       original file name
      * @param content        raw file bytes
-     * @param mappingProfile column mapping profile, {@code null} selects the configured default
+     * @param mappingProfile mapping profile business id or name, {@code null} selects the configured default
      * @return match preview carrying the upload token the confirmation needs
      */
     public ChatImportView preview(String kbId, String fileName, byte[] content, String mappingProfile) {
         knowledgeBaseService.require(kbId);
         String extension = extensionOf(fileName);
-        String profile = mappingProfile == null || mappingProfile.isBlank()
-                ? properties.getChatImport().getDefaultMappingProfile() : mappingProfile;
+        ResolvedProfile profile = resolveProfile(mappingProfile, extension);
 
-        ParsedChatFile parsed = parserClient.parseChat(fileName, extension, content, profile);
+        ParsedChatFile parsed = parserClient.parseChat(fileName, extension, content,
+                profile.name(), profile.profileYaml());
         if (CollectionUtils.isEmpty(parsed.sessionsOrEmpty())) {
             throw BizException.invalidParam("the export carries no recognisable conversation");
         }
@@ -140,7 +151,7 @@ public class ChatImportService {
         List<ChatImportView.SessionMatch> matches =
                 sessionMatcher.match(parsed.sessionsOrEmpty(), existingSourceKeys(kbId));
         log.info("chat import preview built, kbId={}, fileName={}, sessions={}, profile={}",
-                kbId, fileName, matches.size(), profile);
+                kbId, fileName, matches.size(), profile.name());
         return ChatImportView.builder()
                 .uploadToken(token)
                 .sessions(matches)
@@ -307,6 +318,11 @@ public class ChatImportService {
         metadata.put(ChunkMetadataKeys.SESSION_NAME, sessionMatcher.displayNameOf(session));
         metadata.put(ChunkMetadataKeys.SENDER, String.join(",", window.getSenders()));
         metadata.put(ChunkMetadataKeys.MSG_TIME, window.getStartTime());
+        // Written for every window, overlap configured or not: the retrieval side recognises an aggregation
+        // window by the presence of the span, so writing it only when the overlap is on would make the
+        // near duplicate merging silently inapplicable to everything imported before the switch was flipped.
+        metadata.put(ChunkMetadataKeys.WINDOW_SEQ, window.getSeq());
+        metadata.put(ChunkMetadataKeys.MSG_SPAN, List.of(window.getMsgSpanStart(), window.getMsgSpanEnd()));
 
         Chunk chunk = new Chunk();
         chunk.setChunkId(bizIdGenerator.chunkId());
@@ -373,6 +389,60 @@ public class ChatImportService {
             throw BizException.invalidParam("staged chat export is no longer available");
         }
         return parsed;
+    }
+
+    /**
+     * Resolves the mapping profile an import call uses.
+     *
+     * <p>A named profile is resolved by business id or by name, which is what lets an import written while
+     * the profiles were yml files keep addressing a built-in template by its name, and it is checked
+     * against the uploaded extension: a profile describing another format would otherwise be reported by
+     * the parser as an unreadable file, which blames the export for a mistake made in the form.
+     *
+     * @param requested mapping profile business id or name, blank selecting the default of the format
+     * @param extension extension of the uploaded file
+     * @return name to report to the parser and the YAML body to ship with the request
+     */
+    private ResolvedProfile resolveProfile(String requested, String extension) {
+        SourceMappingType uploaded = SourceMappingType.from(extension);
+        if (requested == null || requested.isBlank()) {
+            return ResolvedProfile.of(sourceMappingService.defaultFor(uploaded,
+                    properties.getChatImport().getDefaultMappingProfile()));
+        }
+        SourceMapping mapping = sourceMappingService.findByIdOrName(requested);
+        if (mapping == null) {
+            // Not an error: the parser keeps its own copies of the built-in profiles, so a name this
+            // deployment has not seeded still resolves there. The format check is skipped because there is
+            // no stored format to check against - the parser reports what it could not read.
+            log.info("mapping profile is not stored, forwarding its name to the parser, profile={}",
+                    requested);
+            return new ResolvedProfile(requested, null);
+        }
+        if (!mapping.getSourceType().reads(uploaded)) {
+            throw BizException.invalidParam("mapping profile " + mapping.getName() + " reads "
+                    + mapping.getSourceType().code() + " exports, not " + extension);
+        }
+        return ResolvedProfile.of(mapping);
+    }
+
+    /**
+     * Mapping profile of one import call.
+     *
+     * @param name        profile name, reported to the parser for diagnostics and for its local fallback
+     * @param profileYaml full YAML body, {@code null} when the profile is only known to the parser
+     */
+    private record ResolvedProfile(String name, String profileYaml) {
+
+        /**
+         * Wraps a stored profile, or nothing when none was found.
+         *
+         * @param mapping stored profile, {@code null} letting the parser apply its own format default
+         * @return profile of the call
+         */
+        private static ResolvedProfile of(SourceMapping mapping) {
+            return mapping == null ? new ResolvedProfile(null, null)
+                    : new ResolvedProfile(mapping.getName(), mapping.getProfileYaml());
+        }
     }
 
     private String extensionOf(String fileName) {

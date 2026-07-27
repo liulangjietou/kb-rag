@@ -54,15 +54,17 @@ import java.util.Set;
  * <p>Fixed stage order, each stage optional but never reordered:
  * <pre>
  * rewrite -&gt; routing -&gt; dual route recall (child level) -&gt; in base fusion -&gt; cross base fusion
- *         -&gt; rerank -&gt; parent merge -&gt; threshold -&gt; top_n
+ *         -&gt; near duplicate window merge -&gt; rerank -&gt; parent merge -&gt; threshold -&gt; top_n
  * </pre>
  *
  * <p><b>Why the order is fixed.</b> Rewriting after recall would be pointless, routing before the
  * rewrite would decide on a question whose references are still unresolved, reranking before
  * fusion would rerank two lists that cannot be compared, merging before rerank would hide from the
  * cross encoder the very passage that matched, and thresholding before rerank would discard candidates
- * on a score the rerank stage is about to replace. Each stage may switch itself off; none may swap
- * places with another.
+ * on a score the rerank stage is about to replace. The near duplicate window merge is the one reduction
+ * that belongs <em>before</em> the rerank rather than after it: it drops a candidate whose content another
+ * candidate already carries, so reranking it first would pay the cross encoder twice for one passage.
+ * Each stage may switch itself off; none may swap places with another.
  *
  * <p><b>One base or fifteen, one pipeline.</b> The per base part - recall, in base fusion, fact source
  * repair - runs once per selected knowledge base and produces an in base ranking; everything after it
@@ -118,6 +120,13 @@ public class RetrievalService {
     private static final String META_CHUNK_SEQ = "chunk_seq";
     private static final String META_CHILD_IDS = "child_ids";
     private static final String META_DISABLED_CHILD_IDS = "disabled_child_ids";
+
+    /**
+     * Chat window chunks this result absorbed because their message ranges overlapped it, requirement
+     * section 4.2. Present only on a node that absorbed at least one, so its absence means "nothing was
+     * merged" rather than "this deployment does not merge".
+     */
+    private static final String META_MERGED_WINDOW_CHUNK_IDS = "merged_window_chunk_ids";
     private static final String META_CHILDREN = RetrievalMetadataKeys.CHILDREN;
     private static final String META_CHILD_CHUNK_ID = "chunk_id";
     private static final String META_CHILD_CONTENT = RetrievalMetadataKeys.CHILD_CONTENT;
@@ -151,6 +160,7 @@ public class RetrievalService {
     private final RerankService rerankService;
     private final ScoreThresholdPolicy scoreThresholdPolicy;
     private final ParentChildMerger parentChildMerger;
+    private final NearDuplicateWindowMerger nearDuplicateWindowMerger;
     private final DisabledChildVisibility disabledChildVisibility;
     private final EngineChunkCleaner engineChunkCleaner;
     private final ObjectStorage objectStorage;
@@ -254,7 +264,13 @@ public class RetrievalService {
             }
         }
 
-        List<FusedChunk> merged = mergeAcrossKbs(rankedByKb, kbRefs, settings);
+        // Overlapping chat windows are collapsed on the merged ranking rather than per base: two windows of
+        // one conversation live in one knowledge base by definition, but the ranking that decides which of
+        // them survives is the one the caller is served, and judging them per base would let the cross base
+        // fusion reintroduce the loser.
+        NearDuplicateWindowMerger.Outcome nearDuplicates =
+                nearDuplicateWindowMerger.merge(mergeAcrossKbs(rankedByKb, kbRefs, settings), chunkById);
+        List<FusedChunk> merged = nearDuplicates.kept();
         // Cross base merging is reciprocal rank fusion whatever the in base strategy was, so the score the
         // ranking is built on - and therefore the score type a node reports - changes with the base count.
         FusionMode orderingMode = rankedByKb.size() > 1 ? FusionMode.RRF : settings.getFusion().getMode();
@@ -286,7 +302,7 @@ public class RetrievalService {
         }
 
         List<RetrievalNodeView> nodes = toNodes(units, decision, orderingMode,
-                visibility.disabledChildIdsByUnit());
+                visibility.disabledChildIdsByUnit(), nearDuplicates);
         log.info("search finished, routedKbIds={}, recallTopK={}, topN={}, fusion={}, candidates={}, "
                         + "units={}, returned={}, rerank={}, degraded={}",
                 routing.getKbIds(), settings.getRecallTopK(), settings.getTopN(), orderingMode.code(),
@@ -808,12 +824,14 @@ public class RetrievalService {
      * @param units                  surviving units in ranking order
      * @param decision               threshold decision of this search
      * @param disabledChildIdsByUnit disabled child ids to report per unit
+     * @param nearDuplicates         outcome of the near duplicate window merge
      * @return ordered nodes
      */
     private List<RetrievalNodeView> toNodes(List<RetrievalUnit> units,
                                             ScoreThresholdPolicy.ThresholdDecision decision,
                                             FusionMode orderingMode,
-                                            Map<String, List<String>> disabledChildIdsByUnit) {
+                                            Map<String, List<String>> disabledChildIdsByUnit,
+                                            NearDuplicateWindowMerger.Outcome nearDuplicates) {
         if (CollectionUtils.isEmpty(units)) {
             return List.of();
         }
@@ -836,7 +854,10 @@ public class RetrievalService {
                     .scoreType(reported.getType().code())
                     .retrievalSource(best.getFused().getPrimarySource().code())
                     .metadata(buildMetadata(unit, answerChunk, decision, orderingMode,
-                            disabledChildIdsByUnit.get(unit.getUnitId())))
+                            disabledChildIdsByUnit.get(unit.getUnitId()),
+                            // Keyed by the best member rather than by the unit: the merge judged candidates,
+                            // and on a two level base the unit id is a parent that was never a candidate.
+                            nearDuplicates.mergedIdsOf(best.chunkId())))
                     .imageUrls(presignedImageUrls(unit, answerChunk))
                     .previewUrl(null)
                     .build());
@@ -949,7 +970,8 @@ public class RetrievalService {
     private Map<String, Object> buildMetadata(RetrievalUnit unit, Chunk answerChunk,
                                               ScoreThresholdPolicy.ThresholdDecision decision,
                                               FusionMode orderingMode,
-                                              List<String> disabledChildIds) {
+                                              List<String> disabledChildIds,
+                                              List<String> mergedWindowChunkIds) {
         Map<String, Object> metadata = new LinkedHashMap<>(scoreMetadata(unit.best()));
         // Read from the fact source row rather than from the routing decision: a node has to be traceable
         // to its base even when routing never ran, and the row is the only place that cannot disagree.
@@ -963,6 +985,9 @@ public class RetrievalService {
                 metadata.putIfAbsent(key, value);
             }
         });
+        if (CollectionUtils.isNotEmpty(mergedWindowChunkIds)) {
+            metadata.put(META_MERGED_WINDOW_CHUNK_IDS, mergedWindowChunkIds);
+        }
         if (!unit.isParent()) {
             return metadata;
         }

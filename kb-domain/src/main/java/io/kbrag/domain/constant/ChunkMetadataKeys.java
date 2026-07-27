@@ -32,6 +32,24 @@ public final class ChunkMetadataKeys {
     public static final String SESSION_NAME = "session_name";
 
     /**
+     * Zero based position of the aggregation window inside its conversation.
+     *
+     * <p>Kept in MySQL only, like the session name: a window number is not a filter dimension, it is what
+     * lets a debug page and a support conversation name the window a result came from.
+     */
+    public static final String WINDOW_SEQ = "window_seq";
+
+    /**
+     * Closed range of conversation message indices the window covers, a two element JSON array
+     * {@code [first, last]}, zero based.
+     *
+     * <p>Written by the chat import for every window and by nothing else, which is exactly what makes it
+     * the marker the retrieval side keys its near duplicate window merging on: a chunk without this key is
+     * not an aggregation window and is left untouched.
+     */
+    public static final String MSG_SPAN = "msg_span";
+
+    /**
      * Object storage keys of the images this chunk derives from.
      *
      * <p>Kept in MySQL only. The keys are turned into time limited pre signed URLs at retrieval time, so

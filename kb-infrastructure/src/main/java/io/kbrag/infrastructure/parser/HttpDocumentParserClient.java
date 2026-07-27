@@ -49,6 +49,14 @@ public class HttpDocumentParserClient implements DocumentParserClient {
     private static final String FORM_FILE = "file";
     private static final String FORM_FILE_EXT = "file_ext";
     private static final String FORM_MAPPING_PROFILE = "mapping_profile";
+
+    /**
+     * Full YAML body of the mapping profile, which the parser prefers over its own copy of the named file.
+     *
+     * <p>Sent as a form field rather than as a second file part: it is a text value of the request, and a
+     * file part would make the parser treat the profile as an upload it has to validate like the export.
+     */
+    private static final String FORM_PROFILE_YAML = "profile_yaml";
     private static final String FIELD_CODE = "code";
     private static final String FIELD_DATA = "data";
     private static final String FIELD_MESSAGE = "message";
@@ -57,6 +65,7 @@ public class HttpDocumentParserClient implements DocumentParserClient {
     private static final String FIELD_PAGE_NO = "page_no";
     private static final String FIELD_TEXT = "text";
     private static final String FIELD_SCANNED = "scanned";
+    private static final String FIELD_OCR_SOURCE = "ocr_source";
     private static final String FIELD_IMAGES = "images";
     private static final String FIELD_IMAGE_ID = "image_id";
     private static final String FIELD_KIND = "kind";
@@ -99,12 +108,16 @@ public class HttpDocumentParserClient implements DocumentParserClient {
     }
 
     @Override
-    public ParsedChatFile parseChat(String fileName, String fileExt, byte[] content, String mappingProfile) {
+    public ParsedChatFile parseChat(String fileName, String fileExt, byte[] content, String mappingProfile,
+                                    String profileYaml) {
         MultiValueMap<String, Object> form = new LinkedMultiValueMap<>();
         form.add(FORM_FILE, asResource(fileName, content));
         form.add(FORM_FILE_EXT, fileExt);
         if (mappingProfile != null && !mappingProfile.isBlank()) {
             form.add(FORM_MAPPING_PROFILE, mappingProfile);
+        }
+        if (profileYaml != null && !profileYaml.isBlank()) {
+            form.add(FORM_PROFILE_YAML, profileYaml);
         }
         return toParsedChatFile(fileName, post(PARSE_CHAT_PATH, form, fileName));
     }
@@ -169,6 +182,7 @@ public class HttpDocumentParserClient implements DocumentParserClient {
                     .pageNo(page.path(FIELD_PAGE_NO).asInt())
                     .text(page.path(FIELD_TEXT).asText())
                     .scanned(page.path(FIELD_SCANNED).asBoolean(false))
+                    .ocrSource(page.path(FIELD_OCR_SOURCE).asText(null))
                     .build());
         }
         List<ParsedDocument.ParsedImage> images = new ArrayList<>();

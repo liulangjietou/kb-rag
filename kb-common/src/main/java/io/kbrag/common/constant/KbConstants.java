@@ -61,6 +61,9 @@ public final class KbConstants {
     /** Business id prefix of an outbound call audit row. */
     public static final String API_AUDIT_LOG_ID_PREFIX = "aud";
 
+    /** Business id prefix of a chat import mapping profile row. */
+    public static final String SOURCE_MAPPING_ID_PREFIX = "smp";
+
     /**
      * Fixed prefix of every open API key plaintext, requirement section 4.8 "kb-sk-{prefix}{random}".
      *

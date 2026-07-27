@@ -1,0 +1,25 @@
+# Line-template mapping profile for plain text chat transcripts (M8-CONTRACTS.md 0.1).
+#
+# Copy of the parser's built-in txt profile: the parser keeps the file as its default
+# for a .txt upload, this copy is what seeds t_kb_source_mapping so an operator can read
+# and clone it from the console.
+#
+# Each pattern is a Python regular expression matched against the start of a line.
+# send_time and sender are required named groups; content is optional and only used by a
+# template that keeps the message body on the header line. A line matching no pattern is
+# appended to the message before it, which is how a multi-line body survives.
+#
+# NOTE: written from publicly documented 留痕/MemoTrace and WeChat export conventions;
+# NOT yet validated against a real exported sample. Recalibrate this profile, not the
+# parser code, once a real export is available.
+
+txt:
+  patterns:
+    # A. 留痕 / MemoTrace: timestamp and sender on their own line, body on the next.
+    - name: liuhen
+      regex: '^(?P<send_time>\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}:\d{2})\s+(?P<sender>\S.*?)\s*$'
+    # B. WeChat PC: sender followed by a bracketed timestamp, body on the same line or
+    #    the next one. Both bracket shapes are accepted because an export produced on a
+    #    Chinese locale uses the full width pair.
+    - name: wechat_pc
+      regex: '^(?P<sender>\S.*?)\s*[（(](?P<send_time>\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}:\d{2})[）)]\s*[:：]\s*(?P<content>.*)$'
