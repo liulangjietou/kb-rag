@@ -46,6 +46,21 @@ class EvalMetricsCalculatorTest {
     }
 
     @Test
+    void shouldKeepNdcgAtOneWhenOverlappingChunksRepeatTheSameEvidence() {
+        // A span sitting in a chunk-overlap region legitimately marks every retrieved chunk relevant
+        // while the case declares a single evidence. Normalising against the declared count alone
+        // yielded NDCG 2.948 on production data; the ideal ranking must cover the observed relevant
+        // units, capping the metric at one.
+        CaseJudgment overlapped = new CaseJudgment(true, 2, 1, 1,
+                List.of(true, true, true, true, true), 1);
+
+        EvalMetricsAtK metrics = calculator.aggregate(List.of(overlapped), 5);
+
+        assertEquals(1.0d, metrics.ndcg(), DELTA);
+        assertEquals(1.0d, metrics.precision(), DELTA);
+    }
+
+    @Test
     void shouldGiveAPerfectScoreWhenEveryCaseIsFullyRecalledAtRankOne() {
         CaseJudgment perfect = new CaseJudgment(true, 1, 1, 1, List.of(true), 1);
 

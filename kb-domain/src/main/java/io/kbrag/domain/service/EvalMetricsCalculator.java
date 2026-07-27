@@ -107,14 +107,22 @@ public class EvalMetricsCalculator {
             return 0.0d;
         }
         double dcg = 0.0d;
+        int observedRelevant = 0;
         int limit = Math.min(k, relevance.size());
         for (int i = 0; i < limit; i++) {
             if (Boolean.TRUE.equals(relevance.get(i))) {
                 // Rank is one based, i is zero based, so the position term is log2(rank + 1) = log2(i + 2).
                 dcg += 1.0d / log2(i + 2);
+                observedRelevant++;
             }
         }
-        int idealCount = Math.min(judgment.idealRelevantCount(), k);
+        // The ideal ranking must sort at least as many relevant units as were actually observed:
+        // overlapping chunks legitimately carry the same evidence span several times, so the observed
+        // relevant count can exceed the declared evidence count - normalising against the declared
+        // count alone produced NDCG values above one (a real 2.95 in production data). Taking the
+        // larger of the two keeps the metric in [0,1] without penalising cases where fewer relevant
+        // units were observed than declared.
+        int idealCount = Math.min(Math.max(judgment.idealRelevantCount(), observedRelevant), k);
         if (idealCount <= 0) {
             return 0.0d;
         }
