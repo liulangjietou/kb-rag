@@ -21,7 +21,9 @@
 - 鉴权：Authorization Bearer kb-sk-*，按 key_hash 查验；app_scope 校验越权→403 APP_ACCESS_DENIED；**限流**：按 Key 令牌桶（qps_limit，Caffeine/内存实现），超限 429 RATE_LIMITED + Retry-After:1
 - **审计**：每次调用 after-completion 异步落 t_kb_api_audit_log；保留 180 天，@Scheduled 每日归档为 JSON.gz 写 MinIO audit/ 前缀后删行（单批≤5000 防长事务）
 - 错误码复用既有 + APP_NOT_FOUND/VERSION_NOT_FOUND/VERSION_NOT_PUBLISHED/APP_ACCESS_DENIED/API_KEY_DISABLED/RATE_LIMITED
-- API Key 管理端点（管理鉴权）：创建（返回明文一次）/列表(prefix+末4位)/禁用/轮换/删除，app_scope 配置
+- API Key 管理端点（管理鉴权）：创建（返回明文一次）/列表/禁用/轮换/删除，app_scope 配置
+  - **列表的展示串就是响应里的单个 `prefix` 字段**，服务端已按"前缀…末 4 位"打好码（如 `kb-sk-58e086…5a4a`）直接原样展示；**不存在独立的末四位字段**——t_kb_api_key 只存 key_hash，明文尾部事后无从取得。此前"prefix+末4位"的措辞被读作两个字段拼接，导致管理台一度渲染出 `kb-sk-58e086…5a4a****undefined`
+  - **`app_scope` 返回恒为数组，空数组即"授权全部应用"**（ApiKeyService.scopeOf 把 null 列映射为 `[]`），与写侧传 null 同义；调用方不得用 `=== null` 判断
 
 ## 4. web（sonnet）
 - **应用中心**（新顶级菜单）：应用列表/新建；应用详情=配置编辑（选单个知识库、检索参数、问答 prompt 三块）+ 版本列表（状态 Tag 走 metaOf、发布/回滚按钮、门禁进度与**双跑对比结果**展示、GATE_LOG_ONLY 的强制发布确认框）+ 绑定门禁评测集选择

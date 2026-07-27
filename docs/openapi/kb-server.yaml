@@ -87,8 +87,29 @@ info:
     `merged_window_chunk_ids`（≤5）。PaddleOCR 本地 OCR 兜底属 kb-parser 侧（见 kb-parser.yaml），
     server 对带 `ocr_source` 标记的页不再调 VLM。
 
+
+    0.10.1 修订（全量前后端契约对齐扫描）：按端点逐个比对 controller 映射与 DTO 的
+
+    @JsonProperty，修正本文件与 server 实现不符之处，均已对运行实例只读实测取证——
+
+    ①`DocumentChunk` 删除服务端并不下发的 kb_id/doc_id，补 chunk_type/chunk_text_hash/
+
+    disabled_child_ids（后者在分片列表是顶层字段，在检索响应 RetrievalNode 上则位于
+
+    metadata 内，两处位置不同）；②`Document` 补 created_at 与仅上传响应返回的
+
+    version_id/version/duplicated/duplicate_of_doc_id；③`KnowledgeBase`/`EvalCase`/
+
+    `EvalDataset` 删除并不返回的 updated_at（服务端全局 non_null 序列化，只有
+
+    SourceMapping/IkDictEntry/App/AppVersion 真的暴露该列）；④`IkDictEntry` 删除并不存在的
+
+    自增 id、补 remark；⑤`ChatImportPreviewData` 补 skipped；⑥`DocumentPreview` 补
+
+    doc_id/process_status，`PreviewImage` 补 page_no/kind/status。
+
     '
-  version: 0.10.0-m9
+  version: 0.10.1-m9
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -2594,9 +2615,6 @@ components:
         created_at:
           type: string
           format: date-time
-        updated_at:
-          type: string
-          format: date-time
     KnowledgeBaseResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
@@ -2652,6 +2670,21 @@ components:
           type: string
           nullable: true
           maxLength: 1024
+        created_at:
+          type: string
+          format: date-time
+        version_id:
+          type: string
+          description: 仅上传响应返回：本次上传落到的文档版本 id；列表/详情不返回
+        version:
+          type: string
+          description: 仅上传响应返回：该版本号（如 v2），对应 M4a 重复上传三分支的判定结果
+        duplicated:
+          type: boolean
+          description: 仅上传响应返回：true 表示 content_hash 命中既有版本、未重新解析建版
+        duplicate_of_doc_id:
+          type: string
+          description: 仅上传响应返回：命中的是同库内另一篇文档时，给出那篇文档的 doc_id
     DocumentResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
@@ -2684,17 +2717,20 @@ components:
       - SKIPPED
     DocumentChunk:
       type: object
+      description: 分片行（ChunkResponse）。不含 kb_id/doc_id——两者均由调用方使用的路由决定，
+        服务端不重复下发
       properties:
         chunk_id:
-          type: string
-        kb_id:
-          type: string
-        doc_id:
           type: string
         document_version_id:
           type: string
         content:
           type: string
+        chunk_type:
+          $ref: '#/components/schemas/ChunkType'
+        chunk_text_hash:
+          type: string
+          description: 分片正文 SHA-256，跨版本标注精确继承的匹配键（M4a-CONTRACTS.md §2.3）
         parent_id:
           type: string
           nullable: true
@@ -2702,11 +2738,19 @@ components:
           type: integer
         enabled:
           type: boolean
+        disabled_child_ids:
+          type: array
+          items:
+            type: string
+          description: 本父片下被禁用的子片 id，服务端按整个文档版本计算（非当前分页）；
+            非父片或无禁用子片时为 []。注意与检索响应不同——RetrievalNode 上该字段位于
+            metadata 内，此处为顶层字段（M4a-CONTRACTS.md §2.2）
         embedding_status:
           $ref: '#/components/schemas/EmbeddingStatus'
         metadata:
           type: object
           additionalProperties: true
+          nullable: true
     ChunkListResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
@@ -3260,14 +3304,30 @@ components:
           type: string
         preview_url:
           type: string
+        page_no:
+          type: integer
+          nullable: true
+          description: 图片所在页码，无页锚定的图片不返回
+        kind:
+          type: string
+          nullable: true
+          description: 图片来源类型（内嵌图 / 扫描页渲染图）
         text_proxy:
           type: string
           nullable: true
           description: VLM 生成的图片文本代理（描述 + OCR 文本）；未配置 VLM 或调用失败时为 null
+        status:
+          type: string
+          nullable: true
+          description: 文本代理生成状态；失败/跳过的图片同样列出，text_proxy 为空
     DocumentPreview:
       type: object
       description: M3-CONTRACTS.md §3.4：解析预览产物（清洗完成后、切分之前的中间态）
       properties:
+        doc_id:
+          type: string
+        process_status:
+          $ref: '#/components/schemas/ProcessStatus'
         markdown:
           type: string
         pages:
@@ -3322,16 +3382,20 @@ components:
       - DISABLED
     IkDictEntry:
       type: object
+      description: 词典行（IkDictResponse）。无自增 id 字段——word 是唯一键，也是
+        DELETE/PUT 路由使用的标识
       properties:
-        id:
-          type: integer
-          format: int64
         word:
           type: string
         dict_type:
           $ref: '#/components/schemas/IkDictType'
         status:
           $ref: '#/components/schemas/IkDictStatus'
+        remark:
+          type: string
+          nullable: true
+          maxLength: 512
+          description: 备注，创建时可选传入
         created_at:
           type: string
           format: date-time
@@ -3476,6 +3540,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ChatImportSession'
+        skipped:
+          type: object
+          additionalProperties:
+            type: integer
+          description: 解析阶段被丢弃的消息数，按原因分组（如语音/视频等无文本行）；
+            无丢弃时该键不返回
     ChatImportPreviewResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
@@ -3859,9 +3929,6 @@ components:
         created_at:
           type: string
           format: date-time
-        updated_at:
-          type: string
-          format: date-time
     CreateEvalCaseRequest:
       type: object
       description: 新增（POST cases）与编辑（PUT eval-cases/{caseId}）复用同一请求体
@@ -4012,9 +4079,6 @@ components:
         last_run:
           $ref: '#/components/schemas/LastRunSummary'
         created_at:
-          type: string
-          format: date-time
-        updated_at:
           type: string
           format: date-time
     EvalDatasetResult:
