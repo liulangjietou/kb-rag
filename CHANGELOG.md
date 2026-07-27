@@ -7,6 +7,10 @@
 ## [Unreleased]
 
 ### Fixed
+- fusion 字段两处形状错位（kb-rag-web PR#14，用户实测报告）：①评测估算/提交把 fusion 发成
+  {mode,rrf_k} 对象而 server 是字符串字面量，勾选混合检索/混合+重排即 Jackson 500；②应用配置页
+  读写嵌套 retrieval.fusion 对象而 server 快照是扁平 fusion_mode/w_vec/rrf_k，未知字段被静默丢弃
+  ——应用的融合设置端到端从未生效。两处对齐真实形状；管理端调试 search 两侧本就一致未动
 - 评测报告与门禁双跑对比全列 NaN%（kb-rag-web PR#13，用户实测截图报告）：M4b 期 web 类型层把每个
   指标假设为 {value, ci_low, ci_high} 对象且该 ASSUMPTION 从未与后端定版核对，后端实际返回扁平
   数字 + 独立 recall_ci/hit_rate_ci —— 数字通过空值检查、.value 取出 undefined → NaN%；两个抽屉
