@@ -5,16 +5,22 @@ import type { ChatImportPreviewResponse, ConfirmChatImportRequest } from './type
 /**
  * POST /api/v1/kb/{kbId}/chat-imports (M3-CONTRACTS.md section 3.5): multipart upload, returns a
  * session-match preview only -- nothing is persisted until chat-imports/confirm is called.
+ *
+ * The wire field name stays `mapping_profile` (unchanged since M3), but M8-CONTRACTS.md section
+ * 0.7 redefines the value it carries: instead of a bare built-in profile name, callers now pass a
+ * `t_kb_source_mapping.mapping_id` (or a built-in's bare name for old-value compatibility, e.g.
+ * "memotrace"). The parameter here is named `mappingId` to reflect that new contract; the wizard
+ * always sends a mapping_id selected from GET /source-mappings.
  */
 export function previewChatImport(
   kbId: string,
   file: File,
-  mappingProfile?: string,
+  mappingId?: string,
 ): Promise<ChatImportPreviewResponse> {
   const formData = new FormData();
   formData.append('file', file);
-  if (mappingProfile) {
-    formData.append('mapping_profile', mappingProfile);
+  if (mappingId) {
+    formData.append('mapping_profile', mappingId);
   }
   return apiUpload<ChatImportPreviewResponse>(`/kb/${kbId}/chat-imports`, formData);
 }

@@ -72,7 +72,24 @@ export default function RetrievalNodeCard({ node, rank, thresholdTag, selected, 
           {metadata.session_name && <Tag>会话：{metadata.session_name}</Tag>}
           {metadata.sender && <Tag>发送人：{metadata.sender}</Tag>}
           {metadata.msg_time !== undefined && <Tag>{formatEpochMillis(metadata.msg_time)}</Tag>}
+          {/* M8-CONTRACTS.md section 0.5: overlap window sequence + message span, chat_log-only. */}
+          {metadata.window_seq !== undefined && <Tag>窗口序号：{metadata.window_seq}</Tag>}
+          {metadata.msg_span && (
+            <Tag>
+              消息区间：[{metadata.msg_span[0]}, {metadata.msg_span[1]}]
+            </Tag>
+          )}
         </Space>
+      )}
+      {/*
+        M8-CONTRACTS.md section 0.6: near-duplicate overlapping-window merge -- surfaced the same
+        way as the graph-route paragraph below, only when the server actually folded lower-ranked
+        overlapping windows into this node.
+      */}
+      {metadata?.merged_window_chunk_ids && metadata.merged_window_chunk_ids.length > 0 && (
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+          已归并重叠窗口 ×{metadata.merged_window_chunk_ids.length}（{metadata.merged_window_chunk_ids.join('、')}）
+        </Typography.Paragraph>
       )}
       {metadata?.graph_score !== undefined && (
         <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>

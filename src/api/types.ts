@@ -332,6 +332,25 @@ export interface RetrievalNodeMetadata {
   graph_hops?: number;
   /** M7-CONTRACTS.md section 0.8: matched entity names behind this hit, capped at 5. */
   graph_entities?: string[];
+  /**
+   * M8-CONTRACTS.md section 0.5: chat aggregation overlapping-window sequence number for this
+   * chunk (only meaningful when the kb's `window_overlap` > 0; absent under the pre-M8 default
+   * window_overlap=0 straight-cut behavior).
+   */
+  window_seq?: number;
+  /**
+   * M8-CONTRACTS.md section 0.5: inclusive [start, end] message-sequence span within the session
+   * that this chunk's window covers.
+   */
+  msg_span?: [number, number];
+  /**
+   * M8-CONTRACTS.md section 0.6: near-duplicate window merge (retrieval side, applied after
+   * library-fusion and before rerank) -- ids of the lower-ranked chunks (same session_id,
+   * msg_span overlap ratio >= 0.5) folded into this node, capped at 5 by the server. Presence
+   * means at least one overlapping window was merged away; RetrievalNodeCard renders a
+   * "已归并重叠窗口 ×N" hint line sized off this array's length.
+   */
+  merged_window_chunk_ids?: string[];
   [key: string]: unknown;
 }
 
@@ -493,7 +512,67 @@ export interface ConfirmDocumentsRequest {
 }
 
 // ---------------------------------------------------------------------------
-// Chat log import (M3-CONTRACTS.md section 3.5)
+// Source mapping (M8-CONTRACTS.md section 0.7): t_kb_source_mapping CRUD -- backs both the
+// system-settings "导入映射" tab and the chat-import wizard's mapping-profile picker below.
+// ---------------------------------------------------------------------------
+
+/**
+ * t_kb_source_mapping.source_type (M8-CONTRACTS.md section 0.7: "csv/xlsx/txt/html"); csv/xlsx
+ * rows predate this milestone (table "一期已就位"), txt/html are the two formats M8 adds.
+ */
+export type SourceMappingType = 'csv' | 'xlsx' | 'txt' | 'html';
+
+/**
+ * t_kb_source_mapping row (M8-CONTRACTS.md section 0.7: "行含 name UK、source_type(csv/xlsx/
+ * txt/html)、profile_yaml 文本、is_builtin"; built-ins are seeded idempotently from the parser's
+ * local yml at server startup and are "不可删可复制").
+ * ASSUMPTION: the id column name is not spelled out anywhere except the `{mappingId}` path
+ * template on the PUT/DELETE routes; `mapping_id` is assumed by symmetry with every other
+ * `xxx_id` business identifier in this codebase (key_id/app_id/kb_id/doc_id/...). created_at/
+ * updated_at are likewise assumed present by symmetry with every other managed-entity row
+ * (IkDictEntry/ApiKey/...) even though the contract's row sketch omits timestamps.
+ */
+export interface SourceMapping {
+  mapping_id: string;
+  name: string;
+  source_type: SourceMappingType;
+  profile_yaml: string;
+  is_builtin: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/** POST /api/v1/source-mappings request body: create a custom mapping (is_builtin is always server-assigned false). */
+export interface CreateSourceMappingRequest {
+  name: string;
+  source_type: SourceMappingType;
+  profile_yaml: string;
+}
+
+/**
+ * PUT /api/v1/source-mappings/{mappingId} request body.
+ * ASSUMPTION: built-ins are read-only per section 0.7 ("不可改"), so the web only ever calls this
+ * on a custom row; the shape mirrors CreateSourceMappingRequest since the contract does not carve
+ * out a narrower partial-update shape (e.g. profile_yaml only).
+ */
+export type UpdateSourceMappingRequest = CreateSourceMappingRequest;
+
+/**
+ * POST /api/v1/source-mappings/{mappingId}/copy request body -- "复制为自定义" action on a
+ * built-in row (section 0.7).
+ * ASSUMPTION/GAP: the contract only states built-ins "可复制" without naming an endpoint or
+ * request shape; modelled as its own action route (mirrors rotateApiKey's POST .../rotate
+ * pattern elsewhere in this codebase) rather than overloading POST /source-mappings, since the
+ * input here is "which built-in to clone" rather than a from-scratch profile_yaml. Flagged for
+ * reconciliation with the server agent's actual route.
+ */
+export interface CopySourceMappingRequest {
+  /** Optional display name for the copy; omitted lets the server derive one (e.g. "{name} 副本"). */
+  name?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Chat log import (M3-CONTRACTS.md section 3.5, mapping picker extended by M8-CONTRACTS.md section 0.7)
 // ---------------------------------------------------------------------------
 
 export type ChatImportAction = 'CREATE' | 'NEW_VERSION';

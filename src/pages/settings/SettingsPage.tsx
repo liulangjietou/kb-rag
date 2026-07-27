@@ -5,6 +5,7 @@ import ApiKeyTab from './components/ApiKeyTab';
 import AuditLogTab from './components/AuditLogTab';
 import IkDictTab from './components/IkDictTab';
 import ModelStatusCards from './components/ModelStatusCards';
+import SourceMappingTab from './components/SourceMappingTab';
 
 /**
  * System settings page (M2-CONTRACTS.md section 5): model status tab upgraded from the M1
@@ -70,6 +71,15 @@ export default function SettingsPage() {
             children: (
               <Card>
                 <AuditLogTab />
+              </Card>
+            ),
+          },
+          {
+            key: 'source-mapping',
+            label: '导入映射',
+            children: (
+              <Card>
+                <SourceMappingTab />
               </Card>
             ),
           },

@@ -21,6 +21,7 @@ import type {
   RollbackMode,
   RunStatus,
   ScoreType,
+  SourceMappingType,
   ThresholdAppliedOn,
 } from '../api/types';
 
@@ -48,6 +49,14 @@ export const CHUNK_TYPE_META: Record<ChunkType, TagMeta> = {
 export const CHAT_IMPORT_ACTION_META: Record<ChatImportAction, TagMeta> = {
   CREATE: { color: 'success', label: '新建文档' },
   NEW_VERSION: { color: 'processing', label: '生成新版本' },
+};
+
+/** t_kb_source_mapping.source_type Tag meta (M8-CONTRACTS.md section 0.7), shared by the "导入映射" tab and the chat-import mapping picker. */
+export const SOURCE_MAPPING_TYPE_META: Record<SourceMappingType, TagMeta> = {
+  csv: { color: 'blue', label: 'CSV' },
+  xlsx: { color: 'green', label: 'XLSX' },
+  txt: { color: 'gold', label: 'TXT' },
+  html: { color: 'purple', label: 'HTML' },
 };
 
 export const EMBEDDING_STATUS_META: Record<EmbeddingStatus, { color: string; label: string }> = {

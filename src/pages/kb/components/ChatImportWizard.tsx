@@ -1,10 +1,11 @@
 // Author: owlzhangfq@gmail.com
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { InboxOutlined } from '@ant-design/icons';
-import { Alert, Button, Input, Modal, Space, Table, Tag, Typography, Upload, message } from 'antd';
+import { Alert, Button, Modal, Select, Space, Table, Tag, Typography, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
 import { confirmChatImport, previewChatImport } from '../../../api/chatImport';
-import type { ChatImportSessionPreview } from '../../../api/types';
+import { listSourceMappings } from '../../../api/sourceMapping';
+import type { ChatImportSessionPreview, SourceMapping } from '../../../api/types';
 import { formatEpochMillis } from '../../../utils/format';
 import { CHAT_IMPORT_ACTION_META, metaOf } from '../../../utils/statusMeta';
 
@@ -17,22 +18,35 @@ interface ChatImportWizardProps {
 }
 
 /**
- * Chat log import wizard (M3-CONTRACTS.md sections 3.5/4): upload csv/xlsx -> session match
- * preview table (session name / message count / time range / CREATE|NEW_VERSION action) ->
- * confirm import. Nothing is persisted until the confirm step; the preview upload_token is only
- * valid for 30 minutes server-side.
+ * Chat log import wizard (M3-CONTRACTS.md sections 3.5/4, format range extended to txt/html by
+ * M8-CONTRACTS.md section 0.1-0.3/0.7): upload csv/xlsx/txt/html -> session match preview table
+ * (session name / message count / time range / CREATE|NEW_VERSION action) -> confirm import.
+ * Nothing is persisted until the confirm step; the preview upload_token is only valid for 30
+ * minutes server-side. The mapping-profile picker reads GET /source-mappings (M8 section 0.7)
+ * instead of accepting a free-text profile name, so operators only ever pick from
+ * server-known/validated profiles (built-in or custom).
  */
 export default function ChatImportWizard({ kbId, open, onClose, onImported }: ChatImportWizardProps) {
-  const [mappingProfile, setMappingProfile] = useState('');
+  const [mappingId, setMappingId] = useState<string | undefined>(undefined);
+  const [mappings, setMappings] = useState<SourceMapping[]>([]);
+  const [mappingsLoading, setMappingsLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadToken, setUploadToken] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ChatImportSessionPreview[]>([]);
   const [confirming, setConfirming] = useState(false);
 
+  useEffect(() => {
+    if (!open) return;
+    setMappingsLoading(true);
+    listSourceMappings()
+      .then(setMappings)
+      .finally(() => setMappingsLoading(false));
+  }, [open]);
+
   const reset = () => {
     setUploadToken(null);
     setSessions([]);
-    setMappingProfile('');
+    setMappingId(undefined);
   };
 
   const handleClose = () => {
@@ -44,12 +58,12 @@ export default function ChatImportWizard({ kbId, open, onClose, onImported }: Ch
     multiple: false,
     showUploadList: false,
     disabled: uploading,
-    accept: '.csv,.xlsx',
+    accept: '.csv,.xlsx,.txt,.html',
     customRequest: async (options) => {
       const { file, onSuccess, onError } = options;
       setUploading(true);
       try {
-        const result = await previewChatImport(kbId, file as File, mappingProfile || undefined);
+        const result = await previewChatImport(kbId, file as File, mappingId);
         setUploadToken(result.upload_token);
         setSessions(result.sessions);
         onSuccess?.(result);
@@ -97,19 +111,30 @@ export default function ChatImportWizard({ kbId, open, onClose, onImported }: Ch
       {sessions.length === 0 ? (
         <Space direction="vertical" style={{ width: '100%' }}>
           <Typography.Paragraph type="secondary">
-            上传聊天记录导出文件（csv/xlsx），系统按映射档案解析会话并生成匹配预览，确认后才会写入知识库；脱敏默认开启。
+            上传聊天记录导出文件（csv/xlsx/txt/html），系统按映射档案解析会话并生成匹配预览，确认后才会写入知识库；脱敏默认开启。
           </Typography.Paragraph>
-          <Input
-            placeholder="映射档案（可选，默认 memotrace）"
-            value={mappingProfile}
-            onChange={(e) => setMappingProfile(e.target.value)}
-            style={{ marginBottom: 8 }}
+          <Select
+            placeholder="映射档案（可选，留空使用格式默认内置模板）"
+            allowClear
+            loading={mappingsLoading}
+            value={mappingId}
+            onChange={setMappingId}
+            style={{ width: '100%', marginBottom: 8 }}
+            options={mappings.map((m) => ({
+              value: m.mapping_id,
+              label: (
+                <Space>
+                  <span>{m.name}</span>
+                  {m.is_builtin && <Tag color="processing">内置</Tag>}
+                </Space>
+              ),
+            }))}
           />
           <Upload.Dragger {...uploadProps}>
             <p className="ant-upload-drag-icon">
               <InboxOutlined />
             </p>
-            <p className="ant-upload-text">点击或拖拽 csv/xlsx 文件到此处上传</p>
+            <p className="ant-upload-text">点击或拖拽 csv/xlsx/txt/html 文件到此处上传</p>
           </Upload.Dragger>
         </Space>
       ) : (
