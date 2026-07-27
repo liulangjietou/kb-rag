@@ -1,6 +1,6 @@
 # kb-rag 架构文档
 
-> 版本：v1.0（基线 = 一期 M1-M7 + 二期 M8，即 server `bdb4491` / parser `5243f39` / web `8e12cfc` / deploy `daefa9e` 合并后状态；M9 在途开发中，其内容不在本文档范围）
+> 版本：v1.1（基线 = 一期 M1-M7 + 二期 M8/M9 及其后修复合并进各仓 main 的状态，2026-07-27；v1.0 基线为 M8）
 > 日期：2026-07-27
 > 作者：RichardFyoung / Claude
 >
@@ -53,7 +53,7 @@
 
 - **MySQL `t_kb_chunk` 是唯一事实源**；Milvus 与 ES 均为派生索引，可从 MySQL 幂等重建。
 - 双写状态按"分片 × 物理索引"粒度记录在 `t_kb_chunk_index_sync`，由定时补偿任务重放（§3.7）。
-- **无消息队列、无强制 Redis**：异步全部为 Spring `@Async` + 进程内线程池；跨存储一致性 = 同步状态表 + 定时补偿。限流计数、登录 Token、上传 Token 均为进程内实现，明确记录为单实例部署的降级方案（多实例扩展是未来边界，不影响功能正确性）。
+- **无消息队列、无强制 Redis**：异步全部为 Spring `@Async` + 进程内线程池；跨存储一致性 = 同步状态表 + 定时补偿。限流计数与上传 Token 为进程内实现，明确记录为单实例部署的降级方案（多实例扩展是未来边界，不影响功能正确性）；管理台登录 Token 自 M9 后修复起落库 `t_kb_auth_token`（V11，仅存 SHA-256 哈希，单实例重启不再踢掉全部会话）。
 
 ---
 
@@ -89,7 +89,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | 模块 | 职责 | 关键内容 |
 |---|---|---|
 | **kb-common** | 无 Spring 依赖的基础件 | `Result` 统一响应信封、`ErrorCode`、`BizException`/`ProviderException`、`JsonUtil`/`HashUtil`、`RequestIdHolder`、`KbConstants`（业务 ID 前缀与 `kb-sk-` Key 前缀） |
-| **kb-domain** | 实体 + 端口 + 纯领域算法 | 22 个 MyBatis-Plus 实体/Mapper、33 个枚举、60+ 领域模型、**13 个出站端口接口**（`domain.port`）、46 个无状态领域服务（切分/融合/指纹/评测指标/门禁裁决等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，25 个嵌套段） |
+| **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 23 张业务表一一对应）、30+ 枚举、60+ 领域模型、**13 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
 | **kb-infrastructure** | 端口实现，按外部依赖分包 | `search.es` / `search.milvus` / `graph` / `provider.{chat,embedding,rerank,vision}` / `storage` / `parser` / `notify` / `config` |
 | **kb-app** | 应用编排层（架构主体） | 15 个业务域包：`kb` / `document` / `index` / `retrieval` / `graph` / `annotation` / `eval` / `appcenter` / `openapi` / `chat` / `alert` / `dict` / `auth` / `system` / `config` |
 | **kb-api** | HTTP 边界与装配点 | 23 个 Controller、过滤器/拦截器、SSE、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
@@ -128,14 +128,15 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 `RetrievalService` 固定阶段顺序（每级可选但永不重排）：
 
 ```
-改写 → 多库路由 → 双路/三路召回(子片粒度) → 库内融合(RRF/加权) → 跨库 RRF
-     → 近重复窗口归并 → rerank → 父子归并 → 阈值过滤 → top_n
+图片 query 预处理(M9, 可选) → 改写 → 多库路由 → 双路/三路召回(子片粒度) → 库内融合(RRF/加权)
+     → 跨库 RRF → 近重复窗口归并 → rerank → 父子归并(含禁用子片精确剔除) → 阈值过滤 → top_n
 ```
 
 关键协作者与设计不变式：
 
 | 类 | 不变式 |
 |---|---|
+| `ImageQueryService`（M9） | 对外/预览端点可带 `images[]`（仅 base64，≤3 张、单张 5MB、总量 10MB，越界 INVALID_PARAM）；逐张 VisionProvider 转文本、以 `[图片内容] ` 前缀拼到 query 尾部（发生在改写之前，图片语义参与改写）；任一失败即忽略全部图片降级纯文本并记 `image_understanding_unavailable`；纯图片且理解失败返回 INVALID_PARAM |
 | `RewriteService` | 改写超时 800ms 降级原 query；改写结果只作检索词、不回填任何 prompt（注入防线④）；Caffeine 缓存 |
 | `RoutingService` | LLM 提议、**白名单裁决**（结果与候选库集合取交集，注入防线③）；失败/未命中回退全部关联库（`route_fallback_all`）；缓存 key=query+候选集+生效 prompt，失败不入缓存 |
 | `RetrievalIndexContextResolver` | **调用上下文三分支的唯一分辨点**：RELEASED → 冻结快照索引+固化可见集；TESTING/调试/评测 → 实时别名+当前激活集合；旧 RELEASED（无快照）→ 兼容实时、不记降级 |
@@ -144,6 +145,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `CrossKbRrfFusion` + `KbQuotaAllocator` | 跨库只用名次不用分数；rerank 候选预算是**全局总量**按权重配额切分（向下取整、余量归最高权重库） |
 | `RerankService` | 候选上限 50（父子开启时联动 `max(50, top_n×5)`，硬上限 100）；超时 1.5s 降级粗排；rerank 分是唯一跨库跨路可比的绝对分 |
 | `ParentChildMerger` | 召回/融合/rerank 全在子片粒度，之后按 parent_id 归并、父片得分取子片 max；目标父片数 `max(top_n×3, 20)` |
+| `DisabledChildVisibility` + `ParentTextRedactor`（M9） | 含禁用子片的父片：默认整片返回并标注 `disabled_child_ids`；M9 起对偏移非 null 的禁用子片按 [start,end) **倒序**精确剔除文本段、置省略标记与 `redacted_child_count`；任一禁用子片偏移为 null 则整片回退（半剔除比不剔除更误导）；库级开关 `hide_parent_with_disabled_child` 打开则整父片隐藏 |
 | `ScoreThresholdPolicy` | 阈值只作用于 rerank 分；降级时作用于标准 cosine 分；BM25 单路阈值失效并透出 `threshold_inactive`；`score_type` 必须如实上报 |
 | `ActiveVersionResolver` | 版本可见集缓存（TTL 可配）+ 失效通知；快照路径绝不经过此处 |
 | `EngineChunkCleaner` | 召回命中事实源已删分片时反向清理引擎（**快照路径关闭自愈**，防跨索引误删——M6 红线） |
@@ -153,7 +155,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 **图路（M7）**：`GraphRetrievalService` 检索侧零 LLM——query 轻量切词（`GraphQueryTokenizer`）→ Neo4j 实体名 fulltext（cjk 分析器）匹配 → N 跳扩展（默认 2）→ 溯源边回 chunk，关联度 = 归一化匹配分 / (1+跳数)（`GraphRelevanceScorer`）；快照上下文图路直接关闭且不记降级（能力边界而非故障）。抽取侧 `GraphExtractionService` 逐分片 LLM 抽取 + 输出强校验（非法跳过计 `t_kb_task.skipped_count`）。
 
-**degraded 枚举**（`DegradedReason`，与需求 §4.8 一一对应）：`query_rewrite_timeout/error/unavailable`、`rerank_timeout/error/unavailable`、`vector_route_unavailable`、`route_fallback_all`、`threshold_inactive`、`snapshot_index_missing`、`graph_route_unavailable`（另有 M9 在途新增值，见其契约）。
+**degraded 枚举**（`DegradedReason`，与需求 §4.8 一一对应）：`query_rewrite_timeout/error/unavailable`、`rerank_timeout/error/unavailable`、`vector_route_unavailable`、`route_fallback_all`、`threshold_inactive`、`snapshot_index_missing`、`graph_route_unavailable`、`image_understanding_unavailable`（M9）。
 
 ### 3.5 索引管线（`io.kbrag.app.document` + `io.kbrag.app.index`）
 
@@ -162,6 +164,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 - 阶段：解析（parser HTTP）→ 清洗/脱敏（`DocumentCleaner`/`TextDesensitizer`）→ 图片资产与 VLM 文本代理插回（`ImageAssetService`/`ImagePlaceholderResolver`，单图失败不失败整篇）→ 切分（`SplitterRouter` 策略路由，未知 code 回落定长；父子两级切分 `ParentChildSplitter`）→ 嵌入（`ChunkEmbedder`，零 Key 全部 SKIPPED）→ 双写（`ChunkIndexWriter`：**先写 PENDING 同步行、再调引擎、再更新状态**——补偿扫描的唯一证据链）。
 - **指纹复用**：`VersionFingerprintFactory` 产出 content_hash/解析指纹/分片指纹/嵌入版本，`VersionArtifactReuser` 在全匹配时复制上一构建的 chunk 行（新 ID、重写父链），跳过解析与切分。
 - **版本机制**：`DocumentVersionPlanner` 一次回答重复判定/版本号（major.minor）/可否复用；`DocumentVersionActivator` 激活时旧 active 退回 READY（支持秒级回滚）；`VersionRetentionService` 异步清理超保留窗口（默认 3）的旧版 chunk（保留原件与解析产物）；`AppVersionPinChecker` 保护被快照引用的版本不被清理。
+- **标注跨版本（M4a + M9）**：`AnnotationInheritanceService` 按 chunk_text_hash 精确继承禁用类标注（新版本不自动继承其他标注）；M9 起 `AnnotationMigrationAdvisor`（domain 纯函数）以归一化字符 3-gram **Dice 系数**（对称指标——刻意不用评测的非对称重叠率）为待复核标注懒计算迁移建议（阈值 `kb.annotation.migration-min-score=0.35`、top 3、候选限同文档当前激活版本、短文本不推荐），`POST /api/v1/annotations/{id}/migrate` 人工逐条确认（仅禁用/编辑两类，幂等；刻意不做自动与批量迁移——误迁移代价大于逐条确认成本）。
 
 ### 3.6 应用发布与开放 API（`appcenter` + `openapi`）
 
@@ -193,7 +196,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `ApiAuditArchiveService` | cron 03:30 | 审计日志归档 MinIO → 分批物理删除 |
 | `AppSnapshotRetentionService` | cron 04:15 | SUPERSEDED 版本快照按保留数清理（RELEASED 永不清理） |
 
-### 3.8 数据模型（22 张业务表，Flyway V1-V9）
+### 3.8 数据模型（23 张业务表，Flyway V1-V11）
 
 全部 InnoDB，统一 `id / created_at / updated_at / lock_version / deleted`，审计字段由 `AuditFieldFiller` 填充，业务 ID 带类型前缀（kb/doc/dv/ck/task/img/upt/an/evds/evc/evr/evre/app/av/ak/aud/smp）。
 
@@ -208,6 +211,8 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V7（M6） | 应用版本加 `visible_version_ids` + `index_snapshots` |
 | V8（M7） | `t_kb_task` 加 `skipped_count`（图抽取跳过计数） |
 | V9（M8） | `t_kb_source_mapping`（映射档案，启动播种内置模板、只补缺不覆盖） |
+| V10（M9） | `t_kb_chunk` 加 `parent_start_offset` / `parent_end_offset`（子片在父片中的 [起,止) 字符偏移，切分副产物、不做事后反查；子片编辑/合并/拆分及父片编辑时失效置 null） |
+| V11（M9 后修复） | `t_kb_auth_token`（管理台登录 Token 落库，仅存 SHA-256 哈希，24h TTL 语义不变） |
 
 引擎侧可过滤字段全集（Milvus 标量 / ES filter，建索引时显式声明）：`kb_id`、`doc_id`、`document_version_id`、`enabled`、`parent_id`、`chunk_type`、`tag_ids`、`session_id`、`sender`、`msg_time`、`chunk_seq`；其余 metadata 只存 MySQL。新增可过滤维度视为 schema 变更，走索引重建迁移。
 
@@ -291,7 +296,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | `scripts/benchmark.sh` | 纯 bash+curl 压测（P50/P95/P99），验收口径 P95<2s；`seed-bench.py` 零 Key 直灌 10 万分片种子数据 |
 | `demo/` | 4 篇原创文档（md/docx/pdf/xlsx 各一，字节级可复现生成）+ `eval-cases.json`（10 条，含文档级锚定图片 case，按文件名+content_hash 关联导入） |
 | `mappings/` | 聊天记录列名映射模板分发（memotrace 等） |
-| `docs/` | 需求文档、M1-M9 契约、OpenAPI（`kb-server.yaml` 约 70 端点 / `kb-parser.yaml` 3 端点）、备份恢复手册、本文档与 `FLOWS.md` |
+| `docs/` | 需求文档、M1-M9 契约、OpenAPI（`kb-server.yaml` 0.10.0-m9，75 条路径 / `kb-parser.yaml` 0.9.0-m8，3 端点）、备份恢复手册、本文档与 `FLOWS.md` |
 
 ---
 
@@ -303,7 +308,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 
 ### 7.2 安全
 
-- **两条独立鉴权链**：管理台 Bearer Token（`AuthInterceptor`，内存 TokenStore、防爆破锁定、首登随机密码强制改密）与对外 API Key（`ApiKeyAuthFilter` 独立过滤器链、哈希存储、app_scope 授权范围、令牌桶限流）。
+- **两条独立鉴权链**：管理台 Bearer Token（`AuthInterceptor`，Token 哈希落库 `t_kb_auth_token`、防爆破锁定、首登随机密码强制改密）与对外 API Key（`ApiKeyAuthFilter` 独立过滤器链、哈希存储、app_scope 授权范围、令牌桶限流）。
 - **Prompt 注入四防线**：①生成/judge prompt 固定分隔符包裹资料原文；②LLM 切分输出强校验（非法降级按长度切）；③路由白名单交集裁决；④改写结果仅作检索词。
 - 解析侧基线：magic number 校验、zip-slip/炸弹、XXE（defusedxml）、SSRF（解析期零出站）；前端零 `dangerouslySetInnerHTML`；聊天导入默认脱敏（手机号/身份证/银行卡 16-19 位）；审计 query 无条件脱敏；MinIO 私有桶 + 限时预签名 URL。
 
@@ -332,4 +337,4 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 1. **MinerU 未集成**（需求 §8 原选型）：pdf 走 PyMuPDF，OCR 走 VLM/PaddleOCR 三级次序；NOTICE 保留预留声明。
 2. **Redis 未实际接入**：compose 提供可选服务，但 server 当前全部为进程内实现（Caffeine/令牌桶/内存 Token），`cache.provider` 切换属未来扩展。
 3. **重建方式**（v1.9 已回补需求）：切分配置重建走同索引内原子替换，非"新索引+切别名"。
-4. web / deploy 仓的 README、CHANGELOG 存在滞后于代码的描述（以各仓代码与本文档为准，待独立清偿）。
+4. web / deploy 仓的 README、CHANGELOG 曾滞后于代码，已由四仓 `docs/oss-readiness` 分支的开源就绪 PR 清偿（server #19 / parser #4 / web #18 / deploy #22）。

@@ -1,6 +1,6 @@
 # kb-rag 流程图文档
 
-> 版本：v1.0（基线与 `ARCHITECTURE.md` 相同 = M1-M8 合并后状态）
+> 版本：v1.1（基线与 `ARCHITECTURE.md` 相同 = M1-M9 及其后修复合并进 main 的状态）
 > 日期：2026-07-27
 > 作者：RichardFyoung / Claude
 >
@@ -36,7 +36,7 @@ sequenceDiagram
     PA-->>P: markdown + pages(scanned/ocr_source) + images + warnings
     P->>P: 清洗/脱敏 (DocumentCleaner/TextDesensitizer)
     P->>V: 扫描页/内嵌图 → 文本代理 (零 Key 跳过)
-    P->>P: 占位符插回原位 → SplitterRouter 切分<br/>(父子开启时两级切分)
+    P->>P: 占位符插回原位 → SplitterRouter 切分<br/>(父子开启时两级切分, 子片偏移随切分产出 V10)
     P->>P: ChunkEmbedder 嵌入 (零 Key 全部 SKIPPED)
     P->>DB: chunk 写事实源
     P->>DB: t_kb_chunk_index_sync 先写 PENDING
@@ -85,11 +85,16 @@ stateDiagram-v2
 
 ## 3. 检索链路（含全部降级点）
 
-对应：`RetrievalService` 及其协作者（需求 §4.4，契约 M2/M5/M6/M7）。
+对应：`RetrievalService` 及其协作者（需求 §4.4，契约 M2/M5/M6/M7/M9）。
 
 ```mermaid
 flowchart TD
-    Q[query + messages] --> RW{改写开启?}
+    Q[query + messages + images?] --> IMG{带图片 query? M9}
+    IMG -- 否 --> RW
+    IMG -- 是 --> IMG1[ImageQueryService 校验张数/大小<br/>逐张 VLM 转文本, 前缀拼接到 query 尾部]
+    IMG1 -- 成功 --> RW
+    IMG1 -- 零Key/超时/失败 --> DG0[degraded: image_understanding_unavailable<br/>忽略全部图片纯文本继续<br/>纯图无文本→INVALID_PARAM 报错] --> RW
+    RW{改写开启?}
     RW -- 否 --> RT
     RW -- 是 --> RW1[RewriteService LLM 改写<br/>超时800ms]
     RW1 -- 成功 --> RT
@@ -113,7 +118,7 @@ flowchart TD
     RR1 -- 成功 --> PC
     RR1 -- 超时/失败/未配模型 --> DG3[degraded: rerank_*<br/>降级粗排分] --> PC
     RR -- 否 --> PC
-    PC[父子归并 ParentChildMerger<br/>子片粒度→按 parent_id 归并<br/>父片得分取子片 max]
+    PC[父子归并 ParentChildMerger<br/>子片粒度→按 parent_id 归并, 父片得分取子片 max<br/>M9: 禁用子片按偏移倒序精确剔除+省略标记+redacted_child_count<br/>任一禁用子片偏移为 null→整片回退]
     PC --> TH[阈值过滤 ScoreThresholdPolicy<br/>rerank分>标准cosine分<br/>BM25单路失效→degraded: threshold_inactive]
     TH --> TN[top_n 截断 → nodes + degraded + score_type]
 ```
@@ -374,4 +379,18 @@ flowchart LR
 | 切分 | 智能/LLM 语义切分回落按长度切分 |
 | 改写/路由/rerank | 显式开启但未配模型 → `*_unavailable` 降级，链路继续 |
 | VLM 图片理解 | 跳过文本代理（或由 parser 本地 PaddleOCR 兜底回填） |
+| 图片 query（M9） | 忽略全部图片纯文本检索，`degraded: image_understanding_unavailable`；纯图片且无文本 query 返回 INVALID_PARAM |
 | 问答生成 / judge / 图抽取 | 界面置灰 + 引导配置入口 |
+
+---
+
+## 13. 标注跨版本迁移建议（M9）
+
+对应：`AnnotationMigrationAdvisor` / `ChunkAnnotationService`（需求 §4.5 二期项⑥转正，契约 M9 §0.4/0.5）。
+
+```mermaid
+flowchart LR
+    A[文档新版本激活] --> B[标注不自动继承<br/>禁用类按 chunk_text_hash 精确继承]
+    B --> C[pending-review 待复核清单<br/>懒计算 suggestions: 归一化 3-gram Dice 对称相似度<br/>阈值0.35 / top3 / 候选限同文档激活版本 / 短文本不推荐]
+    C --> D[人工逐条 migrate 到目标分片<br/>仅禁用/编辑两类, 幂等, 强制同文档<br/>刻意不做自动与批量迁移]
+```
