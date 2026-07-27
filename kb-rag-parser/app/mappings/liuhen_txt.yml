@@ -1,0 +1,32 @@
+# Built-in mapping profile for TXT chat log exports (M8-CONTRACTS.md §0.1).
+# Selected automatically (app/config.py DEFAULT_CHAT_MAPPING_PROFILE_BY_EXT)
+# when a POST /api/v1/parse/chat request for file_ext=txt does not pass
+# mapping_profile explicitly.
+#
+# NOTE: written from publicly documented 留痕/MemoTrace and WeChat PC client
+# TXT export conventions; has NOT yet been validated against a real export
+# sample -- recalibrate this file (not the parser code) once one is
+# available (M8-CONTRACTS.md §0 "样例到位后校准").
+#
+# Each pattern is a line-header regex (Python re, matched against the start
+# of each non-blank line via re.match) with required named groups
+# send_time/sender, and an optional content group for templates whose
+# message body can start on the same line as the header. A line matching
+# neither pattern is merged as continuation content into the previous
+# message (see app/chat/txt_adapter.py). To use a custom line format
+# instead of these two, pass a profile_yaml (or a custom mapping_profile
+# file) whose txt: section replaces this patterns list entirely.
+
+txt:
+  patterns:
+    # 留痕/MemoTrace TXT export style:
+    #   2024-01-01 10:00:00 张三
+    #   你好，最近怎么样？
+    - name: liuhen
+      regex: '^(?P<send_time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(?P<sender>.+?)\s*$'
+
+    # WeChat PC client export style (message body inline or on the
+    # following line(s)):
+    #   张三 (2024-01-01 10:00:00): 你好，最近怎么样？
+    - name: wechat_pc
+      regex: '^(?P<sender>.+?)\s*\((?P<send_time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\)[:：]\s*(?P<content>.*)$'
