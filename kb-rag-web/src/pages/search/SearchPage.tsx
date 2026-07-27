@@ -1,3 +1,4 @@
+// Author: owlzhangfq@gmail.com
 import { useEffect, useState } from 'react';
 import { SearchOutlined } from '@ant-design/icons';
 import {
@@ -17,10 +18,12 @@ import {
   Spin,
   Switch,
   Typography,
+  message,
 } from 'antd';
 import type { Dayjs } from 'dayjs';
 import { search } from '../../api/search';
 import { listKnowledgeBases } from '../../api/kb';
+import { submitRetrievalFeedback, type RetrievalVerdict } from '../../api/retrievalFeedback';
 import type { FusionMode, KnowledgeBase, MetadataFilter, SearchRequest, SearchResponse } from '../../api/types';
 import { useModelStatus } from '../../context/ModelStatusContext';
 import { GRAPH_FUSION_MUTEX_HINT, describeDegradedReason, describeThresholdApplied } from '../../utils/statusMeta';
@@ -86,6 +89,8 @@ export default function SearchPage() {
   const [hasSearched, setHasSearched] = useState(false);
   // "收进评测集" selection state (M4b-CONTRACTS.md section 5), keyed by chunk_id; cleared on every new search.
   const [selectedChunkIds, setSelectedChunkIds] = useState<string[]>([]);
+  /** 好/坏 verdict per chunk_id for the current result set; cleared on every new search. */
+  const [feedbackByChunkId, setFeedbackByChunkId] = useState<Record<string, RetrievalVerdict>>({});
   const [collectModalOpen, setCollectModalOpen] = useState(false);
   const { modelStatus } = useModelStatus();
   const [form] = Form.useForm<SearchFormValues>();
@@ -141,6 +146,7 @@ export default function SearchPage() {
       setSearchedQuery(values.query);
       setSearchedKbId(values.kb_id);
       setSelectedChunkIds([]);
+      setFeedbackByChunkId({});
       setHasSearched(true);
     } finally {
       setLoading(false);
@@ -149,6 +155,24 @@ export default function SearchPage() {
 
   const toggleChunkSelected = (chunkId: string, checked: boolean) => {
     setSelectedChunkIds((prev) => (checked ? [...prev, chunkId] : prev.filter((id) => id !== chunkId)));
+  };
+
+  /**
+   * 需求 §4.5 检索结果好/坏反馈. The verdict is attributed to the query that produced the result,
+   * not whatever is currently typed in the box, so it uses searchedQuery/searchedKbId.
+   */
+  const handleFeedback = async (chunkId: string, verdict: RetrievalVerdict) => {
+    if (!searchedKbId) {
+      return;
+    }
+    await submitRetrievalFeedback({
+      kb_id: searchedKbId,
+      query: searchedQuery,
+      chunk_id: chunkId,
+      verdict,
+    });
+    setFeedbackByChunkId((prev) => ({ ...prev, [chunkId]: verdict }));
+    message.success(verdict === 'GOOD' ? '已标记为好结果' : '已标记为坏结果');
   };
 
   const selectedNodes = result?.nodes.filter((node) => selectedChunkIds.includes(node.chunk_id)) ?? [];
@@ -371,6 +395,8 @@ export default function SearchPage() {
             thresholdTag={thresholdTag}
             selected={selectedChunkIds.includes(node.chunk_id)}
             onSelectChange={(checked) => toggleChunkSelected(node.chunk_id, checked)}
+            feedback={feedbackByChunkId[node.chunk_id] ?? null}
+            onFeedback={(verdict) => handleFeedback(node.chunk_id, verdict)}
           />
         ))}
         {!hasSearched && <Empty description="请选择知识库并输入检索内容开始调试" />}

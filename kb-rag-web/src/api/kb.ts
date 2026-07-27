@@ -1,3 +1,4 @@
+// Author: owlzhangfq@gmail.com
 import { apiDelete, apiGet, apiPost, apiPut } from './request';
 import type {
   ConfirmDocumentsRequest,
@@ -23,9 +24,24 @@ export function deleteKnowledgeBase(kbId: string): Promise<void> {
   return apiDelete<void>(`/kb/${kbId}`);
 }
 
-/** PUT /api/v1/kb/{kbId}/index-config (M2-CONTRACTS.md section 4). */
-export function updateIndexConfig(kbId: string, payload: UpdateIndexConfigRequest): Promise<void> {
-  return apiPut<void>(`/kb/${kbId}/index-config`, payload);
+/** Response of PUT /kb/{kbId}/index-config: what the save actually invalidated. */
+export interface UpdateIndexConfigResult {
+  /** Documents now flagged config_stale against the new fingerprint, i.e. awaiting a rebuild. */
+  stale_documents: number;
+  /** The recomputed current_config_fingerprint. */
+  fingerprint: string;
+}
+
+/**
+ * PUT /api/v1/kb/{kbId}/index-config (M2-CONTRACTS.md section 4). The server answers with the
+ * stale-document count it just recomputed, which is the only place that number is available
+ * without re-listing and re-counting the documents client-side.
+ */
+export function updateIndexConfig(
+  kbId: string,
+  payload: UpdateIndexConfigRequest,
+): Promise<UpdateIndexConfigResult> {
+  return apiPut<UpdateIndexConfigResult>(`/kb/${kbId}/index-config`, payload);
 }
 
 /**

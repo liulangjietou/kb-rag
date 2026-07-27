@@ -1,4 +1,5 @@
-import { apiGet, apiPost, apiUpload } from './request';
+// Author: owlzhangfq@gmail.com
+import { apiDelete, apiGet, apiPost, apiUpload } from './request';
 import type {
   DocumentPreview,
   KbChunk,
@@ -25,6 +26,15 @@ export function uploadDocument(kbId: string, file: File): Promise<KbDocument> {
 
 export function reindexDocument(docId: string): Promise<void> {
   return apiPost<void>(`/documents/${docId}/reindex`);
+}
+
+/**
+ * DELETE /api/v1/documents/{docId}: removes the document with every one of its versions and
+ * chunks, including the copies held in the search engines. Irreversible -- there is no soft-delete
+ * or restore path, so callers must confirm first.
+ */
+export function deleteDocument(docId: string): Promise<void> {
+  return apiDelete<void>(`/documents/${docId}`);
 }
 
 export function listChunks(docId: string, page?: number): Promise<PageResult<KbChunk>> {

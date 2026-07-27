@@ -49,6 +49,17 @@ export interface CurrentUser {
 // Knowledge base
 // ---------------------------------------------------------------------------
 
+/**
+ * index_config.split_strategy: the splitter the indexing pipeline routes to. Mirrors the server's
+ * SplitStrategy enum, which currently has exactly these TWO members -- the requirements doc
+ * describes six splitting strategies, but only fixed-length and LLM-semantic are implemented
+ * (parent/child is orthogonal: it is its own switch, applied on top of whichever strategy runs).
+ *
+ * `llm_semantic` requires a configured chat model; saving it without one is rejected server-side
+ * with INVALID_PARAM ("the LLM semantic split strategy requires a configured chat model").
+ */
+export type SplitStrategy = 'fixed_length' | 'llm_semantic';
+
 /** M2-CONTRACTS.md section 1.4: parent/child two-level chunking switch and lengths. */
 export interface ParentChildConfig {
   enabled: boolean;
@@ -117,12 +128,11 @@ export interface ChatAggregationConfig {
  */
 export interface IndexConfig {
   /**
-   * Split strategy code (e.g. "fixed_length"), server-side KbIndexConfig.splitStrategy. Read-only
-   * for this web: there is no strategy picker in the index-config drawer yet, and a PUT that omits
-   * the key keeps the stored value (UpdateIndexConfigRequest.toIndexConfig falls back to current).
-   * Carried through the drawer's form state so a future picker has one place to write to.
+   * Which splitter the indexing pipeline routes to. Omitting the key on a PUT keeps the stored
+   * value (UpdateIndexConfigRequest.toIndexConfig falls back to current); an unknown code is
+   * rejected with INVALID_PARAM rather than silently ignored.
    */
-  split_strategy?: string;
+  split_strategy?: SplitStrategy;
   /** Embedding model the current index was built with; server-assigned, never sent back on a PUT. */
   embedding_model?: string;
   chunk_max_tokens: number;

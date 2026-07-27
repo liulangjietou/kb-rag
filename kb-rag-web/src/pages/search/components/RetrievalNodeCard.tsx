@@ -1,4 +1,7 @@
-import { Card, Checkbox, Collapse, Image, List, Space, Tag, Typography } from 'antd';
+// Author: owlzhangfq@gmail.com
+import { DislikeOutlined, LikeOutlined } from '@ant-design/icons';
+import { Button, Card, Checkbox, Collapse, Image, Space, List, Tag, Tooltip, Typography } from 'antd';
+import type { RetrievalVerdict } from '../../../api/retrievalFeedback';
 import type { RetrievalChildHit, RetrievalNode } from '../../../api/types';
 import { formatEpochMillis, formatScore } from '../../../utils/format';
 import { CHUNK_TYPE_META, RETRIEVAL_SOURCE_META, SCORE_TYPE_META, metaOf } from '../../../utils/statusMeta';
@@ -14,6 +17,12 @@ interface RetrievalNodeCardProps {
    */
   selected?: boolean;
   onSelectChange?: (checked: boolean) => void;
+  /**
+   * 需求 §4.5 "检索结果反馈标注": marks this result 好/坏 for the current query. Absent when the
+   * card is rendered outside a live search (no query/kb to attribute the verdict to).
+   */
+  feedback?: RetrievalVerdict | null;
+  onFeedback?: (verdict: RetrievalVerdict) => void;
 }
 
 /** metadata keys shown as "各路原始分/归一化分/fused 分/rerank 分" tags, in display order. */
@@ -46,7 +55,15 @@ function RouteScoreTags({ source }: { source: Record<string, unknown> }) {
 /** One retrieval result card: content + score/score_type/retrieval_source tags (M1-CONTRACTS.md
  * section 5), extended with M2's per-route/normalized/fused/rerank scores, the threshold-applied
  * tag, and (parent/child mode) an expandable list of the child chunks merged into this node. */
-export default function RetrievalNodeCard({ node, rank, thresholdTag, selected, onSelectChange }: RetrievalNodeCardProps) {
+export default function RetrievalNodeCard({
+  node,
+  rank,
+  thresholdTag,
+  selected,
+  onSelectChange,
+  feedback,
+  onFeedback,
+}: RetrievalNodeCardProps) {
   const scoreTypeMeta = metaOf(SCORE_TYPE_META, node.score_type);
   const sourceMeta = metaOf(RETRIEVAL_SOURCE_META, node.retrieval_source);
   const chunkTypeMeta = metaOf(CHUNK_TYPE_META, node.chunk_type);
@@ -66,6 +83,27 @@ export default function RetrievalNodeCard({ node, rank, thresholdTag, selected, 
         <Tag color={sourceMeta.color}>{sourceMeta.label}</Tag>
         <Tag color={chunkTypeMeta.color}>{chunkTypeMeta.label}</Tag>
         {thresholdTag && <Tag color={thresholdTag.color}>{thresholdTag.label}</Tag>}
+        {onFeedback && (
+          <Space size={4}>
+            <Tooltip title="标为好结果（仅记录反馈信号；要沉淀成评测 case 请用「收进评测集」）">
+              <Button
+                size="small"
+                type={feedback === 'GOOD' ? 'primary' : 'text'}
+                icon={<LikeOutlined />}
+                onClick={() => onFeedback('GOOD')}
+              />
+            </Tooltip>
+            <Tooltip title="标为坏结果">
+              <Button
+                size="small"
+                danger={feedback === 'BAD'}
+                type={feedback === 'BAD' ? 'primary' : 'text'}
+                icon={<DislikeOutlined />}
+                onClick={() => onFeedback('BAD')}
+              />
+            </Tooltip>
+          </Space>
+        )}
       </Space>
       {isChatLog && metadata && (
         <Space wrap style={{ marginBottom: 8 }}>
