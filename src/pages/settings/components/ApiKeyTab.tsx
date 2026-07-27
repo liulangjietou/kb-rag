@@ -4,7 +4,7 @@ import { CopyOutlined, PlusOutlined } from '@ant-design/icons';
 import { Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography, message } from 'antd';
 import { createApiKey, deleteApiKey, listApiKeys, rotateApiKey, updateApiKeyScope, updateApiKeyStatus } from '../../../api/apiKey';
 import { listApps } from '../../../api/app';
-import type { ApiKey, ApiKeyWithSecret, CreateApiKeyRequest, KbApp } from '../../../api/types';
+import type { ApiKey, CreateApiKeyRequest, KbApp } from '../../../api/types';
 import { API_KEY_STATUS_META, metaOf } from '../../../utils/statusMeta';
 
 interface CreateApiKeyFormValues {
@@ -24,7 +24,7 @@ export default function ApiKeyTab() {
   const [loading, setLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [secretModal, setSecretModal] = useState<ApiKeyWithSecret | null>(null);
+  const [secretModal, setSecretModal] = useState<string | null>(null);
   const [scopeEditKey, setScopeEditKey] = useState<ApiKey | null>(null);
   const [scopeForm] = Form.useForm<{ scope_all: boolean; app_scope: string[] }>();
   const [form] = Form.useForm<CreateApiKeyFormValues>();
@@ -61,7 +61,7 @@ export default function ApiKeyTab() {
       message.success('API Key 创建成功');
       form.resetFields();
       setCreateOpen(false);
-      setSecretModal(created);
+      setSecretModal(created.api_key);
       load();
     } finally {
       setSubmitting(false);
@@ -77,7 +77,7 @@ export default function ApiKeyTab() {
   const handleRotate = async (keyId: string) => {
     const rotated = await rotateApiKey(keyId);
     message.success('已轮换，旧密钥立即失效');
-    setSecretModal(rotated);
+    setSecretModal(rotated.api_key);
     load();
   };
 
@@ -89,7 +89,7 @@ export default function ApiKeyTab() {
 
   const openScopeEdit = (key: ApiKey) => {
     setScopeEditKey(key);
-    scopeForm.setFieldsValue({ scope_all: key.app_scope === null, app_scope: key.app_scope ?? [] });
+    scopeForm.setFieldsValue({ scope_all: !key.app_scope || key.app_scope.length === 0, app_scope: key.app_scope ?? [] });
   };
 
   const handleSaveScope = async () => {
@@ -156,17 +156,16 @@ export default function ApiKeyTab() {
             title: '授权范围',
             width: 200,
             render: (_, record) =>
-              record.app_scope === null ? (
+              // Server semantics (ApiKeyService/ApiKeyResponse javadoc): empty OR null scope
+              // authorises every application; the server serialises the all-apps state as [].
+              // There is no "authorises nothing" state to render.
+              !record.app_scope || record.app_scope.length === 0 ? (
                 <Tag>全部应用</Tag>
               ) : (
                 <Space wrap>
-                  {record.app_scope.length === 0 ? (
-                    <Typography.Text type="secondary">未授权任何应用</Typography.Text>
-                  ) : (
-                    record.app_scope.map((appId) => (
-                      <Tag key={appId}>{apps.find((a) => a.app_id === appId)?.name ?? appId}</Tag>
-                    ))
-                  )}
+                  {record.app_scope.map((appId) => (
+                    <Tag key={appId}>{apps.find((a) => a.app_id === appId)?.name ?? appId}</Tag>
+                  ))}
                 </Space>
               ),
           },
@@ -236,8 +235,8 @@ export default function ApiKeyTab() {
           <Space direction="vertical" style={{ width: '100%' }}>
             <Alert type="warning" showIcon message="请立即复制并妥善保存，关闭后将无法再次查看完整密钥" />
             <Space.Compact style={{ width: '100%' }}>
-              <Input readOnly value={secretModal.plain_key} />
-              <Button icon={<CopyOutlined />} onClick={() => handleCopy(secretModal.plain_key)}>
+              <Input readOnly value={secretModal} />
+              <Button icon={<CopyOutlined />} onClick={() => handleCopy(secretModal)}>
                 复制
               </Button>
             </Space.Compact>

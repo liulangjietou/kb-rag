@@ -1437,9 +1437,14 @@ export interface CreateApiKeyRequest {
   app_scope?: string[] | null;
 }
 
-/** Creation/rotation response: the plaintext secret is only ever present in these two responses. */
-export interface ApiKeyWithSecret extends ApiKey {
-  plain_key: string;
+/**
+ * Creation/rotation response, the REAL server shape: the key row nested under `key` and the
+ * plaintext as a top-level `api_key` sibling. The earlier flat `plain_key` extension rendered the
+ * one-time secret modal empty and copied the literal string "undefined".
+ */
+export interface ApiKeyCreatedResponse {
+  key: ApiKey;
+  api_key: string;
 }
 
 /**

@@ -1,6 +1,6 @@
 // Author: owlzhangfq@gmail.com
 import { apiDelete, apiGet, apiPost, apiPut } from './request';
-import type { ApiKey, ApiKeyWithSecret, CreateApiKeyRequest, UpdateApiKeyScopeRequest } from './types';
+import type { ApiKey, ApiKeyCreatedResponse, CreateApiKeyRequest, UpdateApiKeyScopeRequest } from './types';
 
 /**
  * API Key management endpoints (M4c-CONTRACTS.md section 3: "API Key 管理端点（管理鉴权）：创建
@@ -9,8 +9,8 @@ import type { ApiKey, ApiKeyWithSecret, CreateApiKeyRequest, UpdateApiKeyScopeRe
  */
 
 /** POST /api/v1/api-keys: the only response that ever carries the plaintext secret. */
-export function createApiKey(payload: CreateApiKeyRequest): Promise<ApiKeyWithSecret> {
-  return apiPost<ApiKeyWithSecret>('/api-keys', payload);
+export function createApiKey(payload: CreateApiKeyRequest): Promise<ApiKeyCreatedResponse> {
+  return apiPost<ApiKeyCreatedResponse>('/api-keys', payload);
 }
 
 /** GET /api/v1/api-keys. ASSUMPTION: modelled as a plain array, no paging named by the contract. */
@@ -28,8 +28,8 @@ export function updateApiKeyStatus(keyId: string, status: 'ENABLED' | 'DISABLED'
 }
 
 /** POST /api/v1/api-keys/{keyId}/rotate: issues a new secret, invalidating the old one immediately. */
-export function rotateApiKey(keyId: string): Promise<ApiKeyWithSecret> {
-  return apiPost<ApiKeyWithSecret>(`/api-keys/${keyId}/rotate`);
+export function rotateApiKey(keyId: string): Promise<ApiKeyCreatedResponse> {
+  return apiPost<ApiKeyCreatedResponse>(`/api-keys/${keyId}/rotate`);
 }
 
 export function deleteApiKey(keyId: string): Promise<void> {
