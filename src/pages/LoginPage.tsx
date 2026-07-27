@@ -33,7 +33,16 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f0f2f5' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        height: '100vh',
+        background: '#f0f2f5',
+      }}
+    >
       <Card style={{ width: 380 }}>
         <Typography.Title level={3} style={{ textAlign: 'center', marginBottom: 24 }}>
           企业RAG管理平台
@@ -52,6 +61,12 @@ export default function LoginPage() {
           </Form.Item>
         </Form>
       </Card>
+      <Typography.Text type="secondary" style={{ fontSize: 12, marginTop: 16 }}>
+        企业RAG管理平台 · Apache-2.0 · @author{' '}
+        <Typography.Link href="mailto:owlzhangfq@gmail.com" style={{ fontSize: 12 }}>
+          owlzhangfq@gmail.com
+        </Typography.Link>
+      </Typography.Text>
     </div>
   );
 }

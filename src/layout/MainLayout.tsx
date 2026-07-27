@@ -12,7 +12,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { useModelStatus } from '../context/ModelStatusContext';
 
-const { Header, Sider, Content } = Layout;
+const { Header, Sider, Content, Footer } = Layout;
 
 const MENU_ITEMS = [
   { key: '/kb', icon: <DatabaseOutlined />, label: '知识库' },
@@ -85,6 +85,14 @@ export default function MainLayout() {
         <Content style={{ margin: 16 }}>
           <Outlet />
         </Content>
+        <Footer style={{ textAlign: 'center', padding: '12px 16px' }}>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            企业RAG管理平台 · Apache-2.0 · @author{' '}
+            <Typography.Link href="mailto:owlzhangfq@gmail.com" style={{ fontSize: 12 }}>
+              owlzhangfq@gmail.com
+            </Typography.Link>
+          </Typography.Text>
+        </Footer>
       </Layout>
     </Layout>
   );
