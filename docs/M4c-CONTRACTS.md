@@ -35,3 +35,5 @@
 
 ## 6. 实现期修订（完工后回补）
 实现期修订：server 申报 10 项偏离经主会话裁决全部接受，其中要点——①t_kb_eval_result 加 evidence_hit_count/evidence_total_count 两列（交集重算需 case 级证据计数，从 overlap_ratios 反推口径不一致）；②唯一 RELEASED 用虚拟列+唯一索引（临时库实测 1062）；③chat_model 落快照并经 ChatProviderFactory 真实生效（只存不用是隐性正确性洞）；④ReleaseGateJudge 加 1e-9 浮点余量（0.88-0.90 的浮点误差会把"恰好等于容差"误判为回退，单测抓到的真实缺陷）；⑤401 不落审计（无 key_id 可引）、429 落审计；⑥ChatProvider.stream 默认为完成后单块下发，真 token 流待 DashScope 覆写（零 Key 不可验）。八项主会话中途定版（chat-preview/gate-dataset/审计端点/SSE 字段/gate_run_ids 顺序等）均已按定版实现。**已知未完项：OpenAPI 的 M4c 端点同步待补**（下一次会话完成，记录于此避免文档欠账被遗忘）；零 Key 验收与 Key 恢复后补验清单同 M4b 模式。
+
+**2026-07-27 补记（Key 恢复后真跑暴露的两处修正，server PR#16）**：①原契约"content type 设在响应上而非 produces 条件，json Accept + stream=true 仍给流"的设计从未生效——SseEmitter 经 ResponseEntity<?> 返回会被消息转换器拒绝（NotWritable 500）；定版改为 produces=text/event-stream 独立流式方法（chat-preview 与对外 chat 同步），stream=true 必须携带 Accept: text/event-stream，错配返回 INVALID_PARAM 400；②CHAT_TIMEOUT_MS(3s) 兼任生成 HTTP 读超时导致真实生成必超时，新增 CHAT_GENERATE_TIMEOUT_MS=60000 仅抬生成读上限，路由/改写 future 级预算不变。

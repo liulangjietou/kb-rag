@@ -7,6 +7,12 @@
 ## [Unreleased]
 
 ### Fixed
+- 真流式从未生效（kb-rag-server PR#16，用户配有效 Key 首次真跑流式暴露）：chat-preview 与对外
+  /knowledge/chat 把 SseEmitter 藏在 ResponseEntity<?> 后返回，Spring 按声明类型选返回值处理器、
+  emitter 被交给消息转换器 → HttpMessageNotWritableException 500；修复为 produces=text/event-stream
+  拆分独立流式方法，Accept 与 stream 字段错配报可操作 400（原"json Accept 也给流"承诺不可实现已移除，
+  见 M4c-CONTRACTS.md §6 补记）。同 PR 新增 CHAT_GENERATE_TIMEOUT_MS（默认 60s）——生成与
+  路由/改写共用 3s 预算导致真实生成必超时，现仅生成读上限独立放宽
 - SSE 流式端点（chat/chat-preview）上抛出的业务异常被内容协商吃成裸 500：Accept 仅为
   text/event-stream 时 JSON 错误信封无法协商渲染，过期 token 的 401 语义被掩盖为
   Internal Server Error；修复为对 stream-only Accept 手写 JSON 信封绕过协商
