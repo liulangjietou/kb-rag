@@ -49,6 +49,21 @@ public class Chunk extends BaseEntity {
     @TableField("parent_id")
     private String parentId;
 
+    /**
+     * Start offset of this child's text inside its parent's {@code content}, requirement section 4.5.
+     *
+     * <p>{@code null} means "unknown", which is the only safe default: the retrieval side cuts a disabled
+     * child out of the parent text with these offsets, so a stale pair would remove the wrong sentence
+     * while a missing one merely returns the whole parent. Every write path that can move the text - a
+     * child edit, a merge or split, an edit of the parent itself - clears it.
+     */
+    @TableField("parent_start_offset")
+    private Integer parentStartOffset;
+
+    /** Exclusive end offset of this child's text inside its parent's {@code content}. */
+    @TableField("parent_end_offset")
+    private Integer parentEndOffset;
+
     /** Zero based order inside the document version. */
     @TableField("seq")
     private Integer seq;

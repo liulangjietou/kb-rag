@@ -3,6 +3,7 @@ package io.kbrag.app.openapi;
 import io.kbrag.app.appcenter.AppService;
 import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.config.AsyncConfig;
+import io.kbrag.app.retrieval.ImageQueryService;
 import io.kbrag.app.retrieval.RetrievalCommand;
 import io.kbrag.app.retrieval.RetrievalIndexOverride;
 import io.kbrag.app.retrieval.RetrievalNodeView;
@@ -70,6 +71,7 @@ public class KnowledgeApiService {
     private final ContentBudgetTrimmer contentBudgetTrimmer;
     private final RequestOverridePolicy requestOverridePolicy;
     private final ApiAuditService apiAuditService;
+    private final ImageQueryService imageQueryService;
 
     /**
      * Runs one open search call.
@@ -80,13 +82,15 @@ public class KnowledgeApiService {
      */
     public KnowledgeCallResult search(ApiKeyPrincipal principal, KnowledgeCallCommand command) {
         long startedAt = System.currentTimeMillis();
+        EnrichedCall call = EnrichedCall.of(command);
         try {
             ResolvedTarget target = resolve(principal, command);
-            KnowledgeCallResult result = retrieve(target, command);
-            audit(principal, command, target, result, startedAt, ApiAuditService.ENDPOINT_SEARCH);
+            call = enrich(command);
+            KnowledgeCallResult result = retrieve(target, call);
+            audit(principal, call.command(), target, result, startedAt, ApiAuditService.ENDPOINT_SEARCH);
             return result;
         } catch (BizException e) {
-            auditRejection(principal, command, startedAt, e, ApiAuditService.ENDPOINT_SEARCH);
+            auditRejection(principal, call.command(), startedAt, e, ApiAuditService.ENDPOINT_SEARCH);
             throw e;
         }
     }
@@ -100,15 +104,17 @@ public class KnowledgeApiService {
      */
     public KnowledgeCallResult chat(ApiKeyPrincipal principal, KnowledgeCallCommand command) {
         long startedAt = System.currentTimeMillis();
+        EnrichedCall call = EnrichedCall.of(command);
         try {
             ResolvedTarget target = resolve(principal, command);
-            KnowledgeCallResult retrieved = retrieve(target, command);
-            String answer = generate(target, command, retrieved.getNodes());
+            call = enrich(command);
+            KnowledgeCallResult retrieved = retrieve(target, call);
+            String answer = generate(target, call.command(), retrieved.getNodes());
             KnowledgeCallResult result = withAnswer(retrieved, answer);
-            audit(principal, command, target, result, startedAt, ApiAuditService.ENDPOINT_CHAT);
+            audit(principal, call.command(), target, result, startedAt, ApiAuditService.ENDPOINT_CHAT);
             return result;
         } catch (BizException e) {
-            auditRejection(principal, command, startedAt, e, ApiAuditService.ENDPOINT_CHAT);
+            auditRejection(principal, call.command(), startedAt, e, ApiAuditService.ENDPOINT_CHAT);
             throw e;
         }
     }
@@ -127,24 +133,26 @@ public class KnowledgeApiService {
     public void chatStream(ApiKeyPrincipal principal, KnowledgeCallCommand command,
                            ChatStreamListener listener) {
         long startedAt = System.currentTimeMillis();
+        EnrichedCall call = EnrichedCall.of(command);
         try {
             ResolvedTarget target = resolve(principal, command);
-            KnowledgeCallResult retrieved = retrieve(target, command);
+            call = enrich(command);
+            KnowledgeCallResult retrieved = retrieve(target, call);
             StringBuilder answer = new StringBuilder();
-            streamGenerate(target, command, retrieved.getNodes(), delta -> {
+            streamGenerate(target, call.command(), retrieved.getNodes(), delta -> {
                 answer.append(delta);
                 listener.onDelta(delta);
             });
             listener.onReferences(retrieved.getNodes());
             listener.onDone(RequestIdHolder.get(), retrieved.getDegraded(), retrieved.routedKbIds());
-            audit(principal, command, target, retrieved, startedAt, ApiAuditService.ENDPOINT_CHAT);
+            audit(principal, call.command(), target, retrieved, startedAt, ApiAuditService.ENDPOINT_CHAT);
         } catch (BizException e) {
-            auditRejection(principal, command, startedAt, e, ApiAuditService.ENDPOINT_CHAT);
+            auditRejection(principal, call.command(), startedAt, e, ApiAuditService.ENDPOINT_CHAT);
             listener.onError(e.getErrorCode().name(), e.getMessage());
         } catch (Exception e) {
             log.error("open chat stream failed, errorCode={}, appId={}",
                     ErrorCode.INTERNAL_ERROR, command.getAppId(), e);
-            auditRejection(principal, command, startedAt,
+            auditRejection(principal, call.command(), startedAt,
                     new BizException(ErrorCode.INTERNAL_ERROR, ErrorCode.INTERNAL_ERROR.getDefaultMessage()),
                     ApiAuditService.ENDPOINT_CHAT);
             listener.onError(ErrorCode.INTERNAL_ERROR.name(), ErrorCode.INTERNAL_ERROR.getDefaultMessage());
@@ -217,11 +225,12 @@ public class KnowledgeApiService {
         ResolvedTarget target = new ResolvedTarget(version, appVersionService.parseConfig(version),
                 TargetStage.of(version.getStatus()), false);
         requestOverridePolicy.validate(forbiddenKeysOf(command));
-        KnowledgeCallResult retrieved = retrieve(target, command);
+        EnrichedCall call = enrich(command);
+        KnowledgeCallResult retrieved = retrieve(target, call);
         if (listener == null) {
-            return withAnswer(retrieved, generate(target, command, retrieved.getNodes()));
+            return withAnswer(retrieved, generate(target, call.command(), retrieved.getNodes()));
         }
-        streamGenerate(target, command, retrieved.getNodes(), listener::onDelta);
+        streamGenerate(target, call.command(), retrieved.getNodes(), listener::onDelta);
         listener.onReferences(retrieved.getNodes());
         listener.onDone(RequestIdHolder.get(), retrieved.getDegraded(), retrieved.routedKbIds());
         return retrieved;
@@ -264,13 +273,31 @@ public class KnowledgeApiService {
     }
 
     /**
+     * Folds the attached images into the question before anything else reads it, requirement section 4.8.
+     *
+     * <p>Runs after the authorisation check and before the retrieval, which is what makes the image text
+     * reach the rewrite stage, the recall routes, the generation prompt and the audit digest as one single
+     * question. Every consumer downstream therefore sees the same string and none of them has to know that
+     * an image was involved.
+     *
+     * @param command call parameters as the caller expressed them
+     * @return the same call with an enriched query, plus whatever the image stage degraded
+     */
+    private EnrichedCall enrich(KnowledgeCallCommand command) {
+        ImageQueryService.ImageQueryOutcome outcome =
+                imageQueryService.enrich(command.getQuery(), command.getImages());
+        return new EnrichedCall(command.toBuilder().query(outcome.query()).build(), outcome.degraded());
+    }
+
+    /**
      * Runs the retrieval stage of one call against the frozen configuration.
      *
-     * @param target  resolved application version
-     * @param command call parameters
+     * @param target resolved application version
+     * @param call   call parameters with the image text already folded into the query
      * @return result without an answer
      */
-    private KnowledgeCallResult retrieve(ResolvedTarget target, KnowledgeCallCommand command) {
+    private KnowledgeCallResult retrieve(ResolvedTarget target, EnrichedCall call) {
+        KnowledgeCallCommand command = call.command();
         AppConfigSnapshot snapshot = target.snapshot();
         List<KbRef> kbRefs = snapshot.getKbRefs();
         if (CollectionUtils.isEmpty(kbRefs)) {
@@ -281,12 +308,33 @@ public class KnowledgeApiService {
         List<RetrievalNodeView> nodes = trim(outcome.getNodes(), command.getMaxContentLength());
         return KnowledgeCallResult.builder()
                 .nodes(nodes)
-                .degraded(outcome.getDegraded())
+                .degraded(mergeDegraded(call.imageDegraded(), outcome.getDegraded()))
                 .applied(outcome.getApplied())
                 .appVersionId(target.version().getAppVersionId())
                 .appVersion(target.version().getVersion())
                 .targetStage(target.stage())
                 .build();
+    }
+
+    /**
+     * Joins the markers of the image stage with the ones the pipeline produced.
+     *
+     * <p>The image stage runs outside {@code RetrievalService}, so its marker cannot travel in the search
+     * outcome; joining here keeps the caller with one flat {@code degraded} array whatever produced it.
+     *
+     * @param imageDegraded markers of the image stage
+     * @param pipeline      markers of the retrieval pipeline
+     * @return degradation markers of the whole call, without duplicates
+     */
+    private List<String> mergeDegraded(List<String> imageDegraded, List<String> pipeline) {
+        if (CollectionUtils.isEmpty(imageDegraded)) {
+            return pipeline;
+        }
+        Set<String> merged = new LinkedHashSet<>(imageDegraded);
+        if (CollectionUtils.isNotEmpty(pipeline)) {
+            merged.addAll(pipeline);
+        }
+        return List.copyOf(merged);
     }
 
     /**
@@ -537,5 +585,28 @@ public class KnowledgeApiService {
      */
     private record ResolvedTarget(AppVersion version, AppConfigSnapshot snapshot, TargetStage stage,
                                   boolean snapshotBound) {
+    }
+
+    /**
+     * One call after the image stage, carrying the question every later stage works on.
+     *
+     * <p>Exists so the audit row digests the question that was actually searched with rather than the raw
+     * one: an operator reading the trail has to see the text the ranking came from, and an image only call
+     * would otherwise store an empty digest.
+     *
+     * @param command      call parameters with the image text folded into the query
+     * @param imageDegraded degradation markers the image stage produced, empty on success
+     */
+    private record EnrichedCall(KnowledgeCallCommand command, List<String> imageDegraded) {
+
+        /**
+         * The call before the image stage ran, used while auditing a rejection that happened earlier.
+         *
+         * @param command call parameters as the caller expressed them
+         * @return untouched call
+         */
+        static EnrichedCall of(KnowledgeCallCommand command) {
+            return new EnrichedCall(command, List.of());
+        }
     }
 }

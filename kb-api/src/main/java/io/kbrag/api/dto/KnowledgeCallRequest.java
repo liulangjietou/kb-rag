@@ -10,7 +10,6 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;
 import lombok.Setter;
 import org.apache.commons.collections4.CollectionUtils;
@@ -37,8 +36,14 @@ import java.util.Set;
 @Setter
 public class KnowledgeCallRequest {
 
-    /** User query. */
-    @NotBlank(message = "must not be blank")
+    /**
+     * User query.
+     *
+     * <p>Not bean validated since M9: a call may carry its whole question in {@link #images}, and a blank
+     * {@code query} is only invalid when no image accompanies it - a condition the transport layer cannot
+     * decide, because whether the images could be understood is only known after the vision stage ran. The
+     * application layer holds that single gate.
+     */
     private String query;
 
     /**
@@ -57,6 +62,16 @@ public class KnowledgeCallRequest {
     /** Conversation history, carried by the caller since the API keeps no session state. */
     @Valid
     private List<SearchRequest.MessageRequest> messages;
+
+    /**
+     * Images attached to the question, base64 encoded, requirement section 4.8.
+     *
+     * <p>Base64 and never a URL: fetching a caller supplied link would point this service at whatever host
+     * it names. The count and size ceilings are enforced by the application layer, which is also where the
+     * vision stage and its degradation live - a bean validation annotation here would duplicate the limits
+     * in a second place and drift from the configured ones.
+     */
+    private List<String> images;
 
     /** White listed override: number of returned nodes. */
     @JsonProperty("top_n")
@@ -120,6 +135,7 @@ public class KnowledgeCallRequest {
                 .appVersion(appVersion)
                 .query(query)
                 .messages(toMessages())
+                .images(images)
                 .topN(topN)
                 .scoreThreshold(scoreThreshold)
                 .metadataFilter(metadataFilter == null ? null : metadataFilter.toFilter())

@@ -37,11 +37,12 @@ class DisabledChildVisibilityTest {
         List<RetrievalUnit> units = merger.merge(List.of(candidate("ck_child_a", PARENT_ID)));
 
         DisabledChildVisibility.Visibility result = visibility.apply(units,
-                Map.of(PARENT_ID, List.of("ck_child_b")), false);
+                Map.of(PARENT_ID, List.of(disabledChild("ck_child_b"))), false);
 
         assertEquals(1, result.units().size());
         assertEquals(PARENT_ID, result.units().get(0).getUnitId());
-        assertEquals(List.of("ck_child_b"), result.disabledChildIdsByUnit().get(PARENT_ID));
+        assertEquals(List.of("ck_child_b"), result.disabledChildrenByUnit().get(PARENT_ID).stream()
+                .map(DisabledChildVisibility.DisabledChild::chunkId).toList());
     }
 
     @Test
@@ -49,10 +50,10 @@ class DisabledChildVisibilityTest {
         List<RetrievalUnit> units = merger.merge(List.of(candidate("ck_child_a", PARENT_ID)));
 
         DisabledChildVisibility.Visibility result = visibility.apply(units,
-                Map.of(PARENT_ID, List.of("ck_child_b")), true);
+                Map.of(PARENT_ID, List.of(disabledChild("ck_child_b"))), true);
 
         assertTrue(result.units().isEmpty());
-        assertTrue(result.disabledChildIdsByUnit().isEmpty());
+        assertTrue(result.disabledChildrenByUnit().isEmpty());
     }
 
     @Test
@@ -62,7 +63,7 @@ class DisabledChildVisibilityTest {
                 candidate("ck_child_c", OTHER_PARENT_ID)));
 
         DisabledChildVisibility.Visibility result = visibility.apply(units,
-                Map.of(PARENT_ID, List.of("ck_child_b")), true);
+                Map.of(PARENT_ID, List.of(disabledChild("ck_child_b"))), true);
 
         assertEquals(List.of(OTHER_PARENT_ID),
                 result.units().stream().map(RetrievalUnit::getUnitId).toList());
@@ -74,10 +75,10 @@ class DisabledChildVisibilityTest {
         List<RetrievalUnit> units = merger.merge(List.of(candidate("ck_flat", null)));
 
         DisabledChildVisibility.Visibility result = visibility.apply(units,
-                Map.of("ck_flat", List.of("ck_child_b")), true);
+                Map.of("ck_flat", List.of(disabledChild("ck_child_b"))), true);
 
         assertEquals(List.of("ck_flat"), result.units().stream().map(RetrievalUnit::getUnitId).toList());
-        assertTrue(result.disabledChildIdsByUnit().isEmpty());
+        assertTrue(result.disabledChildrenByUnit().isEmpty());
     }
 
     @Test
@@ -87,8 +88,14 @@ class DisabledChildVisibilityTest {
         DisabledChildVisibility.Visibility result = visibility.apply(units, Map.of(), true);
 
         assertEquals(1, result.units().size());
-        assertTrue(result.disabledChildIdsByUnit().isEmpty());
+        assertTrue(result.disabledChildrenByUnit().isEmpty());
         assertFalse(result.units().isEmpty());
+    }
+
+    private DisabledChildVisibility.DisabledChild disabledChild(String chunkId) {
+        // No offsets: this suite is about which parents survive the switch, which the M9 precise redaction
+        // does not change. The redaction itself is covered by ParentTextRedactorTest and RetrievalServiceTest.
+        return new DisabledChildVisibility.DisabledChild(chunkId, null, null);
     }
 
     private RetrievalCandidate candidate(String chunkId, String parentId) {

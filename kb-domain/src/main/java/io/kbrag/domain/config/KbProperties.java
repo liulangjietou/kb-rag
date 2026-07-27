@@ -81,6 +81,9 @@ public class KbProperties {
     /** Retrieval defaults. */
     private Retrieval retrieval = new Retrieval();
 
+    /** Annotation workbench policy, requirement section 4.5. */
+    private Annotation annotation = new Annotation();
+
     /** Knowledge graph connectivity and traversal defaults, requirement section 4.9. */
     private Graph graph = new Graph();
 
@@ -682,6 +685,43 @@ public class KbProperties {
 
         /** Lower bound of the parent candidate target. */
         private int parentCandidateFloor = 20;
+
+        /**
+         * Images one call may attach to its query, requirement section 4.8.
+         *
+         * <p>Bounds the vision fan out rather than a screen: every image costs its own model round trip
+         * before the search even starts, so this is the number the latency promise is computed against.
+         */
+        private int imageQueryMaxCount = 3;
+
+        /** Largest decoded size of a single query image in bytes. */
+        private int imageQueryMaxBytes = 5_242_880;
+
+        /**
+         * Largest decoded size of all query images of one call in bytes.
+         *
+         * <p>Not derived from the two above: three images at the per image ceiling would be fifteen
+         * megabytes of request body, which is a memory budget rather than an image size question.
+         */
+        private int imageQueryMaxTotalBytes = 10_485_760;
+    }
+
+    /**
+     * Annotation workbench policy, requirement section 4.5.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Annotation {
+
+        /**
+         * Lowest Dice coefficient a cross version migration recommendation must reach.
+         *
+         * <p>Tuned as a recall/noise trade off rather than a correctness one: nothing is migrated
+         * automatically, so a low threshold only costs the operator a longer list to read, while a high one
+         * hides the moderately edited chunk that is usually the right answer.
+         */
+        private double migrationMinScore = 0.35d;
     }
 
     /**

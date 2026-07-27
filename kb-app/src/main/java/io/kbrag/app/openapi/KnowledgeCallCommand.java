@@ -22,8 +22,8 @@ import java.util.Set;
  * @author owlzhangfq@gmail.com
  */
 @Getter
-@Builder
-@ToString(exclude = {"query", "messages"})
+@Builder(toBuilder = true)
+@ToString(exclude = {"query", "messages", "images"})
 public class KnowledgeCallCommand {
 
     /** Application business id. */
@@ -37,6 +37,14 @@ public class KnowledgeCallCommand {
 
     /** Conversation history the caller carries, used by the multi turn rewrite stage. */
     private final List<ChatMessage> messages;
+
+    /**
+     * Images attached to the question, base64 encoded, requirement section 4.8.
+     *
+     * <p>Not an override and therefore not on the white list: an image is part of the question the caller
+     * asks, exactly like {@link #query}, rather than a retrieval parameter the version snapshot froze.
+     */
+    private final List<String> images;
 
     /** White listed override: number of returned nodes. */
     private final Integer topN;

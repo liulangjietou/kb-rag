@@ -15,6 +15,7 @@ import io.kbrag.domain.enums.InheritStatus;
 import io.kbrag.domain.mapper.AnnotationMapper;
 import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.mapper.DocumentVersionMapper;
+import io.kbrag.domain.service.AnnotationMigrationAdvisor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
@@ -214,10 +215,13 @@ public class AnnotationInheritanceService {
      * <p>A payload that does not say is read as enabled: inheriting a disable is the destructive
      * direction, and guessing it from a malformed row would remove content nobody excluded.
      *
+     * <p>Public because the assisted migration replays the very same decision against a chunk of the new
+     * version; two readers of one schemaless payload would eventually disagree on what a missing key means.
+     *
      * @param annotation toggle annotation
      * @return {@code true} when the annotation enabled the chunk
      */
-    private boolean enabledOf(Annotation annotation) {
+    public boolean enabledOf(Annotation annotation) {
         Object value = payloadOf(annotation).get(AnnotationPayloadKeys.ENABLED);
         if (value instanceof Boolean flag) {
             return flag;
@@ -225,7 +229,13 @@ public class AnnotationInheritanceService {
         return value == null || Boolean.parseBoolean(String.valueOf(value));
     }
 
-    private Map<String, Object> payloadOf(Annotation annotation) {
+    /**
+     * Parses the operation detail of an annotation.
+     *
+     * @param annotation stored annotation
+     * @return payload document, empty when the column is blank or unreadable
+     */
+    public Map<String, Object> payloadOf(Annotation annotation) {
         if (annotation.getPayload() == null || annotation.getPayload().isBlank()) {
             return Map.of();
         }
@@ -266,7 +276,11 @@ public class AnnotationInheritanceService {
                 annotation.getChunkTextHash(),
                 annotation.getInheritStatus() == null ? null : annotation.getInheritStatus().name(),
                 annotation.getOperator(),
-                annotation.getCreatedAt() == null ? null : annotation.getCreatedAt().toString());
+                annotation.getCreatedAt() == null ? null : annotation.getCreatedAt().toString(),
+                // Empty here and filled in by the migration service: the recommendation is computed per
+                // request against the newly activated version, and the staleness count that also calls this
+                // method has no use for it.
+                List.of());
     }
 
     private int orEnabled(Chunk chunk) {
@@ -300,11 +314,26 @@ public class AnnotationInheritanceService {
      * @param inheritStatus     cross version state of the annotation
      * @param operator          console account that performed the operation
      * @param createdAt         ISO timestamp of the operation
+     * @param suggestions       chunks of the newly activated version this annotation could be moved to,
+     *                          always a list and empty when nothing is similar enough
      */
     public record PendingAnnotation(String annotationId, String kbId, String docId,
                                     String documentVersionId, String version, String chunkId,
                                     String annotationType, Map<String, Object> payload, String excerpt,
                                     String chunkTextHash, String inheritStatus, String operator,
-                                    String createdAt) {
+                                    String createdAt,
+                                    List<AnnotationMigrationAdvisor.Suggestion> suggestions) {
+
+        /**
+         * Copies this row with its migration recommendations attached.
+         *
+         * @param suggestions recommendations for this row, never {@code null}
+         * @return decorated row
+         */
+        public PendingAnnotation withSuggestions(List<AnnotationMigrationAdvisor.Suggestion> suggestions) {
+            return new PendingAnnotation(annotationId, kbId, docId, documentVersionId, version, chunkId,
+                    annotationType, payload, excerpt, chunkTextHash, inheritStatus, operator, createdAt,
+                    suggestions);
+        }
     }
 }

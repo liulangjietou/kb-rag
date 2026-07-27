@@ -2,7 +2,9 @@ package io.kbrag.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.kbrag.app.annotation.AnnotationInheritanceService;
+import io.kbrag.domain.service.AnnotationMigrationAdvisor;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,6 +35,9 @@ import java.util.Map;
  * @param inheritStatus     cross version state of the annotation
  * @param operator          console account that performed the operation
  * @param createdAt         ISO timestamp of the operation
+ * @param suggestions       chunks of the active version this annotation could be moved to, always present
+ *                          and empty when nothing is similar enough - a console binding a list must never
+ *                          have to branch on a missing field
  *
  * @author owlzhangfq@gmail.com
  */
@@ -49,7 +54,8 @@ public record PendingAnnotationResponse(
         @JsonProperty("chunk_text_hash") String chunkTextHash,
         @JsonProperty("inherit_status") String inheritStatus,
         String operator,
-        @JsonProperty("created_at") String createdAt) {
+        @JsonProperty("created_at") String createdAt,
+        List<MigrationSuggestionResponse> suggestions) {
 
     /**
      * Maps a view onto its response.
@@ -71,6 +77,32 @@ public record PendingAnnotationResponse(
                 pending.chunkTextHash(),
                 pending.inheritStatus(),
                 pending.operator(),
-                pending.createdAt());
+                pending.createdAt(),
+                pending.suggestions() == null ? List.of()
+                        : pending.suggestions().stream().map(MigrationSuggestionResponse::from).toList());
+    }
+
+    /**
+     * One chunk of the active version an annotation could be moved to.
+     *
+     * @param chunkId        chunk business id, the value the migrate endpoint takes
+     * @param contentPreview leading characters of the chunk, at most 120, so an operator can recognise it
+     * @param score          symmetric Dice similarity between {@code 0.0} and {@code 1.0}
+     */
+    public record MigrationSuggestionResponse(
+            @JsonProperty("chunk_id") String chunkId,
+            @JsonProperty("content_preview") String contentPreview,
+            double score) {
+
+        /**
+         * Maps a recommendation onto its response.
+         *
+         * @param suggestion recommendation
+         * @return response
+         */
+        public static MigrationSuggestionResponse from(AnnotationMigrationAdvisor.Suggestion suggestion) {
+            return new MigrationSuggestionResponse(suggestion.chunkId(), suggestion.contentPreview(),
+                    suggestion.score());
+        }
     }
 }

@@ -3,12 +3,14 @@ package io.kbrag.domain.service;
 import io.kbrag.domain.model.ParentChildParams;
 import io.kbrag.domain.model.ParentChunk;
 import io.kbrag.domain.model.SplitChunk;
+import io.kbrag.domain.model.SplitParams;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -90,6 +92,78 @@ class ParentChildSplitterTest {
     void shouldRejectAnOverlapThatCannotAdvance() {
         assertThrows(IllegalArgumentException.class,
                 () -> splitter.split("text", params(true, 400, 100, 100)));
+    }
+
+    @Test
+    void shouldReportOffsetsThatCutTheChildTextOutOfItsParent() {
+        List<ParentChunk> groups = splitter.split(sentences(60), params(true, 200, 60, 10));
+
+        int checked = 0;
+        for (ParentChunk group : groups) {
+            String parentText = group.getParent().getContent();
+            for (SplitChunk child : group.getChildren()) {
+                // The precise redaction of a disabled child cuts exactly this slice out of the parent, so
+                // the identity below is the whole contract of the offsets.
+                assertEquals(child.getContent(),
+                        parentText.substring(child.getStartOffset(), child.getEndOffset()));
+                checked++;
+            }
+        }
+        assertTrue(checked > groups.size(), "a parent should hold more than one child");
+    }
+
+    @Test
+    void shouldDropOffsetsWhenTheParentSliceDiffersFromTheChildText() {
+        // A strategy that rewrites its input - the LLM semantic one - reports a position that no longer
+        // describes the text it returned. Storing it would cut the wrong sentence out of every answer.
+        ParentChildSplitter rewriting = new ParentChildSplitter(
+                fakeSplitter(new SplitChunk(0, "改写后的文本", 6, null, 0, 6)));
+
+        SplitChunk child = rewriting.split("原始文本原始文本", params(true, 200, 60, 10))
+                .get(0).getChildren().get(0);
+
+        assertNull(child.getStartOffset());
+        assertNull(child.getEndOffset());
+    }
+
+    @Test
+    void shouldDropOffsetsThatReachOutsideTheParentText() {
+        ParentChildSplitter overreaching = new ParentChildSplitter(
+                fakeSplitter(new SplitChunk(0, "原始文本原始文本", 8, null, 0, 99)));
+
+        SplitChunk child = overreaching.split("原始文本原始文本", params(true, 200, 60, 10))
+                .get(0).getChildren().get(0);
+
+        assertNull(child.getStartOffset());
+        assertNull(child.getEndOffset());
+    }
+
+    /**
+     * A strategy whose parent pass returns the input untouched and whose child pass returns exactly the
+     * chunk the test wants to describe, offsets included.
+     *
+     * @param child chunk returned by the child pass
+     * @return splitter stub
+     */
+    private TextSplitter fakeSplitter(SplitChunk child) {
+        return new TextSplitter() {
+
+            private boolean parentPassDone;
+
+            @Override
+            public String strategy() {
+                return "fake";
+            }
+
+            @Override
+            public List<SplitChunk> split(String text, SplitParams params) {
+                if (!parentPassDone) {
+                    parentPassDone = true;
+                    return List.of(new SplitChunk(0, text, text.length(), null, 0, text.length()));
+                }
+                return List.of(child);
+            }
+        };
     }
 
     private ParentChildParams params(boolean enabled, int parentMax, int childMax, int childOverlap) {

@@ -3,6 +3,7 @@ package io.kbrag.app.openapi;
 import io.kbrag.app.appcenter.AppService;
 import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.retrieval.AppliedInfo;
+import io.kbrag.app.retrieval.ImageQueryService;
 import io.kbrag.app.retrieval.RetrievalCommand;
 import io.kbrag.app.retrieval.RetrievalIndexOverride;
 import io.kbrag.app.retrieval.RetrievalNodeView;
@@ -14,6 +15,7 @@ import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.entity.App;
 import io.kbrag.domain.entity.AppVersion;
 import io.kbrag.domain.enums.AppVersionStatus;
+import io.kbrag.domain.enums.DegradedReason;
 import io.kbrag.domain.enums.TargetStage;
 import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.AppIndexSnapshot;
@@ -21,8 +23,10 @@ import io.kbrag.domain.model.AppPromptConfig;
 import io.kbrag.domain.model.ChatMessage;
 import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
+import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ChatProviderFactory;
+import io.kbrag.domain.port.VisionProvider;
 import io.kbrag.domain.service.ChatPromptAssembler;
 import io.kbrag.domain.service.ContentBudgetTrimmer;
 import io.kbrag.domain.service.RequestOverridePolicy;
@@ -71,6 +75,7 @@ class KnowledgeApiServiceTest {
     private ChatProviderFactory chatProviderFactory;
     private ChatProvider chatProvider;
     private ApiAuditService apiAuditService;
+    private VisionProvider visionProvider;
     private KnowledgeApiService service;
 
     @BeforeEach
@@ -83,9 +88,10 @@ class KnowledgeApiServiceTest {
         apiAuditService = mock(ApiAuditService.class);
         when(appService.require(APP_ID)).thenReturn(new App());
         when(chatProviderFactory.forModel(any())).thenReturn(chatProvider);
+        visionProvider = mock(VisionProvider.class);
         service = new KnowledgeApiService(appService, appVersionService, retrievalService, chatProviderFactory,
                 new ChatPromptAssembler(), new ContentBudgetTrimmer(), new RequestOverridePolicy(),
-                apiAuditService);
+                apiAuditService, new ImageQueryService(visionProvider, new KbProperties()));
     }
 
     @Test
@@ -379,6 +385,71 @@ class KnowledgeApiServiceTest {
         verify(apiAuditService, never()).recordAsync(any());
     }
 
+    @Test
+    void shouldFoldTheImageTextIntoTheQueryBeforeTheRetrievalPipelineRuns() {
+        stubVersion(AppVersionStatus.RELEASED);
+        stubSearch(node("doc_1", "第一段"));
+        when(visionProvider.isConfigured()).thenReturn(true);
+        when(visionProvider.describeImage(any(), anyString())).thenReturn("一个金属法兰盘的照片");
+
+        service.search(principal(List.of()), commandWithImages(List.of(image())));
+
+        // The rewrite stage lives inside RetrievalService, so a query that already carries the image text
+        // when the command is issued is proof that the concatenation happened before the rewrite.
+        assertEquals("保险条款怎么算\n[图片内容] 一个金属法兰盘的照片", capturedRetrieval().getQuery());
+    }
+
+    @Test
+    void shouldAuditTheConcatenatedQueryRatherThanTheWrittenOne() {
+        stubVersion(AppVersionStatus.RELEASED);
+        stubSearch(node("doc_1", "第一段"));
+        when(visionProvider.isConfigured()).thenReturn(true);
+        when(visionProvider.describeImage(any(), anyString())).thenReturn("一个金属法兰盘的照片");
+
+        service.search(principal(List.of()), commandWithImages(List.of(image())));
+
+        // An operator reading the trail has to see the text the ranking actually came from.
+        assertEquals("保险条款怎么算\n[图片内容] 一个金属法兰盘的照片", capturedAudit().getQuery());
+    }
+
+    @Test
+    void shouldReportTheImageDegradationNextToThePipelineMarkers() {
+        stubVersion(AppVersionStatus.RELEASED);
+        when(retrievalService.search(eq(List.of(KbRef.of(KB_ID))), any())).thenReturn(new SearchOutcome(
+                new ArrayList<>(List.of(node("doc_1", "第一段"))),
+                List.of(DegradedReason.VECTOR_ROUTE_UNAVAILABLE.code()), applied()));
+        when(visionProvider.isConfigured()).thenReturn(false);
+
+        KnowledgeCallResult result = service.search(principal(List.of()),
+                commandWithImages(List.of(image())));
+
+        assertEquals(List.of(DegradedReason.IMAGE_UNDERSTANDING_UNAVAILABLE.code(),
+                DegradedReason.VECTOR_ROUTE_UNAVAILABLE.code()), result.getDegraded());
+        // The written question still ran: an unreadable image never costs the caller its text search.
+        assertEquals("保险条款怎么算", capturedRetrieval().getQuery());
+    }
+
+    @Test
+    void shouldRejectAnImageOnlyCallWhoseImageCouldNotBeUnderstood() {
+        stubVersion(AppVersionStatus.RELEASED);
+        when(visionProvider.isConfigured()).thenReturn(false);
+        KnowledgeCallCommand command = KnowledgeCallCommand.builder()
+                .appId(APP_ID)
+                .query("  ")
+                .messages(List.of())
+                .images(List.of(image()))
+                .presentedOverrideKeys(Set.of())
+                .build();
+
+        BizException failure =
+                assertThrows(BizException.class, () -> service.search(principal(List.of()), command));
+
+        assertEquals(ErrorCode.INVALID_PARAM, failure.getErrorCode());
+        verify(retrievalService, never()).search(anyList(), any());
+        // The rejection is audited like any other: an agent's failed call is part of the trail.
+        assertEquals(ErrorCode.INVALID_PARAM.name(), capturedAudit().getErrorCode());
+    }
+
     private void stubVersion(AppVersionStatus status) {
         AppVersion version = versionOf(status);
         when(appVersionService.resolveForCall(eq(APP_ID), any())).thenReturn(version);
@@ -465,6 +536,25 @@ class KnowledgeApiServiceTest {
                 .maxContentLength(maxContentLength)
                 .presentedOverrideKeys(keys)
                 .build();
+    }
+
+    private KnowledgeCallCommand commandWithImages(List<String> images) {
+        return KnowledgeCallCommand.builder()
+                .appId(APP_ID)
+                .query("保险条款怎么算")
+                .messages(List.of())
+                .images(images)
+                .presentedOverrideKeys(Set.of())
+                .build();
+    }
+
+    /**
+     * Base64 of a small arbitrary payload; the bytes never reach a real provider in these tests.
+     *
+     * @return base64 image payload
+     */
+    private String image() {
+        return java.util.Base64.getEncoder().encodeToString(new byte[]{1, 2, 3, 4});
     }
 
     private KnowledgeCallCommand commandWithKeys(Set<String> keys) {

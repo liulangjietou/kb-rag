@@ -106,12 +106,14 @@ public class ChunkAnnotationService {
         payload.put(AnnotationPayloadKeys.AFTER_EXCERPT, annotationRecorder.excerpt(content));
         payload.put(AnnotationPayloadKeys.BEFORE_HASH, chunk.getChunkTextHash());
 
-        boolean indexable = !isParent(chunkId);
+        List<Chunk> children = childrenOf(chunkId);
+        boolean indexable = CollectionUtils.isEmpty(children);
         chunk.setContent(content);
         chunk.setChunkTextHash(newHash);
         chunk.setEmbeddingStatus(indexable && chunkEmbedder.isConfigured()
                 ? EmbeddingStatus.PENDING : EmbeddingStatus.SKIPPED);
         chunkMapper.updateById(chunk);
+        invalidateParentOffsets(chunk, children);
 
         if (indexable) {
             chunkIndexWriter.write(chunk.getKbId(), List.of(chunk), chunkEmbedder.embed(List.of(chunk)));
@@ -196,6 +198,8 @@ public class ChunkAnnotationService {
         merged.setContent(content);
         merged.setChunkTextHash(chunkTextHasher.hash(content));
         merged.setParentId(first.getParentId());
+        // No parent offset: the concatenation inserts a separator between the sources, so the result is not
+        // a slice of the parent text any more and no pair of offsets could describe it honestly.
         merged.setSeq(first.getSeq());
         merged.setChunkType(first.getChunkType());
         // Enabled when at least one source was: a merge is a restructuring, and silently disabling the
@@ -257,6 +261,8 @@ public class ChunkAnnotationService {
             part.setContent(parts.get(index));
             part.setChunkTextHash(chunkTextHasher.hash(parts.get(index)));
             part.setParentId(source.getParentId());
+            // No parent offset either: a part is a slice of the source chunk rather than of the parent, and
+            // the requirement puts every row a merge or a split produces outside the precise redaction.
             part.setSeq(source.getSeq() + index);
             part.setChunkType(source.getChunkType());
             part.setEnabled(Objects.equals(source.getEnabled(), DISABLED) ? DISABLED : ENABLED);
@@ -289,6 +295,40 @@ public class ChunkAnnotationService {
         log.info("chunk split, docId={}, versionId={}, chunkId={}, parts={}, recutChildren={}",
                 source.getDocId(), source.getDocumentVersionId(), chunkId, produced.size(), recutChildren);
         return produced;
+    }
+
+    /**
+     * The single point where a stored child offset is invalidated, requirement section 4.5.
+     *
+     * <p>Two cases, both of them "the text these offsets address has moved". Editing a <b>parent</b>
+     * replaces the very string the offsets are measured in, so every child of it loses its position at
+     * once - keeping any of them would cut a passage out of text that no longer contains it. Editing a
+     * <b>child</b> replaces the text the offsets are supposed to delimit, so that one child loses its
+     * position. The third case the requirement lists - the rows a merge or a split produces - needs no code
+     * here: those rows are inserted fresh and a fresh row carries no offset, which is the same statement
+     * expressed by construction rather than by an update.
+     *
+     * <p>Written through an update wrapper rather than through the entity, because {@code updateById}
+     * skips {@code null} fields by design and would leave the stale pair in place.
+     *
+     * @param chunk    chunk whose text was just replaced
+     * @param children children of that chunk, empty when it is not a parent
+     */
+    private void invalidateParentOffsets(Chunk chunk, List<Chunk> children) {
+        LambdaUpdateWrapper<Chunk> wrapper = new LambdaUpdateWrapper<Chunk>()
+                .set(Chunk::getParentStartOffset, null)
+                .set(Chunk::getParentEndOffset, null);
+        if (CollectionUtils.isNotEmpty(children)) {
+            chunkMapper.update(null, wrapper.eq(Chunk::getParentId, chunk.getChunkId()));
+            log.info("child offsets invalidated because the parent text changed, chunkId={}, children={}",
+                    chunk.getChunkId(), children.size());
+            return;
+        }
+        if (chunk.getParentId() == null) {
+            return;
+        }
+        chunkMapper.update(null, wrapper.eq(Chunk::getChunkId, chunk.getChunkId()));
+        log.info("child offset invalidated because the child text changed, chunkId={}", chunk.getChunkId());
     }
 
     /**
@@ -436,10 +476,6 @@ public class ChunkAnnotationService {
     private void removeChunks(String kbId, List<String> chunkIds) {
         knowledgeBaseService.removeChunks(kbId, new LambdaQueryWrapper<Chunk>()
                 .in(Chunk::getChunkId, chunkIds));
-    }
-
-    private boolean isParent(String chunkId) {
-        return CollectionUtils.isNotEmpty(childrenOf(chunkId));
     }
 
     private List<Chunk> childrenOf(String chunkId) {

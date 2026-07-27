@@ -847,6 +847,13 @@ public class IndexPipelineService {
         chunk.setContent(splitChunk.getContent());
         chunk.setChunkTextHash(chunkTextHasher.hash(splitChunk.getContent()));
         chunk.setParentId(parentId);
+        if (parentId != null) {
+            // Only a child has a position worth storing: the offsets of a single level chunk are relative
+            // to the whole document, and storing them in a column the retrieval side reads as "inside my
+            // parent" would make it cut a passage out of the wrong text.
+            chunk.setParentStartOffset(splitChunk.getStartOffset());
+            chunk.setParentEndOffset(splitChunk.getEndOffset());
+        }
         chunk.setSeq(splitChunk.getSeq());
         chunk.setChunkType(chunkType);
         chunk.setEnabled(ENABLED);

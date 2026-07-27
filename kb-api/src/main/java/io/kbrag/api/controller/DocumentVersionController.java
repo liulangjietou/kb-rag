@@ -4,11 +4,9 @@ import io.kbrag.api.dto.ActivateImpactResponse;
 import io.kbrag.api.dto.ActivateVersionResponse;
 import io.kbrag.api.dto.DocumentVersionResponse;
 import io.kbrag.api.dto.PendingAnnotationResponse;
-import io.kbrag.app.annotation.AnnotationInheritanceService;
-import io.kbrag.app.document.DocumentService;
+import io.kbrag.app.annotation.AnnotationMigrationService;
 import io.kbrag.app.document.DocumentVersionService;
 import io.kbrag.common.api.Result;
-import io.kbrag.domain.entity.Document;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,9 +28,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class DocumentVersionController {
 
-    private final DocumentService documentService;
     private final DocumentVersionService documentVersionService;
-    private final AnnotationInheritanceService annotationInheritanceService;
+    private final AnnotationMigrationService annotationMigrationService;
 
     /**
      * Lists the versions of a document, newest first.
@@ -80,14 +77,15 @@ public class DocumentVersionController {
      * <p>Only genuinely open items are returned - nothing that was inherited automatically or performed
      * again - so the length of the list is the number the console shows.
      *
+     * <p>Every row carries its migration recommendations, computed for this request against the version
+     * that is active right now (requirement section 4.5). The list is always present and may be empty.
+     *
      * @param docId document business id
      * @return review items, newest first
      */
     @GetMapping("/annotations/pending-review")
     public Result<List<PendingAnnotationResponse>> pendingReview(@PathVariable String docId) {
-        Document document = documentService.require(docId);
-        return Result.success(annotationInheritanceService
-                .pendingReview(docId, document.getCurrentVersionId()).stream()
+        return Result.success(annotationMigrationService.pendingReview(docId).stream()
                 .map(PendingAnnotationResponse::from).toList());
     }
 }

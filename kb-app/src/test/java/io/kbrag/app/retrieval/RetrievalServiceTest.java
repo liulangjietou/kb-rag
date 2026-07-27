@@ -36,6 +36,7 @@ import io.kbrag.domain.port.VectorStore;
 import io.kbrag.domain.service.CrossKbRrfFusion;
 import io.kbrag.domain.service.FusionRouter;
 import io.kbrag.domain.service.KbQuotaAllocator;
+import io.kbrag.domain.service.ParentTextRedactor;
 import io.kbrag.domain.service.RrfFusion;
 import io.kbrag.domain.service.WeightedFusion;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,6 +73,10 @@ class RetrievalServiceTest {
 
     private static final String KB_ID = "kb_test";
     private static final String VERSION_ID = "dv_test";
+
+    /** Parent chunk of the precise redaction cases; index 2 to 5 is the passage a disabled child covers. */
+    private static final String PARENT_ID = "ck_parent";
+    private static final String PARENT_TEXT = "甲乙丙丁戊己庚辛";
     private static final String FULLTEXT_ALIAS = "kb_test_es";
     private static final String VECTOR_ALIAS = "kb_test_es";
     private static final String SNAPSHOT_INDEX = "kb_test_none_s1";
@@ -143,7 +148,8 @@ class RetrievalServiceTest {
                 new CrossKbRrfFusion(), new KbQuotaAllocator(), graphRetrievalService, routingService,
                 rewriteService, rerankService, new ScoreThresholdPolicy(), new ParentChildMerger(),
                 new NearDuplicateWindowMerger(),
-                new DisabledChildVisibility(chunkMapper), engineChunkCleaner, objectStorage,
+                new DisabledChildVisibility(chunkMapper), new ParentTextRedactor(),
+                engineChunkCleaner, objectStorage,
                 new RetrievalDegradeMonitor(properties), properties);
     }
 
@@ -808,6 +814,107 @@ class RetrievalServiceTest {
 
         verify(graphRetrievalService, never()).recall(anyString(), any(), anyInt());
         assertTrue(outcome.getDegraded().isEmpty());
+    }
+
+    @Test
+    void shouldCutTheDisabledChildOutOfTheParentTextAndCountIt() {
+        givenTwoLevelBase(false);
+        givenParentChildRecall(disabledChild("ck_off", 2, 5));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().build());
+
+        RetrievalNodeView node = outcome.getNodes().get(0);
+        assertEquals("甲乙" + ParentTextRedactor.REDACTION_MARK + "己庚辛", node.getContent());
+        assertEquals(1, node.getMetadata().get("redacted_child_count"));
+        // The ids stay next to the count: a caller has to know which child was excluded, not only how many.
+        assertEquals(List.of("ck_off"), node.getMetadata().get("disabled_child_ids"));
+    }
+
+    @Test
+    void shouldReturnTheWholeParentWhenADisabledChildLostItsOffset() {
+        givenTwoLevelBase(false);
+        givenParentChildRecall(disabledChild("ck_off", null, null));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().build());
+
+        RetrievalNodeView node = outcome.getNodes().get(0);
+        // A half redacted parent reads as complete while missing a section, so an unknown offset falls back
+        // to the pre M9 behaviour: the whole parent plus the disabled child marker.
+        assertEquals(PARENT_TEXT, node.getContent());
+        assertFalse(node.getMetadata().containsKey("redacted_child_count"));
+        assertEquals(List.of("ck_off"), node.getMetadata().get("disabled_child_ids"));
+    }
+
+    @Test
+    void shouldReportNoRedactionCountWhenNoChildIsDisabled() {
+        givenTwoLevelBase(false);
+        givenParentChildRecall();
+
+        RetrievalNodeView node = retrievalService.search(KB_ID, command().build()).getNodes().get(0);
+
+        assertEquals(PARENT_TEXT, node.getContent());
+        assertFalse(node.getMetadata().containsKey("redacted_child_count"));
+        assertFalse(node.getMetadata().containsKey("disabled_child_ids"));
+    }
+
+    @Test
+    void shouldKeepHidingTheWholeParentWhenTheStrictSwitchIsOn() {
+        givenTwoLevelBase(true);
+        givenParentChildRecall(disabledChild("ck_off", 2, 5));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().build());
+
+        // The strict base never redacts: it removes the unit, exactly as it did before this milestone.
+        assertTrue(outcome.getNodes().isEmpty());
+    }
+
+    /**
+     * A two level knowledge base with the parent suppression switch in the requested position.
+     *
+     * @param hideParentWithDisabledChild value of the knowledge base switch
+     */
+    private void givenTwoLevelBase(boolean hideParentWithDisabledChild) {
+        KbIndexConfig config = indexConfig(true);
+        config.setHideParentWithDisabledChild(hideParentWithDisabledChild);
+        KnowledgeBase knowledgeBase = knowledgeBase(true);
+        knowledgeBase.setIndexConfig(JsonUtil.toJson(config));
+        when(knowledgeBaseService.require(KB_ID)).thenReturn(knowledgeBase);
+        when(knowledgeBaseService.indexConfigOf(any(KnowledgeBase.class))).thenReturn(config);
+    }
+
+    /**
+     * One recalled child under a parent, with the disabled siblings the fact source holds.
+     *
+     * <p>The three consecutive answers mirror the three reads the pipeline performs: the fact source rows
+     * of the candidates, the disabled children of the returned parents, and the parent rows themselves.
+     *
+     * @param disabled disabled children of the parent, possibly none
+     */
+    private void givenParentChildRecall(Chunk... disabled) {
+        when(embeddingProvider.isConfigured()).thenReturn(false);
+        when(fulltextStore.searchBm25(anyString(), any()))
+                .thenReturn(List.of(new ScoredChunk("ck_hit", 9.0d, RetrievalSource.BM25)));
+        Chunk parent = chunk(PARENT_ID, PARENT_TEXT, null);
+        when(chunkMapper.selectList(any()))
+                .thenReturn(List.of(chunk("ck_hit", "丁戊", PARENT_ID)))
+                .thenReturn(List.of(disabled))
+                .thenReturn(List.of(parent));
+    }
+
+    /**
+     * A disabled child row of the parent under test.
+     *
+     * @param chunkId child chunk business id
+     * @param start   start offset inside the parent text, {@code null} when it was invalidated
+     * @param end     exclusive end offset inside the parent text
+     * @return disabled child row
+     */
+    private Chunk disabledChild(String chunkId, Integer start, Integer end) {
+        Chunk child = chunk(chunkId, "丙丁戊", PARENT_ID);
+        child.setEnabled(0);
+        child.setParentStartOffset(start);
+        child.setParentEndOffset(end);
+        return child;
     }
 
     /**

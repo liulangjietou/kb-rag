@@ -58,7 +58,18 @@ public enum DegradedReason {
      * snapshot switches the graph route off by design - the graph holds active version semantics and has
      * no frozen copy - which is a capability boundary rather than a fault and carries no marker.
      */
-    GRAPH_ROUTE_UNAVAILABLE("graph_route_unavailable");
+    GRAPH_ROUTE_UNAVAILABLE("graph_route_unavailable"),
+
+    /**
+     * The call carried images but none of them could be turned into text, so the retrieval ran on the
+     * written query alone, requirement section 4.8.
+     *
+     * <p>Reported whenever an image was sent and its understanding did not happen - no vision model
+     * configured, a timeout, a provider failure. Unlike the rewrite and rerank markers there is no "not
+     * requested" case to distinguish: attaching an image <em>is</em> the request, so a caller that gets no
+     * image semantics into its query always has to be told.
+     */
+    IMAGE_UNDERSTANDING_UNAVAILABLE("image_understanding_unavailable");
 
     private final String code;
 

@@ -110,6 +110,20 @@ public class AnnotationRecorder {
                 : text.substring(0, EXCERPT_MAX_LENGTH) + ELLIPSIS;
     }
 
+    /**
+     * Tells whether an excerpt lost text on its way into the payload.
+     *
+     * <p>Asked by the assisted migration before it replays an edit: an excerpt is a display artefact, and
+     * writing a truncated one back as the full text of a chunk would silently delete the tail of a passage.
+     * Recognising the marker is the only way to tell the two apart, since the payload stores no length.
+     *
+     * @param excerpt excerpt read back from a payload, {@code null} tolerated
+     * @return {@code true} when the stored text is a prefix of the original one
+     */
+    public boolean truncated(String excerpt) {
+        return excerpt != null && excerpt.length() > EXCERPT_MAX_LENGTH && excerpt.endsWith(ELLIPSIS);
+    }
+
     private Annotation record(Chunk context, String chunkId, AnnotationType type, String discriminator,
                               Map<String, Object> payload, InheritStatus inheritStatus) {
         String key = HashUtil.sha256Hex(String.join(KEY_SEPARATOR, chunkId, type.name(), discriminator));

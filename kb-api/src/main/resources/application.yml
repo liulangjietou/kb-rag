@@ -193,6 +193,15 @@ kb:
     # against a mutation path nobody wired to that invalidation.
     visible-version-cache-ttl-minutes: ${RETRIEVAL_VISIBLE_VERSION_CACHE_TTL_MINUTES:5}
     visible-version-cache-max-size: ${RETRIEVAL_VISIBLE_VERSION_CACHE_MAX_SIZE:1000}
+    # Image query, requirement section 4.8. Every image costs a vision round trip before the search starts,
+    # so the count is the latency budget and the two byte ceilings are the memory budget of one request.
+    image-query-max-count: ${IMAGE_QUERY_MAX_COUNT:3}
+    image-query-max-bytes: ${IMAGE_QUERY_MAX_BYTES:5242880}
+    image-query-max-total-bytes: ${IMAGE_QUERY_MAX_TOTAL_BYTES:10485760}
+  annotation:
+    # Lowest Dice coefficient a cross version migration recommendation must reach. Nothing is migrated
+    # automatically, so a low value only lengthens the list an operator reads.
+    migration-min-score: ${ANNOTATION_MIGRATION_MIN_SCORE:0.35}
   graph:
     # Blank disables the whole graph capability: no driver is created, the health endpoint does not probe
     # Neo4j, the graph route never runs and the extraction endpoint refuses. Everything else is unaffected.

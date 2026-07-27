@@ -33,6 +33,7 @@ import io.kbrag.domain.port.VectorStore;
 import io.kbrag.domain.service.CrossKbRrfFusion;
 import io.kbrag.domain.service.FusionRouter;
 import io.kbrag.domain.service.KbQuotaAllocator;
+import io.kbrag.domain.service.ParentTextRedactor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
@@ -122,6 +123,13 @@ public class RetrievalService {
     private static final String META_DISABLED_CHILD_IDS = "disabled_child_ids";
 
     /**
+     * Disabled children whose passage was actually cut out of the returned parent text, requirement
+     * section 4.5. Present only when a cut happened, so its absence means "the parent is complete" - a
+     * parent that could not be redacted precisely carries {@code disabled_child_ids} and no count.
+     */
+    private static final String META_REDACTED_CHILD_COUNT = "redacted_child_count";
+
+    /**
      * Chat window chunks this result absorbed because their message ranges overlapped it, requirement
      * section 4.2. Present only on a node that absorbed at least one, so its absence means "nothing was
      * merged" rather than "this deployment does not merge".
@@ -162,6 +170,7 @@ public class RetrievalService {
     private final ParentChildMerger parentChildMerger;
     private final NearDuplicateWindowMerger nearDuplicateWindowMerger;
     private final DisabledChildVisibility disabledChildVisibility;
+    private final ParentTextRedactor parentTextRedactor;
     private final EngineChunkCleaner engineChunkCleaner;
     private final ObjectStorage objectStorage;
     private final RetrievalDegradeMonitor degradeMonitor;
@@ -302,7 +311,7 @@ public class RetrievalService {
         }
 
         List<RetrievalNodeView> nodes = toNodes(units, decision, orderingMode,
-                visibility.disabledChildIdsByUnit(), nearDuplicates);
+                visibility.disabledChildrenByUnit(), nearDuplicates);
         log.info("search finished, routedKbIds={}, recallTopK={}, topN={}, fusion={}, candidates={}, "
                         + "units={}, returned={}, rerank={}, degraded={}",
                 routing.getKbIds(), settings.getRecallTopK(), settings.getTopN(), orderingMode.code(),
@@ -823,14 +832,15 @@ public class RetrievalService {
      *                               base call, reciprocal rank fusion once bases were merged
      * @param units                  surviving units in ranking order
      * @param decision               threshold decision of this search
-     * @param disabledChildIdsByUnit disabled child ids to report per unit
+     * @param disabledChildrenByUnit disabled children to report per unit
      * @param nearDuplicates         outcome of the near duplicate window merge
      * @return ordered nodes
      */
     private List<RetrievalNodeView> toNodes(List<RetrievalUnit> units,
                                             ScoreThresholdPolicy.ThresholdDecision decision,
                                             FusionMode orderingMode,
-                                            Map<String, List<String>> disabledChildIdsByUnit,
+                                            Map<String, List<DisabledChildVisibility.DisabledChild>>
+                                                    disabledChildrenByUnit,
                                             NearDuplicateWindowMerger.Outcome nearDuplicates) {
         if (CollectionUtils.isEmpty(units)) {
             return List.of();
@@ -844,17 +854,20 @@ public class RetrievalService {
             Chunk answerChunk = unit.isParent()
                     ? parentById.getOrDefault(unit.getUnitId(), best.getChunk())
                     : best.getChunk();
+            List<DisabledChildVisibility.DisabledChild> disabledChildren =
+                    disabledChildrenByUnit.get(unit.getUnitId());
+            ParentTextRedactor.Redaction redaction = redact(answerChunk, disabledChildren);
             nodes.add(RetrievalNodeView.builder()
                     .docId(answerChunk.getDocId())
                     .documentVersionId(answerChunk.getDocumentVersionId())
                     .chunkId(answerChunk.getChunkId())
                     .chunkType(answerChunk.getChunkType().code())
-                    .content(answerChunk.getContent())
+                    .content(redaction.text())
                     .score(reported.getValue())
                     .scoreType(reported.getType().code())
                     .retrievalSource(best.getFused().getPrimarySource().code())
                     .metadata(buildMetadata(unit, answerChunk, decision, orderingMode,
-                            disabledChildIdsByUnit.get(unit.getUnitId()),
+                            disabledChildren, redaction,
                             // Keyed by the best member rather than by the unit: the merge judged candidates,
                             // and on a two level base the unit id is a parent that was never a candidate.
                             nearDuplicates.mergedIdsOf(best.chunkId())))
@@ -863,6 +876,26 @@ public class RetrievalService {
                     .build());
         }
         return nodes;
+    }
+
+    /**
+     * Cuts the excluded passages out of a returned parent text, requirement section 4.5.
+     *
+     * <p>Reached only for a parent the knowledge base decided to return - the strict switch removed the
+     * others before this point - and only when the disabled children still know where they sit. Otherwise
+     * the redactor hands the text back untouched, which is the pre M9 behaviour.
+     *
+     * @param answerChunk      chunk whose text is returned
+     * @param disabledChildren excluded children of that chunk, {@code null} when there are none
+     * @return text to return with the number of passages that were cut
+     */
+    private ParentTextRedactor.Redaction redact(
+            Chunk answerChunk, List<DisabledChildVisibility.DisabledChild> disabledChildren) {
+        if (CollectionUtils.isEmpty(disabledChildren)) {
+            return new ParentTextRedactor.Redaction(answerChunk.getContent(), 0);
+        }
+        return parentTextRedactor.redact(answerChunk.getContent(), disabledChildren.stream()
+                .map(DisabledChildVisibility.DisabledChild::toSpan).toList());
     }
 
     /**
@@ -970,7 +1003,8 @@ public class RetrievalService {
     private Map<String, Object> buildMetadata(RetrievalUnit unit, Chunk answerChunk,
                                               ScoreThresholdPolicy.ThresholdDecision decision,
                                               FusionMode orderingMode,
-                                              List<String> disabledChildIds,
+                                              List<DisabledChildVisibility.DisabledChild> disabledChildren,
+                                              ParentTextRedactor.Redaction redaction,
                                               List<String> mergedWindowChunkIds) {
         Map<String, Object> metadata = new LinkedHashMap<>(scoreMetadata(unit.best()));
         // Read from the fact source row rather than from the routing decision: a node has to be traceable
@@ -991,10 +1025,14 @@ public class RetrievalService {
         if (!unit.isParent()) {
             return metadata;
         }
-        if (CollectionUtils.isNotEmpty(disabledChildIds)) {
-            // The parent text is returned in full, so the caller is told which passages inside it an
-            // operator excluded rather than being left to assume the whole parent is approved.
-            metadata.put(META_DISABLED_CHILD_IDS, disabledChildIds);
+        if (CollectionUtils.isNotEmpty(disabledChildren)) {
+            // Reported whether or not the text could be cut: the caller has to be able to tell that
+            // something inside this parent was excluded, and the two cases differ only by the count below.
+            metadata.put(META_DISABLED_CHILD_IDS, disabledChildren.stream()
+                    .map(DisabledChildVisibility.DisabledChild::chunkId).toList());
+        }
+        if (redaction.applied()) {
+            metadata.put(META_REDACTED_CHILD_COUNT, redaction.redactedChildCount());
         }
         metadata.put(META_CHILD_IDS, unit.getMembers().stream().map(RetrievalCandidate::chunkId).toList());
         List<Map<String, Object>> children = new ArrayList<>(unit.getMembers().size());

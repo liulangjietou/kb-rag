@@ -26,6 +26,12 @@ import java.util.List;
  * position that matches the budget. That case is expected for tables and code blocks and never
  * silently drops content.
  *
+ * <p><b>Every segment carries its position in the source text</b> (M9, requirement section 4.5). A packed
+ * chunk is always a contiguous run of segments, so its offsets are the first segment's start plus whatever
+ * the leading trim removed - a by-product of the packing rather than a search performed afterwards. The
+ * two level splitter turns those offsets into {@code t_kb_chunk.parent_start_offset}, which is what lets a
+ * disabled child be cut out of its parent text precisely.
+ *
  * <p>{@code @Primary} since M4b: a second {@link TextSplitter} bean joined the container
  * ({@link LlmSemanticTextSplitter}), and every collaborator that still autowires a single
  * {@code TextSplitter} directly - the two level splitter and the LLM strategy's own fallback path -
@@ -51,6 +57,9 @@ public class FixedLengthTextSplitter implements TextSplitter {
      */
     private static final String SEGMENT_TERMINATORS = "\n.!?;。！？；";
 
+    /** Upper bound of the characters {@link String#trim()} removes, mirrored so offsets match the text. */
+    private static final char TRIM_BOUNDARY = ' ';
+
     private final TokenEstimator tokenEstimator;
 
     @Override
@@ -64,13 +73,13 @@ public class FixedLengthTextSplitter implements TextSplitter {
         if (text == null || text.isBlank()) {
             return chunks;
         }
-        List<String> segments = toSegments(text, params.getMaxTokens());
+        List<Segment> segments = toSegments(text, params.getMaxTokens());
 
-        List<String> buffer = new ArrayList<>();
+        List<Segment> buffer = new ArrayList<>();
         int bufferTokens = 0;
         int seq = 0;
-        for (String segment : segments) {
-            int segmentTokens = tokenEstimator.estimate(segment);
+        for (Segment segment : segments) {
+            int segmentTokens = tokenEstimator.estimate(segment.text());
             if (!buffer.isEmpty() && bufferTokens + segmentTokens > params.getMaxTokens()) {
                 chunks.add(newChunk(seq++, buffer));
                 // Cap the replayed overlap so the next chunk still fits into the budget.
@@ -96,29 +105,31 @@ public class FixedLengthTextSplitter implements TextSplitter {
      *
      * @param text      source text
      * @param maxTokens token budget of a single chunk
-     * @return atomic segments in reading order
+     * @return atomic segments in reading order, each carrying its start offset in {@code text}
      */
-    private List<String> toSegments(String text, int maxTokens) {
-        List<String> raw = new ArrayList<>();
+    private List<Segment> toSegments(String text, int maxTokens) {
+        List<Segment> raw = new ArrayList<>();
         StringBuilder current = new StringBuilder();
+        int segmentStart = 0;
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             current.append(c);
             if (SEGMENT_TERMINATORS.indexOf(c) >= 0) {
-                raw.add(current.toString());
+                raw.add(new Segment(current.toString(), segmentStart));
                 current.setLength(0);
+                segmentStart = i + 1;
             }
         }
         if (current.length() > 0) {
-            raw.add(current.toString());
+            raw.add(new Segment(current.toString(), segmentStart));
         }
 
-        List<String> segments = new ArrayList<>(raw.size());
-        for (String segment : raw) {
-            if (segment.isEmpty()) {
+        List<Segment> segments = new ArrayList<>(raw.size());
+        for (Segment segment : raw) {
+            if (segment.text().isEmpty()) {
                 continue;
             }
-            if (tokenEstimator.estimate(segment) <= maxTokens) {
+            if (tokenEstimator.estimate(segment.text()) <= maxTokens) {
                 segments.add(segment);
                 continue;
             }
@@ -132,17 +143,19 @@ public class FixedLengthTextSplitter implements TextSplitter {
      *
      * @param segment   oversized segment
      * @param maxTokens token budget of a single chunk
-     * @return pieces that individually fit into the budget
+     * @return pieces that individually fit into the budget, each keeping its source position
      */
-    private List<String> hardCut(String segment, int maxTokens) {
-        List<String> pieces = new ArrayList<>();
-        String remaining = segment;
+    private List<Segment> hardCut(Segment segment, int maxTokens) {
+        List<Segment> pieces = new ArrayList<>();
+        String remaining = segment.text();
+        int start = segment.start();
         while (!remaining.isEmpty()) {
             int cut = tokenEstimator.prefixLengthWithinBudget(remaining, maxTokens);
             if (cut <= 0) {
                 cut = 1;
             }
-            pieces.add(remaining.substring(0, cut));
+            pieces.add(new Segment(remaining.substring(0, cut), start));
+            start += cut;
             remaining = remaining.substring(cut);
         }
         return pieces;
@@ -155,14 +168,14 @@ public class FixedLengthTextSplitter implements TextSplitter {
      * @param overlapTokens overlap budget in estimated tokens
      * @return segments replayed at the head of the next chunk
      */
-    private List<String> tailOverlap(List<String> buffer, int overlapTokens) {
-        List<String> overlap = new ArrayList<>();
+    private List<Segment> tailOverlap(List<Segment> buffer, int overlapTokens) {
+        List<Segment> overlap = new ArrayList<>();
         if (overlapTokens <= 0) {
             return overlap;
         }
         int tokens = 0;
         for (int i = buffer.size() - 1; i >= 0; i--) {
-            int segmentTokens = tokenEstimator.estimate(buffer.get(i));
+            int segmentTokens = tokenEstimator.estimate(buffer.get(i).text());
             if (tokens + segmentTokens > overlapTokens) {
                 break;
             }
@@ -172,16 +185,53 @@ public class FixedLengthTextSplitter implements TextSplitter {
         return overlap;
     }
 
-    private int totalTokens(List<String> segments) {
+    private int totalTokens(List<Segment> segments) {
         int total = 0;
-        for (String segment : segments) {
-            total += tokenEstimator.estimate(segment);
+        for (Segment segment : segments) {
+            total += tokenEstimator.estimate(segment.text());
         }
         return total;
     }
 
-    private SplitChunk newChunk(int seq, List<String> segments) {
-        String content = String.join("", segments).trim();
-        return new SplitChunk(seq, content, tokenEstimator.estimate(content));
+    /**
+     * Builds one chunk out of the packed segments and derives its offsets.
+     *
+     * <p>The trim is mirrored on the offsets rather than applied to the text alone, so
+     * {@code source.substring(startOffset, endOffset)} is character for character the chunk content. A
+     * blank packing reports no offsets, because an empty text has no position worth naming.
+     *
+     * @param seq      order of the chunk inside the source text
+     * @param segments contiguous run of segments the chunk is made of
+     * @return chunk with its content, token estimate and source offsets
+     */
+    private SplitChunk newChunk(int seq, List<Segment> segments) {
+        StringBuilder joined = new StringBuilder();
+        for (Segment segment : segments) {
+            joined.append(segment.text());
+        }
+        int begin = 0;
+        int end = joined.length();
+        while (begin < end && joined.charAt(begin) <= TRIM_BOUNDARY) {
+            begin++;
+        }
+        while (begin < end && joined.charAt(end - 1) <= TRIM_BOUNDARY) {
+            end--;
+        }
+        String content = joined.substring(begin, end);
+        if (content.isEmpty()) {
+            return new SplitChunk(seq, content, tokenEstimator.estimate(content));
+        }
+        int start = segments.get(0).start() + begin;
+        return new SplitChunk(seq, content, tokenEstimator.estimate(content), null,
+                start, start + content.length());
+    }
+
+    /**
+     * One atomic segment together with where it starts in the source text.
+     *
+     * @param text  segment text, always a verbatim slice of the source
+     * @param start start offset of {@code text} inside the source
+     */
+    private record Segment(String text, int start) {
     }
 }

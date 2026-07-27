@@ -1,8 +1,10 @@
 package io.kbrag.app.annotation;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import io.kbrag.app.index.ChunkEmbedder;
 import io.kbrag.app.index.ChunkIndexWriter;
 import io.kbrag.app.kb.KnowledgeBaseService;
+import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.Chunk;
@@ -17,18 +19,21 @@ import io.kbrag.domain.service.FixedLengthTextSplitter;
 import io.kbrag.domain.service.SimpleTokenEstimator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -60,6 +65,9 @@ class ChunkAnnotationServiceTest {
 
     @BeforeEach
     void setUp() {
+        // The offset invalidation writes null through an update wrapper, which resolves its column names
+        // from the cache a Spring mapper scan would have filled.
+        MybatisLambdaCache.register(Chunk.class);
         chunkMapper = mock(ChunkMapper.class);
         chunkIndexWriter = mock(ChunkIndexWriter.class);
         chunkEmbedder = mock(ChunkEmbedder.class);
@@ -297,6 +305,108 @@ class ChunkAnnotationServiceTest {
         assertEquals(EmbeddingStatus.SKIPPED, edited.getEmbeddingStatus());
         // Still written to the full text engine: the BM25 route must show the corrected wording.
         verify(chunkIndexWriter, times(1)).write(eq(KB_ID), anyList(), any());
+    }
+
+    @Test
+    void shouldInvalidateTheOffsetOfAnEditedChild() {
+        Chunk child = chunk("ck_child_a", 0, PARENT_ID, "the original passage");
+        child.setParentStartOffset(4);
+        child.setParentEndOffset(24);
+        givenChunk(child);
+        givenNoChildren();
+
+        service.edit("ck_child_a", "the corrected passage");
+
+        // The offsets delimit text that is no longer there, so keeping them would make the retrieval side
+        // cut the wrong sentence out of the parent.
+        LambdaUpdateWrapper<Chunk> wrapper = capturedOffsetInvalidation();
+        assertTrue(wrapper.getSqlSet().contains("parent_start_offset"));
+        assertTrue(wrapper.getSqlSet().contains("parent_end_offset"));
+        assertTrue(wrapper.getTargetSql().contains("chunk_id"));
+    }
+
+    @Test
+    void shouldInvalidateEveryChildOffsetWhenTheParentTextChanges() {
+        givenChunk(chunk(PARENT_ID, 0, null, "the whole section"));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_child_a", 0, PARENT_ID, "first passage"),
+                chunk("ck_child_b", 1, PARENT_ID, "second passage")));
+
+        service.edit(PARENT_ID, "the whole section, rewritten");
+
+        // Editing a parent replaces the very string the offsets are measured in, so all of them go at once.
+        assertTrue(capturedOffsetInvalidation().getTargetSql().contains("parent_id"));
+    }
+
+    @Test
+    void shouldNotTouchAnyOffsetWhenASingleLevelChunkIsEdited() {
+        givenChunk(chunk("ck_1", 0, null, "the original passage"));
+        givenNoChildren();
+
+        service.edit("ck_1", "the corrected passage");
+
+        // No parent, no children: there is no offset in the system that this edit could invalidate.
+        verify(chunkMapper, never()).update(eq(null), any());
+    }
+
+    @Test
+    void shouldNotInvalidateAnyOffsetWhenOnlyTheRetrievalSwitchChanges() {
+        givenChunk(chunk("ck_child_a", 0, PARENT_ID, "first passage"));
+        givenNoChildren();
+
+        service.toggle("ck_child_a", false);
+
+        // Disabling a child is exactly the case the offsets exist for, so a toggle must leave them alone.
+        verify(chunkMapper, never()).update(eq(null), any());
+    }
+
+    @Test
+    void shouldLeaveTheRowAMergeProducesWithoutAnyOffset() {
+        Chunk first = chunk("ck_1", 3, PARENT_ID, "first half");
+        first.setParentStartOffset(0);
+        first.setParentEndOffset(10);
+        Chunk second = chunk("ck_2", 4, PARENT_ID, "second half");
+        second.setParentStartOffset(10);
+        second.setParentEndOffset(21);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(first, second)).thenReturn(List.of());
+
+        Chunk merged = service.merge(List.of("ck_1", "ck_2"));
+
+        // The concatenation inserts a separator, so the result is not a slice of the parent any more.
+        assertNull(merged.getParentStartOffset());
+        assertNull(merged.getParentEndOffset());
+    }
+
+    @Test
+    void shouldLeaveTheRowsASplitProducesWithoutAnyOffset() {
+        Chunk source = chunk("ck_1", 7, PARENT_ID, "abcdefghij");
+        source.setParentStartOffset(20);
+        source.setParentEndOffset(30);
+        givenChunk(source);
+        givenNoChildren();
+
+        List<Chunk> parts = service.split("ck_1", List.of(3, 6));
+
+        assertTrue(parts.stream().allMatch(part -> part.getParentStartOffset() == null));
+        assertTrue(parts.stream().allMatch(part -> part.getParentEndOffset() == null));
+    }
+
+    /**
+     * The offset invalidation the service issued, told apart from the sequence shift of a split by the
+     * columns it writes.
+     *
+     * @return captured update wrapper
+     */
+    @SuppressWarnings("unchecked")
+    private LambdaUpdateWrapper<Chunk> capturedOffsetInvalidation() {
+        ArgumentCaptor<LambdaUpdateWrapper<Chunk>> captor =
+                ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(chunkMapper, atLeastOnce()).update(eq(null), captor.capture());
+        return captor.getAllValues().stream()
+                .filter(wrapper -> wrapper.getSqlSet() != null
+                        && wrapper.getSqlSet().contains("parent_start_offset"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no offset invalidation was issued"));
     }
 
     private void givenChunk(Chunk chunk) {
