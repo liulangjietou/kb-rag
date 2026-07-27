@@ -10,7 +10,7 @@
 kb-rag-server            # parent，统一依赖版本
 ├── kb-common            # Result / ErrorCode / JsonUtil / HashUtil / 异常 / request_id 上下文（不依赖 Spring）
 ├── kb-domain            # 实体 + Mapper + 枚举 + 纯领域算法（切分、融合、指纹、评测指标、门禁裁决）+ 出站端口接口
-├── kb-infrastructure    # 端口实现：Elasticsearch、Milvus、Neo4j、MinIO、模型 Provider、parser 客户端、Webhook
+├── kb-infrastructure    # 端口实现：Elasticsearch、Qdrant、Neo4j、MinIO、模型 Provider、parser 客户端、Webhook
 ├── kb-app               # 应用编排：kb / document / index / retrieval / graph / annotation / eval /
 │                        #           appcenter / openapi / chat / alert / dict / auth / system / config
 └── kb-api               # Controller + DTO + 过滤器 + 健康探针 + Flyway 脚本 + 启动类
@@ -46,7 +46,7 @@ kb-infrastructure 实现 kb-domain 定义的端口接口，kb-app 只依赖端�
 - JDK 17
 - Maven 3.6+
 - MySQL 8、Elasticsearch 8.x、MinIO（必需）
-- Milvus 2.4+（仅完整模式需要，轻量模式留空 `MILVUS_URI` 即可）
+- Qdrant 2.4+（仅完整模式需要，轻量模式留空 `QDRANT_URI` 即可）
 - Neo4j 5（仅 GraphRAG 需要，留空 `NEO4J_URI` 即整体关闭图能力，其余功能完全不受影响）
 
 ## 两种部署形态
@@ -54,7 +54,7 @@ kb-infrastructure 实现 kb-domain 定义的端口接口，kb-app 只依赖端�
 | 形态 | `VECTOR_ENGINE` | 向量路 | 全文路 | 说明 |
 |---|---|---|---|---|
 | 轻量模式（默认） | `es` | Elasticsearch `dense_vector` kNN | 同一个 Elasticsearch 索引 | 最小依赖集，8GB 可跑 |
-| 完整模式 | `milvus` | Milvus collection | 独立的 Elasticsearch BM25 索引 | 换嵌入模型不会连带重建全文索引 |
+| 完整模式 | `qdrant` | Qdrant collection | 独立的 Elasticsearch BM25 索引 | 换嵌入模型不会连带重建全文索引 |
 
 两种形态下向量分都会被换算为标准 cosine 再线性映射到 `[0,1]`，因此同一个相似度阈值在两种形态下语义一致。
 
@@ -69,7 +69,7 @@ kb-infrastructure 实现 kb-domain 定义的端口接口，kb-app 只依赖端�
 - 阈值失去可比分数（BM25 原始分无上界），自动失效并返回 `threshold_inactive`
 - `GET /api/v1/system/model-status` 返回四类模型各自的配置状态，管理台据此置灰依赖模型的功能
 
-同一套装置也用在图能力与向量引擎上：`ModelProviderConfig` 是唯一读模型凭据的地方，凭据为空即注入 `Unconfigured*` 实现；`GraphStoreConfig`（`NEO4J_URI` 空 → `DisabledGraphStore`）与 `MilvusClientConfig`（`MILVUS_URI` 空 → 不建 client、不注册健康探针）镜像同一模式。上游代码只写 `isConfigured()` / `isEnabled()` 一个分支，全链路无 null 检查。
+同一套装置也用在图能力与向量引擎上：`ModelProviderConfig` 是唯一读模型凭据的地方，凭据为空即注入 `Unconfigured*` 实现；`GraphStoreConfig`（`NEO4J_URI` 空 → `DisabledGraphStore`）与 `QdrantClientConfig`（`QDRANT_URI` 空 → 不建 client、不注册健康探针）镜像同一模式。上游代码只写 `isConfigured()` / `isEnabled()` 一个分支，全链路无 null 检查。
 
 后续配置嵌入模型时走「建新物理索引 + 全量嵌入 + 别名原子切换」升级，不是原地改索引。
 
@@ -120,10 +120,10 @@ Query 改写 → 多库路由 → 双路/三路召回（子片粒度）→ 库�
 SERVER_PORT=20000                            # 应用端口，parser 为 20001
 MYSQL_HOST=127.0.0.1  MYSQL_PORT=13306  MYSQL_DB=kb_rag  MYSQL_USER=kbrag  MYSQL_PASSWORD=
 ES_URI=http://127.0.0.1:9200
-MILVUS_URI=                                  # 轻量模式留空
+QDRANT_URI=                                  # 轻量模式留空
 NEO4J_URI=                                   # 留空即关闭 GraphRAG
 MINIO_ENDPOINT=http://127.0.0.1:9000  MINIO_ACCESS_KEY=<必填>  MINIO_SECRET_KEY=<必填>  MINIO_BUCKET=kb-files
-VECTOR_ENGINE=es                             # es | milvus
+VECTOR_ENGINE=es                             # es | qdrant
 DASHSCOPE_API_KEY=                           # 留空即零 Key 模式
 EMBEDDING_MODEL=text-embedding-v4  EMBEDDING_DIM=1024
 RERANK_MODEL=gte-rerank-v2                   # 留空 RERANK_API_KEY 即关闭重排
@@ -137,7 +137,7 @@ CORS_ALLOWED_ORIGINS=http://localhost:20002  # 管理台地址
 
 | 段 | 管什么 |
 |---|---|
-| `kb.vector` / `kb.es` / `kb.milvus` / `kb.minio` / `kb.graph` | 中间件连接与索引参数（分片副本数、分词器、预签名 TTL、图谱跳数与抽取并发） |
+| `kb.vector` / `kb.es` / `kb.qdrant` / `kb.minio` / `kb.graph` | 中间件连接与索引参数（分片副本数、分词器、预签名 TTL、图谱跳数与抽取并发） |
 | `kb.embedding` / `kb.rerank` / `kb.chat` / `kb.vision` | 四类模型的 provider / 模型名 / 凭据 / 端点 / 超时 |
 | `kb.parser` / `kb.upload` / `kb.image` | parser 地址与超时、上传体积与扩展名白名单、单文档图片上限 |
 | `kb.split` / `kb.doc.version` | 切分参数（定长与父子两级）与文档版本保留数 |
@@ -188,7 +188,7 @@ mvn -B -ntp verify        # CI 跑的命令，等价于全量单测 + 打包
 
 统一响应体：成功 `{"code":"OK","message":"success","data":...,"request_id":"..."}`，失败 `{"code":"...","message":"...","request_id":"..."}`。`request_id` 在入口过滤器生成（可由 `X-Request-Id` 请求头指定），写入日志 MDC，透传给 parser 服务，并随异步线程池的 `TaskDecorator` 传到 worker 线程。
 
-`/actuator` 的暴露白名单为 `health,info,prometheus`；健康探针含 MySQL、Elasticsearch、MinIO，配置了 Milvus / Neo4j 时各自增加一项。指标端点需要额外引入 micrometer 的 Prometheus registry 才会真正出现，当前依赖里没有它，所以实际可用的是 `health` 与 `info`。
+`/actuator` 的暴露白名单为 `health,info,prometheus`；健康探针含 MySQL、Elasticsearch、MinIO，配置了 Qdrant / Neo4j 时各自增加一项。指标端点需要额外引入 micrometer 的 Prometheus registry 才会真正出现，当前依赖里没有它，所以实际可用的是 `health` 与 `info`。
 
 ## 文档导航
 

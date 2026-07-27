@@ -460,7 +460,7 @@ class KnowledgeApiServiceTest {
         AppVersion version = versionOf(status);
         version.setIndexSnapshots(JsonUtil.toJson(List.of(
                 new AppIndexSnapshot(KB_ID, "es", SNAPSHOT_BM25_INDEX),
-                new AppIndexSnapshot(KB_ID, "milvus", SNAPSHOT_VECTOR_INDEX))));
+                new AppIndexSnapshot(KB_ID, "qdrant", SNAPSHOT_VECTOR_INDEX))));
         version.setVisibleVersionIds(JsonUtil.toJson(Map.of(KB_ID, List.of(FROZEN_VERSION))));
         when(appVersionService.resolveForCall(eq(APP_ID), any())).thenReturn(version);
         when(appVersionService.require(VERSION_ID)).thenReturn(version);

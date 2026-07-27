@@ -7,7 +7,7 @@ import io.kbrag.domain.model.ModelStatus;
  * Model configuration view consumed by the console to grey out model backed controls.
  *
  * @param embeddingConfigured {@code false} means zero key mode, BM25 single route retrieval
- * @param vectorEngine        configured vector engine, {@code es} or {@code milvus}
+ * @param vectorEngine        configured vector engine, {@code es} or {@code qdrant}
  * @param provider            embedding provider name, {@code none} when unconfigured
  * @param model               embedding model name, {@code none} when unconfigured
  * @param dimension           vector dimension, 0 when unconfigured

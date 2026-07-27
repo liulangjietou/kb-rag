@@ -12,7 +12,7 @@
 
     <artifactId>kb-infrastructure</artifactId>
     <name>kb-infrastructure</name>
-    <description>Adapters for Elasticsearch, Milvus, MinIO, model providers and the parser service</description>
+    <description>Adapters for Elasticsearch, Qdrant, MinIO, model providers and the parser service</description>
 
     <dependencies>
         <dependency>
@@ -27,45 +27,11 @@
             <groupId>co.elastic.clients</groupId>
             <artifactId>elasticsearch-java</artifactId>
         </dependency>
-        <dependency>
-            <groupId>io.milvus</groupId>
-            <artifactId>milvus-sdk-java</artifactId>
-            <!--
-              The SDK ships a bulk writer that pulls the whole Parquet and Hadoop stack. The service
-              writes through the regular upsert path only, so the transitive stack is excluded: it adds
-              tens of megabytes to the artifact and a second Jackson and Netty lineage to keep aligned.
-            -->
-            <exclusions>
-                <exclusion>
-                    <groupId>org.apache.parquet</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.hadoop</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.apache.avro</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.amazonaws</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.azure</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.google.cloud</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.konghq</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
+        <!--
+          Qdrant is reached over its REST API through the RestClient that spring-boot-starter-web above
+          already provides, so the vector route adds no dependency of its own. The gRPC SDK would pull a
+          protobuf and Netty lineage to keep aligned for a surface this port does not need.
+        -->
         <dependency>
             <groupId>io.minio</groupId>
             <artifactId>minio</artifactId>

@@ -8,7 +8,7 @@ import io.kbrag.domain.enums.VectorEngine;
  * <p>Modelling the write fan out as a list of targets is what keeps the three deployment shapes in
  * one code path: zero key has a single Elasticsearch target without a vector field, lite has a
  * single Elasticsearch target that also carries the vector, and full has an Elasticsearch target for
- * BM25 plus a Milvus target for the vector.
+ * BM25 plus a Qdrant target for the vector.
  *
  * @param engine            engine owning the target
  * @param physicalIndexName three segment physical name, the unit of the synchronization records

@@ -10,26 +10,26 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Component;
 
 /**
- * Milvus probe of {@code /actuator/health}.
+ * Qdrant probe of {@code /actuator/health}.
  *
- * <p>Registered only when a Milvus URI is configured: the lite deployment does not run Milvus, and
+ * <p>Registered only when a Qdrant URI is configured: the lite deployment does not run Qdrant, and
  * probing an engine that is not part of the deployment would make a healthy stack report as down.
  *
  * @author owlzhangfq@gmail.com
  */
-@Component("milvusHealthIndicator")
+@Component("qdrantHealthIndicator")
 @RequiredArgsConstructor
-@ConditionalOnExpression("!'${kb.milvus.uri:}'.isBlank()")
-public class MilvusHealthIndicator implements HealthIndicator {
+@ConditionalOnExpression("!'${kb.qdrant.uri:}'.isBlank()")
+public class QdrantHealthIndicator implements HealthIndicator {
 
     private static final String DETAIL_KEY = "detail";
-    private static final String DETAIL_NOT_ACTIVE = "milvus configured but not the active vector engine";
+    private static final String DETAIL_NOT_ACTIVE = "qdrant configured but not the active vector engine";
 
     private final VectorStore vectorStore;
 
     @Override
     public Health health() {
-        if (!VectorEngine.MILVUS.code().equals(vectorStore.engine())) {
+        if (!VectorEngine.QDRANT.code().equals(vectorStore.engine())) {
             return Health.up().withDetail(DETAIL_KEY, DETAIL_NOT_ACTIVE).build();
         }
         HealthStatus status = vectorStore.healthCheck();

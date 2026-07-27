@@ -38,7 +38,7 @@ class IndexSyncCompensationServiceTest {
 
     private static final String KB_ID = "kb_test";
     private static final String ES_INDEX = "kb_test_tev4_v1";
-    private static final String MILVUS_INDEX = "kb_test_tev4_v1_milvus";
+    private static final String QDRANT_INDEX = "kb_test_tev4_v1_qdrant";
 
     private ChunkIndexSyncMapper chunkIndexSyncMapper;
     private ChunkMapper chunkMapper;
@@ -64,7 +64,7 @@ class IndexSyncCompensationServiceTest {
     void shouldGroupRowsByPhysicalIndex() {
         List<ChunkIndexSync> rows = List.of(
                 syncRow(1L, "ck_1", ES_INDEX),
-                syncRow(2L, "ck_2", MILVUS_INDEX),
+                syncRow(2L, "ck_2", QDRANT_INDEX),
                 syncRow(3L, "ck_3", ES_INDEX));
 
         Map<String, List<ChunkIndexSync>> grouped = service.groupByPhysicalIndex(rows);
@@ -73,9 +73,9 @@ class IndexSyncCompensationServiceTest {
         assertEquals(List.of("ck_1", "ck_3"),
                 grouped.get(ES_INDEX).stream().map(ChunkIndexSync::getChunkId).toList());
         assertEquals(List.of("ck_2"),
-                grouped.get(MILVUS_INDEX).stream().map(ChunkIndexSync::getChunkId).toList());
+                grouped.get(QDRANT_INDEX).stream().map(ChunkIndexSync::getChunkId).toList());
         // Insertion order makes a scan reproducible, which is what lets a failure be replayed.
-        assertEquals(List.of(ES_INDEX, MILVUS_INDEX), List.copyOf(grouped.keySet()));
+        assertEquals(List.of(ES_INDEX, QDRANT_INDEX), List.copyOf(grouped.keySet()));
     }
 
     @Test
@@ -83,11 +83,11 @@ class IndexSyncCompensationServiceTest {
         when(chunkIndexSyncMapper.selectList(any())).thenReturn(List.of(
                 syncRow(1L, "ck_1", ES_INDEX),
                 syncRow(2L, "ck_2", ES_INDEX),
-                syncRow(3L, "ck_3", MILVUS_INDEX)));
+                syncRow(3L, "ck_3", QDRANT_INDEX)));
         when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_1"), chunk("ck_2"), chunk("ck_3")));
         when(indexAliasManager.resolveTargets(KB_ID)).thenReturn(List.of(
                 new IndexTarget(VectorEngine.ES, ES_INDEX, "kb_test_es", "bm25", false, 0),
-                new IndexTarget(VectorEngine.MILVUS, MILVUS_INDEX, "kb_test_milvus", "tev4", true, 1024)));
+                new IndexTarget(VectorEngine.QDRANT, QDRANT_INDEX, "kb_test_qdrant", "tev4", true, 1024)));
         when(embeddingProvider.isConfigured()).thenReturn(true);
         when(embeddingProvider.maxBatchSize()).thenReturn(10);
         when(embeddingProvider.embed(any())).thenReturn(List.of(new float[]{0.1f}));
@@ -97,7 +97,7 @@ class IndexSyncCompensationServiceTest {
         assertEquals(3, repaired);
         ArgumentCaptor<IndexTarget> targets = ArgumentCaptor.forClass(IndexTarget.class);
         verify(chunkIndexWriter, times(2)).writeTarget(targets.capture(), any(), any());
-        assertEquals(List.of(ES_INDEX, MILVUS_INDEX),
+        assertEquals(List.of(ES_INDEX, QDRANT_INDEX),
                 targets.getAllValues().stream().map(IndexTarget::physicalIndexName).toList());
         // Only the vector carrying target pays for an embedding call; the vector is not kept in MySQL,
         // so it can only be recomputed, and grouping by chunk would have paid twice.

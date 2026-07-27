@@ -28,8 +28,8 @@
                                   │       kb-infrastructure ───────────────┤
                                   └──┬─────┬─────┬─────┬─────┬─────┬──────┘
                                      │     │     │     │     │     │ HTTP multipart
-                                  MySQL   ES  Milvus MinIO Neo4j ┌──▼───────────────┐
-                                 :13306 :9200 :19530 :9000 :7687 │ kb-rag-parser     │ :20001
+                                  MySQL   ES  Qdrant MinIO Neo4j ┌──▼───────────────┐
+                                 :13306 :9200  :6333 :9000 :7687 │ kb-rag-parser     │ :20001
                                  (事实源)(BM25/  (向量, (原件/ (图,  │ (Python/FastAPI)  │
                                         lite向量) full) 归档) 可选) │ PyMuPDF/openpyxl  │
                                                                  └──────────────────┘
@@ -47,14 +47,14 @@
 | kb-rag-server | 20000 |
 | kb-rag-parser | 20001 |
 | kb-rag-web（dev） | 20002 |
-| MySQL / ES / MinIO / Milvus / Redis / Neo4j | 13306 / 9200 / 9000+9001 / 19530+9091 / 6379 / 7687+7474 |
+| MySQL / ES / MinIO / Qdrant / Redis / Neo4j | 13306 / 9200 / 9000+9001 / 6333+6334 / 6379 / 7687+7474 |
 
 > MySQL 的 13306 是**宿主机映射端口**（避开本机默认 3306），容器内仍监听标准 3306；
 > 其余中间件宿主机与容器端口一致。改端口只需调整 `.env` 的 `MYSQL_PORT`。
 
 ### 1.3 数据一致性原则
 
-- **MySQL `t_kb_chunk` 是唯一事实源**；Milvus 与 ES 均为派生索引，可从 MySQL 幂等重建。
+- **MySQL `t_kb_chunk` 是唯一事实源**；Qdrant 与 ES 均为派生索引，可从 MySQL 幂等重建。
 - 双写状态按"分片 × 物理索引"粒度记录在 `t_kb_chunk_index_sync`，由定时补偿任务重放（§3.7）。
 - **无消息队列、无强制 Redis**：异步全部为 Spring `@Async` + 进程内线程池；跨存储一致性 = 同步状态表 + 定时补偿。限流计数与上传 Token 为进程内实现，明确记录为单实例部署的降级方案（多实例扩展是未来边界，不影响功能正确性）；管理台登录 Token 自 M9 后修复起落库 `t_kb_auth_token`（V11，仅存 SHA-256 哈希，单实例重启不再踢掉全部会话）。
 
@@ -65,16 +65,16 @@
 | 形态 | compose 文件 | 服务集 | 内存档 |
 |---|---|---|---|
 | **轻量（lite，默认引导）** | `docker-compose.lite.yml` | MySQL 8.0.36 + ES 8.11.4 + MinIO（+ Neo4j `profile=graph` 可选） | 8GB |
-| **完整（full）** | `docker-compose.yml`（`include` lite，复用其服务定义） | lite 全部 + Milvus v2.4.15（etcd + 独立 minio + standalone）+ Redis 7.2.5（`profile=redis,optional`） | 24GB |
+| **完整（full）** | `docker-compose.yml`（`include` lite，复用其服务定义） | lite 全部 + Qdrant v1.18.3（单容器，自带存储）+ Redis 7.2.5（`profile=redis,optional`） | 16GB |
 | **ik 分词** | `docker-compose.es-ik.yml`（override 层） | 仅覆盖 elasticsearch 为自构建 `kb-rag-es-ik:8.11.4` 镜像 | — |
 
 关键设计：
 
-- **D16 双引擎切换**：`kb.vector.engine=es|milvus`。lite 模式 ES 单引擎同时承担 BM25 与向量（dense_vector kNN）；full 模式 Milvus 承担向量、ES 只做 BM25。两模式共用 `VectorStore` 抽象与同一检索链路，分数量纲由抽象层统一（§3.4）。
+- **D16 双引擎切换**：`kb.vector.engine=es|qdrant`。lite 模式 ES 单引擎同时承担 BM25 与向量（dense_vector kNN）；full 模式 Qdrant 承担向量、ES 只做 BM25。两模式共用 `VectorStore` 抽象与同一检索链路，分数量纲由抽象层统一（§3.4）。
 - **零 Key 启动**：不配任何模型 Key 也能完整跑通"上传→BM25 检索"。实现机制见 §3.3 的 `Unconfigured*Provider` 模式；检索自动降级 BM25 单路并透出 `degraded=[vector_route_unavailable]`。
 - **Neo4j 可选**：`profile=graph` 默认不启动；`NEO4J_URI` 留空即注入 `DisabledGraphStore`，图能力整体禁用、其余功能零影响（含显式排除 `Neo4jAutoConfiguration`，防止 driver 在 classpath 上导致健康探针误报 DOWN）。
 - **ik 词典热更新**：ES ik 插件远程词典指向 server 的免登录端点 `/internal/dict/ik/{ext|stop}.txt`（带 Last-Modified/ETag，约 60s 轮询）；词条以 DB（`t_kb_ik_dict`）为源，容器重建不丢。注意：切换 ik 镜像后存量索引 analyzer 仍是 standard，需触发重建才生效。
-- **milvus-minio 与应用侧 MinIO 严禁复用**同一实例/bucket（compose 内已隔离为两个服务）。
+- **qdrant-minio 与应用侧 MinIO 严禁复用**同一实例/bucket（compose 内已隔离为两个服务）。
 
 ---
 
@@ -93,7 +93,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 |---|---|---|
 | **kb-common** | 无 Spring 依赖的基础件 | `Result` 统一响应信封、`ErrorCode`、`BizException`/`ProviderException`、`JsonUtil`/`HashUtil`、`RequestIdHolder`、`KbConstants`（业务 ID 前缀与 `kb-sk-` Key 前缀） |
 | **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 23 张业务表一一对应）、30+ 枚举、60+ 领域模型、**13 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
-| **kb-infrastructure** | 端口实现，按外部依赖分包 | `search.es` / `search.milvus` / `graph` / `provider.{chat,embedding,rerank,vision}` / `storage` / `parser` / `notify` / `config` |
+| **kb-infrastructure** | 端口实现，按外部依赖分包 | `search.es` / `search.qdrant` / `graph` / `provider.{chat,embedding,rerank,vision}` / `storage` / `parser` / `notify` / `config` |
 | **kb-app** | 应用编排层（架构主体） | 15 个业务域包：`kb` / `document` / `index` / `retrieval` / `graph` / `annotation` / `eval` / `appcenter` / `openapi` / `chat` / `alert` / `dict` / `auth` / `system` / `config` |
 | **kb-api** | HTTP 边界与装配点 | 23 个 Controller、过滤器/拦截器、SSE、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
 
@@ -108,7 +108,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `ChatProvider` | `DashScopeChatProvider` / `UnconfiguredChatProvider` | 改写/路由/生成/judge 共用 |
 | `ChatProviderFactory` | `ModelChatProviderFactory` | 按模型名缓存实例——应用版本快照的 `chat_model` 经此生效 |
 | `VisionProvider` | `DashScopeVisionProvider` / `UnconfiguredVisionProvider` | 图片文本代理（VLM 调用全部在 server 侧） |
-| `VectorStore` | `EsVectorStore`（lite）/ `MilvusVectorStore`（full） | `ensureIndex/upsert/delete/updateEnabled/snapshotIndex/search`；分数统一见 §3.4 |
+| `VectorStore` | `EsVectorStore`（lite）/ `QdrantVectorStore`（full） | `ensureIndex/upsert/delete/updateEnabled/snapshotIndex/search`；分数统一见 §3.4 |
 | `FulltextStore` | `EsFulltextStore` | BM25 检索 |
 | `GraphStore` | `Neo4jGraphStore` / `DisabledGraphStore` | 实体/关系/溯源边；Neo4j 为派生存储可重建，无对应 MySQL 表 |
 | `ObjectStorage` | `MinioObjectStorage` | 原件/解析产物/图片/审计归档；预签名 URL |
@@ -117,7 +117,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `TokenEstimator` | `SimpleTokenEstimator` | 分片长度以 token 计、`max_content_length` 预算 |
 | `VersionPinChecker` | `AppVersionPinChecker` | 被应用版本可见集引用的文档版本禁止归档（已下线版本同样 pin——chunk 正文只在 MySQL） |
 
-**零 Key / 能力开关统一装置**：`ModelProviderConfig` 是唯一读模型凭据的地方，凭据为空即注入 `Unconfigured*` 实现；`GraphStoreConfig`（NEO4J_URI 空 → `DisabledGraphStore`）与 `MilvusClientConfig`（MILVUS_URI 空 → 不建 client、不注册健康探针）镜像同一模式。上游代码只写 `isConfigured()/isEnabled()` 一个分支，全链路无 null 检查——这是需求 §5"防御式编程只做一处且高复用"的落地点。
+**零 Key / 能力开关统一装置**：`ModelProviderConfig` 是唯一读模型凭据的地方，凭据为空即注入 `Unconfigured*` 实现；`GraphStoreConfig`（NEO4J_URI 空 → `DisabledGraphStore`）与 `QdrantClientConfig`（QDRANT_URI 空 → 不建 client、不注册健康探针）镜像同一模式。上游代码只写 `isConfigured()/isEnabled()` 一个分支，全链路无 null 检查——这是需求 §5"防御式编程只做一处且高复用"的落地点。
 
 ### 3.3 索引命名与别名管理
 
@@ -143,7 +143,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `RewriteService` | 改写超时 800ms 降级原 query；改写结果只作检索词、不回填任何 prompt（注入防线④）；Caffeine 缓存 |
 | `RoutingService` | LLM 提议、**白名单裁决**（结果与候选库集合取交集，注入防线③）；失败/未命中回退全部关联库（`route_fallback_all`）；缓存 key=query+候选集+生效 prompt，失败不入缓存 |
 | `RetrievalIndexContextResolver` | **调用上下文三分支的唯一分辨点**：RELEASED → 冻结快照索引+固化可见集；TESTING/调试/评测 → 实时别名+当前激活集合；旧 RELEASED（无快照）→ 兼容实时、不记降级 |
-| `VectorScoreNormalizer` | 跨引擎向量分统一：ES `(1+cos)/2` 先还原、Milvus 原生 cosine，统一映射到 [0,1]；两实现共享一份"引擎一致性单测" |
+| `VectorScoreNormalizer` | 跨引擎向量分统一：ES `(1+cos)/2` 先还原、Qdrant 原生 cosine，统一映射到 [0,1]；两实现共享一份"引擎一致性单测" |
 | `FusionRouter` → `RrfFusion`/`WeightedFusion` | 加权融合先按候选集 min-max 归一化；开图路的库强制 RRF（`GraphFusionPolicy`——图关联度是第三种量纲） |
 | `CrossKbRrfFusion` + `KbQuotaAllocator` | 跨库只用名次不用分数；rerank 候选预算是**全局总量**按权重配额切分（向下取整、余量归最高权重库） |
 | `RerankService` | 候选上限 50（父子开启时联动 `max(50, top_n×5)`，硬上限 100）；超时 1.5s 降级粗排；rerank 分是唯一跨库跨路可比的绝对分 |
@@ -173,7 +173,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 - `AppVersionService`：八状态机全部迁移收敛于 `transition` 一个方法，合法迁移定义在 `AppVersionStatus` 枚举上；"至多一个 RELEASED"由表上 `released_slot` 生成列 + 唯一索引双保险。
 - `ReleaseGateService`（`GATE_EXECUTOR`，与评测池分离防自等待死锁）：同语料同时刻双跑（候选配置 vs 当前正式版配置，复用 `EvalRunService`）；`ReleaseGateJudge`（纯函数，唯一裁决点，含 1e-9 浮点余量）三态裁决：通过 / 拦截 / 仅记录不拦截；`GateMetricsRecomputer` 在双方共同判定的 case 交集上重算指标，堵分母漂移。
-- `AppReleaseSnapshotService`：门禁裁决后、RELEASED 生效前，**同时冻结** `index_snapshots`（`IndexSnapshotService`：ES `_clone` / Milvus queryIterator 拷贝，不挂别名）与 `visible_version_ids`——只冻结索引不冻结可见集正是"回滚后召回全空"缺陷的根源（v1.6 修复）。
+- `AppReleaseSnapshotService`：门禁裁决后、RELEASED 生效前，**同时冻结** `index_snapshots`（`IndexSnapshotService`：ES `_clone` / Qdrant queryIterator 拷贝，不挂别名）与 `visible_version_ids`——只冻结索引不冻结可见集正是"回滚后召回全空"缺陷的根源（v1.6 修复）。
 - 对外 API `/api/v1/knowledge/{search,chat}`：**独立的 `ApiKeyAuthFilter` servlet 过滤器链**（刻意不与管理台 Bearer 拦截器共用入口）；`ApiKeyFactory` 一把 Key 三形态（明文仅创建时返回一次 / SHA-256 digest 用于鉴权 / 前缀用于展示）；`ApiRateLimiter` 进程内令牌桶；`RequestOverridePolicy` 白名单只放 4 个响应形态参数（top_n/score_threshold/metadata_filter/max_content_length），越界拒绝而非忽略；`ApiAuditService` 异步落审计（拒绝也记录、401 不落 429 落）、`ApiAuditArchiveService` 定时归档 MinIO 后分批物理删除；`QueryDigestFactory` 对审计 query 无条件脱敏截断。
 - chat SSE 事件契约：`message_delta`* → `references`（元素为与 search nodes 同构的 RetrievalNode）→ `done`（含 request_id/用量/degraded）或 `error`；生成模型取应用版本快照配置，经 `ChatProviderFactory` 生效；`ChatPromptAssembler` 固定分隔符包裹检索内容（注入防线①）。
 
@@ -217,7 +217,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V10（M9） | `t_kb_chunk` 加 `parent_start_offset` / `parent_end_offset`（子片在父片中的 [起,止) 字符偏移，切分副产物、不做事后反查；子片编辑/合并/拆分及父片编辑时失效置 null） |
 | V11（M9 后修复） | `t_kb_auth_token`（管理台登录 Token 落库，仅存 SHA-256 哈希，24h TTL 语义不变） |
 
-引擎侧可过滤字段全集（Milvus 标量 / ES filter，建索引时显式声明）：`kb_id`、`doc_id`、`document_version_id`、`enabled`、`parent_id`、`chunk_type`、`tag_ids`、`session_id`、`sender`、`msg_time`、`chunk_seq`；其余 metadata 只存 MySQL。新增可过滤维度视为 schema 变更，走索引重建迁移。
+引擎侧可过滤字段全集（Qdrant 标量 / ES filter，建索引时显式声明）：`kb_id`、`doc_id`、`document_version_id`、`enabled`、`parent_id`、`chunk_type`、`tag_ids`、`session_id`、`sender`、`msg_time`、`chunk_seq`；其余 metadata 只存 MySQL。新增可过滤维度视为 schema 变更，走索引重建迁移。
 
 ---
 
@@ -318,7 +318,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 ### 7.3 可观测
 
 - `request_id` 全链路：`RequestIdFilter` 入口生成 → MDC → 响应头 → `X-Request-Id` 透传 parser 与 Provider 调用日志 → `TaskDecorator` 带入异步线程。
-- 健康：Actuator 组合探针（ES 必选；Milvus/Neo4j 仅配置时注册；MinIO；parser `/health`）。
+- 健康：Actuator 组合探针（ES 必选；Qdrant/Neo4j 仅配置时注册；MinIO；parser `/health`）。
 - 告警：`AlertEvaluator` 三类触发 + 静默期，Webhook 未配置降级界面红点；日志仅 info/error、英文、错误码占位符。
 
 ### 7.4 一致性手法汇总

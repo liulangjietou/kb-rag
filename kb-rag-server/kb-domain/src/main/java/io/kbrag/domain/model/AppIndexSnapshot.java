@@ -15,7 +15,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * historical version at an index it never contained.
  *
  * @param kbId              knowledge base business id the snapshot belongs to
- * @param engine            engine code, {@code es} or {@code milvus}
+ * @param engine            engine code, {@code es} or {@code qdrant}
  * @param physicalIndexName physical index or collection name of the snapshot, addressed directly since a
  *                          snapshot carries no alias
  *

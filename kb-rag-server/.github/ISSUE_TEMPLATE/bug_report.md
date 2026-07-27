@@ -27,11 +27,11 @@ assignees: ""
 ## 环境信息
 
 - 版本 / commit：
-- 部署模式：lite（VECTOR_ENGINE=es）/ full（VECTOR_ENGINE=milvus）
+- 部署模式：lite（VECTOR_ENGINE=es）/ full（VECTOR_ENGINE=qdrant）
 - 是否配置 `DASHSCOPE_API_KEY`（零 Key 模式 / 全功能模式）：
 - 是否启用 GraphRAG（`NEO4J_URI` 是否为空）：
 - JDK 版本（`java -version`）与操作系统：
-- 中间件版本：MySQL / Elasticsearch（是否装 ik 插件）/ MinIO / Milvus / Neo4j
+- 中间件版本：MySQL / Elasticsearch（是否装 ik 插件）/ MinIO / Qdrant / Neo4j
 
 ## 相关日志
 

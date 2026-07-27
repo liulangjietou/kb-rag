@@ -31,7 +31,7 @@ class RetrievalIndexContextResolverTest {
 
     private static final String KB_ID = "kb_alpha";
     private static final String ES_ALIAS = "kb_alpha_es";
-    private static final String VECTOR_ALIAS = "kb_alpha_milvus";
+    private static final String VECTOR_ALIAS = "kb_alpha_qdrant";
     private static final String SNAPSHOT_ES = "kb_alpha_bm25_s1";
     private static final String SNAPSHOT_VECTOR = "kb_alpha_tev4_s1";
     private static final String ACTIVE_VERSION = "dv_current";

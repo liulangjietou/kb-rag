@@ -76,9 +76,9 @@ public class IndexAliasManager {
         }
         targets.add(new IndexTarget(VectorEngine.ES, fulltextIndex, fulltextAlias,
                 KbConstants.EMBEDDING_SEGMENT_BM25, false, 0));
-        targets.add(new IndexTarget(VectorEngine.MILVUS,
+        targets.add(new IndexTarget(VectorEngine.QDRANT,
                 indexNaming.vectorPhysicalName(kbId, embeddingSegment),
-                indexNaming.alias(kbId, VectorEngine.MILVUS),
+                indexNaming.alias(kbId, VectorEngine.QDRANT),
                 embeddingSegment,
                 true,
                 dimension));

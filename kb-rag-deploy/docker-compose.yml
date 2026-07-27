@@ -1,7 +1,7 @@
 # kb-rag 完整模式（full）中间件编排
 #
 # 在 lite（mysql + elasticsearch + minio）基础上叠加：
-#   - milvus-standalone v2.4.x（自带 etcd + 专属 milvus-minio，与应用 MinIO 完全隔离，不复用）
+#   - qdrant v1.18.x（单容器自带存储，无需额外的元数据服务或对象存储）
 #   - redis:7（可选，标注 optional：仅用于多实例部署下的 Query 改写缓存 / 限流计数 / 任务互斥锁；
 #     单实例部署默认 cache.provider=local，Redis 缺失不影响功能正确性，见需求文档 §5 Redis 职责边界）
 #
@@ -12,7 +12,8 @@
 #   docker compose -f docker-compose.yml up -d                       # 不含 redis
 #   docker compose -f docker-compose.yml --profile redis up -d       # 含 redis
 #
-# 资源要求：建议 24GB 内存（需求文档 §5 资源要求矩阵：中间件约 12GB + kb-parser 8GB）。
+# 资源要求：建议 16GB 内存（需求文档 §5 资源要求矩阵：中间件约 4GB + kb-parser 8GB）。
+# 相比此前的 Milvus 编排下调，原因是 milvus-standalone + etcd + 专属 MinIO 三个容器合并为单个 qdrant。
 
 name: kb-rag-full
 
@@ -21,85 +22,33 @@ include:
 
 services:
   # ------------------------------------------------------------------
-  # Milvus 依赖：独立 etcd（元数据）
+  # Qdrant 单机版：向量检索引擎（full 模式）
+  #
+  # 单进程自带存储，不需要额外的元数据服务或对象存储——这也是它替换 Milvus 的主要理由：
+  # 原先的 milvus-standalone 必须搭配独立 etcd 与专属 MinIO 共三个容器，现在一个即可。
+  #
+  # 数据落在 kb_rag_qdrant_data 卷的 /qdrant/storage 下，容器重建不丢数据。
+  # QDRANT_API_KEY 留空即免鉴权（本机部署默认），填写后所有请求需带 api-key 头。
   # ------------------------------------------------------------------
-  milvus-etcd:
-    image: quay.io/coreos/etcd:v3.5.5
-    container_name: kb-rag-milvus-etcd
+  qdrant:
+    image: qdrant/qdrant:v1.18.3
+    container_name: kb-rag-qdrant
     restart: unless-stopped
     environment:
-      - ETCD_AUTO_COMPACTION_MODE=revision
-      - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
-      - ETCD_SNAPSHOT_COUNT=50000
-    command:
-      - etcd
-      - -advertise-client-urls=http://127.0.0.1:2379
-      - -listen-client-urls=http://0.0.0.0:2379
-      - --data-dir=/etcd
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
     volumes:
-      - kb_rag_milvus_etcd_data:/etcd
-    healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-    networks:
-      - kb-rag-net
-
-  # ------------------------------------------------------------------
-  # Milvus 依赖：专属 MinIO（对象存储向量分段数据），与应用侧 kb-rag-minio 相互独立，
-  # 严禁复用同一个 MinIO 实例/bucket（见 M1-CONTRACTS.md §8 提醒）
-  # ------------------------------------------------------------------
-  milvus-minio:
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
-    container_name: kb-rag-milvus-minio
-    restart: unless-stopped
-    environment:
-      # 默认值仅为占位口令，供 `docker compose config` 免 .env 校验语法；preflight.sh 统一拦截默认口令
-      MINIO_ROOT_USER: ${MILVUS_MINIO_ACCESS_KEY:-milvusadmin}
-      MINIO_ROOT_PASSWORD: ${MILVUS_MINIO_SECRET_KEY:-CHANGE_ME_milvus_minio_secret_key}
-    command: minio server /minio_data --console-address ":9001"
-    volumes:
-      - kb_rag_milvus_minio_data:/minio_data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-    networks:
-      - kb-rag-net
-
-  # ------------------------------------------------------------------
-  # Milvus 单机版
-  # ------------------------------------------------------------------
-  milvus-standalone:
-    image: milvusdb/milvus:v2.4.15
-    container_name: kb-rag-milvus-standalone
-    restart: unless-stopped
-    command: ["milvus", "run", "standalone"]
-    environment:
-      ETCD_ENDPOINTS: milvus-etcd:2379
-      MINIO_ADDRESS: milvus-minio:9000
-      MINIO_ACCESS_KEY_ID: ${MILVUS_MINIO_ACCESS_KEY:-milvusadmin}
-      MINIO_SECRET_ACCESS_KEY: ${MILVUS_MINIO_SECRET_KEY:-CHANGE_ME_milvus_minio_secret_key}
-      COMMON_STORAGETYPE: minio
-    volumes:
-      - kb_rag_milvus_data:/var/lib/milvus
+      - kb_rag_qdrant_data:/qdrant/storage
     ports:
-      - "${MILVUS_PORT:-19530}:19530"
-      - "${MILVUS_METRICS_PORT:-9091}:9091"
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      # 镜像内没有 curl/wget，用 bash 的 /dev/tcp 直接发一个 HTTP 请求探活
+      test: ["CMD", "bash", "-c",
+             "exec 3<>/dev/tcp/127.0.0.1/6333 && printf 'GET /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q '200 OK'"]
       interval: 30s
-      start_period: 90s
-      timeout: 20s
+      start_period: 20s
+      timeout: 10s
       retries: 3
-    depends_on:
-      milvus-etcd:
-        condition: service_healthy
-      milvus-minio:
-        condition: service_healthy
     networks:
       - kb-rag-net
 
@@ -131,12 +80,8 @@ services:
       - kb-rag-net
 
 volumes:
-  kb_rag_milvus_etcd_data:
-    name: kb_rag_milvus_etcd_data
-  kb_rag_milvus_minio_data:
-    name: kb_rag_milvus_minio_data
-  kb_rag_milvus_data:
-    name: kb_rag_milvus_data
+  kb_rag_qdrant_data:
+    name: kb_rag_qdrant_data
   kb_rag_redis_data:
     name: kb_rag_redis_data
 

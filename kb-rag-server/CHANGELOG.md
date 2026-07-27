@@ -7,6 +7,18 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 变更（M9 之后）
+
+- **向量引擎由 Milvus 换为 Qdrant（不兼容变更）** `[schema]`：`VectorEngine` 枚举 `MILVUS` 改为
+  `QDRANT`，新增 `QdrantVectorStore`（走 Qdrant REST API，经 `spring-boot-starter-web` 已有的
+  `RestClient`，不引入 gRPC/protobuf 依赖），移除 `MilvusVectorStore` 与 `milvus-sdk-java`。
+  Flyway `V12__vector_engine_qdrant.sql` 只更新两张索引台账 `engine` 字段的注释，不改数据。
+  配置项 `kb.milvus.uri/token` 改为 `kb.qdrant.uri/api-key`（环境变量 `QDRANT_URI` /
+  `QDRANT_API_KEY`）
+- 分片启用开关在向量引擎侧真正生效：Milvus 无部分更新，`updateEnabled` 此前是空实现
+  （改一个布尔位需要连带重写向量，代价是重新嵌入），只靠 MySQL 事实源在检索后过滤，被禁用的
+  分片仍会占用召回预算。Qdrant 的 set payload 支持原地改字段且不触碰向量，该降级随之消除
+
 ### 修复（M9 之后）
 
 - 控制台会话 token 落库：签发的 Bearer Token 此前只存在进程内存里，服务重启即全员掉登录。`[schema]` Flyway `V11__auth_token.sql` 新增 `t_kb_auth_token`，只存 token 的 SHA-256 摘要（对齐 API Key 的处理），24h TTL 语义不变，改密仍然吊销该账号全部会话

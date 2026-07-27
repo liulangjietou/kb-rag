@@ -6,6 +6,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **向量引擎由 Milvus 换为 Qdrant（不兼容变更）**：`VECTOR_ENGINE` 合法取值从 `es | milvus` 变为
+  `es | qdrant`。full 模式的 compose 由 `milvus-standalone` + 独立 `etcd` + 专属 `milvus-minio`
+  三个容器合并为单个 `qdrant`，内存档从 24GB 下调到 16GB；`.env` 的 `MILVUS_*` 一组变量替换为
+  `QDRANT_URI` / `QDRANT_API_KEY` / `QDRANT_PORT` / `QDRANT_GRPC_PORT`。lite 模式
+  （`VECTOR_ENGINE=es`）不受影响。已有 full 部署的升级路径见
+  [UPGRADING.md](UPGRADING.md)「从 Milvus 升级到 Qdrant」：向量存放在引擎内部，无法原地搬迁，
+  必须清理索引台账后从 MySQL 事实源重建
+
 ### Fixed
 - 两处文档滞后于 M8 交付的修正：mappings/README.md「已知限制」仍写 TXT/HTML 降级二期，更新为
   M8 已交付（内置 liuhen_txt/liuhen_html 模板、自定义正则/选择器）并补充映射档案 CRUD 界面与

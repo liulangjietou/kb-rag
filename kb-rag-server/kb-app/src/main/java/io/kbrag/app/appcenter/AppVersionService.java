@@ -246,7 +246,7 @@ public class AppVersionService {
      * Promotes a version to the released one, optionally installing the index snapshot it was frozen with.
      *
      * <p><b>Why the snapshot arrives as a parameter.</b> Creating it talks to search engines and can take
-     * minutes on the Milvus path, and this method owns a transaction that holds the unique released slot.
+     * minutes on the Qdrant path, and this method owns a transaction that holds the unique released slot.
      * Doing the copy inside would keep that lock for the duration of the copy and would make a failed copy
      * indistinguishable from a failed state transition. So the copy happens first, outside, and what reaches
      * here is the finished result - requirement section 4.7 "the snapshot is created before the version takes

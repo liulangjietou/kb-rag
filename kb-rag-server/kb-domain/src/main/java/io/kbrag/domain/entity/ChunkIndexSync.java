@@ -31,7 +31,7 @@ public class ChunkIndexSync extends BaseEntity {
     @TableField("physical_index_name")
     private String physicalIndexName;
 
-    /** Engine code, {@code es} or {@code milvus}. */
+    /** Engine code, {@code es} or {@code qdrant}. */
     @TableField("engine")
     private String engine;
 

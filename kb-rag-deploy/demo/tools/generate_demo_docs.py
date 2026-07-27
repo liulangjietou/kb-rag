@@ -190,7 +190,7 @@ def generate_pipeline_diagram(output_path: str, cjk_font_path: str | None) -> No
         ["嵌入", "Embed"],
     ]
     row2_labels = [
-        ["双写索引", "Milvus / ES"],
+        ["双写索引", "Qdrant / ES"],
         ["混合检索", "Hybrid Recall"],
         ["重排序", "Rerank"],
         ["生成回答", "Generate"],

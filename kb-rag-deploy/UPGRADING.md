@@ -45,9 +45,9 @@ README「备份与恢复（M6）」一节与 [`docs/backup-restore.md`](docs/bac
 - 升级失败时可以把 kb-rag-server 镜像直接回退到旧版本；因为迁移向后兼容，
   回退后的旧代码仍可正常读写新 schema（多出的列被忽略，不会报错）
 
-## ES / Milvus：schema 变更走"从事实源重建 + 别名切换"
+## ES / Qdrant：schema 变更走"从事实源重建 + 别名切换"
 
-ES / Milvus 的索引结构变更**不走迁移脚本**，官方迁移路径是"从 MySQL 事实源
+ES / Qdrant 的索引结构变更**不走迁移脚本**，官方迁移路径是"从 MySQL 事实源
 全量重建索引 + 别名原子切换"（`IndexAliasManager`，见
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §3.3）：
 
@@ -60,6 +60,43 @@ ES / Milvus 的索引结构变更**不走迁移脚本**，官方迁移路径是"
 嵌入模型切换、lite → full 迁移同样复用这套"建新物理索引 → 回填 → 别名切换"
 的原语，具体流程见 README「快速启动」与 `docs/FLOWS.md` §5。
 
+## 从 Milvus 升级到 Qdrant（向量引擎替换）
+
+full 模式的向量引擎由 Milvus 换为 Qdrant，`VECTOR_ENGINE` 的合法取值从
+`es | milvus` 变为 `es | qdrant`。**lite 模式（`VECTOR_ENGINE=es`）不受影响**，
+无需任何操作。
+
+full 模式的升级不是原地切换：向量与其索引结构都存放在引擎内部，Milvus 的集合
+无法被 Qdrant 读取，必须按本文档上一节的原语从 MySQL 事实源重建。
+
+1. 停 kb-rag-server，`./scripts/backup.sh` 全量备份
+2. `.env` 改动：删除 `MILVUS_URI` / `MILVUS_TOKEN` / `MILVUS_PORT` /
+   `MILVUS_METRICS_PORT` / `MILVUS_MINIO_ACCESS_KEY` / `MILVUS_MINIO_SECRET_KEY`，
+   改为 `QDRANT_URI=http://127.0.0.1:6333`（按需加 `QDRANT_API_KEY`），
+   并把 `VECTOR_ENGINE=milvus` 改为 `VECTOR_ENGINE=qdrant`
+3. `docker compose -f docker-compose.yml up -d` 拉起 qdrant；Flyway 会自动应用
+   `V12__vector_engine_qdrant.sql`（只改字段注释，不动数据）
+4. 清理指向 Milvus 的索引台账——这些记录指向的集合已随 Milvus 下线而不可达，
+   留着会让检索路由到不存在的 collection：
+
+   ```sql
+   DELETE FROM t_kb_index_registry   WHERE engine = 'milvus';
+   DELETE FROM t_kb_chunk_index_sync WHERE engine = 'milvus';
+   ```
+
+5. 逐个知识库触发重建（管理台「知识库详情 → 索引配置 → 按新配置重建」，
+   或 `POST /api/v1/kb/{kbId}/rebuild`），等待状态回到「已就绪」
+6. 跑"上传 → 检索"冒烟，确认结果卡片同时出现向量分与 BM25 分
+7. 确认无误后删除 Milvus 的三个数据卷：
+
+   ```bash
+   docker volume rm kb_rag_milvus_data kb_rag_milvus_etcd_data kb_rag_milvus_minio_data
+   ```
+
+已发布的应用版本若冻结过 Milvus 索引快照，其快照集合同样不可达，需要重新发布
+一个基于 Qdrant 索引的版本；旧版本的 `t_kb_app_index_snapshot` 记录随第 4 步的
+台账清理一并失效。
+
 ## 升级步骤建议
 
 1. `./scripts/backup.sh` 全量备份
@@ -69,7 +106,7 @@ ES / Milvus 的索引结构变更**不走迁移脚本**，官方迁移路径是"
    kb-rag-parser / kb-rag-web 镜像或代码，中间件版本按上方"镜像 tag"流程处理
 4. `docker compose ... up -d`，观察 Flyway 迁移日志（kb-rag-server 启动日志）
    与各服务 healthcheck
-5. 跑一次"上传 → 检索"冒烟用例；若该版本涉及 ES/Milvus schema 变更，额外触发
+5. 跑一次"上传 → 检索"冒烟用例；若该版本涉及 ES/Qdrant schema 变更，额外触发
    一次索引重建并确认检索结果符合预期
 6. 确认无误后，本次备份按 `scripts/backup.sh` 的 `BACKUP_KEEP_COUNT` 滚动策略
    自动保留
@@ -86,7 +123,7 @@ ES / Milvus 的索引结构变更**不走迁移脚本**，官方迁移路径是"
 
 看到条目里出现 `V<n>` Flyway 版本号或"建表"/"加列"字样，代表该版本的
 kb-rag-server 启动时会自动执行对应迁移——按上方"MySQL：Flyway 自动迁移"一节
-的向后兼容保证操作即可，无需额外协调数据库迁移窗口；若条目同时提到 ES/Milvus
+的向后兼容保证操作即可，无需额外协调数据库迁移窗口；若条目同时提到 ES/Qdrant
 字段或索引变更（如新增可过滤字段），需要在升级后额外触发一次索引重建（见上一
 节）。不含 schema 变更的条目（多数为部署脚本/文档/纯应用逻辑改动）可以直接
 升级，无需考虑数据库兼容性。

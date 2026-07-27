@@ -41,9 +41,9 @@ class IndexSnapshotServiceTest {
     private static final String KB_ID = "kb_alpha";
     private static final String LIVE_ES_INDEX = "kb_alpha_none_v1";
     private static final String LIVE_BM25_INDEX = "kb_alpha_bm25_v1";
-    private static final String LIVE_MILVUS_INDEX = "kb_alpha_tev4_v1";
+    private static final String LIVE_QDRANT_INDEX = "kb_alpha_tev4_v1";
     private static final String ES_ALIAS = "kb_alpha_es";
-    private static final String MILVUS_ALIAS = "kb_alpha_milvus";
+    private static final String QDRANT_ALIAS = "kb_alpha_qdrant";
 
     private IndexAliasManager indexAliasManager;
     private FulltextStore fulltextStore;
@@ -95,9 +95,9 @@ class IndexSnapshotServiceTest {
         assertEquals("kb_alpha_bm25_s1", snapshots.get(0).physicalIndexName());
         assertEquals(VectorEngine.ES.code(), snapshots.get(0).engine());
         assertEquals("kb_alpha_tev4_s1", snapshots.get(1).physicalIndexName());
-        assertEquals(VectorEngine.MILVUS.code(), snapshots.get(1).engine());
+        assertEquals(VectorEngine.QDRANT.code(), snapshots.get(1).engine());
         verify(fulltextStore).snapshotIndex(LIVE_BM25_INDEX, "kb_alpha_bm25_s1");
-        verify(vectorStore).snapshotIndex(LIVE_MILVUS_INDEX, "kb_alpha_tev4_s1");
+        verify(vectorStore).snapshotIndex(LIVE_QDRANT_INDEX, "kb_alpha_tev4_s1");
     }
 
     @Test
@@ -125,7 +125,7 @@ class IndexSnapshotServiceTest {
     void shouldStopAtTheFirstFailingEngineAndLeaveTheCleanupToTheCaller() {
         givenFullMode();
         when(indexRegistryMapper.selectList(any())).thenReturn(List.of());
-        doThrow(new IllegalStateException("milvus down"))
+        doThrow(new IllegalStateException("qdrant down"))
                 .when(vectorStore).snapshotIndex(anyString(), anyString());
 
         assertThrows(IllegalStateException.class, () -> service.snapshot(KB_ID));
@@ -140,7 +140,7 @@ class IndexSnapshotServiceTest {
     void shouldDropSnapshotsAndMarkTheirRegistryRowsForCleanup() {
         service.drop(List.of(
                 new AppIndexSnapshot(KB_ID, VectorEngine.ES.code(), "kb_alpha_bm25_s1"),
-                new AppIndexSnapshot(KB_ID, VectorEngine.MILVUS.code(), "kb_alpha_tev4_s1")));
+                new AppIndexSnapshot(KB_ID, VectorEngine.QDRANT.code(), "kb_alpha_tev4_s1")));
 
         verify(fulltextStore).dropIndex("kb_alpha_bm25_s1");
         verify(vectorStore).dropIndex("kb_alpha_tev4_s1");
@@ -151,7 +151,7 @@ class IndexSnapshotServiceTest {
     void shouldBroadcastTheDisableFlagToEverySnapshotOfTheBase() {
         when(indexRegistryMapper.selectList(any())).thenReturn(List.of(
                 snapshotRow("kb_alpha_bm25_s1", "s1", VectorEngine.ES),
-                snapshotRow("kb_alpha_tev4_s1", "s1", VectorEngine.MILVUS),
+                snapshotRow("kb_alpha_tev4_s1", "s1", VectorEngine.QDRANT),
                 snapshotRow("kb_alpha_bm25_s2", "s2", VectorEngine.ES)));
         when(fulltextStore.indexExists(anyString())).thenReturn(true);
         when(vectorStore.indexExists(anyString())).thenReturn(true);
@@ -215,7 +215,7 @@ class IndexSnapshotServiceTest {
     private void givenFullMode() {
         when(indexAliasManager.resolveTargets(KB_ID)).thenReturn(List.of(
                 new IndexTarget(VectorEngine.ES, LIVE_BM25_INDEX, ES_ALIAS, "bm25", false, 0),
-                new IndexTarget(VectorEngine.MILVUS, LIVE_MILVUS_INDEX, MILVUS_ALIAS, "tev4", true, 1024)));
+                new IndexTarget(VectorEngine.QDRANT, LIVE_QDRANT_INDEX, QDRANT_ALIAS, "tev4", true, 1024)));
         when(indexRegistryMapper.selectOne(any())).thenReturn(null);
     }
 
@@ -237,7 +237,7 @@ class IndexSnapshotServiceTest {
         row.setKbId(KB_ID);
         row.setEngine(engine.code());
         row.setPhysicalIndexName(physicalIndexName);
-        row.setAliasName(engine == VectorEngine.ES ? ES_ALIAS : MILVUS_ALIAS);
+        row.setAliasName(engine == VectorEngine.ES ? ES_ALIAS : QDRANT_ALIAS);
         row.setIsCurrent(0);
         row.setSnapshotVersion(segment);
         row.setSchemaVersion("1");

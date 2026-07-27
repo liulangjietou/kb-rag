@@ -22,7 +22,7 @@ sequenceDiagram
     participant P as IndexPipelineService(@Async)
     participant PA as kb-parser
     participant V as VisionProvider
-    participant E as ES / Milvus
+    participant E as ES / Qdrant
 
     W->>S: POST /kb/{kbId}/documents (multipart)
     S->>S: UploadValidator 校验(扩展名/大小/magic number)
@@ -137,7 +137,7 @@ sequenceDiagram
     participant P as 索引管线/标注管线
     participant DB as MySQL(事实源)
     participant SY as t_kb_chunk_index_sync
-    participant E as 引擎(ES/Milvus)
+    participant E as 引擎(ES/Qdrant)
     participant C as 补偿任务(30s fixedDelay)
 
     P->>DB: chunk 先写事实源
@@ -216,7 +216,7 @@ sequenceDiagram
     participant EV as EvalRunService(EVAL_EXECUTOR)
     participant J as ReleaseGateJudge(纯函数)
     participant SN as AppReleaseSnapshotService
-    participant E as ES/Milvus
+    participant E as ES/Qdrant
 
     U->>AV: release(versionId)
     AV->>AV: transition → GATING
@@ -228,7 +228,7 @@ sequenceDiagram
     alt 通过 / force 放行
         J-->>AV: GATE_PASSED
         AV->>SN: 冻结发布快照
-        SN->>E: 每引擎建快照索引 kb_kbId_嵌入段_sN<br/>(ES _clone 毫秒级 / Milvus queryIterator 拷贝, 不挂别名)
+        SN->>E: 每引擎建快照索引 kb_kbId_嵌入段_sN<br/>(ES _clone 毫秒级 / Qdrant queryIterator 拷贝, 不挂别名)
         SN->>AV: 同时固化 index_snapshots + visible_version_ids
         AV->>AV: transition → RELEASED, 原正式版 → SUPERSEDED
     else 拦截

@@ -29,7 +29,7 @@ import java.util.List;
  *
  * <p>Score conversion. A {@code dense_vector} field with cosine similarity makes Elasticsearch
  * report {@code (1 + cos) / 2}. The implementation restores the standard cosine value and applies
- * the shared mapping to {@code [0,1]}, which is the same two step conversion the Milvus
+ * the shared mapping to {@code [0,1]}, which is the same two step conversion the Qdrant
  * implementation performs on its raw cosine score. Writing it out explicitly is what guarantees a
  * score threshold means the same thing in both deployment modes.
  *

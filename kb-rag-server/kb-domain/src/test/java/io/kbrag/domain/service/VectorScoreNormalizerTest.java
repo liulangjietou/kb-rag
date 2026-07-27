@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Engine consistency test of the vector score contract.
  *
  * <p>The same underlying cosine similarity must produce the same comparable score whether it arrives
- * as an Elasticsearch {@code (1+cos)/2} value or as a raw Milvus cosine; otherwise a score threshold
+ * as an Elasticsearch {@code (1+cos)/2} value or as a raw Qdrant cosine; otherwise a score threshold
  * would silently mean two different things in lite and full mode.
  *
  * @author owlzhangfq@gmail.com
@@ -23,9 +23,9 @@ class VectorScoreNormalizerTest {
 
     @Test
     void shouldMapStandardCosineRangeOntoUnitInterval() {
-        assertEquals(0.0d, VectorScoreNormalizer.fromMilvusScore(-1.0d), TOLERANCE);
-        assertEquals(0.5d, VectorScoreNormalizer.fromMilvusScore(0.0d), TOLERANCE);
-        assertEquals(1.0d, VectorScoreNormalizer.fromMilvusScore(1.0d), TOLERANCE);
+        assertEquals(0.0d, VectorScoreNormalizer.fromQdrantScore(-1.0d), TOLERANCE);
+        assertEquals(0.5d, VectorScoreNormalizer.fromQdrantScore(0.0d), TOLERANCE);
+        assertEquals(1.0d, VectorScoreNormalizer.fromQdrantScore(1.0d), TOLERANCE);
     }
 
     @Test
@@ -34,16 +34,16 @@ class VectorScoreNormalizerTest {
             double cosine = step / 100.0d;
             double esScore = (1.0d + cosine) / 2.0d;
             double fromEs = VectorScoreNormalizer.fromElasticsearchScore(esScore);
-            double fromMilvus = VectorScoreNormalizer.fromMilvusScore(cosine);
-            assertTrue(Math.abs(fromEs - fromMilvus) < ENGINE_TOLERANCE,
-                    "engines disagreed for cosine " + cosine + ": " + fromEs + " vs " + fromMilvus);
+            double fromQdrant = VectorScoreNormalizer.fromQdrantScore(cosine);
+            assertTrue(Math.abs(fromEs - fromQdrant) < ENGINE_TOLERANCE,
+                    "engines disagreed for cosine " + cosine + ": " + fromEs + " vs " + fromQdrant);
         }
     }
 
     @Test
     void shouldClampScoresOutsideTheExpectedDomain() {
-        assertEquals(0.0d, VectorScoreNormalizer.fromMilvusScore(-2.0d), TOLERANCE);
-        assertEquals(1.0d, VectorScoreNormalizer.fromMilvusScore(2.0d), TOLERANCE);
+        assertEquals(0.0d, VectorScoreNormalizer.fromQdrantScore(-2.0d), TOLERANCE);
+        assertEquals(1.0d, VectorScoreNormalizer.fromQdrantScore(2.0d), TOLERANCE);
         assertEquals(1.0d, VectorScoreNormalizer.fromElasticsearchScore(1.5d), TOLERANCE);
     }
 }

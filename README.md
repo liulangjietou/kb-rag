@@ -4,7 +4,7 @@
 双引擎混合检索（向量 + BM25）→ 标注与评测闭环 → 对外开放平台。
 
 **一句话架构**：Java 主服务（检索/管理编排）+ Python 解析服务（文档转 Markdown）+
-React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch 与 Milvus（检索引擎）/
+React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch 与 Qdrant（检索引擎）/
 MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 docker-compose 一键拉起中间件。
 
 > 本仓库由原先四个独立仓库（`kb-rag-server` / `kb-rag-parser` / `kb-rag-web` /

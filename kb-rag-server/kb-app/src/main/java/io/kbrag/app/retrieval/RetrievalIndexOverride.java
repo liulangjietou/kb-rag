@@ -24,7 +24,7 @@ public record RetrievalIndexOverride(String fulltextIndex, String vectorIndex) {
      * Builds the override of one knowledge base from its frozen snapshots.
      *
      * <p><b>Which snapshot serves which route is read off the engine, not off today's configuration.</b> A
-     * Milvus snapshot can only be a vector index and an Elasticsearch snapshot is always the BM25 one; in lite
+     * Qdrant snapshot can only be a vector index and an Elasticsearch snapshot is always the BM25 one; in lite
      * mode the single Elasticsearch snapshot serves both routes, exactly as the live index does. Consulting the
      * configured engine instead would mis-route every historical version after a lite to full migration.
      *
@@ -36,10 +36,10 @@ public record RetrievalIndexOverride(String fulltextIndex, String vectorIndex) {
             return null;
         }
         String fulltextIndex = null;
-        String milvusIndex = null;
+        String qdrantIndex = null;
         for (AppIndexSnapshot snapshot : snapshots) {
-            if (VectorEngine.from(snapshot.engine()) == VectorEngine.MILVUS) {
-                milvusIndex = snapshot.physicalIndexName();
+            if (VectorEngine.from(snapshot.engine()) == VectorEngine.QDRANT) {
+                qdrantIndex = snapshot.physicalIndexName();
             } else {
                 fulltextIndex = snapshot.physicalIndexName();
             }
@@ -48,6 +48,6 @@ public record RetrievalIndexOverride(String fulltextIndex, String vectorIndex) {
             return null;
         }
         return new RetrievalIndexOverride(fulltextIndex,
-                milvusIndex == null ? fulltextIndex : milvusIndex);
+                qdrantIndex == null ? fulltextIndex : qdrantIndex);
     }
 }

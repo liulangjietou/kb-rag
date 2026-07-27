@@ -30,8 +30,8 @@ public class KbProperties {
     /** Elasticsearch connectivity. */
     private Elasticsearch es = new Elasticsearch();
 
-    /** Milvus connectivity, only used in full mode. */
-    private Milvus milvus = new Milvus();
+    /** Qdrant connectivity, only used in full mode. */
+    private Qdrant qdrant = new Qdrant();
 
     /** Object storage connectivity. */
     private Minio minio = new Minio();
@@ -122,7 +122,7 @@ public class KbProperties {
         /**
          * Budget of one snapshot copy in milliseconds.
          *
-         * <p>Bounds the Milvus implementation, which copies entities rather than hard linking segments, so a
+         * <p>Bounds the Qdrant implementation, which copies entities rather than hard linking segments, so a
          * release cannot park a request thread on a collection that stopped answering. The Elasticsearch
          * clone is a segment level hard link and finishes in milliseconds.
          */
@@ -155,7 +155,7 @@ public class KbProperties {
     @ToString
     public static class Vector {
 
-        /** Engine literal, {@code es} for lite mode and {@code milvus} for full mode. */
+        /** Engine literal, {@code es} for lite mode and {@code qdrant} for full mode. */
         private String engine = VectorEngine.ES.code();
 
         /**
@@ -202,18 +202,18 @@ public class KbProperties {
     }
 
     /**
-     * Milvus connectivity.
+     * Qdrant connectivity.
      */
     @Getter
     @Setter
-    @ToString(exclude = "token")
-    public static class Milvus {
+    @ToString(exclude = "apiKey")
+    public static class Qdrant {
 
-        /** Cluster URI, blank means Milvus is not deployed. */
+        /** Service URI, blank means Qdrant is not deployed. */
         private String uri = "";
 
-        /** Access token, blank for an unauthenticated local deployment. */
-        private String token = "";
+        /** API key, blank for an unauthenticated local deployment. */
+        private String apiKey = "";
     }
 
     /**

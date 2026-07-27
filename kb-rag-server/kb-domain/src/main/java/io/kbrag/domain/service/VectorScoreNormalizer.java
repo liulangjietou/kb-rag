@@ -4,7 +4,7 @@ package io.kbrag.domain.service;
  * Converts engine specific vector scores into one comparable score.
  *
  * <p>Why this exists. Elasticsearch reports {@code (1 + cos) / 2} for a cosine {@code dense_vector}
- * while Milvus reports the raw cosine in {@code [-1,1]}. Leaving the conversion to each adapter would
+ * while Qdrant reports the raw cosine in {@code [-1,1]}. Leaving the conversion to each adapter would
  * make a score threshold of 0.5 mean two different things depending on the deployment mode, which
  * would break the promise that lite and full behave identically.
  *
@@ -31,13 +31,13 @@ public final class VectorScoreNormalizer {
     }
 
     /**
-     * Normalises a Milvus cosine score.
+     * Normalises a Qdrant cosine score.
      *
-     * @param milvusScore raw cosine similarity in {@code [-1,1]}
+     * @param qdrantScore raw cosine similarity in {@code [-1,1]}
      * @return standard cosine linearly mapped to {@code [0,1]}
      */
-    public static double fromMilvusScore(double milvusScore) {
-        return fromStandardCosine(milvusScore);
+    public static double fromQdrantScore(double qdrantScore) {
+        return fromStandardCosine(qdrantScore);
     }
 
     /**
