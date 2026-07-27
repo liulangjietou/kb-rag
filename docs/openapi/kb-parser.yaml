@@ -13,7 +13,20 @@ info:
     `data.images[]`（`kind=embedded|page_render`，含二进制内容与占位符对应关系）、
     `data.warnings[]`（超限跳过说明）；新增 `POST /api/v1/parse/chat` 聊天记录
     （CSV/Excel）解析端点，输出统一 ChatMessage 结构。
-  version: "0.3.0-m3"
+
+    M8 增量（docs/M8-CONTRACTS.md §0.1/§0.2/§0.4/§0.7）：①`/api/v1/parse/chat`
+    的 `file_ext` 白名单扩为 csv/xlsx/txt/html（txt 行模板正则、html DOM 选择器
+    两类新适配器，模板随映射档案 yml 的 `txt:`/`html:` 段承载）；新增可选表单字段
+    `profile_yaml`（映射档案完整 YAML 文本，优先于 `mapping_profile` 解析本地
+    app/mappings/*.yml——档案入库 t_kb_source_mapping 后由 kb-rag-server 随请求
+    传递）；`mapping_profile` 改为可选，缺省按扩展名取内置默认
+    （csv/xlsx=memotrace，txt=liuhen_txt，html=liuhen_html）。
+    ②PaddleOCR 本地 OCR 兜底：可选依赖（requirements-ocr.txt，默认不装），
+    环境开关 `OCR_ENGINE=none|paddle`（默认 none 行为与 M3 完全一致；paddle 未装
+    依赖则启动 fast-fail）；扫描页三级次序 kb-server 侧 VLM → parser 侧 PaddleOCR
+    → 跳过降级；OCR 成功的扫描页文本直接回填并标记 `pages[].ocr_source=paddle`，
+    kb-rag-server 对带该标记的页不再调 VLM。
+  version: "0.9.0-m8"
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -25,7 +38,7 @@ tags:
   - name: parse
     description: 文档解析
   - name: chat
-    description: 聊天记录解析（M3，docs/M3-CONTRACTS.md §2.2）
+    description: 聊天记录解析（M3 定型 docs/M3-CONTRACTS.md §2.2，M8 扩 TXT/HTML 与 profile_yaml）
   - name: system
     description: 健康检查
 
@@ -42,6 +55,11 @@ paths:
         M3 起响应含图片与扫描页信息（见 ParseData/ParsePage/ParseImage），kb-parser
         本身不调用任何大模型（VLM 图文理解在 kb-rag-server 侧，见
         docs/M3-CONTRACTS.md §0/§1）。
+
+        M8 起 `OCR_ENGINE=paddle` 时扫描页由 parser 本地 PaddleOCR（ch_PP-OCRv4）
+        直接出文本回填该页 `text` 并标记 `ocr_source=paddle`（见 ParsePage）；单页
+        OCR 超时（`OCR_TIMEOUT_S`，默认 30s）或异常按页降级跳过（该页回到 M3 行为），
+        不影响整篇解析（docs/M8-CONTRACTS.md §0.4）。
       requestBody:
         required: true
         content:
@@ -78,15 +96,27 @@ paths:
   /api/v1/parse/chat:
     post:
       tags: [chat]
-      summary: 解析聊天记录导出文件（CSV/Excel）
+      summary: 解析聊天记录导出文件（CSV/Excel/TXT/HTML）
       description: |
-        docs/M3-CONTRACTS.md §2.2：一期只支持 CSV/Excel（TXT/HTML 降级二期）。
-        `mapping_profile` 指定列名映射档案（默认 `memotrace`，模板见 deploy 仓
-        `mappings/chat/`），未知来源可新增 yml 档案而不改代码。语音/视频消息直接
-        跳过（计入 `data.skipped`），图片消息保留为 `msg_type=image`（M3 不下载
-        聊天记录内嵌图片文件，`content` 为原始占位描述文本）；时间字段按 epoch
-        秒/毫秒自动判别，再按常见字符串格式尝试解析，全部失败则该消息落
-        `skipped.other` 并记 info 日志（不中断整批解析）。
+        docs/M3-CONTRACTS.md §2.2 定型 CSV/Excel；docs/M8-CONTRACTS.md §0.1/§0.2
+        转正 TXT/HTML：txt 走行模板正则适配器（内置留痕/MemoTrace 与微信 PC 两种
+        行模板，行首正则 + 命名捕获组随映射档案 `txt:` 段承载，可自定义覆盖；无法
+        匹配任何行模板的非空行占比 > 30% 即解析失败并报可操作错误），html 走 DOM
+        选择器适配器（映射档案 `html:` 段，剥离 script/style、不加载任何远程资源，
+        图片消息节点转 `[IMAGE]` 占位）。txt/html 导出本身是单一对话转储，固定输出
+        单个 ChatSession（session_id 取上传文件名主干）。
+
+        `mapping_profile` 指定映射档案名，缺省按扩展名取内置默认（csv/xlsx=
+        `memotrace`，txt=`liuhen_txt`，html=`liuhen_html`，见 parser 仓
+        app/mappings/）；`profile_yaml` 为映射档案完整 YAML 文本，传入时优先于
+        `mapping_profile` 的本地文件解析——档案入库 t_kb_source_mapping 后由
+        kb-rag-server 随请求传递，本地 yml 仅作种子与默认（M8 §0.7）。未知来源
+        仍是新增档案而不改代码。
+
+        语音/视频消息直接跳过（计入 `data.skipped`），图片消息保留为
+        `msg_type=image`（不下载聊天记录内嵌图片文件，`content` 为原始占位描述
+        文本）；时间字段按 epoch 秒/毫秒自动判别，再按常见字符串格式尝试解析，
+        全部失败则该消息不输出、落 `skipped.other` 并记 info 日志（不中断整批解析）。
       requestBody:
         required: true
         content:
@@ -102,8 +132,16 @@ paths:
                   $ref: "#/components/schemas/ChatFileExt"
                 mapping_profile:
                   type: string
-                  default: memotrace
-                  description: 列名映射档案名（对应 mappings/chat/{mapping_profile}.yml）
+                  description: |
+                    映射档案名（对应 parser 仓 app/mappings/{mapping_profile}.yml）。
+                    可选，缺省按 file_ext 取内置默认：csv/xlsx=memotrace、
+                    txt=liuhen_txt、html=liuhen_html（M8-CONTRACTS.md §5）。
+                profile_yaml:
+                  type: string
+                  description: |
+                    M8 新增，可选。映射档案完整 YAML 文本，传入时优先于
+                    mapping_profile 解析本地文件（kb-rag-server 从
+                    t_kb_source_mapping 读出后随请求传递，M8-CONTRACTS.md §0.7）。
       responses:
         "200":
           description: 解析成功
@@ -144,8 +182,10 @@ components:
 
     ChatFileExt:
       type: string
-      description: docs/M3-CONTRACTS.md §2.2：聊天记录一期只支持 CSV/Excel
-      enum: [csv, xlsx]
+      description: |
+        聊天记录支持的扩展名。csv/xlsx 为 M3 定型（docs/M3-CONTRACTS.md §2.2），
+        txt/html 为 M8 转正（docs/M8-CONTRACTS.md §0.1/§0.2）。
+      enum: [csv, xlsx, txt, html]
 
     ErrorCode:
       type: string
@@ -184,6 +224,15 @@ components:
             M3 新增。该页抽取文本去空白后长度 < SCANNED_PAGE_TEXT_THRESHOLD（默认 20
             字符）即判定为扫描页：整页渲染为一张 kind=page_render 的图片，占位符插入
             该页文本位置（见 docs/M3-CONTRACTS.md §2.1）。
+        ocr_source:
+          type: string
+          nullable: true
+          enum: [paddle]
+          description: |
+            M8 新增（docs/M8-CONTRACTS.md §0.4）。该扫描页文本由 parser 本地
+            PaddleOCR 兜底回填时为 "paddle"；其余情况（OCR_ENGINE=none、非扫描页、
+            单页 OCR 超时/失败按页跳过）为 null。kb-rag-server 对带该标记的页
+            不再执行自己的 VLM OCR。
 
     ParseImageKind:
       type: string
@@ -267,7 +316,7 @@ components:
 
     ChatMessageItem:
       type: object
-      required: [msg_id, sender, is_self, msg_type, content]
+      required: [msg_id, sender, is_self, send_time, msg_type, content]
       properties:
         msg_id:
           type: string
@@ -278,8 +327,9 @@ components:
         send_time:
           type: integer
           format: int64
-          nullable: true
-          description: epoch 毫秒；无法解析出合法时间时为 null，该消息同时计入 skipped.other
+          description: |
+            epoch 毫秒。无法解析出合法时间的消息不会出现在 messages[] 中
+            （计入 skipped.other），因此本字段恒有值。
         msg_type:
           $ref: "#/components/schemas/ChatMsgType"
         content:
@@ -303,7 +353,10 @@ components:
 
     ChatSkipped:
       type: object
-      description: 跳过消息计数，按类型统计（voice/video 恒为跳过，other 为时间/类型解析失败兜底）
+      description: |
+        跳过消息计数，按类型统计：voice/video 恒为跳过；other 为解析失败兜底
+        （时间解析失败的行，以及 M8 txt 行模板未匹配、html 节点缺必需字段等
+        无法归并为消息的记录）。
       properties:
         voice:
           type: integer

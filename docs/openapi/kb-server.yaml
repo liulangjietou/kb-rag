@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: kb-rag-server API
-  description: 'kb-rag 管理台内部 API（M1 基线 + M2 + M3 增量）。
+  description: 'kb-rag 管理台内部 API（M1 基线 + M2–M8 增量）。
 
 
     本文件按 docs/M1-CONTRACTS.md §5、docs/M2-CONTRACTS.md §1.5/§3/§4/§6 与
@@ -65,6 +65,27 @@ info:
     （M6 之前发布、本就没有快照的旧 RELEASED 版本走同样路径但不记该标记，是历史数据形态而非故障）；
     `DocumentVersionResponse` 新增 `pinned`/`pinned_by`，被任意未清理应用版本（含 SUPERSEDED）
     的固化可见集引用即 pin，归档保留清理跳过之。同 PR 补 M5 遗漏的 `route_fallback_all` 枚举值。
+
+    M7 增量（docs/M7-CONTRACTS.md）：GraphRAG 图检索路——知识库图配置
+    （`GET/PUT /api/v1/kb/{kbId}/graph/config`，graph_enabled 开关）、全量实体关系抽取
+    （`POST .../graph/extract`，先清空再对激活版本启用分片逐片 LLM 抽取）、图谱概览/实体列表/
+    实体关联分片下钻（`.../graph/summary`、`.../graph/entities`、
+    `.../graph/entities/{entityName}/chunks`）；检索三路混排接入图路，query 侧实体匹配为
+    「query 轻量切分 + Neo4j 实体名 fulltext（cjk 分析器）」，不做 query 级 LLM 抽取；
+    `degraded` 枚举补 `graph_route_unavailable`；正式版（索引快照上下文）调用图路直接关闭且
+    不记降级（图数据无快照副本，属能力边界）；Neo4j 以 compose profile=graph 可选启用，
+    `NEO4J_URI` 留空即整体禁用图能力且其余功能零影响。
+
+    M8 增量（docs/M8-CONTRACTS.md）：导入与解析增强——导入映射档案维护
+    （`GET/POST /api/v1/source-mappings`、`PUT/DELETE /api/v1/source-mappings/{mappingId}`、
+    `POST .../{mappingId}/copy`，t_kb_source_mapping 落库，内置模板启动种子化、不可改删可复制）；
+    聊天导入 `mapping_profile` 入参改为传映射档案业务 id 或内置名（兼容旧值），格式范围扩
+    TXT/HTML（parser 侧新增行模板/DOM 选择器适配器，profile_yaml 全文随请求传给 parser）；
+    聊天聚合新增 `window_overlap` 重叠滑窗参数（默认 0=既有顺切，约束 overlap×2 < max_messages），
+    聊天 chunk metadata 增 `window_seq`/`msg_span`；检索侧近重复归并——同会话 `msg_span`
+    重叠率 ≥ 0.5 的命中只保留排名最高者，被并者记入存活者 metadata
+    `merged_window_chunk_ids`（≤5）。PaddleOCR 本地 OCR 兜底属 kb-parser 侧（见 kb-parser.yaml），
+    server 对带 `ocr_source` 标记的页不再调 VLM。
 
     '
   version: 0.9.0-m8
@@ -728,7 +749,9 @@ paths:
       description: 'M3-CONTRACTS.md §3.5：multipart 上传聊天记录导出文件，服务端调用 kb-rag-parser
         `/api/v1/parse/chat` 端点解析后，与库内既有聊天文档做会话匹配， 仅返回匹配预览，不执行导入。逻辑文档标识 = 来源渠道 + session_id：已存在的会话
         `action=NEW_VERSION`，新会话 `action=CREATE`。上传文件与解析结果暂存 MinIO， 返回的 `upload_token`
-        有效期 30 分钟，供 confirm 端点使用。 '
+        有效期 30 分钟，供 confirm 端点使用。 M8 起格式范围扩 TXT/HTML（M8-CONTRACTS.md §0.1/§0.2），映射档案改从
+        t_kb_source_mapping 解析、profile_yaml 全文随请求传给 parser；文件扩展名与所选档案 source_type
+        不匹配时在预览即拦截（INVALID_PARAM）。 '
       requestBody:
         required: true
         content:
@@ -743,8 +766,9 @@ paths:
                   format: binary
                 mapping_profile:
                   type: string
-                  default: memotrace
-                  description: 列名映射档案名（对应 deploy 仓 mappings/chat/{mapping_profile}.yml）
+                  description: 'M8 起为映射档案业务 id（t_kb_source_mapping.mapping_id）或内置名
+                    （memotrace/liuhen_txt/liuhen_html，兼容 M3 旧值）；缺省按文件扩展名选默认档案
+                    （M8-CONTRACTS.md §0.7/§5）'
       responses:
         '200':
           description: OK
@@ -764,8 +788,9 @@ paths:
       - chat-import
       summary: 执行聊天记录导入
       description: 'M3-CONTRACTS.md §3.5：`upload_token` 取自匹配预览接口返回值（30 分钟内 有效），可选
-        `session_ids` 只导入子集会话（缺省=预览返回的全部会话）。按会话聚合 （chat_aggregation:{window_minutes,max_messages}，无重叠顺切）生成
-        chunk_type=chat_log 的分片，metadata 写 session_id/session_name/sender/msg_time；聊天文本默认开启脱敏。 '
+        `session_ids` 只导入子集会话（缺省=预览返回的全部会话）。按会话聚合 （chat_aggregation:{window_minutes,max_messages,window_overlap}，overlap
+        默认 0=顺切，M8 起支持重叠滑窗）生成 chunk_type=chat_log 的分片，metadata 写
+        session_id/session_name/sender/msg_time，M8 增 window_seq/msg_span；聊天文本默认开启脱敏。 '
       requestBody:
         required: true
         content:
@@ -3154,8 +3179,8 @@ components:
           default: false
     ChatAggregationConfig:
       type: object
-      description: 'M3-CONTRACTS.md §3.5：聊天记录按“会话 + 时间窗口”聚合为 chunk_type=chat_log 的分片，一期固定无重叠顺切（步长=窗口，需求文档
-        v1.6 定），不支持重叠滑窗。 '
+      description: 'M3-CONTRACTS.md §3.5：聊天记录按“会话 + 时间窗口”聚合为 chunk_type=chat_log 的分片，一期无重叠顺切（步长=窗口）；M8-CONTRACTS.md
+        §0.5 增 window_overlap 重叠滑窗（默认 0 保持顺切）。 '
       properties:
         window_minutes:
           type: integer
@@ -3165,6 +3190,13 @@ components:
           type: integer
           default: 50
           minimum: 1
+        window_overlap:
+          type: integer
+          default: 0
+          minimum: 0
+          description: 'M8 新增：下一窗口重复上一窗口末尾的消息数，0=既有顺切；约束
+            window_overlap×2 < max_messages（每条消息至多落两个窗口），违规 INVALID_PARAM。
+            开启后聊天 chunk metadata 携带 window_seq 与 msg_span（M8-CONTRACTS.md §0.5）'
     RebuildRequest:
       type: object
       description: M2-CONTRACTS.md §4：doc_ids 缺省 = 该知识库下全部 config_stale=1 文档
