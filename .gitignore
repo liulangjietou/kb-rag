@@ -1,0 +1,35 @@
+# ===== 环境变量与敏感信息（绝不入库）=====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+credentials*
+secrets*
+
+# ===== IDE 本地配置 =====
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+
+# ===== 本地自测手册（含本机绝对路径与测试口令）=====
+自测步骤.md
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+
+# ===== 构建产物与依赖（各子项目 .gitignore 亦有覆盖，此处兜底）=====
+node_modules/
+dist/
+target/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.log
+logs/
