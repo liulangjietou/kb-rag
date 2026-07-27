@@ -54,7 +54,7 @@ export default function MainLayout() {
             overflow: 'hidden',
           }}
         >
-          知识库管理台
+          企业RAG管理平台
         </div>
         <Menu
           theme="dark"

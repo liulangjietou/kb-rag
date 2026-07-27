@@ -36,7 +36,7 @@ export default function LoginPage() {
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f0f2f5' }}>
       <Card style={{ width: 380 }}>
         <Typography.Title level={3} style={{ textAlign: 'center', marginBottom: 24 }}>
-          知识库管理台
+          企业RAG管理平台
         </Typography.Title>
         <Form<LoginRequest> layout="vertical" onFinish={handleFinish} autoComplete="off">
           <Form.Item name="username" label="用户名" rules={[{ required: true, message: '请输入用户名' }]}>
