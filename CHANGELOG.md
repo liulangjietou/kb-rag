@@ -7,6 +7,12 @@
 ## [Unreleased]
 
 ### Fixed
+- 评测报告与门禁双跑对比全列 NaN%（kb-rag-web PR#13，用户实测截图报告）：M4b 期 web 类型层把每个
+  指标假设为 {value, ci_low, ci_high} 对象且该 ASSUMPTION 从未与后端定版核对，后端实际返回扁平
+  数字 + 独立 recall_ci/hit_rate_ci —— 数字通过空值检查、.value 取出 undefined → NaN%；两个抽屉
+  与 CSV 导出一并修正。伴生发现并修复 server 真实指标缺陷（kb-rag-server PR#17）：重叠切分让同一
+  证据 span 命中多个候选时 IDCG 仍按声明证据数归一，NDCG 实测 2.948>1；理想相关数改取
+  max(声明, 观测) 截断到 K
 - 真流式从未生效（kb-rag-server PR#16，用户配有效 Key 首次真跑流式暴露）：chat-preview 与对外
   /knowledge/chat 把 SseEmitter 藏在 ResponseEntity<?> 后返回，Spring 按声明类型选返回值处理器、
   emitter 被交给消息转换器 → HttpMessageNotWritableException 500；修复为 produces=text/event-stream
