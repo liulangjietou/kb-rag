@@ -4,13 +4,15 @@ Author: owlzhangfq@gmail.com
 """
 
 import logging
-from typing import List
+from typing import List, Optional, Tuple
 
 import pymupdf
 
+from app import config
 from app.config import SCANNED_PAGE_RENDER_DPI, SCANNED_PAGE_TEXT_THRESHOLD
 from app.errors import ErrorCode, ParseError
 from app.models import PageContent, ParseData
+from app.ocr.engine import get_ocr_engine
 from app.parsers.base import BaseParser
 from app.parsers.images import KIND_EMBEDDED, KIND_PAGE_RENDER, ImageAssetCollector, guess_media_type, image_placeholder
 
@@ -30,11 +32,21 @@ class PdfParser(BaseParser):
       - embedded raster images on each page (kind="embedded")
       - for a page with no usable text layer ("scanned"), a 150dpi PNG
         render of the whole page (kind="page_render") instead, so
-        kb-rag-server's VLM can OCR it -- this parser never runs OCR itself
-        (M3-CONTRACTS.md §0: OCR is a VLM responsibility on the server side)
+        kb-rag-server's VLM can OCR it -- this parser does not run OCR
+        itself by default (OCR_ENGINE=none, M3-CONTRACTS.md §0: OCR is a
+        VLM responsibility on the server side)
     A scanned page's embedded images are not separately extracted: the
     whole page is already captured as one page_render image, so extracting
     its raw embedded images too would just double-count the same content.
+
+    M8 (M8-CONTRACTS.md §0.4) adds an optional local OCR fallback: when
+    OCR_ENGINE=paddle is configured (and the optional paddleocr dependency
+    is installed), the same page_render PNG is also run through PaddleOCR;
+    a successful result backfills this page's PageContent.text (and the
+    corresponding markdown) and sets ocr_source="paddle" so kb-rag-server
+    skips its own VLM call for that page. A timeout/failure/OCR_ENGINE=none
+    leaves the page exactly as before (empty text, ocr_source=None) -- this
+    is always a per-page degrade, never a whole-document failure.
     """
 
     def parse(self, content: bytes, filename: str) -> ParseData:
@@ -58,13 +70,17 @@ class PdfParser(BaseParser):
                 text = page.get_text()
                 page_no = page_index + 1
                 scanned = len(text.strip()) < SCANNED_PAGE_TEXT_THRESHOLD
+                ocr_source: Optional[str] = None
 
                 if scanned:
-                    placeholder_lines = self._render_scanned_page(page, page_no, collector)
+                    placeholder_lines, ocr_text = self._render_and_ocr_scanned_page(page, page_no, collector)
+                    if ocr_text:
+                        text = ocr_text
+                        ocr_source = config.OCR_SOURCE_PADDLE
                 else:
                     placeholder_lines = self._extract_embedded_images(document, page, page_no, collector)
 
-                pages.append(PageContent(page_no=page_no, text=text, scanned=scanned))
+                pages.append(PageContent(page_no=page_no, text=text, scanned=scanned, ocr_source=ocr_source))
                 page_markdown = f"## Page {page_no}\n\n{text}"
                 if placeholder_lines:
                     page_markdown += "\n\n" + "\n".join(placeholder_lines)
@@ -87,14 +103,21 @@ class PdfParser(BaseParser):
             document.close()
 
     @staticmethod
-    def _render_scanned_page(page, page_no: int, collector: ImageAssetCollector) -> List[str]:
-        """Render a text-less page to PNG so kb-rag-server's VLM can OCR it."""
+    def _render_and_ocr_scanned_page(
+        page, page_no: int, collector: ImageAssetCollector
+    ) -> Tuple[List[str], Optional[str]]:
+        """Render a text-less page to PNG (so kb-rag-server's VLM can OCR
+        it, same as pre-M8), and additionally attempt this service's own
+        PaddleOCR fallback on that same PNG (M8-CONTRACTS.md §0.4) -- a
+        no-op returning None when OCR_ENGINE=none (the default)."""
         pixmap = page.get_pixmap(dpi=SCANNED_PAGE_RENDER_DPI)
         png_bytes = pixmap.tobytes("png")
         image_id = collector.try_add(
             page_no, kind=KIND_PAGE_RENDER, media_type=_PAGE_RENDER_MEDIA_TYPE, raw_bytes=png_bytes
         )
-        return [image_placeholder(image_id)] if image_id else []
+        placeholder_lines = [image_placeholder(image_id)] if image_id else []
+        ocr_text = get_ocr_engine().recognize(png_bytes, page_no)
+        return placeholder_lines, ocr_text
 
     @staticmethod
     def _extract_embedded_images(document, page, page_no: int, collector: ImageAssetCollector) -> List[str]:

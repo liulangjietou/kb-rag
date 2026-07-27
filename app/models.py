@@ -32,6 +32,15 @@ class PageContent(BaseModel):
         "page_render image instead (M3-CONTRACTS.md §2.1). Only pdf pages can "
         "ever be scanned; every other format always reports False.",
     )
+    ocr_source: Optional[str] = Field(
+        None,
+        description="'paddle' when this scanned page's text was backfilled by "
+        "this service's own PaddleOCR fallback (OCR_ENGINE=paddle, "
+        "M8-CONTRACTS.md §0.4); null otherwise (OCR_ENGINE=none, a non-scanned "
+        "page, or the OCR attempt timed out/failed and the page was skipped). "
+        "kb-rag-server should not run its own VLM OCR pass on a page that "
+        "already carries this marker.",
+    )
 
 
 class ImageAsset(BaseModel):

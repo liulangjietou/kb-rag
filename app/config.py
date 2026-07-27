@@ -82,4 +82,66 @@ IMAGE_PLACEHOLDER_TEMPLATE = "[[IMAGE:{image_id}]]"
 # --- M3 chat log parsing additions (M3-CONTRACTS.md §2.2) ---
 
 DEFAULT_CHAT_MAPPING_PROFILE = "memotrace"
-SUPPORTED_CHAT_FILE_EXTENSIONS = frozenset({"csv", "xlsx"})
+
+# M8-CONTRACTS.md §0.1/§0.2: txt (line-template) and html (DOM) adapters
+# widen the chat-log file_ext whitelist alongside the original csv/xlsx.
+SUPPORTED_CHAT_FILE_EXTENSIONS = frozenset({"csv", "xlsx", "txt", "html"})
+
+# Built-in mapping profile used per file_ext when the caller (kb-rag-server)
+# does not pass mapping_profile at all -- csv/xlsx keep the original
+# "memotrace" default unchanged; txt/html get their own built-in profiles
+# (app/mappings/liuhen_txt.yml, app/mappings/liuhen_html.yml) since a
+# column-name profile has no txt:/html: sections to fall back on.
+DEFAULT_CHAT_MAPPING_PROFILE_BY_EXT = {
+    "csv": DEFAULT_CHAT_MAPPING_PROFILE,
+    "xlsx": DEFAULT_CHAT_MAPPING_PROFILE,
+    "txt": "liuhen_txt",
+    "html": "liuhen_html",
+}
+
+# --- M8 TXT line-template adapter additions (M8-CONTRACTS.md §0.1) ---
+
+# A TXT export whose configured line templates match too few lines is
+# almost certainly the wrong format/profile (e.g. a raw WeChat db dump
+# fed in as-is) -- fail fast with an actionable error instead of silently
+# emitting a near-empty session (M8-CONTRACTS.md §0.1).
+TXT_UNMATCHED_LINE_RATIO_FAIL_THRESHOLD = 0.30
+
+# --- M8 PaddleOCR fallback additions (M8-CONTRACTS.md §0.4) ---
+
+OCR_ENGINE_NONE = "none"
+OCR_ENGINE_PADDLE = "paddle"
+_SUPPORTED_OCR_ENGINES = frozenset({OCR_ENGINE_NONE, OCR_ENGINE_PADDLE})
+
+# Marks a PageContent as already OCR'd by this service, so kb-rag-server
+# skips its own (VLM) OCR pass for that page (M8-CONTRACTS.md §0.4).
+OCR_SOURCE_PADDLE = "paddle"
+
+# ch_PP-OCRv4, the contract-mandated Chinese+English model.
+OCR_MODEL_LANG = "ch"
+OCR_MODEL_VERSION = "PP-OCRv4"
+
+
+def _read_ocr_engine_env() -> str:
+    """Same lenient-default philosophy as _read_int_env: an unset or
+    unrecognized OCR_ENGINE value degrades to "none" (today's behavior)
+    rather than crashing the process; only a *recognized but unsupported*
+    engine value would ever need harder handling, and there is exactly one
+    recognized alternative today ("paddle")."""
+    raw = os.getenv("OCR_ENGINE")
+    normalized = (raw or "").strip().lower()
+    if normalized not in _SUPPORTED_OCR_ENGINES:
+        return OCR_ENGINE_NONE
+    return normalized
+
+
+# Read once at import time like every other config constant here; per-call
+# consumers (app.ocr.engine.get_ocr_engine) re-read the module attribute
+# app.config.OCR_ENGINE rather than capturing this value in a closure, so
+# tests can monkeypatch it per-case (same pattern as MAX_IMAGES_PER_DOC).
+OCR_ENGINE = _read_ocr_engine_env()
+
+# Per-page OCR wall-clock budget; on timeout the page is skipped (falls
+# back to the pre-M8 behavior for that page) and counted, never fails the
+# whole document (M8-CONTRACTS.md §0.4).
+OCR_TIMEOUT_S = _read_int_env("OCR_TIMEOUT_S", 30)

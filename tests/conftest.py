@@ -70,6 +70,28 @@ def make_scanned_pdf_bytes() -> bytes:
     return data
 
 
+def make_scanned_pdf_with_ocrable_text_bytes(text: str = "HELLO OCR") -> bytes:
+    """A one-page PDF with zero native text layer (page.get_text() == "",
+    so it is still detected as scanned=True) whose rendered pixmap
+    nonetheless contains legible glyph pixels, for testing real PaddleOCR
+    inference end to end (M8-CONTRACTS.md §0.4): a helper document renders
+    `text` with a real (extractable) text layer, then its pixmap -- a pure
+    raster image of those glyphs -- is embedded as a picture on the actual
+    test page, which itself never gets a text layer of its own."""
+    helper_document = pymupdf.open()
+    helper_page = helper_document.new_page(width=300, height=100)
+    helper_page.insert_text((10, 60), text, fontsize=36)
+    png_bytes = helper_page.get_pixmap(dpi=200).tobytes("png")
+    helper_document.close()
+
+    document = pymupdf.open()
+    page = document.new_page(width=300, height=100)
+    page.insert_image(pymupdf.Rect(0, 0, 300, 100), stream=png_bytes)
+    data = document.tobytes()
+    document.close()
+    return data
+
+
 def make_docx_bytes(heading: str = "Title", paragraph: str = "Hello kb-rag DOCX") -> bytes:
     document = Document()
     document.add_heading(heading, level=1)
@@ -157,10 +179,13 @@ def post_parse_chat(
     content: bytes,
     file_ext: str,
     mapping_profile: Optional[str] = None,
+    profile_yaml: Optional[str] = None,
 ):
     form_data = {"file_ext": file_ext}
     if mapping_profile is not None:
         form_data["mapping_profile"] = mapping_profile
+    if profile_yaml is not None:
+        form_data["profile_yaml"] = profile_yaml
     return client.post(
         "/api/v1/parse/chat",
         files={"file": (filename, content, "application/octet-stream")},

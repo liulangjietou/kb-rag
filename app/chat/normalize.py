@@ -51,6 +51,13 @@ MSG_TYPE_VOICE = "voice"
 MSG_TYPE_VIDEO = "video"
 MSG_TYPE_OTHER = "other"
 
+# M8-CONTRACTS.md §0.2: an HTML image-message node has no textual content of
+# its own (the DOM adapter never downloads the referenced image), so its
+# ChatMessage.content is this fixed placeholder -- the same "image message
+# kept with a placeholder-ish content string" semantics csv/xlsx sources
+# already use for msg_type=image (see README "既有图片消息语义").
+IMAGE_PLACEHOLDER_TEXT = "[IMAGE]"
+
 
 def coerce_is_self(raw_value: object) -> bool:
     """Best-effort boolean coercion; anything unrecognized defaults to False."""

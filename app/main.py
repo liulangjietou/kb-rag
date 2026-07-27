@@ -4,9 +4,12 @@ kb-rag-parser FastAPI application.
 Endpoints:
   POST /api/v1/parse       multipart file + form file_ext -> ParseResponse
                            (M1-CONTRACTS.md §6, extended by M3-CONTRACTS.md §2.1
-                           with images[]/warnings[] and per-page scanned)
-  POST /api/v1/parse/chat  multipart file + form file_ext (+ mapping_profile)
-                           -> ChatParseResponse (M3-CONTRACTS.md §2.2)
+                           with images[]/warnings[] and per-page scanned; M8
+                           adds pages[].ocr_source, M8-CONTRACTS.md §0.4)
+  POST /api/v1/parse/chat  multipart file + form file_ext (csv/xlsx/txt/html)
+                           + form mapping_profile/profile_yaml (both optional)
+                           -> ChatParseResponse (M3-CONTRACTS.md §2.2, widened
+                           by M8-CONTRACTS.md §0.1/§0.2/§0.7)
   GET  /health             -> {"status": "UP"}
 
 Security constraints enforced here (requirement doc §4.2):
@@ -14,8 +17,13 @@ Security constraints enforced here (requirement doc §4.2):
   - zip-based formats (docx/xlsx) run the zip-slip / zip-bomb precheck
     inside their own parser (see app/security.py) before being opened
   - XML parsing hardened against XXE at process startup
+  - html chat-log parsing (M8) strips script/style and never fetches a
+    remote resource (see app/chat/html_adapter.py)
   - a hard timeout (PARSE_TIMEOUT_SECONDS) bounds every parse call
   - no outbound network call is implemented anywhere in this service
+  - OCR_ENGINE=paddle (M8, optional, default "none") fast-fails at startup
+    if the optional paddleocr dependency isn't installed (see
+    app/ocr/engine.py)
 
 Author: owlzhangfq@gmail.com
 """
@@ -30,7 +38,7 @@ from fastapi import FastAPI, File, Form, UploadFile
 
 from app.chat.parser import parse_chat
 from app.config import (
-    DEFAULT_CHAT_MAPPING_PROFILE,
+    DEFAULT_CHAT_MAPPING_PROFILE_BY_EXT,
     MAX_FILE_SIZE_BYTES,
     PARSE_TIMEOUT_SECONDS,
     PARSER_EXECUTOR_MAX_WORKERS,
@@ -38,6 +46,7 @@ from app.config import (
 )
 from app.errors import ErrorCode, ParseError
 from app.models import ChatParseData, ChatParseResponse, HealthResponse, ParseData, ParseResponse
+from app.ocr.engine import ensure_ocr_engine_ready
 from app.parsers.registry import get_parser
 from app.security import ensure_file_size_within_limit, harden_xml_parsing
 
@@ -49,6 +58,12 @@ logger = logging.getLogger(__name__)
 
 # Applied once at import time, before any request can trigger XML parsing.
 harden_xml_parsing()
+
+# Fast-fail app startup (M8-CONTRACTS.md §0.4) when OCR_ENGINE=paddle is
+# configured but the optional paddleocr dependency isn't installed --
+# raises and lets the process crash rather than a confusing per-request
+# failure the first time a scanned pdf page is encountered.
+ensure_ocr_engine_ready()
 
 app = FastAPI(title=SERVICE_NAME, version="0.1.0")
 
@@ -108,9 +123,27 @@ def _parse_document_blocking(content: bytes, file_ext: str, filename: str) -> Pa
     return parser.parse(content, filename)
 
 
-def _parse_chat_blocking(content: bytes, file_ext: str, filename: str, mapping_profile: str) -> ChatParseData:
+def _parse_chat_blocking(
+    content: bytes,
+    file_ext: str,
+    filename: str,
+    mapping_profile: Optional[str],
+    profile_yaml: Optional[str],
+) -> ChatParseData:
     ensure_file_size_within_limit(content, MAX_FILE_SIZE_BYTES)
-    return parse_chat(content, filename, file_ext, mapping_profile)
+    resolved_profile = mapping_profile or _default_mapping_profile_for(file_ext)
+    return parse_chat(content, filename, file_ext, resolved_profile, profile_yaml)
+
+
+def _default_mapping_profile_for(file_ext: str) -> str:
+    """Built-in default mapping_profile per file_ext (M8-CONTRACTS.md
+    §0.1/§0.2/§0.7) applied only when the caller doesn't pass
+    mapping_profile at all -- csv/xlsx keep the original "memotrace"
+    default; an unrecognized file_ext falls back to "memotrace" too, since
+    it will fail fast in parse_chat()'s own file_ext whitelist check
+    regardless of which profile name is attempted."""
+    normalized_ext = (file_ext or "").strip().lower().lstrip(".")
+    return DEFAULT_CHAT_MAPPING_PROFILE_BY_EXT.get(normalized_ext, "memotrace")
 
 
 @app.post("/api/v1/parse", response_model=ParseResponse)
@@ -138,21 +171,32 @@ async def parse_document(
 async def parse_chat_log(
     file: UploadFile = File(...),
     file_ext: str = Form(...),
-    mapping_profile: str = Form(DEFAULT_CHAT_MAPPING_PROFILE),
+    mapping_profile: Optional[str] = Form(None),
+    profile_yaml: Optional[str] = Form(None),
 ) -> ChatParseResponse:
-    """Parse a chat-log export (csv/xlsx) into sessions of messages.
+    """Parse a chat-log export (csv/xlsx/txt/html) into sessions of messages.
+
+    file_ext widened to csv/xlsx/txt/html by M8-CONTRACTS.md §0.1/§0.2.
+    mapping_profile, when omitted, resolves to a file_ext-appropriate
+    built-in default (memotrace for csv/xlsx; liuhen_txt/liuhen_html for
+    txt/html -- see app.config.DEFAULT_CHAT_MAPPING_PROFILE_BY_EXT).
+    profile_yaml, when given, is the mapping profile's full YAML text and
+    takes priority over mapping_profile resolving to a local
+    app/mappings/*.yml file (M8-CONTRACTS.md §0.7) -- kb-rag-server passes
+    this once mapping profiles are stored in t_kb_source_mapping rather
+    than only as local files.
 
     Same failure-normalization contract as /api/v1/parse: any recoverable
     error (unsupported file_ext, a mapping profile that can't resolve the
-    required 'content' column, oversized file, zip-safety rejection,
-    timeout) returns code=PARSE_FAILED instead of raising
-    (M3-CONTRACTS.md §2.2).
+    required 'content' column / txt line template / html selector,
+    oversized file, zip-safety rejection, timeout) returns
+    code=PARSE_FAILED instead of raising (M3-CONTRACTS.md §2.2).
     """
     request_id = uuid.uuid4().hex
     content = await file.read()
 
     code, data, message = await _run_blocking_parse(
         file_ext,
-        lambda: _parse_chat_blocking(content, file_ext, file.filename or "", mapping_profile),
+        lambda: _parse_chat_blocking(content, file_ext, file.filename or "", mapping_profile, profile_yaml),
     )
     return ChatParseResponse(code=code, data=data, message=message, request_id=request_id)

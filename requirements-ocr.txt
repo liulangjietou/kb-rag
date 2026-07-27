@@ -1,0 +1,20 @@
+# Optional dependency for OCR_ENGINE=paddle (M8-CONTRACTS.md §0.4): the
+# local/offline/zero-key scanned-page OCR fallback (app/ocr/engine.py).
+#
+# Not installed by requirements.txt / the Dockerfile base image by default,
+# to keep the base image lean (M8-CONTRACTS.md §0.4 "默认不装保镜像体积").
+# Install explicitly only when the fallback is actually needed:
+#
+#   pip install -r requirements-ocr.txt
+#
+# Setting OCR_ENGINE=paddle without installing this file makes the process
+# fast-fail at startup with an actionable error (see
+# app/ocr/engine.py::ensure_ocr_engine_ready, called from app/main.py).
+#
+# Pins target CPU-only inference (no CUDA). Calibrated on macOS arm64 /
+# Python 3.13 during the M8 acceptance run (the originally drafted 2.x pins
+# have no wheels there); app/ocr/engine.py speaks the PaddleOCR 3.x API.
+# Re-verify `pip install -r requirements-ocr.txt` on the actual deploy
+# target before relying on OCR_ENGINE=paddle in production.
+paddlepaddle==3.3.1
+paddleocr==3.3.3
