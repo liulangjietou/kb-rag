@@ -1,0 +1,402 @@
+openapi: 3.0.3
+info:
+  title: kb-rag-parser API
+  description: |
+    kb-rag 文档解析服务（M1 基线 + M3 增量）。按 docs/M1-CONTRACTS.md §6 定型，
+    M3 增量按 docs/M3-CONTRACTS.md §2 编写。
+
+    安全约束（§4.2 解析安全约束）：defusedxml 处理一切 XML；不实现任何出站 URL 拉取；
+    zip 解包路径校验 + 总量/文件数上限；文件大小上限 100MB；worker 超时 300s。
+
+    M3 增量：kb-parser 不调用任何大模型（docs/M3-CONTRACTS.md §0 第 1 点），只做文件
+    解析、扫描页判定、图片抽取；`/api/v1/parse` 响应新增 `pages[].scanned` 与
+    `data.images[]`（`kind=embedded|page_render`，含二进制内容与占位符对应关系）、
+    `data.warnings[]`（超限跳过说明）；新增 `POST /api/v1/parse/chat` 聊天记录
+    （CSV/Excel）解析端点，输出统一 ChatMessage 结构。
+
+    M8 增量（docs/M8-CONTRACTS.md §0.1/§0.2/§0.4/§0.7）：①`/api/v1/parse/chat`
+    的 `file_ext` 白名单扩为 csv/xlsx/txt/html（txt 行模板正则、html DOM 选择器
+    两类新适配器，模板随映射档案 yml 的 `txt:`/`html:` 段承载）；新增可选表单字段
+    `profile_yaml`（映射档案完整 YAML 文本，优先于 `mapping_profile` 解析本地
+    app/mappings/*.yml——档案入库 t_kb_source_mapping 后由 kb-rag-server 随请求
+    传递）；`mapping_profile` 改为可选，缺省按扩展名取内置默认
+    （csv/xlsx=memotrace，txt=liuhen_txt，html=liuhen_html）。
+    ②PaddleOCR 本地 OCR 兜底：可选依赖（requirements-ocr.txt，默认不装），
+    环境开关 `OCR_ENGINE=none|paddle`（默认 none 行为与 M3 完全一致；paddle 未装
+    依赖则启动 fast-fail）；扫描页三级次序 kb-server 侧 VLM → parser 侧 PaddleOCR
+    → 跳过降级；OCR 成功的扫描页文本直接回填并标记 `pages[].ocr_source=paddle`，
+    kb-rag-server 对带该标记的页不再调 VLM。
+  version: "0.9.0-m8"
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://127.0.0.1:20001
+    description: 本地开发（kb-rag-parser 默认端口，见契约 §0）
+
+tags:
+  - name: parse
+    description: 文档解析
+  - name: chat
+    description: 聊天记录解析（M3 定型 docs/M3-CONTRACTS.md §2.2，M8 扩 TXT/HTML 与 profile_yaml）
+  - name: system
+    description: 健康检查
+
+paths:
+  /api/v1/parse:
+    post:
+      tags: [parse]
+      summary: 解析文档
+      description: |
+        支持格式：pdf(pymupdf) / docx(python-docx) / txt / md / xlsx(openpyxl) / csv。
+        multipart 请求：`file` 为二进制文件，`file_ext` 为表单字段声明的扩展名
+        （用于分派到对应解析策略，独立于文件名后缀，避免伪造扩展名绕过策略选择）。
+
+        M3 起响应含图片与扫描页信息（见 ParseData/ParsePage/ParseImage），kb-parser
+        本身不调用任何大模型（VLM 图文理解在 kb-rag-server 侧，见
+        docs/M3-CONTRACTS.md §0/§1）。
+
+        M8 起 `OCR_ENGINE=paddle` 时扫描页由 parser 本地 PaddleOCR（ch_PP-OCRv4）
+        直接出文本回填该页 `text` 并标记 `ocr_source=paddle`（见 ParsePage）；单页
+        OCR 超时（`OCR_TIMEOUT_S`，默认 30s）或异常按页降级跳过（该页回到 M3 行为），
+        不影响整篇解析（docs/M8-CONTRACTS.md §0.4）。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, file_ext]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                file_ext:
+                  $ref: "#/components/schemas/SupportedFileExt"
+      responses:
+        "200":
+          description: 解析成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ParseResult"
+        "400":
+          description: 参数校验失败（文件缺失/扩展名不支持/超过大小上限）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: 解析失败（PARSE_FAILED）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/parse/chat:
+    post:
+      tags: [chat]
+      summary: 解析聊天记录导出文件（CSV/Excel/TXT/HTML）
+      description: |
+        docs/M3-CONTRACTS.md §2.2 定型 CSV/Excel；docs/M8-CONTRACTS.md §0.1/§0.2
+        转正 TXT/HTML：txt 走行模板正则适配器（内置留痕/MemoTrace 与微信 PC 两种
+        行模板，行首正则 + 命名捕获组随映射档案 `txt:` 段承载，可自定义覆盖；无法
+        匹配任何行模板的非空行占比 > 30% 即解析失败并报可操作错误），html 走 DOM
+        选择器适配器（映射档案 `html:` 段，剥离 script/style、不加载任何远程资源，
+        图片消息节点转 `[IMAGE]` 占位）。txt/html 导出本身是单一对话转储，固定输出
+        单个 ChatSession（session_id 取上传文件名主干）。
+
+        `mapping_profile` 指定映射档案名，缺省按扩展名取内置默认（csv/xlsx=
+        `memotrace`，txt=`liuhen_txt`，html=`liuhen_html`，见 parser 仓
+        app/mappings/）；`profile_yaml` 为映射档案完整 YAML 文本，传入时优先于
+        `mapping_profile` 的本地文件解析——档案入库 t_kb_source_mapping 后由
+        kb-rag-server 随请求传递，本地 yml 仅作种子与默认（M8 §0.7）。未知来源
+        仍是新增档案而不改代码。
+
+        语音/视频消息直接跳过（计入 `data.skipped`），图片消息保留为
+        `msg_type=image`（不下载聊天记录内嵌图片文件，`content` 为原始占位描述
+        文本）；时间字段按 epoch 秒/毫秒自动判别，再按常见字符串格式尝试解析，
+        全部失败则该消息不输出、落 `skipped.other` 并记 info 日志（不中断整批解析）。
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, file_ext]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                file_ext:
+                  $ref: "#/components/schemas/ChatFileExt"
+                mapping_profile:
+                  type: string
+                  description: |
+                    映射档案名（对应 parser 仓 app/mappings/{mapping_profile}.yml）。
+                    可选，缺省按 file_ext 取内置默认：csv/xlsx=memotrace、
+                    txt=liuhen_txt、html=liuhen_html（M8-CONTRACTS.md §5）。
+                profile_yaml:
+                  type: string
+                  description: |
+                    M8 新增，可选。映射档案完整 YAML 文本，传入时优先于
+                    mapping_profile 解析本地文件（kb-rag-server 从
+                    t_kb_source_mapping 读出后随请求传递，M8-CONTRACTS.md §0.7）。
+      responses:
+        "200":
+          description: 解析成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatParseResult"
+        "400":
+          description: 参数校验失败（文件缺失/扩展名不支持/mapping_profile 不存在）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: 解析失败（PARSE_FAILED）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /health:
+    get:
+      tags: [system]
+      summary: 健康检查
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResult"
+
+components:
+  schemas:
+    SupportedFileExt:
+      type: string
+      enum: [pdf, docx, txt, md, xlsx, csv]
+
+    ChatFileExt:
+      type: string
+      description: |
+        聊天记录支持的扩展名。csv/xlsx 为 M3 定型（docs/M3-CONTRACTS.md §2.2），
+        txt/html 为 M8 转正（docs/M8-CONTRACTS.md §0.1/§0.2）。
+      enum: [csv, xlsx, txt, html]
+
+    ErrorCode:
+      type: string
+      description: 与 kb-rag-server 共用同一错误码子集（契约 §5），parser 侧主要产生 PARSE_FAILED
+      enum:
+        - INVALID_PARAM      # 400
+        - PARSE_FAILED       # 500
+        - INTERNAL_ERROR     # 500
+
+    ErrorResponse:
+      type: object
+      description: 统一错误响应，与 kb-rag-server 一致的信封结构
+      required: [code, message, request_id]
+      properties:
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+          example: "parse document failed: unsupported file_ext"
+        request_id:
+          type: string
+          description: 透传自 kb-rag-server 的 X-Request-Id，用于跨服务日志串联
+
+    ParsePage:
+      type: object
+      properties:
+        page_no:
+          type: integer
+          minimum: 1
+        text:
+          type: string
+        scanned:
+          type: boolean
+          default: false
+          description: |
+            M3 新增。该页抽取文本去空白后长度 < SCANNED_PAGE_TEXT_THRESHOLD（默认 20
+            字符）即判定为扫描页：整页渲染为一张 kind=page_render 的图片，占位符插入
+            该页文本位置（见 docs/M3-CONTRACTS.md §2.1）。
+        ocr_source:
+          type: string
+          nullable: true
+          enum: [paddle]
+          description: |
+            M8 新增（docs/M8-CONTRACTS.md §0.4）。该扫描页文本由 parser 本地
+            PaddleOCR 兜底回填时为 "paddle"；其余情况（OCR_ENGINE=none、非扫描页、
+            单页 OCR 超时/失败按页跳过）为 null。kb-rag-server 对带该标记的页
+            不再执行自己的 VLM OCR。
+
+    ParseImageKind:
+      type: string
+      description: |
+        M3 新增。embedded=pdf/docx 内嵌图片；page_render=扫描页（无文本层）整页渲染的
+        PNG（150 dpi）。
+      enum: [embedded, page_render]
+
+    ParseImage:
+      type: object
+      description: |
+        M3 定型（docs/M3-CONTRACTS.md §2.1）。解析产物中的图片，kb-parser 只产出图片
+        本体，不做任何图文理解；VLM 文本代理生成、MinIO 落地、占位符插回原位均在
+        kb-rag-server 侧完成。占位符格式固定 `[[IMAGE:{image_id}]]`，一行独占，与
+        `markdown` 正文中的占位符按 `image_id` 一一对应。
+      required: [image_id, kind, media_type, content_base64]
+      properties:
+        image_id:
+          type: string
+          example: img_1
+        page_no:
+          type: integer
+          nullable: true
+          description: 所属页码；非分页格式（如独立图片文件场景不适用于本端点）可为 null
+        kind:
+          $ref: "#/components/schemas/ParseImageKind"
+        media_type:
+          type: string
+          example: image/png
+        content_base64:
+          type: string
+          description: 图片二进制内容的 base64 编码，由 kb-rag-server 解码后上传 MinIO
+
+    ParseData:
+      type: object
+      required: [markdown, pages]
+      properties:
+        markdown:
+          type: string
+          description: 含 `[[IMAGE:{image_id}]]` 占位符的解析正文（M3 起，见 ParseImage）
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ParsePage"
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/ParseImage"
+          default: []
+        warnings:
+          type: array
+          description: |
+            M3 新增。超出图片数量上限（默认 100，`MAX_IMAGES_PER_DOC`）或单图字节上限
+            （默认 10MB）时，被跳过的图片在此说明，不导致整篇解析失败（见
+            docs/M3-CONTRACTS.md §2.1）。
+          items:
+            type: string
+          default: []
+
+    ParseResult:
+      type: object
+      required: [code, message, request_id, data]
+      properties:
+        code:
+          type: string
+          enum: ["OK"]
+        message:
+          type: string
+          example: "success"
+        request_id:
+          type: string
+        data:
+          $ref: "#/components/schemas/ParseData"
+
+    ChatMsgType:
+      type: string
+      description: |
+        docs/M3-CONTRACTS.md §2.2。voice/video 不会出现（跳过并计入 skipped，不生成
+        消息）；other 表示类型无法归类但消息本身保留。
+      enum: [text, image, voice, video, other]
+
+    ChatMessageItem:
+      type: object
+      required: [msg_id, sender, is_self, send_time, msg_type, content]
+      properties:
+        msg_id:
+          type: string
+        sender:
+          type: string
+        is_self:
+          type: boolean
+        send_time:
+          type: integer
+          format: int64
+          description: |
+            epoch 毫秒。无法解析出合法时间的消息不会出现在 messages[] 中
+            （计入 skipped.other），因此本字段恒有值。
+        msg_type:
+          $ref: "#/components/schemas/ChatMsgType"
+        content:
+          type: string
+          description: |
+            文本内容；msg_type=image 时为源文件中的原始占位描述文本
+            （M3 不下载聊天记录内嵌图片文件，见 docs/M3-CONTRACTS.md §2.2）
+
+    ChatSession:
+      type: object
+      required: [session_id, session_name, messages]
+      properties:
+        session_id:
+          type: string
+        session_name:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessageItem"
+
+    ChatSkipped:
+      type: object
+      description: |
+        跳过消息计数，按类型统计：voice/video 恒为跳过；other 为解析失败兜底
+        （时间解析失败的行，以及 M8 txt 行模板未匹配、html 节点缺必需字段等
+        无法归并为消息的记录）。
+      properties:
+        voice:
+          type: integer
+          default: 0
+        video:
+          type: integer
+          default: 0
+        other:
+          type: integer
+          default: 0
+
+    ChatParseData:
+      type: object
+      required: [sessions, skipped]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatSession"
+        skipped:
+          $ref: "#/components/schemas/ChatSkipped"
+
+    ChatParseResult:
+      type: object
+      required: [code, message, request_id, data]
+      properties:
+        code:
+          type: string
+          enum: ["OK"]
+        message:
+          type: string
+          example: "success"
+        request_id:
+          type: string
+        data:
+          $ref: "#/components/schemas/ChatParseData"
+
+    HealthResult:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: ["UP", "DOWN"]

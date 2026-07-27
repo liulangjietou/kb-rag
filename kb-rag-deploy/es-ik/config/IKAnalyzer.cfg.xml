@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE properties SYSTEM "http://java.sun.com/dtd/properties.dtd">
+<!--
+  kb-rag ik 分词器扩展配置。
+
+  本文件替换 analysis-ik 插件自带的默认配置（挂载见 docker-compose.es-ik.yml），
+  对接 kb-rag-server 的词典热更新通道（docs/M2-CONTRACTS.md §3）：
+    GET /internal/dict/ik/ext.txt   —— 扩展词（EXT）
+    GET /internal/dict/ik/stop.txt  —— 停用词（STOP）
+  两个端点免登录、纯文本一行一词、响应头带 Last-Modified/ETag，ik 按此协议定时轮询
+  实现"新增词条无需重启 ES / 重建索引"。
+
+  地址使用 host.docker.internal 指向宿主机（kb-rag-server 在 M2 阶段仍跑在宿主机
+  20000 端口，见 docs/M1-CONTRACTS.md §0）：
+    - macOS（Docker Desktop）：host.docker.internal 由 Docker Desktop 内置 DNS
+      自动解析到宿主机，无需额外配置。
+    - Linux（Docker Engine）：host.docker.internal 默认不可用，
+      docker-compose.es-ik.yml 已用 extra_hosts: host.docker.internal:host-gateway
+      补齐（需 Docker Engine >= 20.10）；更老版本请把下面两个 URL 换成宿主机实际内网 IP。
+-->
+<properties>
+    <comment>kb-rag IK Analyzer 扩展配置</comment>
+    <!-- 本地扩展字典：kb-rag 词典统一走远程热更新通道管理，不使用本地静态词典文件 -->
+    <entry key="ext_dict"></entry>
+    <!-- 本地扩展停用词典：同上，统一走远程热更新通道 -->
+    <entry key="ext_stopwords"></entry>
+    <!-- 远程扩展字典：对接 kb-rag-server 词典热更新通道（EXT 类型） -->
+    <entry key="remote_ext_dict">http://host.docker.internal:20000/internal/dict/ik/ext.txt</entry>
+    <!-- 远程扩展停用词典：对接 kb-rag-server 词典热更新通道（STOP 类型） -->
+    <entry key="remote_ext_stopwords">http://host.docker.internal:20000/internal/dict/ik/stop.txt</entry>
+</properties>

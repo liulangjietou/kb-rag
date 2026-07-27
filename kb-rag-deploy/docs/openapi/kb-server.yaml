@@ -1,0 +1,5351 @@
+openapi: 3.0.3
+info:
+  title: kb-rag-server API
+  description: 'kb-rag 管理台内部 API（M1 基线 + M2–M8 增量）。
+
+
+    本文件按 docs/M1-CONTRACTS.md §5、docs/M2-CONTRACTS.md §1.5/§3/§4/§6 与
+
+    docs/M3-CONTRACTS.md §3 定型的端点与 DTO 编写，用于 kb-rag-server / kb-rag-web
+
+    之间的接口契约测试与前端 mock。
+
+    M2 增量：search 新入参（改写/融合/重排/阈值/metadata_filter）与出参（applied、
+
+    各路归一化分）、ik 词典 CRUD、知识库索引配置更新与按新配置重建。ik 词典热更新
+
+    通道 `GET /internal/dict/ik/{ext|stop}.txt`（见 M2-CONTRACTS.md §3）面向 ES ik
+
+    插件而非管理台前端，免鉴权、纯文本响应，不纳入本文件的管理台 API 契约。
+
+    M3 增量：model-status 新增 vision_* 三字段；解析预览与确认（PENDING_CONFIRM 状态、
+
+    单个/批量确认、改规则重解析）；聊天记录导入（匹配预览 + 确认执行）；告警 Webhook
+
+    配置与测试；Demo 一键导入与状态查询；IndexConfig 新增 clean_rules/parse_preview_required/
+
+    chat_aggregation。kb-parser 侧 VLM 调用与图片/清洗均在 kb-rag-server 完成，parser 不
+
+    调用任何大模型（docs/M3-CONTRACTS.md §0/§1）。
+
+    M4a 增量：文档版本列表与激活影响预检（`GET .../versions`、`GET .../activate-impact`、
+    `POST .../activate`）、跨版本待复核标注清单、分片标注四操作（编辑/启禁用/合并/拆分）。
+
+    M4b 增量（docs/M4b-CONTRACTS.md）：评测体系全链路——评测集与 case 的增删改查、
+    证据复核工作台（`stale-cases`/`recheck`）、Demo 示例评测集导入（`import-demo`）、
+    检索调试页一键收进评测集（`cases/from-retrieval`）与检索结果反馈标注
+    （`retrieval-feedback`）、评测运行配置矩阵与费用预估（`runs`/`runs/estimate`）、
+    run 详情/命中明细下钻/多 run 对比（`eval-runs/{runId}`、`.../results`、
+    `eval-runs/compare`）；`ActivateImpact.affected_eval_case_count` 由恒 0 占位改为
+    真实统计。对外 API Key 网关（应用发布渠道）属于 M4c 范畴，不在本文件中。
+    M4c 增量（docs/M4c-CONTRACTS.md）：应用中心全链路——应用 CRUD（`/api/v1/apps`）、版本创建/
+    列表/详情、门禁评测集绑定（`gate-dataset`）、提交测试（`submit-test`）、发布门禁与强制发布
+    （`release?force`）、回滚（`rollback`）；控制台内 chat 预览（`chat-preview`，复用对外 chat
+    编排，支持 SSE，事件契约与对外 `/api/v1/knowledge/chat` 一致）；对外开放 API（`/api/v1/
+    knowledge/search`、`/api/v1/knowledge/chat`，API Key 鉴权，独立鉴权/限流过滤器链，
+    securityScheme 见 `ApiKeyBearer`，与管理鉴权 `bearerAuth` 相互独立）；API Key 管理（创建/
+    列表/启禁用/授权范围/轮换/删除，`/api/v1/api-keys`）；调用审计查询与统计（`/api/v1/
+    api-audit-logs`、`.../stats`）。八状态发布状态机 `AppVersionStatus`、三态门禁结论
+    `GateVerdict` 与其分类原因 `GateReason` 详见对应 schema。
+    M5 增量（docs/M5-CONTRACTS.md）：多知识库路由——应用版本配置的 `kb_id` 单库字段废弃为兼容
+    可选项，新增 `kb_refs`（1..15 个知识库+配额权重）与 `routing`（LLM 选库开关+自定义 Prompt，
+    输出与候选白名单求交集，空交集/解析失败/超时/未配置模型一律降级检索全部关联库并记
+    `route_fallback_all`）；跨库检索按库内排名做 Reciprocal Rank Fusion 合并，rerank 候选总
+    预算按 `kb_refs` 权重比例分配（向下取整，余量归权重最高库）；`AppliedInfo`/
+    `AppliedSearchParams` 新增 `routed_kb_ids`（本次实际检索的库），`KnowledgeChatResponse`
+    顶层新增 `routed_kb_ids`，SSE `done` 事件同增；`RetrievalNode.metadata` 新增 `kb_id`
+    （全量填充，来自事实源行）；门禁评测集绑定放宽为「所属知识库属于版本 kb_refs 并集」。
+    旧版仅存单 `kb_id` 的快照读侧兼容翻译为等价单元素 `kb_refs`，永不需要迁移。
+    M6 增量（docs/M6-CONTRACTS.md）：索引快照发布——门禁通过/force 之后、状态切 RELEASED 之前，
+    对关联知识库物理索引建不可变快照并固化当时的版本可见集，写入 `AppVersion.index_snapshots`
+    （每库每引擎一条，物理索引名直存不重算）与 `visible_version_kb_count`（按库汇总的文档版本数，
+    只给数量不给 id 列表）；经 RELEASED 版本（含 rollback 重新发布的历史版本）发起的对外
+    search/chat 固定检索这份快照与固化可见集，TESTING 灰度/chat-preview/管理台调试/评测仍走实时
+    别名与当前激活集合；快照索引被误删时降级为实时别名并记 `degraded=snapshot_index_missing`
+    （M6 之前发布、本就没有快照的旧 RELEASED 版本走同样路径但不记该标记，是历史数据形态而非故障）；
+    `DocumentVersionResponse` 新增 `pinned`/`pinned_by`，被任意未清理应用版本（含 SUPERSEDED）
+    的固化可见集引用即 pin，归档保留清理跳过之。同 PR 补 M5 遗漏的 `route_fallback_all` 枚举值。
+
+    M7 增量（docs/M7-CONTRACTS.md）：GraphRAG 图检索路——知识库图配置
+    （`GET/PUT /api/v1/kb/{kbId}/graph/config`，graph_enabled 开关）、全量实体关系抽取
+    （`POST .../graph/extract`，先清空再对激活版本启用分片逐片 LLM 抽取）、图谱概览/实体列表/
+    实体关联分片下钻（`.../graph/summary`、`.../graph/entities`、
+    `.../graph/entities/{entityName}/chunks`）；检索三路混排接入图路，query 侧实体匹配为
+    「query 轻量切分 + Neo4j 实体名 fulltext（cjk 分析器）」，不做 query 级 LLM 抽取；
+    `degraded` 枚举补 `graph_route_unavailable`；正式版（索引快照上下文）调用图路直接关闭且
+    不记降级（图数据无快照副本，属能力边界）；Neo4j 以 compose profile=graph 可选启用，
+    `NEO4J_URI` 留空即整体禁用图能力且其余功能零影响。
+
+    M8 增量（docs/M8-CONTRACTS.md）：导入与解析增强——导入映射档案维护
+    （`GET/POST /api/v1/source-mappings`、`PUT/DELETE /api/v1/source-mappings/{mappingId}`、
+    `POST .../{mappingId}/copy`，t_kb_source_mapping 落库，内置模板启动种子化、不可改删可复制）；
+    聊天导入 `mapping_profile` 入参改为传映射档案业务 id 或内置名（兼容旧值），格式范围扩
+    TXT/HTML（parser 侧新增行模板/DOM 选择器适配器，profile_yaml 全文随请求传给 parser）；
+    聊天聚合新增 `window_overlap` 重叠滑窗参数（默认 0=既有顺切，约束 overlap×2 < max_messages），
+    聊天 chunk metadata 增 `window_seq`/`msg_span`；检索侧近重复归并——同会话 `msg_span`
+    重叠率 ≥ 0.5 的命中只保留排名最高者，被并者记入存活者 metadata
+    `merged_window_chunk_ids`（≤5）。PaddleOCR 本地 OCR 兜底属 kb-parser 侧（见 kb-parser.yaml），
+    server 对带 `ocr_source` 标记的页不再调 VLM。
+
+
+    0.10.1 修订（全量前后端契约对齐扫描）：按端点逐个比对 controller 映射与 DTO 的
+
+    @JsonProperty，修正本文件与 server 实现不符之处，均已对运行实例只读实测取证——
+
+    ①`DocumentChunk` 删除服务端并不下发的 kb_id/doc_id，补 chunk_type/chunk_text_hash/
+
+    disabled_child_ids（后者在分片列表是顶层字段，在检索响应 RetrievalNode 上则位于
+
+    metadata 内，两处位置不同）；②`Document` 补 created_at 与仅上传响应返回的
+
+    version_id/version/duplicated/duplicate_of_doc_id；③`KnowledgeBase`/`EvalCase`/
+
+    `EvalDataset` 删除并不返回的 updated_at（服务端全局 non_null 序列化，只有
+
+    SourceMapping/IkDictEntry/App/AppVersion 真的暴露该列）；④`IkDictEntry` 删除并不存在的
+
+    自增 id、补 remark；⑤`ChatImportPreviewData` 补 skipped；⑥`DocumentPreview` 补
+
+    doc_id/process_status，`PreviewImage` 补 page_no/kind/status。
+
+    '
+  version: 0.10.1-m9
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+- url: http://127.0.0.1:20000
+  description: 本地开发（kb-rag-server 默认端口，见契约 §0）
+tags:
+- name: auth
+  description: 登录、改密、当前用户
+- name: knowledge-base
+  description: 知识库管理
+- name: document
+  description: 文档上传、状态查询、分片查看、重建索引
+- name: search
+  description: 检索调试
+- name: dict
+  description: ik 中文分词自定义词典管理（M2）
+- name: parse-preview
+  description: 解析预览与确认（M3，docs/M3-CONTRACTS.md §3.4）
+- name: chat-import
+  description: 聊天记录导入（M3，docs/M3-CONTRACTS.md §3.5）
+- name: alert
+  description: 告警 Webhook 配置（M3，docs/M3-CONTRACTS.md §3.6）
+- name: demo
+  description: Demo 一键导入（M3，docs/M3-CONTRACTS.md §3.7）
+- name: eval
+  description: 评测体系：评测集/case/证据复核/评测运行与报告（M4b，docs/M4b-CONTRACTS.md）
+- name: app-center
+  description: 应用中心：应用/版本/发布门禁与控制台 chat 预览（M4c，docs/M4c-CONTRACTS.md §2）
+- name: api-key
+  description: API Key 管理（M4c，docs/M4c-CONTRACTS.md §3）
+- name: api-audit
+  description: 对外调用审计查询与统计（M4c，docs/M4c-CONTRACTS.md §3）
+- name: open-api
+  description: 对外开放 API：search/chat，独立 API Key 鉴权/限流过滤器链（M4c，docs/M4c-CONTRACTS.md
+    §3）
+- name: system
+  description: 系统状态与健康检查
+security:
+- bearerAuth: []
+paths:
+  /api/v1/auth/login:
+    post:
+      tags:
+      - auth
+      summary: 管理员登录
+      description: 登录失败记入 t_kb_login_audit；连续失败 5 次锁定 15 分钟。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/auth/change-password:
+    post:
+      tags:
+      - auth
+      summary: 修改密码（含首登强制改密场景）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: 修改成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/auth/me:
+    get:
+      tags:
+      - auth
+      summary: 获取当前登录用户信息
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfoResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/source-mappings:
+    get:
+      tags: [source-mapping]
+      summary: 导入映射列表（内置在前，组内按名称升序）
+      parameters:
+      - name: source_type
+        in: query
+        schema: {type: string, enum: [csv, xlsx, txt, html]}
+      responses:
+        '200':
+          description: 裸数组（内置+自定义总量小，不分页）
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SourceMapping'
+    post:
+      tags: [source-mapping]
+      summary: 新建自定义映射
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceMappingRequest'
+      responses:
+        '200':
+          description: 新建行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceMapping'
+  /api/v1/source-mappings/{mappingId}:
+    parameters:
+    - name: mappingId
+      in: path
+      required: true
+      schema: {type: string}
+    put:
+      tags: [source-mapping]
+      summary: 全量替换自定义映射（内置行返回 INVALID_PARAM）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceMappingRequest'
+      responses:
+        '200':
+          description: 更新后的行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceMapping'
+    delete:
+      tags: [source-mapping]
+      summary: 删除自定义映射（内置行返回 INVALID_PARAM）
+      responses:
+        '200':
+          description: 已删除
+  /api/v1/source-mappings/{mappingId}/copy:
+    parameters:
+    - name: mappingId
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [source-mapping]
+      summary: 复制为自定义映射
+      description: body 可省略；name 缺省生成「副本-原名」，已占用则追加序号。
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: {type: string}
+      responses:
+        '200':
+          description: 复制出的自定义行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceMapping'
+  /api/v1/annotations/{annotationId}/migrate:
+    parameters:
+    - name: annotationId
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags: [annotation]
+      summary: 把待复核标注迁移到目标分片（M9，幂等）
+      description: 'M9-CONTRACTS.md §0.5：仅支持 TOGGLE/EDIT（MERGE/SPLIT 返回 INVALID_PARAM）；目标须与
+        标注同文档；重复迁移返回 already_migrated=true。无自动迁移、无批量端点。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_chunk_id]
+              properties:
+                target_chunk_id: {type: string}
+      responses:
+        '200':
+          description: 迁移结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  annotation_id: {type: string}
+                  target_chunk_id: {type: string}
+                  annotation_type: {type: string}
+                  inherit_status: {type: string}
+                  changed_chunk_ids: {type: array, items: {type: string}}
+                  already_migrated: {type: boolean}
+  /api/v1/kb:
+    post:
+      tags:
+      - knowledge-base
+      summary: 创建知识库
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateKbRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+    get:
+      tags:
+      - knowledge-base
+      summary: 知识库列表
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBaseListResult'
+  /api/v1/kb/{kbId}:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags:
+      - knowledge-base
+      summary: 知识库详情
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBaseResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - knowledge-base
+      summary: 删除知识库
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/index-config:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    put:
+      tags:
+      - knowledge-base
+      summary: 更新知识库索引配置（分片参数/父子分片）
+      description: 'M2-CONTRACTS.md §4：更新后重算 current_config_fingerprint，并对该知识库下
+
+        活跃版本 chunk_fingerprint 不等于新指纹的文档置 config_stale=1（web 侧据此
+
+        展示“N 篇文档使用旧配置”提示 + 重建入口）。仅更新配置元数据，**不会**立即
+
+        触发重建，重建需显式调用 `POST /api/v1/kb/{kbId}/rebuild`。
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IndexConfig'
+      responses:
+        '200':
+          description: 更新成功，返回最新知识库信息（含新指纹与索引配置）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/rebuild:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - knowledge-base
+      summary: 按当前索引配置重建文档索引
+      description: 'M2-CONTRACTS.md §4：body 可选 `doc_ids`，缺省时重建该知识库下全部
+
+        config_stale=1 的文档。每篇文档一个 REBUILD 任务：从 MinIO 解析产物
+
+        重切/重嵌入，同一物理索引内原子替换该版本 chunk（先写新 chunk 再删旧，
+
+        引擎双写走既有同步机制），完成后置 config_stale=0。异步受理，幂等。
+
+        '
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RebuildRequest'
+      responses:
+        '200':
+          description: 已受理
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/documents:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - document
+      summary: 上传文档（异步进入索引管线）
+      description: 'multipart 上传；服务端校验扩展名 + magic number + 文件大小（≤100MB）。
+
+        校验通过后立即返回，文档以 UPLOADED 状态异步进入解析/切分/索引管线。
+
+        '
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: 已接收，进入异步处理
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags:
+      - document
+      summary: 文档列表
+      parameters:
+      - name: process_status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/ProcessStatus'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentListResult'
+  /api/v1/kb/{kbId}/documents/confirm:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - parse-preview
+      summary: 批量确认解析预览
+      description: 'M3-CONTRACTS.md §3.4：body 可选 `doc_ids`，缺省时确认该知识库下全部 PENDING_CONFIRM
+        状态的文档。仅在知识库开启 `index_config.parse_preview_required` 时有意义；确认后各文档继续切分入库。 '
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmDocumentsRequest'
+      responses:
+        '200':
+          description: 已受理
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/reindex:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    post:
+      tags:
+      - document
+      summary: 重建索引
+      description: 幂等：按当前激活版本重建先删旧 chunk 再重建，失败可重试。
+      responses:
+        '200':
+          description: 已受理
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/chunks:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    get:
+      tags:
+      - document
+      summary: 分片列表
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChunkListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/preview:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    get:
+      tags:
+      - parse-preview
+      summary: 查看解析预览
+      description: 'M3-CONTRACTS.md §3.4：仅当文档 `process_status=PENDING_CONFIRM` （知识库开启
+        `index_config.parse_preview_required` 时，清洗完成后管线暂停于此状态） 时有实际预览产物；预览内容（markdown、按页信息、图片预签名
+        URL 与 VLM 文本代理、 warnings）读自 MinIO 预览产物。 '
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentPreviewResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/confirm:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    post:
+      tags:
+      - parse-preview
+      summary: 确认解析预览，继续切分入库
+      description: 仅对 PENDING_CONFIRM 状态文档有效；确认后管线从清洗完成处继续切分/嵌入/双写。
+      responses:
+        '200':
+          description: 已受理
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/reparse:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    post:
+      tags:
+      - parse-preview
+      summary: 按清洗规则重解析（预览用）
+      description: 'M3-CONTRACTS.md §3.4：body 可选 `clean_rules` 覆盖，仅本次预览生效， 不修改知识库级配置；重解析完成后返回最新预览，文档保持/回到
+        PENDING_CONFIRM。 '
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReparseRequest'
+      responses:
+        '200':
+          description: 重解析完成，返回最新预览
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentPreviewResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/graph/config:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    put:
+      tags: [graph]
+      summary: 开关知识库的 GraphRAG 能力
+      description: 'M7-CONTRACTS.md §0.3/§0.6：开启后可触发实体关系抽取；graph_enabled 与
+        fusion_mode=weighted 互斥（开启图路的库库内融合强制 RRF），违规返回 INVALID_PARAM。
+        关闭开关不删除图数据。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: 更新后的开关状态
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  graph_enabled:
+                    type: boolean
+  /api/v1/kb/{kbId}/graph/extract:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags: [graph]
+      summary: 手动触发全量图抽取
+      description: 'M7-CONTRACTS.md §0.3：先清空本库图数据再对激活版本全部启用分片逐片 LLM 抽取；
+        任务入 t_kb_task（type=GRAPH_EXTRACT，biz_id=kbId，一库一行复用）。零 Key/未配置对话模型时
+        任务 fast-fail UPSTREAM_MODEL_ERROR。'
+      responses:
+        '200':
+          description: 任务受理
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  task_id:
+                    type: string
+  /api/v1/kb/{kbId}/graph/summary:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags: [graph]
+      summary: 图谱概览与最近抽取任务
+      responses:
+        '200':
+          description: 概览
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphSummary'
+  /api/v1/kb/{kbId}/graph/entities:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags: [graph]
+      summary: 实体列表（含出边，供简版可视化）
+      description: 每实体 relations 上限 20 条（Cypher 侧截断）；size 上限 200。
+      parameters:
+      - name: query
+        in: query
+        schema: {type: string}
+      - name: page
+        in: query
+        schema: {type: integer, default: 1}
+      - name: size
+        in: query
+        schema: {type: integer, default: 20, maximum: 200}
+      responses:
+        '200':
+          description: 分页实体列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GraphEntity'
+                  page: {type: integer}
+                  size: {type: integer}
+                  total: {type: integer}
+  /api/v1/kb/{kbId}/graph/entities/{entityName}/chunks:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: entityName
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags: [graph]
+      summary: 实体来源分片下钻
+      description: 'M7-CONTRACTS.md §0.10：简化行（非 RetrievalNode），上限 100 行；被禁用分片以
+        enabled:false 返回而非隐藏——下钻页的用途正是解释"为什么图路没召回它"。'
+      responses:
+        '200':
+          description: 来源分片列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GraphEntityChunk'
+  /api/v1/kb/{kbId}/search:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - search
+      summary: 检索调试
+      description: '有 Key：向量 + BM25 双路（lite 单引擎两次独立请求）经 RRF(k=60) 融合后取 top_n；
+
+        零 Key：仅 BM25 单路，`degraded` 含 `vector_route_unavailable`。
+
+        强制过滤 document_version_id 属于当前激活版本且 enabled=true（引擎侧 filter）。
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/UpstreamModelError'
+  /api/v1/kb/{kbId}/chat-imports:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - chat-import
+      summary: 聊天记录导入-匹配预览（不落库）
+      description: 'M3-CONTRACTS.md §3.5：multipart 上传聊天记录导出文件，服务端调用 kb-rag-parser
+        `/api/v1/parse/chat` 端点解析后，与库内既有聊天文档做会话匹配， 仅返回匹配预览，不执行导入。逻辑文档标识 = 来源渠道 + session_id：已存在的会话
+        `action=NEW_VERSION`，新会话 `action=CREATE`。上传文件与解析结果暂存 MinIO， 返回的 `upload_token`
+        有效期 30 分钟，供 confirm 端点使用。 M8 起格式范围扩 TXT/HTML（M8-CONTRACTS.md §0.1/§0.2），映射档案改从
+        t_kb_source_mapping 解析、profile_yaml 全文随请求传给 parser；文件扩展名与所选档案 source_type
+        不匹配时在预览即拦截（INVALID_PARAM）。 '
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                mapping_profile:
+                  type: string
+                  description: 'M8 起为映射档案业务 id（t_kb_source_mapping.mapping_id）或内置名
+                    （memotrace/liuhen_txt/liuhen_html，兼容 M3 旧值）；缺省按文件扩展名选默认档案
+                    （M8-CONTRACTS.md §0.7/§5）'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatImportPreviewResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/chat-imports/confirm:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - chat-import
+      summary: 执行聊天记录导入
+      description: 'M3-CONTRACTS.md §3.5：`upload_token` 取自匹配预览接口返回值（30 分钟内 有效），可选
+        `session_ids` 只导入子集会话（缺省=预览返回的全部会话）。按会话聚合 （chat_aggregation:{window_minutes,max_messages,window_overlap}，overlap
+        默认 0=顺切，M8 起支持重叠滑窗）生成 chunk_type=chat_log 的分片，metadata 写
+        session_id/session_name/sender/msg_time，M8 增 window_seq/msg_span；聊天文本默认开启脱敏。 '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatImportConfirmRequest'
+      responses:
+        '200':
+          description: 已受理，异步执行导入
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/dict/ik:
+    get:
+      tags:
+      - dict
+      summary: ik 自定义词典列表（分页）
+      description: M2-CONTRACTS.md §3：t_kb_ik_dict 分页查询，可按 dict_type 过滤。
+      parameters:
+      - name: dict_type
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/IkDictType'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IkDictListResult'
+    post:
+      tags:
+      - dict
+      summary: 新增 ik 自定义词条
+      description: 'word 唯一（UK），新增后立即通过 remote_ext_dict/remote_ext_stopwords 热更新通道
+
+        对 ik 插件生效（ik 轮询 Last-Modified/ETag，见 M2-CONTRACTS.md §3），无需重启 ES/重建索引。
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIkDictRequest'
+      responses:
+        '200':
+          description: 新增成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IkDictEntryResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/dict/ik/{dictId}:
+    parameters:
+    - $ref: '#/components/parameters/DictId'
+    delete:
+      tags:
+      - dict
+      summary: 删除 ik 自定义词条
+      description: 删除后同样通过热更新通道即时生效（词表整体重新拉取）。
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/system/model-status:
+    get:
+      tags:
+      - system
+      summary: 模型/向量引擎配置状态
+      description: 用于前端零 Key 场景的 banner 提示与置灰逻辑判定。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelStatusResult'
+  /api/v1/system/alert-config:
+    get:
+      tags:
+      - alert
+      summary: 获取告警 Webhook 配置
+      description: M3-CONTRACTS.md §3.6：配置存 t_kb_system_config，未配置时 webhook_url 为
+        null。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertConfigResult'
+    put:
+      tags:
+      - alert
+      summary: 更新告警 Webhook 配置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertConfig'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertConfigResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/system/alert-config/test:
+    post:
+      tags:
+      - alert
+      summary: 发送测试告警消息
+      description: 'M3-CONTRACTS.md §3.6：按当前已保存的 webhook_url 发送一条测试消息 （`{"msgtype":"text","text":{"content":"..."}}`，兼容钉钉/企微/Slack）。未配置
+        webhook_url 时返回 INVALID_PARAM（管理台据此提示先填写 URL），不降级为 error 日志—— 降级为 error 日志的场景专指真实告警触发时未配置
+        Webhook（见需求文档 §5）。 '
+      responses:
+        '200':
+          description: 已发送
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertTestResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/system/demo/import:
+    post:
+      tags:
+      - demo
+      summary: 一键导入 Demo 知识库
+      description: 'M3-CONTRACTS.md §3.7：创建知识库“Demo 知识库”并导入 `DEMO_DATA_DIR` 指向目录下
+        `manifest.json` 列出的文档集。幂等：已存在同名 Demo 知识库时直接返回其 kb_id，不重复导入。素材目录缺失时返回 INVALID_PARAM（管理台据此提示，`demo/status`
+        的 `available=false` 用于前端提前置灰按钮，避免用户点击后才看到这个错误）。 '
+      responses:
+        '200':
+          description: 已创建/已存在，异步执行导入
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DemoImportResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/system/demo/status:
+    get:
+      tags:
+      - demo
+      summary: Demo 导入状态
+      description: 'M3-CONTRACTS.md §3.7：`available=false` 表示未找到 `DEMO_DATA_DIR` 素材目录，前端据此置灰“一键导入
+        Demo”按钮；`imported=true` 时 `kb_id`/`doc_count` 为已导入的 Demo 知识库信息。 '
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DemoStatusResult'
+  /actuator/health:
+    get:
+      tags:
+      - system
+      summary: 健康检查（含 MySQL/ES/MinIO/Milvus 探活）
+      security: []
+      responses:
+        '200':
+          description: 健康或部分降级
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+  /api/v1/dict/ik/{word}:
+    put:
+      summary: Enable or disable an ik dictionary word
+      tags:
+      - dict
+      parameters:
+      - name: word
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - status
+              properties:
+                status:
+                  type: string
+                  enum:
+                  - ENABLED
+                  - DISABLED
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+  /api/v1/documents/{docId}/versions:
+    get:
+      summary: List document versions, newest first
+      tags:
+      - document
+      parameters: &id003
+      - &id001
+        name: docId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/DocumentVersion'
+  /api/v1/documents/{docId}/versions/{versionId}/activate-impact:
+    get:
+      summary: Preflight for an activation, drives the confirm dialog
+      tags:
+      - document
+      parameters: &id002
+      - *id001
+      - name: versionId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ActivateImpact'
+  /api/v1/documents/{docId}/versions/{versionId}/activate:
+    post:
+      summary: Activate a version, rebuilding it first when its chunks were archived
+      tags:
+      - document
+      parameters: *id002
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ActivateVersionResult'
+  /api/v1/documents/{docId}/annotations/pending-review:
+    get:
+      summary: Annotations of previous versions that the active version neither inherited
+        nor redid
+      tags:
+      - annotation
+      parameters: *id003
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/Annotation'
+  /api/v1/chunks/{chunkId}:
+    put:
+      summary: Edit chunk text, re-embed and sync both engines
+      tags:
+      - annotation
+      parameters: &id004
+      - name: chunkId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - content
+              properties:
+                content:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/DocumentChunk'
+  /api/v1/chunks/{chunkId}/toggle:
+    post:
+      summary: Enable or disable a chunk without re-embedding
+      tags:
+      - annotation
+      parameters: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - enabled
+              properties:
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/ToggleChunkResult'
+  /api/v1/chunks/merge:
+    post:
+      summary: Merge adjacent chunks of one document version
+      tags:
+      - annotation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - chunk_ids
+              properties:
+                chunk_ids:
+                  type: array
+                  minItems: 2
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/DocumentChunk'
+  /api/v1/chunks/{chunkId}/split:
+    post:
+      summary: Split a chunk at the given character offsets
+      tags:
+      - annotation
+      parameters: *id004
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - split_offsets
+              properties:
+                split_offsets:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/SplitChunkResult'
+  /api/v1/kb/{kbId}/eval-datasets:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - eval
+      summary: 创建评测集
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvalDatasetRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalDatasetResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags:
+      - eval
+      summary: 评测集列表
+      description: 含 case_count、dataset_revision、最近一次 run 摘要（M4b-CONTRACTS.md §2）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalDatasetListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/eval-datasets/import-demo:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - eval
+      summary: 导入 Demo 示例评测集
+      description: '导入 deploy 仓 demo/eval-cases.json：按 file_name + content_hash_sha256
+        匹配该库文档得 doc_id（匹配不到的 case 跳过并在响应列出）；幂等，同名评测集已存在则返回其 id 不重复导入
+        （M4b-CONTRACTS.md §2）。'
+      responses:
+        '200':
+          description: 导入成功或已存在（幂等）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportDemoEvalDatasetResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-datasets/{datasetId}:
+    parameters:
+    - $ref: '#/components/parameters/EvalDatasetId'
+    get:
+      tags:
+      - eval
+      summary: 评测集详情
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalDatasetResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - eval
+      summary: 删除评测集
+      description: 级联删除该评测集下 case 与 run/result，走软删 + after-commit 清理（M4b-CONTRACTS.md
+        §2）
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-datasets/{datasetId}/cases:
+    parameters:
+    - $ref: '#/components/parameters/EvalDatasetId'
+    post:
+      tags:
+      - eval
+      summary: 新增评测 case
+      description: annotated_version_id 由服务端按该 doc 当前激活版本填入；写入后 dataset_revision+1
+        （M4b-CONTRACTS.md §2）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvalCaseRequest'
+      responses:
+        '200':
+          description: 新增成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalCaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags:
+      - eval
+      summary: 评测 case 分页列表
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/CaseStatus'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalCaseListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-datasets/{datasetId}/cases/from-retrieval:
+    parameters:
+    - $ref: '#/components/parameters/EvalDatasetId'
+    post:
+      tags:
+      - eval
+      summary: 从检索调试页一键收进评测集
+      description: '服务端读取 chunk_ids 对应正文作为 span 证据、其 doc_id 作为锚定文档；source=DEBUG_PAGE。
+        图片类 chunk（chunk_type=image）或显式传 anchor_type=DOCUMENT 时建成文档级锚定 case
+        （M4b-CONTRACTS.md §2）。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CasesFromRetrievalRequest'
+      responses:
+        '200':
+          description: 新增成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalCaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-datasets/{datasetId}/stale-cases:
+    parameters:
+    - $ref: '#/components/parameters/EvalDatasetId'
+    get:
+      tags:
+      - eval
+      summary: 证据复核工作台数据
+      description: 待复核 case 列表 + 每条的失配证据与当前激活版本中的候选原文（按重叠率取 Top3 候选供人工选择，
+        M4b-CONTRACTS.md §2/§4）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaleCaseListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-cases/{caseId}:
+    parameters:
+    - $ref: '#/components/parameters/EvalCaseId'
+    put:
+      tags:
+      - eval
+      summary: 编辑评测 case
+      description: dataset_revision+1（M4b-CONTRACTS.md §2）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvalCaseRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalCaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - eval
+      summary: 删除评测 case
+      description: dataset_revision+1（M4b-CONTRACTS.md §2）
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-cases/{caseId}/recheck:
+    parameters:
+    - $ref: '#/components/parameters/EvalCaseId'
+    post:
+      tags:
+      - eval
+      summary: 证据复核
+      description: REANCHOR 用新证据替换并置回 ACTIVE，DEPRECATE 置 DEPRECATED（M4b-CONTRACTS.md
+        §2）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecheckCaseRequest'
+      responses:
+        '200':
+          description: 复核成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalCaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/retrieval-feedback:
+    post:
+      tags:
+      - eval
+      summary: 检索结果反馈标注
+      description: 'verdict=GOOD 即一键收进评测集（同 cases/from-retrieval 语义承载，source=DEBUG_PAGE）；
+        verdict=BAD 记 info 日志且不落库（M4b-CONTRACTS.md §2）。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RetrievalFeedbackRequest'
+      responses:
+        '200':
+          description: 已受理
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-datasets/{datasetId}/runs:
+    parameters:
+    - $ref: '#/components/parameters/EvalDatasetId'
+    post:
+      tags:
+      - eval
+      summary: 提交评测运行（配置矩阵，一次产生 N 个 run）
+      description: 'configs 允许 1..6 组，一次提交产生 N 个 run（每组一个 run，共享 dataset_revision
+        与 corpus_fingerprint，报告可横向对比）。零 Key 环境下 VECTOR_ONLY/HYBRID/HYBRID_RERANK
+        直接置 FAILED（M4b-CONTRACTS.md §3.1）。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvalRunsRequest'
+      responses:
+        '200':
+          description: 已受理（异步执行）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateEvalRunsResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags:
+      - eval
+      summary: 评测集下 run 历史列表
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalRunListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-datasets/{datasetId}/runs/estimate:
+    parameters:
+    - $ref: '#/components/parameters/EvalDatasetId'
+    post:
+      tags:
+      - eval
+      summary: 评测运行前预估调用次数
+      description: 提交前展示预估调用次数与费用护栏（嵌入/重排/改写/judge 各自次数，M4b-CONTRACTS.md §3.4）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvalRunsRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalRunEstimateResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-runs/{runId}:
+    parameters:
+    - $ref: '#/components/parameters/EvalRunId'
+    get:
+      tags:
+      - eval
+      summary: run 详情（含 metrics）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalRunResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-runs/{runId}/results:
+    parameters:
+    - $ref: '#/components/parameters/EvalRunId'
+    get:
+      tags:
+      - eval
+      summary: run 命中明细（下钻）
+      parameters:
+      - name: hit
+        in: query
+        required: false
+        schema:
+          type: boolean
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalResultListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/eval-runs/compare:
+    get:
+      tags:
+      - eval
+      summary: 多 run 指标对比
+      description: 同 dataset_revision 才允许对比，不同则响应 comparable=false 并给出原因（M4b-CONTRACTS.md
+        §3.1 语料变化标注）
+      parameters:
+      - name: run_ids
+        in: query
+        required: true
+        style: form
+        explode: false
+        schema:
+          type: array
+          minItems: 2
+          items:
+            type: string
+        description: 逗号分隔的 run_id 列表，如 run_ids=a,b,c
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvalRunCompareResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/apps:
+    post:
+      tags:
+      - app-center
+      summary: 创建应用
+      description: 应用不携带配置，创建后需再建版本（配置表单即建版），见 M4c-CONTRACTS.md §2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAppRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+    get:
+      tags:
+      - app-center
+      summary: 应用列表
+      description: 按创建时间倒序，每个应用附带当前 RELEASED 版本号（无则为 null）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppListResult'
+  /api/v1/apps/{appId}:
+    parameters:
+    - $ref: '#/components/parameters/AppId'
+    get:
+      tags:
+      - app-center
+      summary: 应用详情
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - app-center
+      summary: 重命名应用或替换描述
+      description: 字段为空则保留原值
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAppRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - app-center
+      summary: 删除应用及其全部版本
+      description: 软删；已发布版本的 RELEASED 唯一槽位随之释放（虚拟列在软删行上解析为 NULL）
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/apps/{appId}/versions:
+    parameters:
+    - $ref: '#/components/parameters/AppId'
+    post:
+      tags:
+      - app-center
+      summary: 从提交的配置建版
+      description: '控制台配置表单即建版；未传字段继承最新版本配置。草稿态外配置在 submit-test 时补全并
+        冻结为快照（M4c-CONTRACTS.md §1/§2）。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppVersionConfigRequest'
+      responses:
+        '200':
+          description: 创建成功（DRAFT）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppVersionResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags:
+      - app-center
+      summary: 版本列表
+      description: 按创建时间倒序，含门禁结论与双跑对比报告
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppVersionListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/apps/{appId}/chat-preview:
+    parameters:
+    - $ref: '#/components/parameters/AppId'
+    post:
+      tags:
+      - app-center
+      summary: 控制台内 chat 预览
+      description: '经管理台登录鉴权，复用对外 chat 编排；可预览未发布版本（app_version_id 缺省取最新
+        版本，不区分是否已发布）。stream 决定响应走 JSON 还是 SSE，事件契约与对外 /api/v1/knowledge/chat
+        完全一致（M4c-CONTRACTS.md §2/§6 主会话定版）。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatPreviewRequest'
+      responses:
+        '200':
+          description: 非流式返回完整应答；stream=true 时改为 text/event-stream，事件序列固定为
+            message_delta*（零或多次）→ references → done，失败以 error 终结（不会同时出现 done 与
+            error）。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeChatResult'
+            text/event-stream:
+              schema:
+                description: 'SSE 帧，event 取值与 data 负载见 M4c-CONTRACTS.md §6：message_delta
+                  -> ChatStreamMessageDeltaEvent；references -> ChatStreamReferencesEvent；
+                  done -> ChatStreamDoneEvent；error -> ChatStreamErrorEvent。'
+                oneOf:
+                - $ref: '#/components/schemas/ChatStreamMessageDeltaEvent'
+                - $ref: '#/components/schemas/ChatStreamReferencesEvent'
+                - $ref: '#/components/schemas/ChatStreamDoneEvent'
+                - $ref: '#/components/schemas/ChatStreamErrorEvent'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/UpstreamModelError'
+  /api/v1/app-versions/{appVersionId}:
+    parameters:
+    - $ref: '#/components/parameters/AppVersionId'
+    get:
+      tags:
+      - app-center
+      summary: 版本详情
+      description: 含门禁结论
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppVersionResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/app-versions/{appVersionId}/gate-dataset:
+    parameters:
+    - $ref: '#/components/parameters/AppVersionId'
+    put:
+      tags:
+      - app-center
+      summary: 绑定或清空门禁评测集
+      description: 仅 DRAFT/TESTING 态可修改；评测集所属知识库须属于该版本 kb_refs 集合（并集判断，
+        M5 起不再要求与单一知识库一致），否则 400
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GateDatasetRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppVersionResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/app-versions/{appVersionId}/submit-test:
+    parameters:
+    - $ref: '#/components/parameters/AppVersionId'
+    post:
+      tags:
+      - app-center
+      summary: 草稿提交测试（DRAFT -> TESTING）
+      description: 补全并冻结配置快照（先知识库、再部署默认），冻结后不再回落任何实时默认值
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppVersionResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/app-versions/{appVersionId}/release:
+    parameters:
+    - $ref: '#/components/parameters/AppVersionId'
+    post:
+      tags:
+      - app-center
+      summary: 发布（自动执行门禁）
+      description: '绑定 gate_dataset 时进入 GATING 同语料双跑（候选与当前 RELEASED 配置各一轮），
+        仅在双方有效 case 交集上比较 Hit Rate/Recall@K，容差 ε=max(0.02, 1/N)；三态结论 GATE_PASSED
+        自动放行，GATE_LOG_ONLY/GATE_BLOCKED 需 force=true 显式放行并留痕（force_operator）。
+        响应即调用返回时刻的版本状态：门禁场景下为 GATING，双跑异步执行，控制台轮询详情接口获取结果
+        （M4c-CONTRACTS.md §2）。门禁通过/force 之后、状态切 RELEASED 之前，对关联的每个知识库
+        物理索引建不可变快照并固化当时的版本可见集（写入 index_snapshots/visible_version_kb_count，
+        M6-CONTRACTS.md §0.3）；任一库快照失败则发布中止、版本停留在门禁结论状态可重试，已建的本次
+        快照索引会被回滚删除。此后经该 RELEASED 版本（含 rollback 重新发布的历史版本）发起的对外
+        search/chat 调用固定检索这份快照索引与固化可见集，不受快照建立之后的新文档/新版本影响；
+        管理台调试与 TESTING 灰度调用仍走实时别名与当前激活集合。'
+      parameters:
+      - name: force
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+        description: true 时无视非通过门禁结论强制放行，记录 force_operator 为当前登录用户
+      responses:
+        '200':
+          description: 调用返回时刻的版本状态（GATING/GATE_PASSED/GATE_LOG_ONLY/GATE_BLOCKED/RELEASED）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppVersionResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/app-versions/{appVersionId}/rollback:
+    parameters:
+    - $ref: '#/components/parameters/AppVersionId'
+    post:
+      tags:
+      - app-center
+      summary: 回滚为正式版
+      description: 仅 SUPERSEDED 态版本可回滚；门禁不重跑（历史结论视为既成事实），原 RELEASED 版本转
+        SUPERSEDED，发布/回滚均为原子状态切换。回滚后的检索恢复该版本自己发布时冻结的索引快照与
+        版本可见集（历史知识状态），不会重新对当前语料建快照；被 SUPERSEDED 的版本只要其快照仍存在
+        即持续视为"被引用"，归档清理会跳过其固化可见集覆盖的文档版本，直到快照按保留策略被清理
+        （M6-CONTRACTS.md §0.8/§0.9）
+      responses:
+        '200':
+          description: 回滚成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppVersionResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/api-keys:
+    post:
+      tags:
+      - api-key
+      summary: 创建 API Key
+      description: 明文仅本次响应返回，此后不可再获取；qps_limit 缺省取部署默认，app_scope 空/缺省
+        授权全部应用
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateApiKeyRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyCreatedResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+    get:
+      tags:
+      - api-key
+      summary: API Key 列表
+      description: 按创建时间倒序，不含密钥材料，prefix 为展示用（前缀+末 4 位）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyListResult'
+  /api/v1/api-keys/{keyId}/status:
+    parameters:
+    - $ref: '#/components/parameters/ApiKeyId'
+    put:
+      tags:
+      - api-key
+      summary: 启用/禁用 Key
+      description: 同时清空该 Key 的限流令牌桶，避免误操作后重新启用仍带着被节流的桶
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateApiKeyStatusRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/api-keys/{keyId}/scope:
+    parameters:
+    - $ref: '#/components/parameters/ApiKeyId'
+    put:
+      tags:
+      - api-key
+      summary: 替换授权范围
+      description: app_scope 为空列表授权全部应用；条目须为存在的 app_id，否则 400
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateApiKeyScopeRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/api-keys/{keyId}/rotate:
+    parameters:
+    - $ref: '#/components/parameters/ApiKeyId'
+    post:
+      tags:
+      - api-key
+      summary: 轮换密钥
+      description: 旧密钥立即失效（摘要被覆盖，无宽限期），同时清空该 Key 的限流令牌桶；新明文仅本次响应返回
+      responses:
+        '200':
+          description: 轮换成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyCreatedResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/api-keys/{keyId}:
+    parameters:
+    - $ref: '#/components/parameters/ApiKeyId'
+    delete:
+      tags:
+      - api-key
+      summary: 删除 Key
+      responses:
+        '200':
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/api-audit-logs:
+    get:
+      tags:
+      - api-audit
+      summary: 审计日志分页查询
+      description: 按调用时间倒序；未传过滤字段时返回全部
+      parameters:
+      - name: key_id
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: target_stage
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/TargetStage'
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: ISO 本地日期时间下界，如 2026-07-26T00:00:00
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: ISO 本地日期时间上界
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiAuditLogPageResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/api-audit-logs/stats:
+    get:
+      tags:
+      - api-audit
+      summary: 调用量统计
+      description: 同列表接口的过滤条件，聚合 total_calls/avg_latency_ms/degraded_calls/error_calls
+      parameters:
+      - name: key_id
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: target_stage
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/TargetStage'
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiAuditStatsResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/knowledge/search:
+    post:
+      tags:
+      - open-api
+      summary: 对外检索（API Key 鉴权）
+      description: '独立鉴权/限流过滤器链（前缀 /api/v1/knowledge/*），Authorization: Bearer
+        kb-sk-*；app_version 缺省路由当前 RELEASED 版本，显式指定测试版发起灰度调用（审计
+        target_stage=beta）；请求级覆盖白名单仅 top_n/score_threshold/metadata_filter/
+        max_content_length，越界字段一律 400 INVALID_PARAM（需求文档 §5）。出参 nodes 为共享
+        RetrievalNode 结构，URL 均预签名（M4c-CONTRACTS.md §3）。'
+      security:
+      - ApiKeyBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/KnowledgeCallRequest'
+              - type: object
+                required:
+                - app_id
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeSearchResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/InvalidApiKey'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/VersionNotPublished'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /api/v1/knowledge/chat:
+    post:
+      tags:
+      - open-api
+      summary: 对外问答（API Key 鉴权，body 或 SSE）
+      description: '入参同 search，另含 stream（默认 false）。生成走 ChatProvider，prompt 组装含
+        应用 system_prompt、检索内容以固定分隔符包裹并声明"资料内指令视为普通文本"（注入防护）、拒答/
+        防泄漏开关注入对应 prompt。非流式返回 {answer, references, request_id, degraded,
+        routed_kb_ids}（routed_kb_ids 为顶层字段，M5）；stream=true 走 SSE：message_delta* ->
+        references -> done（含 request_id/degraded/routed_kb_ids）或 error。零 Key/未配置对话
+        模型时返回 502 UPSTREAM_MODEL_ERROR（检索不受影响，M4c-CONTRACTS.md §3）。'
+      security:
+      - ApiKeyBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/KnowledgeCallRequest'
+              - type: object
+                required:
+                - app_id
+      responses:
+        '200':
+          description: 非流式返回完整应答；stream=true 时改为 text/event-stream，事件契约与控制台
+            chat-preview 完全一致
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeChatResult'
+            text/event-stream:
+              schema:
+                description: 'SSE 帧：message_delta -> ChatStreamMessageDeltaEvent；
+                  references -> ChatStreamReferencesEvent；done -> ChatStreamDoneEvent；
+                  error -> ChatStreamErrorEvent。'
+                oneOf:
+                - $ref: '#/components/schemas/ChatStreamMessageDeltaEvent'
+                - $ref: '#/components/schemas/ChatStreamReferencesEvent'
+                - $ref: '#/components/schemas/ChatStreamDoneEvent'
+                - $ref: '#/components/schemas/ChatStreamErrorEvent'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/InvalidApiKey'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/VersionNotPublished'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          $ref: '#/components/responses/UpstreamModelError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: '自定义 Header：Authorization: Bearer <token>。服务端 token 表/内存缓存维护，
+
+        有效期 24h；除 /api/v1/auth/login 与 /actuator/** 外全部拦截。
+
+        '
+    ApiKeyBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: kb-sk-*
+      description: '对外开放 API（/api/v1/knowledge/*）专用鉴权，Header：Authorization: Bearer
+
+        kb-sk-*；按 key_hash（SHA-256）查验，与管理台 bearerAuth 会话令牌相互独立、走独立过滤器链，
+
+        独立限流（按 Key 令牌桶）（M4c-CONTRACTS.md §3）。
+
+        '
+  parameters:
+    KbId:
+      name: kbId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 知识库业务主键（kb_id）
+    DocId:
+      name: docId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 文档业务主键（doc_id）
+    DictId:
+      name: dictId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+      description: ik 词典条目主键（t_kb_ik_dict.id，无独立业务字符串 ID，仅此表通用列 id 即主键）
+    EvalDatasetId:
+      name: datasetId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 评测集业务主键（dataset_id，M4b）
+    EvalCaseId:
+      name: caseId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 评测 case 业务主键（case_id，M4b）
+    EvalRunId:
+      name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 评测运行业务主键（run_id，M4b）
+    AppId:
+      name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 应用业务主键（app_id，M4c）
+    AppVersionId:
+      name: appVersionId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 应用版本业务主键（app_version_id，M4c）
+    ApiKeyId:
+      name: keyId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: API Key 业务主键（key_id，M4c）
+  responses:
+    InvalidParam:
+      description: 参数校验失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: 未登录或 token 失效
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UpstreamModelError:
+      description: 上游模型 Provider 调用失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InvalidApiKey:
+      description: API Key 缺失/格式不正确/未匹配到任何存量哈希（INVALID_API_KEY），或存在但已被
+        禁用（API_KEY_DISABLED），M4c
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: API Key 有效但其授权范围不包含所请求的应用（APP_ACCESS_DENIED），M4c
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    VersionNotPublished:
+      description: 应用版本存在但未处于可调用状态（VERSION_NOT_PUBLISHED），M4c
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    RateLimited:
+      description: 超出该 API Key 的 QPS 配额（RATE_LIMITED），响应头带 Retry-After 建议重试秒数，M4c
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: 建议重试等待秒数
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorCode:
+      type: string
+      description: M1 错误码子集 + M4c 对外开放 API 新增错误码，HTTP 状态码见括注
+      enum:
+      - INVALID_PARAM
+      - UNAUTHORIZED
+      - NOT_FOUND
+      - INVALID_API_KEY
+      - API_KEY_DISABLED
+      - APP_ACCESS_DENIED
+      - APP_NOT_FOUND
+      - VERSION_NOT_FOUND
+      - VERSION_NOT_PUBLISHED
+      - RATE_LIMITED
+      - PARSE_FAILED
+      - UPSTREAM_MODEL_ERROR
+      - INTERNAL_ERROR
+    ErrorResponse:
+      type: object
+      description: 统一错误响应
+      required:
+      - code
+      - message
+      - request_id
+      properties:
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+          example: 'invalid parameter: name is required'
+        request_id:
+          type: string
+          description: 全链路透传的请求 ID，经 X-Request-Id Header 贯穿 kb-server/kb-parser/模型
+            Provider 日志
+          example: req-3f6a2e1c
+    ResultEnvelope:
+      type: object
+      description: 统一成功响应外壳，具体业务负载见各接口 data 字段的组合 schema
+      required:
+      - code
+      - message
+      - request_id
+      properties:
+        code:
+          type: string
+          enum:
+          - OK
+        message:
+          type: string
+          example: success
+        request_id:
+          type: string
+    EmptyResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            nullable: true
+    LoginRequest:
+      type: object
+      required:
+      - username
+      - password
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+    LoginData:
+      type: object
+      properties:
+        token:
+          type: string
+        must_change_password:
+          type: boolean
+    LoginResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/LoginData'
+    ChangePasswordRequest:
+      type: object
+      required:
+      - old_password
+      - new_password
+      properties:
+        old_password:
+          type: string
+          format: password
+        new_password:
+          type: string
+          format: password
+    UserInfo:
+      type: object
+      properties:
+        username:
+          type: string
+        must_change_password:
+          type: boolean
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+    UserInfoResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/UserInfo'
+    CreateKbRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+    SourceMapping:
+      type: object
+      description: 'M8 导入映射行（t_kb_source_mapping）：聊天导入解析档案，profile_yaml 为完整 YAML（csv/xlsx
+        列名映射；txt.patterns 行模板正则含命名组 send_time/sender；html 选择器 message/sender/time/content）。
+        内置行不可改删、可复制；schema 属主为 kb-rag-parser，server 不复刻结构校验（M8-CONTRACTS.md §5）。'
+      properties:
+        mapping_id: {type: string}
+        name: {type: string}
+        source_type: {type: string, enum: [csv, xlsx, txt, html]}
+        profile_yaml: {type: string}
+        is_builtin: {type: boolean}
+        created_at: {type: string}
+        updated_at: {type: string}
+    SourceMappingRequest:
+      type: object
+      required: [name, source_type, profile_yaml]
+      properties:
+        name: {type: string}
+        source_type: {type: string, enum: [csv, xlsx, txt, html]}
+        profile_yaml: {type: string}
+    KnowledgeBase:
+      type: object
+      properties:
+        kb_id:
+          type: string
+        name:
+          type: string
+        graph_enabled:
+          type: boolean
+          description: M7 GraphRAG：本库是否开启实体关系抽取与图检索路（M7-CONTRACTS.md §0.3）
+        description:
+          type: string
+          nullable: true
+        current_config_fingerprint:
+          type: string
+          nullable: true
+        index_config:
+          allOf:
+          - $ref: '#/components/schemas/IndexConfig'
+          nullable: true
+          description: '索引配置（分片参数 + 父子分片，M2 新增可编辑项）；为空表示沿用 M1 固定
+
+            默认值（chunk_max_tokens=600 / chunk_overlap=100，父子分片关闭）。
+
+            '
+        created_at:
+          type: string
+          format: date-time
+    KnowledgeBaseResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/KnowledgeBase'
+    KnowledgeBaseListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/KnowledgeBase'
+    ProcessStatus:
+      type: string
+      description: 文档处理状态（t_kb_document.process_status）。M3 新增 PENDING_CONFIRM （docs/M3-CONTRACTS.md
+        §3.4）：仅当知识库开启 index_config.parse_preview_required 时，清洗完成后管线在此暂停等待人工确认，之后才继续切分入库。
+      enum:
+      - UPLOADED
+      - PARSING
+      - PARSE_FAILED
+      - PARSED
+      - PENDING_CONFIRM
+      - INDEXING
+      - INDEXED
+      - INDEX_FAILED
+    Document:
+      type: object
+      properties:
+        doc_id:
+          type: string
+        kb_id:
+          type: string
+        file_name:
+          type: string
+        file_ext:
+          type: string
+        file_size:
+          type: integer
+          format: int64
+        current_version_id:
+          type: string
+          nullable: true
+        process_status:
+          $ref: '#/components/schemas/ProcessStatus'
+        config_stale:
+          type: boolean
+          description: 配置一致性标记，与处理状态正交
+        fail_reason:
+          type: string
+          nullable: true
+          maxLength: 1024
+        created_at:
+          type: string
+          format: date-time
+        version_id:
+          type: string
+          description: 仅上传响应返回：本次上传落到的文档版本 id；列表/详情不返回
+        version:
+          type: string
+          description: 仅上传响应返回：该版本号（如 v2），对应 M4a 重复上传三分支的判定结果
+        duplicated:
+          type: boolean
+          description: 仅上传响应返回：true 表示 content_hash 命中既有版本、未重新解析建版
+        duplicate_of_doc_id:
+          type: string
+          description: 仅上传响应返回：命中的是同库内另一篇文档时，给出那篇文档的 doc_id
+    DocumentResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/Document'
+    DocumentListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Document'
+              page:
+                type: integer
+              total:
+                type: integer
+    EmbeddingStatus:
+      type: string
+      enum:
+      - PENDING
+      - DONE
+      - FAILED
+      - SKIPPED
+    DocumentChunk:
+      type: object
+      description: 分片行（ChunkResponse）。不含 kb_id/doc_id——两者均由调用方使用的路由决定，
+        服务端不重复下发
+      properties:
+        chunk_id:
+          type: string
+        document_version_id:
+          type: string
+        content:
+          type: string
+        chunk_type:
+          $ref: '#/components/schemas/ChunkType'
+        chunk_text_hash:
+          type: string
+          description: 分片正文 SHA-256，跨版本标注精确继承的匹配键（M4a-CONTRACTS.md §2.3）
+        parent_id:
+          type: string
+          nullable: true
+        seq:
+          type: integer
+        enabled:
+          type: boolean
+        disabled_child_ids:
+          type: array
+          items:
+            type: string
+          description: 本父片下被禁用的子片 id，服务端按整个文档版本计算（非当前分页）；
+            非父片或无禁用子片时为 []。注意与检索响应不同——RetrievalNode 上该字段位于
+            metadata 内，此处为顶层字段（M4a-CONTRACTS.md §2.2）
+        embedding_status:
+          $ref: '#/components/schemas/EmbeddingStatus'
+        metadata:
+          type: object
+          additionalProperties: true
+          nullable: true
+    ChunkListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DocumentChunk'
+              page:
+                type: integer
+              total:
+                type: integer
+    SearchRequest:
+      type: object
+      description: 'M2-CONTRACTS.md §1.5：管理台调试用扩展入参，全部可选、即时生效（不落库为 KB
+
+        默认值）。固定链路次序见 M2-CONTRACTS.md §1：改写 → 双路召回 → 融合 →
+
+        rerank → 父子归并 → 阈值过滤 → top_n。
+
+        '
+      required:
+      - query
+      properties:
+        query:
+          type: string
+        recall_top_k:
+          type: integer
+          default: 50
+          minimum: 1
+        top_n:
+          type: integer
+          default: 5
+          minimum: 1
+        score_threshold:
+          type: number
+          format: float
+          minimum: 0.01
+          maximum: 1.0
+          nullable: true
+          default: null
+          description: '可空=不过滤。作用于 rerank 分；rerank 关闭或降级时作用于向量标准
+
+            cosine[0,1] 分；BM25 单路时不生效（degraded += threshold_inactive）。
+
+            '
+        fusion:
+          allOf:
+          - $ref: '#/components/schemas/FusionConfig'
+          nullable: true
+        rerank_enabled:
+          type: boolean
+          nullable: true
+          description: 默认 true（仅当 RERANK_MODEL 已配置生效），显式传 false 可关闭。
+        rewrite_enabled:
+          type: boolean
+          default: false
+          description: 默认 false；显式开启却未配置 chat 模型时 degraded += query_rewrite_timeout
+            同类降级标注。
+        messages:
+          type: array
+          nullable: true
+          description: 多轮对话上下文（OpenAI 兼容 role/content），非空时按此做指代消解改写。
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        metadata_filter:
+          allOf:
+          - $ref: '#/components/schemas/MetadataFilter'
+          nullable: true
+    ChunkType:
+      type: string
+      enum:
+      - text
+      - image
+      - chat_log
+    ScoreType:
+      type: string
+      description: '分数口径。M1 仅 cosine/bm25_rank 两种原始召回口径；M2 新增 rerank（唯一绝对分）
+
+        与两种融合口径 fused_rrf/fused_weighted（M2-CONTRACTS.md §1.3）。
+
+        '
+      enum:
+      - rerank
+      - cosine
+      - bm25_rank
+      - fused_rrf
+      - fused_weighted
+    RetrievalSource:
+      type: string
+      enum:
+      - vector
+      - bm25
+    DegradedReason:
+      type: string
+      description: '检索降级原因枚举。M1 仅定义 vector_route_unavailable（零 Key 场景，向量路不可用，
+
+        仅走 BM25 单路）。M2 新增（M2-CONTRACTS.md §1.1/§1.2/§1.3）：
+
+        query_rewrite_timeout（改写超时/失败降级用原 query，或显式开启改写却无模型）、
+
+        rerank_timeout/rerank_error（重排超时或调用失败，降级为融合结果排序）、
+
+        threshold_inactive（score_threshold 在 BM25 单路场景不生效）。
+
+        M5 新增 route_fallback_all（知识库路由白名单未命中/解析失败/超时/未配置模型，降级检索全部
+
+        关联库）。M6 新增 snapshot_index_missing（RELEASED 版本的快照索引已不存在，如被误删，
+
+        回退实时别名与当前激活集合提供结果；M6 之前发布、本就没有快照的旧 RELEASED 版本走同样的
+
+        实时别名路径，但那是历史数据形态而非故障，不记该标记，M6-CONTRACTS.md §0.4/§0.5）。
+
+        '
+      enum:
+      - vector_route_unavailable
+      - query_rewrite_timeout
+      - query_rewrite_error
+      - query_rewrite_unavailable
+      - rerank_timeout
+      - rerank_error
+      - rerank_unavailable
+      - threshold_inactive
+      - route_fallback_all
+      - snapshot_index_missing
+      - graph_route_unavailable
+      - image_understanding_unavailable
+    GraphSummary:
+      type: object
+      description: M7 图谱概览（GraphSummaryResponse）
+      properties:
+        graph_enabled: {type: boolean}
+        entity_count: {type: integer, format: int64}
+        relation_count: {type: integer, format: int64}
+        covered_chunk_count: {type: integer, format: int64}
+        latest_task:
+          nullable: true
+          allOf:
+          - $ref: '#/components/schemas/GraphTask'
+    GraphTask:
+      type: object
+      description: 最近一次图抽取任务（type 恒为 GRAPH_EXTRACT——图清理挂删除级联不产生任务行，
+        M7-CONTRACTS.md §5 偏离①）
+      properties:
+        task_id: {type: string}
+        type: {type: string, enum: [GRAPH_EXTRACT]}
+        status: {type: string, enum: [PENDING, RUNNING, SUCCESS, FAILED]}
+        progress: {type: integer, nullable: true}
+        skipped_chunk_count:
+          type: integer
+          nullable: true
+          description: 因输出强校验（非法 JSON/实体名超长/关系端点不在本次实体列表）被跳过的分片数，
+            任务成功时同样返回——"成功但丢了语料"是必须暴露的失败模式
+        error_message: {type: string, nullable: true}
+        created_at: {type: string}
+    GraphEntity:
+      type: object
+      description: 实体行（GraphEntityResponse），relations 为出边、上限 20 条
+      properties:
+        name: {type: string}
+        type: {type: string}
+        source_chunk_count: {type: integer, format: int64}
+        relations:
+          type: array
+          items:
+            type: object
+            properties:
+              target: {type: string}
+              type: {type: string}
+    GraphEntityChunk:
+      type: object
+      description: 实体来源分片简化行（GraphEntityChunkResponse）
+      properties:
+        chunk_id: {type: string}
+        doc_id: {type: string}
+        doc_file_name: {type: string}
+        document_version_id: {type: string}
+        document_version_label: {type: string}
+        content: {type: string}
+        enabled: {type: boolean}
+    RetrievalNode:
+      type: object
+      description: 检索结果节点（契约 §5 定型结构）
+      required:
+      - doc_id
+      - document_version_id
+      - chunk_id
+      - chunk_type
+      - content
+      - score
+      - score_type
+      - retrieval_source
+      properties:
+        doc_id:
+          type: string
+        document_version_id:
+          type: string
+        chunk_id:
+          type: string
+        chunk_type:
+          $ref: '#/components/schemas/ChunkType'
+        content:
+          type: string
+        score:
+          type: number
+          format: float
+          description: 统一映射到标准 cosine [0,1] 后的分数（跨引擎一致，见契约 §4）
+        score_type:
+          $ref: '#/components/schemas/ScoreType'
+        retrieval_source:
+          $ref: '#/components/schemas/RetrievalSource'
+        metadata:
+          type: object
+          description: 'M7 图路命中时含 graph_score/graph_hops/graph_entities（≤5 个实体名；未被图路命中时三键不出现）。
+        M8 聊天分片含 window_seq 与 msg_span（会话内消息序号闭区间）；近重复归并存活者含 merged_window_chunk_ids（≤5，同会话窗口重叠率≥0.5 只留排名最高）。
+        M9 父子模式下发生精确剔除时含 redacted_child_count（被剔除的禁用子片段数；任一禁用子片
+        无偏移则整片回退且不带该键）。
+        引擎侧固定字段（tag_ids/session_id/sender/msg_time 等，见 M1-CONTRACTS.md
+
+            §6）+ M2 新增各路分数明细（M2-CONTRACTS.md §1.5，父子归并开启时另含
+
+            child_ids，见 §1.4），字段按实际生效链路出现，其余透传引擎原始 metadata。
+
+            '
+          properties:
+            norm_vector_score:
+              type: number
+              format: float
+              nullable: true
+              description: 融合前向量路 min-max 归一化分（weighted 融合时使用）
+            norm_bm25_score:
+              type: number
+              format: float
+              nullable: true
+              description: 融合前 BM25 路 min-max 归一化分（weighted 融合时使用）
+            fused_score:
+              type: number
+              format: float
+              nullable: true
+              description: 融合分（RRF 或加权），rerank 关闭/降级时可作为最终分参考
+            rerank_score:
+              type: number
+              format: float
+              nullable: true
+              description: rerank 归一化分（0-1），rerank 开启且未降级时存在
+            child_ids:
+              type: array
+              nullable: true
+              description: 父子分片开启时，归并到该父片的命中子片 chunk_id 列表
+              items:
+                type: string
+            kb_id:
+              type: string
+              nullable: true
+              description: 归属知识库业务 id（M5-CONTRACTS.md §2.2）；来自事实源行，全量填充，
+                与本次调用是否经过多库路由无关，单库调用亦填充
+          additionalProperties: true
+        image_urls:
+          type: array
+          items:
+            type: string
+          default: []
+        preview_url:
+          type: string
+          nullable: true
+          default: null
+    SearchData:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetrievalNode'
+        request_id:
+          type: string
+        degraded:
+          type: array
+          items:
+            $ref: '#/components/schemas/DegradedReason'
+          default: []
+        applied:
+          allOf:
+          - $ref: '#/components/schemas/AppliedSearchParams'
+          description: M2 新增，供调试页展示本次请求实际生效的参数（M2-CONTRACTS.md §1.5）
+    SearchResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/SearchData'
+    FusionMode:
+      type: string
+      description: M2-CONTRACTS.md §1.3
+      enum:
+      - rrf
+      - weighted
+    FusionConfig:
+      type: object
+      description: 'weighted 模式：每路候选集内 min-max 归一化，融合分 = w_vec·norm(vec) +
+
+        w_bm25·norm(bm25)，w_vec + w_bm25 = 1（入参只传 w_vec，w_bm25 由服务端换算）。
+
+        '
+      properties:
+        mode:
+          $ref: '#/components/schemas/FusionMode'
+        w_vec:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: 仅 mode=weighted 时生效，默认 0.5
+        rrf_k:
+          type: integer
+          minimum: 1
+          default: 60
+          description: 仅 mode=rrf 时生效
+    ChatMessage:
+      type: object
+      description: OpenAI 兼容 chat message（用于多轮指代消解改写，见 M2-CONTRACTS.md §1.1）
+      required:
+      - role
+      - content
+      properties:
+        role:
+          type: string
+          enum:
+          - user
+          - assistant
+          - system
+        content:
+          type: string
+    MetadataFilter:
+      type: object
+      description: 'M2-CONTRACTS.md §1.5：映射为 ES bool filter / Milvus expr，字段即
+
+        M1-CONTRACTS.md §6 引擎固定字段集（tag_ids/session_id/sender/msg_time）。
+
+        '
+      properties:
+        tag_ids:
+          type: array
+          nullable: true
+          items:
+            type: string
+        session_id:
+          type: string
+          nullable: true
+        sender:
+          type: string
+          nullable: true
+        msg_time_from:
+          type: string
+          format: date-time
+          nullable: true
+        msg_time_to:
+          type: string
+          format: date-time
+          nullable: true
+    AppliedSearchParams:
+      type: object
+      description: 调试页顶部信息条：本次请求实际生效的改写/融合/阈值作用口径（M2-CONTRACTS.md §1.5）；
+        routed_kb_ids 为 M5 新增（该端点仍是单库调试端点，值恒为该单库 id，与多库编排端点的
+        AppliedInfo.routed_kb_ids 共用同一字段名，避免同一元数据双路径不一致，M5-CONTRACTS.md
+        §6 server 申报偏离①）
+      properties:
+        rewrite_used_query:
+          type: string
+          nullable: true
+          description: 实际用于检索的 query；未开启改写或降级时等于原始 query
+        fusion_mode:
+          $ref: '#/components/schemas/FusionMode'
+        threshold_applied_on:
+          allOf:
+          - $ref: '#/components/schemas/ScoreType'
+          nullable: true
+          description: score_threshold 实际作用的分数口径；未设置阈值或 threshold_inactive 时为 null
+        routed_kb_ids:
+          type: array
+          items:
+            type: string
+          description: 本次调用实际检索的知识库 id 列表，单库调试端点恒为该单库 id（M5）
+    ParentChildConfig:
+      type: object
+      description: M2-CONTRACTS.md §1.4：父子分片，引擎只索引子片，父片正文只在 MySQL
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        parent_max_tokens:
+          type: integer
+          default: 1200
+          minimum: 1
+        child_max_tokens:
+          type: integer
+          default: 400
+          minimum: 1
+        child_overlap:
+          type: integer
+          default: 50
+          minimum: 0
+    IndexConfig:
+      type: object
+      description: '知识库索引配置（t_kb_knowledge_base.index_config JSON）。chunk_max_tokens/
+
+        chunk_overlap 为 M1 既有按长度切分参数（默认 600/100，见 M1-CONTRACTS.md
+
+        索引管线说明），M2 起可通过 `PUT /api/v1/kb/{kbId}/index-config` 编辑；
+
+        parent_child 为 M2 新增二级切分开关；clean_rules/parse_preview_required/
+
+        chat_aggregation 为 M3 新增（docs/M3-CONTRACTS.md §3.3/§3.4/§3.5）。
+
+        '
+      properties:
+        chunk_max_tokens:
+          type: integer
+          default: 600
+          minimum: 1
+        chunk_overlap:
+          type: integer
+          default: 100
+          minimum: 0
+        parent_child:
+          $ref: '#/components/schemas/ParentChildConfig'
+        clean_rules:
+          $ref: '#/components/schemas/CleanRules'
+        parse_preview_required:
+          type: boolean
+          default: false
+          description: 'M3-CONTRACTS.md §3.4：默认 false，保证批量上传顺畅。开启后管线在清洗完成后 暂停，文档 process_status=PENDING_CONFIRM，需调用
+            confirm 端点才继续切分入库。 '
+        chat_aggregation:
+          $ref: '#/components/schemas/ChatAggregationConfig'
+        hide_parent_with_disabled_child:
+          type: boolean
+          default: false
+          description: when true a parent chunk holding any disabled child is not
+            returned at all
+        inherit_disable_annotation:
+          type: boolean
+          default: true
+          description: carry disable annotations to a new version when the chunk text
+            hash is identical
+    CleanRules:
+      type: object
+      description: 'M3-CONTRACTS.md §3.3：知识库级清洗规则，索引管线 clean 阶段按固定顺序执行—— 去页眉页脚 → 去水印
+        → 正则替换 → 脱敏，每步可独立开关；参与 parse_fingerprint 计算 （六元组之一，见需求文档 §4.1），改清洗规则会正确标记文档
+        config_stale。 '
+      properties:
+        strip_header_footer:
+          type: boolean
+          default: false
+          description: 跨页重复行检测（同一文本在 >=60% 页面的首/末两行出现即视为页眉页脚并删除）
+        strip_watermark_patterns:
+          type: array
+          default: []
+          items:
+            type: string
+          description: 水印正则列表，匹配到的文本整体删除
+        regex_replacements:
+          type: array
+          default: []
+          items:
+            $ref: '#/components/schemas/RegexReplacement'
+        excel_header_join:
+          type: boolean
+          default: true
+          description: Excel/CSV 行级切分时是否把表头拼接进每一行
+        extract_metadata:
+          type: boolean
+          default: false
+        desensitize:
+          $ref: '#/components/schemas/DesensitizeConfig'
+    RegexReplacement:
+      type: object
+      properties:
+        pattern:
+          type: string
+        replacement:
+          type: string
+    DesensitizeConfig:
+      type: object
+      description: '正则掩码：手机号保留前 3 后 4、身份证保留前 6 后 4、银行卡保留后 4、邮箱保留域名。 聊天记录导入时默认开启（需求文档
+        §4.2）。 '
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        phone:
+          type: boolean
+          default: true
+        id_card:
+          type: boolean
+          default: true
+        bank_card:
+          type: boolean
+          default: true
+        email:
+          type: boolean
+          default: false
+    ChatAggregationConfig:
+      type: object
+      description: 'M3-CONTRACTS.md §3.5：聊天记录按“会话 + 时间窗口”聚合为 chunk_type=chat_log 的分片，一期无重叠顺切（步长=窗口）；M8-CONTRACTS.md
+        §0.5 增 window_overlap 重叠滑窗（默认 0 保持顺切）。 '
+      properties:
+        window_minutes:
+          type: integer
+          default: 60
+          minimum: 1
+        max_messages:
+          type: integer
+          default: 50
+          minimum: 1
+        window_overlap:
+          type: integer
+          default: 0
+          minimum: 0
+          description: 'M8 新增：下一窗口重复上一窗口末尾的消息数，0=既有顺切；约束
+            window_overlap×2 < max_messages（每条消息至多落两个窗口），违规 INVALID_PARAM。
+            开启后聊天 chunk metadata 携带 window_seq 与 msg_span（M8-CONTRACTS.md §0.5）'
+    RebuildRequest:
+      type: object
+      description: M2-CONTRACTS.md §4：doc_ids 缺省 = 该知识库下全部 config_stale=1 文档
+      properties:
+        doc_ids:
+          type: array
+          nullable: true
+          items:
+            type: string
+    ConfirmDocumentsRequest:
+      type: object
+      description: M3-CONTRACTS.md §3.4：doc_ids 缺省 = 该知识库下全部 PENDING_CONFIRM 状态文档
+      properties:
+        doc_ids:
+          type: array
+          nullable: true
+          items:
+            type: string
+    PreviewImage:
+      type: object
+      description: M3-CONTRACTS.md §3.4：预览产物中的图片，preview_url 为限时预签名 URL
+      properties:
+        image_id:
+          type: string
+        preview_url:
+          type: string
+        page_no:
+          type: integer
+          nullable: true
+          description: 图片所在页码，无页锚定的图片不返回
+        kind:
+          type: string
+          nullable: true
+          description: 图片来源类型（内嵌图 / 扫描页渲染图）
+        text_proxy:
+          type: string
+          nullable: true
+          description: VLM 生成的图片文本代理（描述 + OCR 文本）；未配置 VLM 或调用失败时为 null
+        status:
+          type: string
+          nullable: true
+          description: 文本代理生成状态；失败/跳过的图片同样列出，text_proxy 为空
+    DocumentPreview:
+      type: object
+      description: M3-CONTRACTS.md §3.4：解析预览产物（清洗完成后、切分之前的中间态）
+      properties:
+        doc_id:
+          type: string
+        process_status:
+          $ref: '#/components/schemas/ProcessStatus'
+        markdown:
+          type: string
+        pages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ParsePreviewPage'
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/PreviewImage'
+        warnings:
+          type: array
+          items:
+            type: string
+          default: []
+    ParsePreviewPage:
+      type: object
+      properties:
+        page_no:
+          type: integer
+        text:
+          type: string
+        scanned:
+          type: boolean
+          default: false
+    DocumentPreviewResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/DocumentPreview'
+    ReparseRequest:
+      type: object
+      description: 'M3-CONTRACTS.md §3.4：可选 clean_rules 覆盖，仅本次重解析预览生效， 不写回知识库 index_config。 '
+      properties:
+        clean_rules:
+          allOf:
+          - $ref: '#/components/schemas/CleanRules'
+          nullable: true
+    IkDictType:
+      type: string
+      description: t_kb_ik_dict.dict_type（M2-CONTRACTS.md §3）
+      enum:
+      - EXT
+      - STOP
+    IkDictStatus:
+      type: string
+      description: t_kb_ik_dict.status
+      enum:
+      - ENABLED
+      - DISABLED
+    IkDictEntry:
+      type: object
+      description: 词典行（IkDictResponse）。无自增 id 字段——word 是唯一键，也是
+        DELETE/PUT 路由使用的标识
+      properties:
+        word:
+          type: string
+        dict_type:
+          $ref: '#/components/schemas/IkDictType'
+        status:
+          $ref: '#/components/schemas/IkDictStatus'
+        remark:
+          type: string
+          nullable: true
+          maxLength: 512
+          description: 备注，创建时可选传入
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateIkDictRequest:
+      type: object
+      required:
+      - word
+      - dict_type
+      properties:
+        word:
+          type: string
+          minLength: 1
+        dict_type:
+          $ref: '#/components/schemas/IkDictType'
+        status:
+          allOf:
+          - $ref: '#/components/schemas/IkDictStatus'
+          default: ENABLED
+    IkDictEntryResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/IkDictEntry'
+    IkDictListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IkDictEntry'
+              page:
+                type: integer
+              total:
+                type: integer
+    VectorEngine:
+      type: string
+      enum:
+      - es
+      - milvus
+    ModelStatus:
+      type: object
+      properties:
+        embedding_configured:
+          type: boolean
+        vector_engine:
+          $ref: '#/components/schemas/VectorEngine'
+        provider:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        dimension:
+          type: integer
+          description: embedding dimension reported by the provider
+        rerank_configured:
+          type: boolean
+        rerank_provider:
+          type: string
+          nullable: true
+        rerank_model:
+          type: string
+          nullable: true
+        chat_configured:
+          type: boolean
+        chat_provider:
+          type: string
+          nullable: true
+        chat_model:
+          type: string
+          nullable: true
+        vision_configured:
+          type: boolean
+          description: M3-CONTRACTS.md §3.1：VisionProvider（DashScope qwen-vl-max）是否已配置
+        vision_provider:
+          type: string
+          nullable: true
+        vision_model:
+          type: string
+          nullable: true
+    ModelStatusResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/ModelStatus'
+    ChatImportAction:
+      type: string
+      description: 'M3-CONTRACTS.md §3.5：逻辑文档标识 = 来源渠道 + session_id。CREATE=库内无匹配，
+        建新文档；NEW_VERSION=已存在同一 session_id 的聊天文档，生成新版本（全量替换，走 M1 版本机制）。 '
+      enum:
+      - CREATE
+      - NEW_VERSION
+    TimeRange:
+      type: object
+      description: epoch 毫秒时间范围（该会话内消息 send_time 的最小/最大值）
+      properties:
+        from:
+          type: integer
+          format: int64
+          nullable: true
+        to:
+          type: integer
+          format: int64
+          nullable: true
+    ChatImportSession:
+      type: object
+      description: M3-CONTRACTS.md §3.5：聊天记录导入匹配预览的单个会话条目
+      properties:
+        session_id:
+          type: string
+        session_name:
+          type: string
+        message_count:
+          type: integer
+        time_range:
+          $ref: '#/components/schemas/TimeRange'
+        matched_doc_id:
+          type: string
+          nullable: true
+          description: 库内已存在同一 session_id 的聊天文档 doc_id；无匹配为 null
+        action:
+          $ref: '#/components/schemas/ChatImportAction'
+    ChatImportPreviewData:
+      type: object
+      properties:
+        upload_token:
+          type: string
+          description: 上传文件与解析结果在 MinIO 的暂存凭证，有效期 30 分钟，供 confirm 端点使用
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatImportSession'
+        skipped:
+          type: object
+          additionalProperties:
+            type: integer
+          description: 解析阶段被丢弃的消息数，按原因分组（如语音/视频等无文本行）；
+            无丢弃时该键不返回
+    ChatImportPreviewResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/ChatImportPreviewData'
+    ChatImportConfirmRequest:
+      type: object
+      required:
+      - upload_token
+      properties:
+        upload_token:
+          type: string
+        session_ids:
+          type: array
+          nullable: true
+          description: 可选子集，缺省 = 匹配预览返回的全部会话
+          items:
+            type: string
+    AlertConfig:
+      type: object
+      description: 'M3-CONTRACTS.md §3.6：t_kb_system_config 存储的告警配置。触发源： ①同类任务连续失败
+        >= task_fail_threshold；②最近 5 分钟检索降级率 > degrade_rate_threshold；③双写积压 > sync_backlog_threshold（复用
+        M2 补偿扫描统计）。 同一告警类型 silence_minutes 内不重复发送；未配置 webhook_url 时触发降级为 error 日志。 '
+      properties:
+        webhook_url:
+          type: string
+          nullable: true
+        enabled:
+          type: boolean
+          default: false
+        task_fail_threshold:
+          type: integer
+          default: 3
+          minimum: 1
+        degrade_rate_threshold:
+          type: number
+          format: float
+          default: 0.3
+          minimum: 0
+          maximum: 1
+        sync_backlog_threshold:
+          type: integer
+          default: 1000
+          minimum: 1
+        silence_minutes:
+          type: integer
+          default: 30
+          minimum: 0
+    AlertConfigResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/AlertConfig'
+    AlertTestResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              delivered:
+                type: boolean
+              detail:
+                type: string
+                nullable: true
+                description: Webhook 端返回信息或失败原因摘要
+    DemoImportData:
+      type: object
+      properties:
+        kb_id:
+          type: string
+        doc_count:
+          type: integer
+    DemoImportResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/DemoImportData'
+    DemoStatus:
+      type: object
+      description: M3-CONTRACTS.md §3.7
+      properties:
+        available:
+          type: boolean
+          description: false 表示未找到 DEMO_DATA_DIR 素材目录，前端据此置灰“一键导入 Demo”按钮
+        imported:
+          type: boolean
+        kb_id:
+          type: string
+          nullable: true
+        doc_count:
+          type: integer
+          nullable: true
+    DemoStatusResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/DemoStatus'
+    ComponentHealth:
+      type: string
+      enum:
+      - UP
+      - DOWN
+      - UNKNOWN
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ComponentHealth'
+        components:
+          type: object
+          properties:
+            mysql:
+              type: object
+              properties:
+                status:
+                  $ref: '#/components/schemas/ComponentHealth'
+            elasticsearch:
+              type: object
+              properties:
+                status:
+                  $ref: '#/components/schemas/ComponentHealth'
+            minio:
+              type: object
+              properties:
+                status:
+                  $ref: '#/components/schemas/ComponentHealth'
+            milvus:
+              type: object
+              description: 仅 VECTOR_ENGINE=milvus 时探活，lite 模式可不出现
+              properties:
+                status:
+                  $ref: '#/components/schemas/ComponentHealth'
+    DocumentVersion:
+      type: object
+      properties:
+        version_id:
+          type: string
+        version:
+          type: string
+          example: '2.0'
+        status:
+          type: string
+          enum:
+          - BUILDING
+          - BUILD_FAILED
+          - READY
+          - ACTIVE
+          - ARCHIVED
+        content_hash:
+          type: string
+        chunk_count:
+          type: integer
+        active:
+          type: boolean
+        rollback_mode:
+          type: string
+          enum:
+          - INSTANT
+          - REBUILD
+          description: INSTANT when the target version still owns its chunks, REBUILD
+            once archived
+        pinned:
+          type: boolean
+          description: true 表示至少一个未删除的应用版本（含 SUPERSEDED，只要其固化可见集尚未随快照
+            清理而清空）引用了这个文档版本，归档保留清理会跳过它（M6-CONTRACTS.md §0.8）
+        pinned_by:
+          type: array
+          items:
+            type: string
+          description: 引用该文档版本的应用版本业务 id 列表，供控制台解释为何一个版本被跳过归档，
+            而不是只把归档动作置灰；pinned=false 时为空数组
+        changelog:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+    ActivateImpact:
+      type: object
+      properties:
+        rollback_mode:
+          type: string
+          enum:
+          - INSTANT
+          - REBUILD
+        needs_rebuild:
+          type: boolean
+        stale_annotation_count:
+          type: integer
+        affected_eval_case_count:
+          type: integer
+          description: 锚定该 doc_id 且会因本次切换进入待复核（EVIDENCE_STALE）的评测 case 数（M4b-CONTRACTS.md
+            §0：M4a 恒为 0 的占位在 M4b 已填实为真实统计）
+    ActivateVersionResult:
+      type: object
+      properties:
+        task_id:
+          type: string
+          nullable: true
+          description: null for an INSTANT switch, rebuild task id otherwise
+        rollback_mode:
+          type: string
+          enum:
+          - INSTANT
+          - REBUILD
+    Annotation:
+      type: object
+      properties:
+        annotation_id:
+          type: string
+        kb_id:
+          type: string
+        doc_id:
+          type: string
+        document_version_id:
+          type: string
+        chunk_id:
+          type: string
+        annotation_type:
+          type: string
+          enum:
+          - EDIT
+          - TOGGLE
+          - MERGE
+          - SPLIT
+        payload:
+          type: object
+          additionalProperties: true
+        chunk_text_hash:
+          type: string
+        inherit_status:
+          type: string
+          enum:
+          - NOT_INHERITED
+          - AUTO_INHERITED
+          - REDONE
+        operator:
+          type: string
+        version:
+          type: string
+        excerpt:
+          type: string
+        created_at:
+          type: string
+    ToggleChunkResult:
+      type: object
+      properties:
+        changed_chunk_ids:
+          type: array
+          items:
+            type: string
+          description: includes cascaded child chunks when the target is a parent
+    SplitChunkResult:
+      type: object
+      properties:
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocumentChunk'
+    AnchorType:
+      type: string
+      description: 评测 case 证据锚定类型（M4b-CONTRACTS.md §1）。SPAN 锚定到具体原文片段（span 非空）；
+        DOCUMENT 锚定整篇文档（span 恒为空，图片类 case 仅能用此类型）
+      enum:
+      - SPAN
+      - DOCUMENT
+    CaseStatus:
+      type: string
+      description: t_kb_eval_case.status（与 t_kb_annotation.inherit_status 无关，两套枚举不复用）。
+        EVIDENCE_STALE 由文档激活版本切换时同步扫描置入，需人工在证据复核工作台 REANCHOR 或 DEPRECATE
+      enum:
+      - ACTIVE
+      - EVIDENCE_STALE
+      - DEPRECATED
+    CaseSource:
+      type: string
+      description: case 来源。DEBUG_PAGE 来自检索调试页一键收进（含检索结果反馈 GOOD 判定），IMPORTED
+        来自 Demo 评测集导入
+      enum:
+      - MANUAL
+      - DEBUG_PAGE
+      - IMPORTED
+    RunStatus:
+      type: string
+      description: t_kb_eval_run.status。零 Key 环境下 VECTOR_ONLY/HYBRID/HYBRID_RERANK
+        直接置 FAILED（fail_reason 说明嵌入模型未配置），不产生误导性指标
+      enum:
+      - PENDING
+      - RUNNING
+      - SUCCESS
+      - FAILED
+    EvalMode:
+      type: string
+      description: 检索配置矩阵档位到既有检索参数的映射（M4b-CONTRACTS.md §3.1）：BM25_ONLY 禁向量路，
+        VECTOR_ONLY 禁 BM25 路，HYBRID 双路+融合、rerank 关，HYBRID_RERANK 双路+融合+rerank
+      enum:
+      - BM25_ONLY
+      - VECTOR_ONLY
+      - HYBRID
+      - HYBRID_RERANK
+    RecheckAction:
+      type: string
+      description: 证据复核工作台操作（M4b-CONTRACTS.md §2）
+      enum:
+      - REANCHOR
+      - DEPRECATE
+    RetrievalFeedbackVerdict:
+      type: string
+      description: 检索结果反馈判定（M4b-CONTRACTS.md §2）
+      enum:
+      - GOOD
+      - BAD
+    EvalCaseEvidence:
+      type: object
+      description: t_kb_eval_case.evidences 数组元素；DOCUMENT 锚定时 span 为空
+      required:
+      - doc_id
+      - annotated_version_id
+      properties:
+        doc_id:
+          type: string
+        span:
+          type: string
+          nullable: true
+          description: 原文摘录片段；anchor_type=DOCUMENT 时恒为空
+        annotated_version_id:
+          type: string
+          description: 标注时该 doc 的激活版本，由服务端按当前激活版本自动填入
+    EvalCaseEvidenceInput:
+      type: object
+      description: 新增/编辑/复核 case 时提交的证据（annotated_version_id 由服务端填入，不由调用方传入）
+      required:
+      - doc_id
+      properties:
+        doc_id:
+          type: string
+        span:
+          type: string
+          nullable: true
+          description: anchor_type=DOCUMENT 时可省略/为空
+    EvalCase:
+      type: object
+      properties:
+        case_id:
+          type: string
+        dataset_id:
+          type: string
+        query:
+          type: string
+        messages:
+          type: array
+          nullable: true
+          description: 多轮对话历史（可空）
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        expected_answer:
+          type: string
+          nullable: true
+        anchor_type:
+          $ref: '#/components/schemas/AnchorType'
+        evidences:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvalCaseEvidence'
+        status:
+          $ref: '#/components/schemas/CaseStatus'
+        source:
+          $ref: '#/components/schemas/CaseSource'
+        note:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    CreateEvalCaseRequest:
+      type: object
+      description: 新增（POST cases）与编辑（PUT eval-cases/{caseId}）复用同一请求体
+      required:
+      - query
+      - anchor_type
+      - evidences
+      properties:
+        query:
+          type: string
+        messages:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        expected_answer:
+          type: string
+          nullable: true
+        anchor_type:
+          $ref: '#/components/schemas/AnchorType'
+        evidences:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/EvalCaseEvidenceInput'
+        note:
+          type: string
+          nullable: true
+    RecheckCaseRequest:
+      type: object
+      required:
+      - action
+      properties:
+        action:
+          $ref: '#/components/schemas/RecheckAction'
+        evidences:
+          type: array
+          nullable: true
+          description: action=REANCHOR 时必填，用新证据整体替换旧证据
+          items:
+            $ref: '#/components/schemas/EvalCaseEvidenceInput'
+    EvidenceCandidate:
+      type: object
+      description: 证据复核工作台候选原文（按重叠率取 Top3，M4b-CONTRACTS.md §2/§4）
+      properties:
+        chunk_id:
+          type: string
+        document_version_id:
+          type: string
+        content:
+          type: string
+        overlap_ratio:
+          type: number
+          format: float
+    StaleEvidenceEntry:
+      type: object
+      properties:
+        evidence:
+          $ref: '#/components/schemas/EvalCaseEvidence'
+        candidates:
+          type: array
+          description: 当前激活版本中按重叠率排序的 Top3 候选原文
+          items:
+            $ref: '#/components/schemas/EvidenceCandidate'
+    StaleCaseEntry:
+      type: object
+      properties:
+        case:
+          $ref: '#/components/schemas/EvalCase'
+        stale_evidences:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaleEvidenceEntry'
+    StaleCaseListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/StaleCaseEntry'
+    EvalCaseResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/EvalCase'
+    EvalCaseListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EvalCase'
+              page:
+                type: integer
+              total:
+                type: integer
+    LastRunSummary:
+      type: object
+      nullable: true
+      description: 评测集尚无 run 时为 null
+      properties:
+        run_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/RunStatus'
+        mode:
+          $ref: '#/components/schemas/EvalMode'
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+    CreateEvalDatasetRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+    EvalDataset:
+      type: object
+      properties:
+        dataset_id:
+          type: string
+        kb_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        dataset_revision:
+          type: integer
+          description: case 增删改即 +1，门禁可比性依据（M4b-CONTRACTS.md §1）
+        case_count:
+          type: integer
+        last_run:
+          $ref: '#/components/schemas/LastRunSummary'
+        created_at:
+          type: string
+          format: date-time
+    EvalDatasetResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/EvalDataset'
+    EvalDatasetListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/EvalDataset'
+    SkippedEvalCase:
+      type: object
+      description: import-demo 时按 file_name+content_hash_sha256 匹配不到库内文档而跳过的 case
+      properties:
+        query:
+          type: string
+        file_name:
+          type: string
+        reason:
+          type: string
+    ImportDemoEvalDatasetData:
+      type: object
+      properties:
+        dataset_id:
+          type: string
+        already_existed:
+          type: boolean
+          description: 同名评测集已存在则为 true，直接返回其 id 不重复导入（幂等）
+        imported_case_count:
+          type: integer
+        skipped:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkippedEvalCase'
+    ImportDemoEvalDatasetResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/ImportDemoEvalDatasetData'
+    CasesFromRetrievalRequest:
+      type: object
+      description: 检索调试页一键收进评测集（M4b-CONTRACTS.md §2）；chunk_type=image 或显式传 anchor_type=DOCUMENT
+        时建成文档级锚定 case
+      required:
+      - query
+      - chunk_ids
+      properties:
+        query:
+          type: string
+        messages:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ChatMessage'
+        chunk_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        anchor_type:
+          allOf:
+          - $ref: '#/components/schemas/AnchorType'
+          nullable: true
+    RetrievalFeedbackRequest:
+      type: object
+      description: 'M4b-CONTRACTS.md §2：verdict=GOOD 等价于一键收进评测集（source=DEBUG_PAGE 草稿
+        case）；verdict=BAD 仅记 info 日志，不落库。'
+      required:
+      - kb_id
+      - query
+      - chunk_id
+      - verdict
+      properties:
+        kb_id:
+          type: string
+        query:
+          type: string
+        chunk_id:
+          type: string
+        verdict:
+          $ref: '#/components/schemas/RetrievalFeedbackVerdict'
+    EvalRunConfig:
+      type: object
+      description: 检索配置矩阵单组配置（M4b-CONTRACTS.md §3.1），mode 映射到既有检索参数
+      required:
+      - label
+      - mode
+      properties:
+        label:
+          type: string
+        mode:
+          $ref: '#/components/schemas/EvalMode'
+        recall_top_k:
+          type: integer
+          nullable: true
+          minimum: 1
+        top_n:
+          type: integer
+          nullable: true
+          minimum: 1
+        fusion:
+          allOf:
+          - $ref: '#/components/schemas/FusionConfig'
+          nullable: true
+        score_threshold:
+          type: number
+          format: float
+          nullable: true
+        rewrite_enabled:
+          type: boolean
+          nullable: true
+    JudgeRequestConfig:
+      type: object
+      description: judge 本期仅在 case 有 expected_answer 时对召回内容能否支撑该答案打分（M4b-CONTRACTS.md
+        §3.5）
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        model:
+          type: string
+          nullable: true
+          description: 留空沿用 EVAL_JUDGE_MODEL（未配置则回退 ChatProvider 当前模型）
+    CreateEvalRunsRequest:
+      type: object
+      description: configs 允许 1..6 组，一次提交产生 N 个 run（每组一个），共享 dataset_revision 与
+        corpus_fingerprint（M4b-CONTRACTS.md §3.1）
+      required:
+      - configs
+      properties:
+        k:
+          type: integer
+          default: 5
+          minimum: 1
+        configs:
+          type: array
+          minItems: 1
+          maxItems: 6
+          items:
+            $ref: '#/components/schemas/EvalRunConfig'
+        judge:
+          allOf:
+          - $ref: '#/components/schemas/JudgeRequestConfig'
+          nullable: true
+    ConfidenceInterval:
+      type: object
+      description: Wilson 95% 置信区间，仅作报告展示，不参与判定（M4b-CONTRACTS.md §3.3）
+      properties:
+        lower:
+          type: number
+          format: float
+        upper:
+          type: number
+          format: float
+    EvalMetricValue:
+      type: object
+      description: 单个分组、单个 K 值下的指标集
+      properties:
+        recall:
+          type: number
+          format: float
+        precision:
+          type: number
+          format: float
+        hit_rate:
+          type: number
+          format: float
+        mrr:
+          type: number
+          format: float
+        ndcg:
+          type: number
+          format: float
+        recall_ci:
+          $ref: '#/components/schemas/ConfidenceInterval'
+        hit_rate_ci:
+          $ref: '#/components/schemas/ConfidenceInterval'
+    EvalMetrics:
+      type: object
+      nullable: true
+      description: '三层嵌套：分组 key（overall/span/document/single_turn/multi_turn）→ K
+        值（字符串，如 "5"）→ EvalMetricValue（M4b-CONTRACTS.md §3.3）；run 未 SUCCESS 时为
+        null。'
+      additionalProperties:
+        type: object
+        additionalProperties:
+          $ref: '#/components/schemas/EvalMetricValue'
+    EvalRun:
+      type: object
+      properties:
+        run_id:
+          type: string
+        dataset_id:
+          type: string
+        kb_id:
+          type: string
+        label:
+          type: string
+        mode:
+          $ref: '#/components/schemas/EvalMode'
+        dataset_revision:
+          type: integer
+          description: 跑时快照
+        corpus_fingerprint:
+          type: string
+          description: 激活版本集合 hash + 嵌入版本 + 词典版本
+        retrieval_config:
+          $ref: '#/components/schemas/EvalRunConfig'
+        judge_model:
+          type: string
+          nullable: true
+        judge_prompt_version:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/RunStatus'
+        metrics:
+          $ref: '#/components/schemas/EvalMetrics'
+        case_total:
+          type: integer
+        case_effective:
+          type: integer
+        case_stale:
+          type: integer
+        case_degraded:
+          type: integer
+          description: 重试后仍降级的 case 数，非 0 时报告顶部显著提示
+        fail_reason:
+          type: string
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    CreateEvalRunsResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            description: 一次提交按 configs 数量产生的 N 个 run
+            items:
+              $ref: '#/components/schemas/EvalRun'
+    EvalRunResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/EvalRun'
+    EvalRunListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EvalRun'
+              page:
+                type: integer
+              total:
+                type: integer
+    EvalRunEstimate:
+      type: object
+      description: 提交 run 前的预估调用次数（M4b-CONTRACTS.md §3.4 费用护栏）
+      properties:
+        embedding_calls:
+          type: integer
+        rerank_calls:
+          type: integer
+        rewrite_calls:
+          type: integer
+        judge_calls:
+          type: integer
+    EvalRunEstimateResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/EvalRunEstimate'
+    JudgeScore:
+      type: object
+      description: 正确性/引用忠实度/完整性各 1-5 分制（M4b-CONTRACTS.md §3.5）
+      properties:
+        correctness:
+          type: integer
+          minimum: 1
+          maximum: 5
+        faithfulness:
+          type: integer
+          minimum: 1
+          maximum: 5
+        completeness:
+          type: integer
+          minimum: 1
+          maximum: 5
+    EvalResult:
+      type: object
+      properties:
+        result_id:
+          type: string
+        run_id:
+          type: string
+        case_id:
+          type: string
+        hit:
+          type: boolean
+        hit_rank:
+          type: integer
+          nullable: true
+          description: 首个命中的名次，未命中为 null
+        overlap_ratios:
+          type: array
+          description: 该 case 每条 evidence 的最佳重叠率
+          items:
+            type: number
+            format: float
+        recalled_chunk_ids:
+          type: array
+          items:
+            type: string
+        degraded:
+          type: array
+          items:
+            $ref: '#/components/schemas/DegradedReason'
+        retry_count:
+          type: integer
+        judge_score:
+          allOf:
+          - $ref: '#/components/schemas/JudgeScore'
+          nullable: true
+        judge_reason:
+          type: string
+          nullable: true
+    EvalResultListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EvalResult'
+              page:
+                type: integer
+              total:
+                type: integer
+    CompareRunEntry:
+      type: object
+      properties:
+        run_id:
+          type: string
+        label:
+          type: string
+        mode:
+          $ref: '#/components/schemas/EvalMode'
+        metrics:
+          $ref: '#/components/schemas/EvalMetrics'
+    EvalRunCompareData:
+      type: object
+      description: 同 dataset_revision 才允许对比；不同则 comparable=false 并给出原因（M4b-CONTRACTS.md
+        §3.1）
+      properties:
+        comparable:
+          type: boolean
+        reason:
+          type: string
+          nullable: true
+          description: comparable=false 时的原因说明（如语料/评测集已变化）
+        dataset_revision:
+          type: integer
+          nullable: true
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompareRunEntry'
+    EvalRunCompareResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/EvalRunCompareData'
+    CreateAppRequest:
+      type: object
+      description: 应用创建请求（M4c-CONTRACTS.md §2）
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          maxLength: 128
+        description:
+          type: string
+          nullable: true
+          maxLength: 1024
+    UpdateAppRequest:
+      type: object
+      description: 应用重命名/改描述请求，字段为 null 保留原值
+      properties:
+        name:
+          type: string
+          nullable: true
+          maxLength: 128
+        description:
+          type: string
+          nullable: true
+          maxLength: 1024
+    App:
+      type: object
+      description: 应用（t_kb_app），列表页附带当前 RELEASED 版本，避免逐行再请求（M4c-CONTRACTS.md
+        §1/§2）
+      properties:
+        app_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        released_version:
+          type: string
+          nullable: true
+          description: 当前对外服务的版本号，尚无 RELEASED 版本时为 null
+        released_version_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    AppResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/App'
+    AppListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/App'
+    AppRetrievalConfig:
+      type: object
+      description: 版本快照的检索参数块；建版请求中每个字段均可选，null 继承最新版本值，草稿态外经
+        submit-test 补全并冻结（M4c-CONTRACTS.md §1）
+      properties:
+        recall_top_k:
+          type: integer
+          nullable: true
+          minimum: 1
+        top_n:
+          type: integer
+          nullable: true
+          minimum: 1
+        fusion_mode:
+          allOf:
+          - $ref: '#/components/schemas/FusionMode'
+          nullable: true
+        w_vec:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 1
+        rrf_k:
+          type: integer
+          nullable: true
+          minimum: 1
+        score_threshold:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0.01
+          maximum: 1.0
+        rerank_enabled:
+          type: boolean
+          nullable: true
+        rewrite_enabled:
+          type: boolean
+          nullable: true
+    AppPromptConfig:
+      type: object
+      description: 版本快照的问答 prompt 块，三开关默认开启（对外暴露的应用默认防泄漏/防注入/引用标注）
+      properties:
+        system_prompt:
+          type: string
+          nullable: true
+          maxLength: 4000
+        refusal_enabled:
+          type: boolean
+          default: true
+        refusal_prompt:
+          type: string
+          nullable: true
+          maxLength: 2000
+        leak_guard_enabled:
+          type: boolean
+          default: true
+        leak_guard_prompt:
+          type: string
+          nullable: true
+          maxLength: 2000
+        citation_enabled:
+          type: boolean
+          default: true
+    AppGateThresholds:
+      type: object
+      description: 首发无对照时使用的绝对阈值，未配置则记录本次结果作为后续基线并放行
+      properties:
+        min_hit_rate:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 1
+        min_recall:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 1
+    AppVersionConfigRequest:
+      type: object
+      description: 建版请求即控制台配置表单；未传字段继承最新版本配置（M4c-CONTRACTS.md §1/§2，
+        M5 增量见 M5-CONTRACTS.md §1）。携带任一配置字段的建版请求必须给出 kb_refs 或旧版 kb_id
+        之一（fast-fail 提前到建版而非 submit-test）。
+      properties:
+        kb_id:
+          type: string
+          nullable: true
+          deprecated: true
+          description: 【已废弃，兼容用】M4c 前客户端的单库字段；仅当 kb_refs 缺省时才会被折叠为
+            一条 [{kb_id, weight:1}]，两者同传 kb_refs 优先。新客户端请使用 kb_refs（M5）。
+        kb_refs:
+          type: array
+          nullable: true
+          minItems: 1
+          maxItems: 15
+          items:
+            $ref: '#/components/schemas/AppKbRef'
+          description: 应用版本关联的知识库列表，1..15 个（上限见部署配置
+            kb.retrieval.max-linked-kb，默认 15），M5 起替代 kb_id；不可重复关联同一知识库、
+            权重须为正整数、知识库须存在，否则 400 INVALID_PARAM。声明顺序有意义：配额分配的
+            向下取整余量与库级单值默认参数（retrieval 未设字段/rewrite/rerank 开关）均取声明的
+            第一个库（M5-CONTRACTS.md §6）。
+        routing:
+          $ref: '#/components/schemas/AppRoutingConfig'
+        retrieval:
+          $ref: '#/components/schemas/AppRetrievalConfig'
+        prompt:
+          $ref: '#/components/schemas/AppPromptConfig'
+        gate:
+          $ref: '#/components/schemas/AppGateThresholds'
+        chat_model:
+          type: string
+          nullable: true
+          description: 生成模型，落快照并经 ChatProviderFactory 真实生效，留空取部署默认对话模型
+        gate_dataset_id:
+          type: string
+          nullable: true
+        changelog:
+          type: string
+          nullable: true
+          maxLength: 1024
+    AppConfigSnapshot:
+      type: object
+      description: 发布时固化的完整检索+问答配置快照（t_kb_app_version.config），只读、不回落任何
+        实时默认值。M5 起序列化恒出 kb_refs，不再回写 kb_id（单一事实源）；M4c 前冻结的旧快照仅存
+        单个 kb_id，读侧统一在此收敛翻译为等价的单条 kb_refs（M5-CONTRACTS.md §6）。
+      properties:
+        kb_id:
+          type: string
+          nullable: true
+          deprecated: true
+          writeOnly: true
+          description: 【已废弃，只入不出】M4c 前快照的遗留单库字段；仅入参可能出现，出参恒读
+            kb_refs（本 schema 的 kb_id 属性只用于兼容历史请求体校验，实际响应体不会出现该字段）。
+        kb_refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppKbRef'
+          description: 应用关联的知识库列表，声明顺序有意义（配额余量与库级单值默认参数取第一个）；
+            旧快照的单 kb_id 在此翻译为等价的单元素列表，永不为空
+        routing:
+          $ref: '#/components/schemas/AppRoutingConfig'
+        retrieval:
+          $ref: '#/components/schemas/AppRetrievalConfig'
+        prompt:
+          $ref: '#/components/schemas/AppPromptConfig'
+        chat_model:
+          type: string
+          nullable: true
+        gate:
+          $ref: '#/components/schemas/AppGateThresholds'
+    AppKbRef:
+      type: object
+      description: 应用版本关联的一个知识库及其配额权重（M5-CONTRACTS.md §1/§2.2）
+      required:
+      - kb_id
+      properties:
+        kb_id:
+          type: string
+        weight:
+          type: integer
+          nullable: true
+          minimum: 1
+          default: 1
+          description: rerank 候选配额权重，仅参与配额分配、不参与打分（跨库分数不可比）；缺省或
+            非正数按默认权重 1 生效
+    AppRoutingConfig:
+      type: object
+      description: 知识库路由开关与自定义 Prompt（M5-CONTRACTS.md §1/§2.1）；默认关闭——关闭或应用
+        仅关联 1 个库时不调用路由模型，未配置对话模型时显式开启也会跳过并记 degraded=
+        route_fallback_all
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        prompt:
+          type: string
+          nullable: true
+          maxLength: 4000
+          description: 路由指令自定义文案，留空使用内置默认路由 Prompt；候选知识库白名单与用户问题
+            始终由服务端拼装，自定义文案无法移除白名单校验（需求文档 §4.4 注入防护③）
+    GateDatasetRequest:
+      type: object
+      properties:
+        dataset_id:
+          type: string
+          nullable: true
+          description: 待绑定评测集；为空或 null 则清空绑定并跳过门禁
+    AppVersionStatus:
+      type: string
+      description: '发布状态机（M4c-CONTRACTS.md §1）：DRAFT -> TESTING -> GATING -> GATE_PASSED
+        -> RELEASED -> SUPERSEDED；GATING 亦可落至 GATE_LOG_ONLY / GATE_BLOCKED，两者均需
+        force=true 显式放行至 RELEASED；SUPERSEDED 可 rollback 回 RELEASED。'
+      enum:
+      - DRAFT
+      - TESTING
+      - GATING
+      - GATE_PASSED
+      - GATE_LOG_ONLY
+      - GATE_BLOCKED
+      - RELEASED
+      - SUPERSEDED
+    GateVerdict:
+      type: string
+      description: 门禁三态结论；LOG_ONLY 表示"不可判定"，不等同于 BLOCKED，两者都不自动放行
+      enum:
+      - PASSED
+      - BLOCKED
+      - LOG_ONLY
+    GateReason:
+      type: string
+      description: GateVerdict 的分类原因，供控制台直接展示解释文案，无需二次推导
+      enum:
+      - NO_DATASET
+      - INSUFFICIENT_CASES
+      - DEGRADED_CASES
+      - STALE_RATIO_EXCEEDED
+      - RUN_FAILED
+      - NOT_COMPARABLE
+      - METRICS_REGRESSED
+      - WITHIN_TOLERANCE
+      - ABSOLUTE_THRESHOLD_MET
+      - ABSOLUTE_THRESHOLD_NOT_MET
+      - BASELINE_RECORDED
+    GateCoreMetrics:
+      type: object
+      description: 门禁仅允许判定的两个核心指标；Precision/MRR/NDCG 与 LLM-as-judge 答案分只展示不参与门禁
+      properties:
+        hit_rate:
+          type: number
+          format: float
+        recall:
+          type: number
+          format: float
+    GateReport:
+      type: object
+      description: 一次门禁双跑的持久化结果，供控制台双跑对比面板渲染（M4c-CONTRACTS.md §1/§6）
+      properties:
+        verdict:
+          $ref: '#/components/schemas/GateVerdict'
+        reason:
+          $ref: '#/components/schemas/GateReason'
+        message:
+          type: string
+        candidate:
+          $ref: '#/components/schemas/GateCoreMetrics'
+        baseline:
+          allOf:
+          - $ref: '#/components/schemas/GateCoreMetrics'
+          nullable: true
+          description: 首发无对照时为 null
+        effective_cases:
+          type: integer
+        total_cases:
+          type: integer
+        stale_cases:
+          type: integer
+        stale_ratio:
+          type: number
+          format: float
+        degraded_cases:
+          type: integer
+        epsilon:
+          type: number
+          format: float
+          description: 本次比较采用的容差，ε=max(0.02, 1/N)，另加 1e-9 浮点余量
+        hit_rate_delta:
+          type: number
+          format: float
+          nullable: true
+          description: 候选减对照，首发无对照时为 null
+        recall_delta:
+          type: number
+          format: float
+          nullable: true
+        candidate_run_id:
+          type: string
+        baseline_run_id:
+          type: string
+          nullable: true
+        evaluated_at:
+          type: string
+          format: date-time
+        case_ids:
+          type: array
+          items:
+            type: string
+    AppVersion:
+      type: object
+      description: 应用版本（t_kb_app_version），含发布状态机位置与门禁结论（M4c-CONTRACTS.md §1/§2）
+      properties:
+        app_version_id:
+          type: string
+        app_id:
+          type: string
+        version:
+          type: string
+          description: 展示版本号，如 V1.0，仅主版本号递增
+        status:
+          $ref: '#/components/schemas/AppVersionStatus'
+        config:
+          $ref: '#/components/schemas/AppConfigSnapshot'
+        gate_dataset_id:
+          type: string
+          nullable: true
+        gate_run_ids:
+          type: array
+          items:
+            type: string
+          description: 双跑评测运行 id，定序为 [候选, 对照]；首发无对照时仅含候选一项
+        gate_verdict:
+          allOf:
+          - $ref: '#/components/schemas/GateVerdict'
+          nullable: true
+          description: 门禁尚未运行过时为 null
+        gate_reason:
+          allOf:
+          - $ref: '#/components/schemas/GateReason'
+          nullable: true
+        gate_reason_message:
+          type: string
+          nullable: true
+        gate_report:
+          allOf:
+          - $ref: '#/components/schemas/GateReport'
+          nullable: true
+        force_released:
+          type: boolean
+          description: true 表示运营在非通过门禁结论下强制放行
+        force_operator:
+          type: string
+          nullable: true
+        changelog:
+          type: string
+          nullable: true
+        released_at:
+          type: string
+          format: date-time
+          nullable: true
+        index_snapshots:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppIndexSnapshot'
+          description: 该版本发布时对关联知识库物理索引冻结的快照，一库一引擎一条（完整模式下同一库
+            的 BM25 与向量各一条）；从未发布过、在索引快照能力上线前发布、或快照已被清理保留策略
+            回收的版本一律为空数组，此时调用回退实时别名与当前激活集合（M6-CONTRACTS.md §0）
+        visible_version_kb_count:
+          type: array
+          items:
+            $ref: '#/components/schemas/VisibleVersionCount'
+          description: 该版本固化的版本可见集，按知识库汇总为文档版本数量（只给数量不给 id 列表，
+            避免列表响应随语料规模膨胀），空数组语义与 index_snapshots 相同
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    AppIndexSnapshot:
+      type: object
+      description: 一次发布对某知识库某引擎冻结的物理索引（t_kb_app_version.index_snapshots 一个元素，
+        M6-CONTRACTS.md §0.2/§0.10）；物理名直接存储、从不重新计算，避免嵌入模型切换后历史版本被
+        指向一个从未包含过的索引
+      properties:
+        kb_id:
+          type: string
+        engine:
+          $ref: '#/components/schemas/VectorEngine'
+        physical_index_name:
+          type: string
+          description: 快照物理索引/集合名，不挂别名，按物理名直查
+    VisibleVersionCount:
+      type: object
+      description: 一个知识库在某次发布固化的可见集里贡献了多少个文档版本（仅计数，M6-CONTRACTS.md §0.10）
+      properties:
+        kb_id:
+          type: string
+        version_count:
+          type: integer
+    AppVersionResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/AppVersion'
+    AppVersionListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/AppVersion'
+    TargetStage:
+      type: string
+      description: 本次调用由 release 版本还是 beta（显式指定的测试版）服务，审计维度之一
+      enum:
+      - release
+      - beta
+    ChatMessageTurn:
+      type: object
+      description: 会话历史轮次；role 非 assistant 一律归一化为 user（防止伪造 system 角色注入）
+      properties:
+        role:
+          type: string
+          enum:
+          - user
+          - assistant
+        content:
+          type: string
+    KnowledgeCallRequest:
+      type: object
+      description: '对外 search/chat 与控制台 chat-preview 的共享入参（M4c-CONTRACTS.md §3）。
+        除下列四个白名单覆盖字段与 query/messages/stream 外，任何未声明字段一律视为越界覆盖，校验拒绝为
+        400 INVALID_PARAM（需求文档 §5），而非被静默丢弃。'
+      required:
+      - query
+      properties:
+        query:
+          type: string
+        app_id:
+          type: string
+          nullable: true
+          description: search/chat 必填（路径外传参）；chat-preview 由路径 appId 提供，此处忽略
+        app_version:
+          type: string
+          nullable: true
+          description: 版本展示号，缺省路由当前 RELEASED 版本；显式指定测试版即视为 beta 灰度调用
+        messages:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/ChatMessageTurn'
+        top_n:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: 请求级覆盖白名单之一
+        score_threshold:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0.01
+          maximum: 1.0
+          description: 请求级覆盖白名单之一
+        metadata_filter:
+          allOf:
+          - $ref: '#/components/schemas/MetadataFilter'
+          nullable: true
+          description: 请求级覆盖白名单之一
+        images:
+          type: array
+          maxItems: 3
+          items: {type: string}
+          description: 'M9：可选图片（纯 base64，不收 URL——SSRF 面；单张解码 ≤5MB、总量 ≤10MB，越界
+            INVALID_PARAM）。VLM 转文本以「[图片内容] 」前缀拼接到 query 尾部（发生在改写之前）；零
+            Key/理解失败忽略全部图片并记 degraded=image_understanding_unavailable；纯图无文本且理解
+            失败返回 INVALID_PARAM。'
+        max_content_length:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: 请求级覆盖白名单之一，返回内容的字符预算
+        stream:
+          type: boolean
+          default: false
+          description: chat 接口生效，search 接口忽略
+    ChatPreviewRequest:
+      allOf:
+      - $ref: '#/components/schemas/KnowledgeCallRequest'
+      - type: object
+        properties:
+          app_version_id:
+            type: string
+            nullable: true
+            description: 按业务 id 预览指定版本（可为草稿），缺省取该应用最新一个版本
+    AppliedInfo:
+      type: object
+      description: 本次调用实际生效的口径，区别于"请求想要什么"（M4c-CONTRACTS.md §3，routed_kb_ids
+        为 M5 新增见 M5-CONTRACTS.md §2.2）
+      properties:
+        rewrite_used_query:
+          type: string
+          nullable: true
+          description: 实际用于检索的 query
+        fusion_mode:
+          type: string
+          nullable: true
+          description: 生效融合策略字面量；多库时最终排序由跨库 RRF 产生，如实返回 rrf（与
+            score_type 同源，不回落为配置里的融合策略值）
+        threshold_applied_on:
+          type: string
+          nullable: true
+          description: 阈值实际作用的分数口径，未过滤时为 none
+        routed_kb_ids:
+          type: array
+          items:
+            type: string
+          description: 本次调用实际检索的知识库 id 列表；路由关闭或降级回退时为版本关联的全部知识库，
+            路由生效时为模型选中的子集（M5）
+    KnowledgeSearchResponse:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetrievalNode'
+        request_id:
+          type: string
+        degraded:
+          type: array
+          items:
+            $ref: '#/components/schemas/DegradedReason'
+        applied:
+          $ref: '#/components/schemas/AppliedInfo'
+        app_version:
+          type: string
+          description: 实际服务本次调用的版本号
+        target_stage:
+          $ref: '#/components/schemas/TargetStage'
+    KnowledgeSearchResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/KnowledgeSearchResponse'
+    KnowledgeChatResponse:
+      type: object
+      description: routed_kb_ids 位于顶层而非嵌套进 applied：chat 响应此前没有 applied 包装，仅为
+        承载单个新字段引入包装会改变既有客户端的解析形状，得不偿失（M5-CONTRACTS.md §6）
+      properties:
+        answer:
+          type: string
+        references:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetrievalNode'
+        request_id:
+          type: string
+        degraded:
+          type: array
+          items:
+            $ref: '#/components/schemas/DegradedReason'
+        routed_kb_ids:
+          type: array
+          items:
+            type: string
+          description: 本次调用检索阶段实际检索的知识库 id 列表（M5，语义同 AppliedInfo.routed_kb_ids）
+        app_version:
+          type: string
+        target_stage:
+          $ref: '#/components/schemas/TargetStage'
+    KnowledgeChatResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/KnowledgeChatResponse'
+    ChatStreamMessageDeltaEvent:
+      type: object
+      description: 'SSE event: message_delta，可出现零到多次'
+      properties:
+        delta:
+          type: string
+    ChatStreamReferencesEvent:
+      type: object
+      description: 'SSE event: references，出现且仅出现一次，早于 done'
+      properties:
+        references:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetrievalNode'
+    ChatStreamDoneEvent:
+      type: object
+      description: 'SSE event: done，成功终结事件，与 error 互斥；routed_kb_ids 与 request_id/degraded
+        并列，为 M5 新增'
+      properties:
+        request_id:
+          type: string
+        degraded:
+          type: array
+          items:
+            $ref: '#/components/schemas/DegradedReason'
+        routed_kb_ids:
+          type: array
+          items:
+            type: string
+          description: 本次调用实际检索的知识库 id 列表（M5）
+    ChatStreamErrorEvent:
+      type: object
+      description: 'SSE event: error，失败终结事件，与 done 互斥'
+      properties:
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        message:
+          type: string
+    ApiKeyStatus:
+      type: string
+      enum:
+      - ENABLED
+      - DISABLED
+    CreateApiKeyRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          maxLength: 128
+        qps_limit:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: 缺省取部署默认限流值
+        app_scope:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: 授权应用 id 列表，空或 null 授权全部应用
+    UpdateApiKeyStatusRequest:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          $ref: '#/components/schemas/ApiKeyStatus'
+    UpdateApiKeyScopeRequest:
+      type: object
+      properties:
+        app_scope:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: 空列表授权全部应用
+    ApiKey:
+      type: object
+      description: API Key 列表/详情视图，不含密钥材料（t_kb_api_key）
+      properties:
+        key_id:
+          type: string
+        name:
+          type: string
+        prefix:
+          type: string
+          description: 展示形式：前缀+末 4 位
+        status:
+          $ref: '#/components/schemas/ApiKeyStatus'
+        qps_limit:
+          type: integer
+          nullable: true
+        app_scope:
+          type: array
+          items:
+            type: string
+          description: 授权应用 id 列表，空数组表示授权全部应用
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    ApiKeyResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/ApiKey'
+    ApiKeyListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/ApiKey'
+    ApiKeyCreated:
+      type: object
+      description: 创建或轮换的响应，明文密钥仅此一次出现
+      properties:
+        key:
+          $ref: '#/components/schemas/ApiKey'
+        api_key:
+          type: string
+          description: 明文密钥，形如 kb-sk-*，展示后不可再获取
+    ApiKeyCreatedResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/ApiKeyCreated'
+    ApiAuditLog:
+      type: object
+      description: 一条对外调用审计记录（t_kb_api_audit_log），保留 180 天后归档
+      properties:
+        audit_log_id:
+          type: string
+        key_id:
+          type: string
+        app_id:
+          type: string
+          nullable: true
+        app_version_id:
+          type: string
+          nullable: true
+          description: 被拒绝的调用（如鉴权失败）为 null
+        target_stage:
+          allOf:
+          - $ref: '#/components/schemas/TargetStage'
+          nullable: true
+        endpoint:
+          type: string
+          description: search 或 chat
+        query_digest:
+          type: string
+          nullable: true
+          description: 按知识库脱敏规则处理后截断 200 字
+        hit_doc_ids:
+          type: array
+          items:
+            type: string
+        latency_ms:
+          type: integer
+          nullable: true
+        degraded:
+          type: array
+          items:
+            $ref: '#/components/schemas/DegradedReason'
+        override_keys:
+          type: array
+          items:
+            type: string
+          description: 本次调用生效的请求级覆盖字段
+        error_code:
+          type: string
+          nullable: true
+          description: 调用被拒绝时的业务错误码
+        request_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    ApiAuditLogPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApiAuditLog'
+        page:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+    ApiAuditLogPageResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/ApiAuditLogPage'
+    ApiAuditStats:
+      type: object
+      properties:
+        total_calls:
+          type: integer
+          format: int64
+        avg_latency_ms:
+          type: number
+          format: double
+        degraded_calls:
+          type: integer
+          format: int64
+        error_calls:
+          type: integer
+          format: int64
+    ApiAuditStatsResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/ApiAuditStats'

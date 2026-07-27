@@ -1,0 +1,37 @@
+# kb-rag ik 分词 override
+#
+# 可选叠加层：把 elasticsearch 服务从官方镜像切换为自带 analysis-ik 中文分词插件的
+# 自建镜像（es-ik/Dockerfile），并挂载远程词典配置对接 kb-rag-server 的词典热更新
+# 通道（docs/M2-CONTRACTS.md §3）。不改动 lite/full 基线文件，按 Compose 多文件叠加
+# 规则以 `-f` 追加使用，随时可去掉这层回退到内置 standard 分词器。
+#
+# 用法（README「启用 ik」章节有完整说明，含验证词典热更新的 curl 步骤）：
+#   docker compose -f docker-compose.lite.yml -f docker-compose.es-ik.yml up -d --build
+#   docker compose -f docker-compose.yml      -f docker-compose.es-ik.yml up -d --build   # full 模式同样适用
+#
+# 首次启用或修改 es-ik/Dockerfile 后需要 --build 重新构建镜像；已存在的 ES 数据卷
+# （kb_rag_es_data）沿用不受影响，但已建索引的 mapping analyzer 仍是 standard，
+# 需按 docs/M2-CONTRACTS.md §3「server 建索引时 analyzer 探测已存在」重建索引才会
+# 真正切到 ik_max_word。
+
+services:
+  elasticsearch:
+    build:
+      context: ./es-ik
+      args:
+        ES_VERSION: "8.11.4"
+        IK_VERSION: "8.11.4"
+    # 显式改名，避免和上游官方 elasticsearch:8.11.4 镜像 tag 混淆——这是本地构建产物，
+    # 不是从 docker.elastic.co 拉取的原始镜像
+    image: kb-rag-es-ik:8.11.4
+    # macOS（Docker Desktop）：host.docker.internal 已由 Docker Desktop 内置 DNS 解析，
+    # 这里的 extra_hosts 对它无害（幂等追加一条 /etc/hosts 记录）。
+    # Linux（Docker Engine >= 20.10）：host.docker.internal 默认不存在，必须靠
+    # host-gateway 特殊值补齐，否则 IKAnalyzer.cfg.xml 里的 remote_ext_dict/
+    # remote_ext_stopwords 会解析失败（ik 侧仅记日志、不阻断启动，但词典拉不到）。
+    # 更老的 Docker Engine（<20.10，不支持 host-gateway）：把 es-ik/config/
+    # IKAnalyzer.cfg.xml 中的 host.docker.internal 手动替换成宿主机内网 IP。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./es-ik/config/IKAnalyzer.cfg.xml:/usr/share/elasticsearch/plugins/analysis-ik/config/IKAnalyzer.cfg.xml:ro

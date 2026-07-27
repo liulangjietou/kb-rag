@@ -1,0 +1,180 @@
+{
+  "version": "1.0",
+  "note": "示例评测集（对应需求文档 §6 t_kb_eval_case 字段与 §4.5 span 锚定评测集设计）。本期（M3）随 kb-rag-deploy 分发但不提供导入入口——评测能力属 M4b 范畴，见 M3-CONTRACTS.md §0 第 2 点与 demo/README.md。M4b 实现导入时，按 doc_ref.file_name + doc_ref.content_hash_sha256 关联 demo/manifest.json 中对应文档，映射为导入后生成的实际 doc_id（需求文档 §5「开箱即用素材」实现机制）；span 锚定的证据文本须为对应文档原文的精确子串，用于 §4.6 的重叠率命中判定。",
+  "cases": [
+    {
+      "case_id": "demo-eval-001",
+      "query": "为什么大语言模型需要检索增强生成",
+      "expected_answer": null,
+      "anchor_type": "span",
+      "evidence": [
+        {
+          "doc_ref": {
+            "file_name": "docs/01-rag-intro.md",
+            "content_hash_sha256": "05d678ba9c598d9876273d304d40024e29907fb6312f3182f1de89a542bfb38f"
+          },
+          "span": "大语言模型在通用语言能力上表现优异，但存在两个天然短板：知识截止于训练数据的某个时间点，"
+        }
+      ],
+      "messages": null,
+      "status": "active"
+    },
+    {
+      "case_id": "demo-eval-002",
+      "query": "知识库的索引流水线包含哪几个阶段",
+      "expected_answer": "解析、清洗、切分、嵌入、双写、检索、重排",
+      "anchor_type": "span",
+      "evidence": [
+        {
+          "doc_ref": {
+            "file_name": "docs/01-rag-intro.md",
+            "content_hash_sha256": "05d678ba9c598d9876273d304d40024e29907fb6312f3182f1de89a542bfb38f"
+          },
+          "span": "企业知识库要把原始文档变成可检索的知识，通常要经过解析、清洗、切分、嵌入、双写、检索、重排"
+        }
+      ],
+      "messages": null,
+      "status": "active"
+    },
+    {
+      "case_id": "demo-eval-003",
+      "query": "评测集在检索系统里起什么作用",
+      "expected_answer": null,
+      "anchor_type": "span",
+      "evidence": [
+        {
+          "doc_ref": {
+            "file_name": "docs/01-rag-intro.md",
+            "content_hash_sha256": "05d678ba9c598d9876273d304d40024e29907fb6312f3182f1de89a542bfb38f"
+          },
+          "span": "命中率、排序质量等指标的变化，用数据而不是直觉决定是否发布。这种标注、评测、发布三位一体的闭"
+        }
+      ],
+      "messages": null,
+      "status": "active"
+    },
+    {
+      "case_id": "demo-eval-004",
+      "query": "扫描页是怎么处理的，是不是要用本地 OCR 模型",
+      "expected_answer": "扫描页整页渲染成图片交给视觉大模型转录，M3 不引入本地 OCR 模型",
+      "anchor_type": "span",
+      "evidence": [
+        {
+          "doc_ref": {
+            "file_name": "docs/02-document-parsing-and-chunking.docx",
+            "content_hash_sha256": "ac47c81f16c9715ca0914ed630885645ecec8c6fddbd78e01bbec451dbae337f"
+          },
+          "span": "对整页没有文本层的扫描页，则把该页整体渲染成图片，连同占位符一起交给下游做图文理解，文字内容由视觉大模型转录得到，而不是本地维护一套体积庞大的离线 OCR 模型。"
+        }
+      ],
+      "messages": null,
+      "status": "active"
+    },
+    {
+      "case_id": "demo-eval-005",
+      "query": "图片占位符是怎么和图片对应起来的",
+      "expected_answer": null,
+      "anchor_type": "span",
+      "evidence": [
+        {
+          "doc_ref": {
+            "file_name": "docs/02-document-parsing-and-chunking.docx",
+            "content_hash_sha256": "ac47c81f16c9715ca0914ed630885645ecec8c6fddbd78e01bbec451dbae337f"
+          },
+          "span": "无论是文档内嵌图片还是扫描页渲染出的图片，解析阶段都只产出文本、占位符与图片二进制，并不调用任何大模型。"
+        }
+      ],
+      "messages": null,
+      "status": "active"
+    },
+    {
+      "case_id": "demo-eval-006",
+      "query": "那这种表格数据适合用哪种切分策略？",
+      "expected_answer": "按行切分并把表头拼接进每一行",
+      "anchor_type": "span",
+      "evidence": [
+        {
+          "doc_ref": {
+            "file_name": "docs/02-document-parsing-and-chunking.docx",
+            "content_hash_sha256": "ac47c81f16c9715ca0914ed630885645ecec8c6fddbd78e01bbec451dbae337f"
+          },
+          "span": "表格型数据按行切分并把表头拼接进每一行，避免脱离表头后数字失去含义"
+        }
+      ],
+      "messages": [
+        { "role": "user", "content": "我们知识库里既有普通文档也有 Excel 报表" },
+        { "role": "assistant", "content": "好的，Excel 报表在切分策略上有专门的优化选项。" }
+      ],
+      "status": "active"
+    },
+    {
+      "case_id": "demo-eval-007",
+      "query": "为什么向量分数和全文分数不能直接相加",
+      "expected_answer": null,
+      "anchor_type": "span",
+      "evidence": [
+        {
+          "doc_ref": {
+            "file_name": "docs/03-hybrid-retrieval-and-rerank.pdf",
+            "content_hash_sha256": "2caf0c442c1b54f200404f1f96be725cc5ae83500fcc20cf5e600ec1489071c7"
+          },
+          "span": "两路候选集的原始分数量纲完全不同：余弦相似度落在有界区间，而全文检索的原始分数没有上界，直接相加会让全文分数淹没向量分数。"
+        }
+      ],
+      "messages": null,
+      "status": "active"
+    },
+    {
+      "case_id": "demo-eval-008",
+      "query": "开启父子分片后，阈值和返回条数作用在父片还是子片上",
+      "expected_answer": "作用在合并后的父片维度上",
+      "anchor_type": "span",
+      "evidence": [
+        {
+          "doc_ref": {
+            "file_name": "docs/03-hybrid-retrieval-and-rerank.pdf",
+            "content_hash_sha256": "2caf0c442c1b54f200404f1f96be725cc5ae83500fcc20cf5e600ec1489071c7"
+          },
+          "span": "如果知识库启用了父子分片，检索用小片，展示回大片，阈值与最终返回条数就要作用在合并后的父片维度上，而不是子片维度"
+        }
+      ],
+      "messages": null,
+      "status": "active"
+    },
+    {
+      "case_id": "demo-eval-009",
+      "query": "文档里的索引与检索流水线示意图画了哪些阶段",
+      "expected_answer": null,
+      "anchor_type": "document",
+      "evidence": [
+        {
+          "doc_ref": {
+            "file_name": "docs/03-hybrid-retrieval-and-rerank.pdf",
+            "content_hash_sha256": "2caf0c442c1b54f200404f1f96be725cc5ae83500fcc20cf5e600ec1489071c7"
+          },
+          "span": null,
+          "note": "文档级锚定：命中判定为 Top-K 中出现该图片衍生的任一分片（image_urls 非空的 chunk），不做文本重叠计算，见需求文档 §4.5「锚定类型」。该图为 pdf 内嵌的自绘流水线示意图，经 VLM 生成文本代理后随所在文档统一切分。"
+        }
+      ],
+      "messages": null,
+      "status": "active"
+    },
+    {
+      "case_id": "demo-eval-010",
+      "query": "MRR 这个指标衡量的是什么",
+      "expected_answer": "第一条相关结果出现的位置，位置越靠前分数越高",
+      "anchor_type": "span",
+      "evidence": [
+        {
+          "doc_ref": {
+            "file_name": "docs/04-eval-metrics-comparison.xlsx",
+            "content_hash_sha256": "adf7a4b4351ed6a834416e154a5ba6fda9d0537fa387d87e302ae497c969d739"
+          },
+          "span": "MRR 关注第一条相关结果出现的位置，位置越靠前分数越高，适合评估一次找到答案的场景"
+        }
+      ],
+      "messages": null,
+      "status": "active"
+    }
+  ]
+}

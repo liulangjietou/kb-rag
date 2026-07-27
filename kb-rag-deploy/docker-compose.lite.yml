@@ -1,0 +1,153 @@
+# kb-rag 轻量模式（lite）中间件编排
+#
+# 只拉起 M1 必需的最小依赖集：MySQL + Elasticsearch（同时承担 BM25 与向量检索，
+# 见需求文档 §5 D16）+ MinIO。kb-rag-server / kb-rag-parser 在 M1 阶段直接跑在宿主机
+# （见 docs/M1-CONTRACTS.md §0），因此这里把各服务端口发布到 127.0.0.1，方便宿主机进程连接。
+#
+# 用法：
+#   cp .env.example .env    # 按需修改，至少设置各项密码
+#   docker compose -f docker-compose.lite.yml up -d
+#
+# 资源要求：约 8GB 内存档（需求文档 §5 资源要求矩阵）。
+
+name: kb-rag-lite
+
+x-restart-policy: &restart-policy unless-stopped
+
+services:
+  mysql:
+    image: mysql:8.0.36
+    container_name: kb-rag-mysql
+    restart: *restart-policy
+    environment:
+      # MYSQL_ROOT_PASSWORD 仅供容器初始化与运维（backup.sh）使用，应用侧不使用 root 账号
+      # 下方默认值均为占位口令，仅保证 `docker compose config` 在未提供 .env 时也能通过语法校验；
+      # scripts/preflight.sh 会在真正启动前检测并拦截使用默认口令的情况（fast-fail 的唯一防线，见 README）
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-CHANGE_ME_mysql_root}
+      MYSQL_DATABASE: ${MYSQL_DB:-kb_rag}
+      MYSQL_USER: ${MYSQL_USER:-kbrag}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-CHANGE_ME_mysql_password}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - kb_rag_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - kb-rag-net
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.4
+    container_name: kb-rag-es
+    restart: *restart-policy
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - action.destructive_requires_name=false
+      - bootstrap.memory_lock=true
+      # 契约要求堆内存 1g；生产环境请按机器内存调大（建议物理内存的 50%）
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      # M6：fs 类型快照仓库必须落在 path.repo 白名单目录下（ES 安全限制），
+      # 指向下方 bind mount；scripts/backup.sh / scripts/restore.sh 注册的
+      # 仓库 location 必须是该路径的子目录，否则 ES 拒绝注册（repository_exception）
+      - path.repo=/usr/share/elasticsearch/snapshot_repo
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "${ES_PORT:-9200}:9200"
+    volumes:
+      - kb_rag_es_data:/usr/share/elasticsearch/data
+      # M6：备份/恢复演练用的快照仓库目录，bind mount 到宿主机 ./backup/es-repo，
+      # 使 scripts/backup.sh 能在不进容器的情况下直接读到仓库元数据与体积；
+      # 该目录随 ./backup 一起离线归档即完成 ES 快照的异地备份（见 docs/backup-restore.md）
+      - ./backup/es-repo:/usr/share/elasticsearch/snapshot_repo
+    healthcheck:
+      test: ["CMD-SHELL", "curl --output /dev/null --silent --fail http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 40s
+    networks:
+      - kb-rag-net
+
+  minio:
+    image: minio/minio:RELEASE.2024-05-10T01-41-38Z
+    container_name: kb-rag-minio
+    restart: *restart-policy
+    environment:
+      # 同上：默认值仅为占位口令，生产前必须在 .env 覆盖，preflight.sh 负责拦截
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-CHANGE_ME_minio_access_key}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-CHANGE_ME_minio_secret_key}
+    command: server /data --console-address ":9001"
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - kb_rag_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - kb-rag-net
+
+  # M7 GraphRAG：Neo4j 为可选服务（profile=graph，默认不启动以保 lite 4GB 承诺）。
+  # 启用：docker compose -f docker-compose.lite.yml --profile graph up -d
+  # 应用侧 NEO4J_URI 留空即代表不使用图能力，二者独立不互相阻塞。
+  neo4j:
+    image: neo4j:5.20-community
+    container_name: kb-rag-neo4j
+    restart: *restart-policy
+    profiles:
+      - graph
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-CHANGE_ME_neo4j_password}
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP:-512m}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP:-512m}
+      NEO4J_server_memory_pagecache_size: ${NEO4J_PAGECACHE:-256m}
+    ports:
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+    volumes:
+      - kb_rag_neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7474 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - kb-rag-net
+
+volumes:
+  kb_rag_mysql_data:
+    name: kb_rag_mysql_data
+  kb_rag_es_data:
+    name: kb_rag_es_data
+  kb_rag_minio_data:
+    name: kb_rag_minio_data
+  kb_rag_neo4j_data:
+    name: kb_rag_neo4j_data
+
+networks:
+  kb-rag-net:
+    name: kb-rag-net
+    driver: bridge

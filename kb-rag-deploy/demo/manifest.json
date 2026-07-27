@@ -1,0 +1,50 @@
+{
+  "version": "1.0",
+  "description": "kb-rag Demo 文档集清单（M3）。POST /api/v1/system/demo/import 按此清单把 documents[].file_name（相对本目录 DEMO_DATA_DIR 的路径）逐一上传进新建的 Demo 知识库；见 demo/README.md。本期只做文档集一键导入，示例评测集导入见 M4b。",
+  "documents": [
+    {
+      "file_name": "docs/01-rag-intro.md",
+      "file_ext": "md",
+      "title": "RAG 技术导论：检索增强生成与企业知识库",
+      "description": "解释为什么需要检索增强生成、一条典型的索引与检索链路（解析/清洗/切分/嵌入/双写/检索/重排），以及评测驱动的持续优化闭环。用于验证纯文本 md 解析与切分。",
+      "suggested_queries": [
+        "为什么需要检索增强生成",
+        "索引与检索链路一共有哪几个阶段",
+        "向量检索和全文检索各自擅长什么"
+      ]
+    },
+    {
+      "file_name": "docs/02-document-parsing-and-chunking.docx",
+      "file_ext": "docx",
+      "title": "文档解析与分片切分策略实践",
+      "description": "介绍多格式解析与版面判定、图片占位符与文本代理插回原位的机制、几种切分策略的适用场景。含三级标题层级，用于验证 docx 解析与按标题层级切分策略。",
+      "suggested_queries": [
+        "扫描页是怎么处理的",
+        "图片占位符是什么格式，怎么和图片对应起来",
+        "表格型数据适合用哪种切分策略"
+      ]
+    },
+    {
+      "file_name": "docs/03-hybrid-retrieval-and-rerank.pdf",
+      "file_ext": "pdf",
+      "title": "混合检索与重排序技术白皮书",
+      "description": "介绍向量与全文双路召回、融合与重排序、阈值与父子分片返回粒度。含一张自绘的索引与检索流水线示意图（PNG 内嵌图片），用于验证 pdf 内嵌图片解析、VLM 图文理解与文本代理插回原位链路。",
+      "suggested_queries": [
+        "为什么要把向量检索和全文检索的分数做归一化",
+        "重排序模型的作用是什么，为什么不对全部候选做重排",
+        "开启父子分片后阈值和返回条数作用在哪个粒度"
+      ]
+    },
+    {
+      "file_name": "docs/04-eval-metrics-comparison.xlsx",
+      "file_ext": "xlsx",
+      "title": "评测指标对照表",
+      "description": "「说明」sheet 用一段文字解释 Recall@K/Precision@K/Hit Rate/MRR/NDCG@K 五个评测指标的含义；「评测结果对比」sheet 用示例数据对比 BM25 单路/向量单路/混合检索/混合检索+重排序四种配置。用于验证 xlsx 行级解析与表头拼装。",
+      "suggested_queries": [
+        "Recall@K 和 Precision@K 有什么区别",
+        "混合检索加重排序相比单路检索指标提升多少",
+        "MRR 指标衡量的是什么"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+# 环境变量与密钥（安全默认值：真实密钥/密码不进仓库）
+.env
+.env.*
+!.env.example
+
+# 备份产物（M6 起默认目录改为 backup/，backups/ 兼容旧配置保留）
+backup/
+backups/
+*.sql.gz
+*.tar.gz
+
+# 各中间件权重/数据挂载目录（若切换为 bind mount 本地目录）
+volumes/
+data/
+
+# Python（demo/tools/generate_demo_docs.py 构建产物，M3）
+__pycache__/
+*.pyc
+
+# 操作系统 / 编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# 日志
+*.log
