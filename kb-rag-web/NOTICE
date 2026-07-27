@@ -1,0 +1,60 @@
+kb-rag-web
+Copyright 2026 kb-rag contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This project depends on the following third-party open-source npm packages
+(license verified via the npm registry `license` field at the version range
+pinned in package.json). All of them are permissively licensed (MIT /
+Apache-2.0) and compatible with this project's Apache-2.0 distribution; none
+are modified, and none are redistributed as source within this repository —
+they are consumed as ordinary npm dependencies and bundled into the built
+`dist/` output at build time. This NOTICE file must be kept in sync whenever
+a new runtime or build-time dependency is added (see
+`kb-rag-deploy/docs/知识库需求文档.md` §12.1 / CONTRIBUTING.md).
+
+--------------------------------------------------------------------------
+Runtime dependencies
+--------------------------------------------------------------------------
+
+react / react-dom (^18.3.1)
+License: MIT.
+
+react-router-dom (^6.28.1)
+License: MIT.
+
+antd (^5.22.5)
+License: MIT.
+
+@ant-design/icons (^5.5.2)
+License: MIT.
+
+axios (^1.7.9)
+License: MIT.
+
+--------------------------------------------------------------------------
+Build-time / development dependencies (not shipped in production dist/,
+listed for completeness)
+--------------------------------------------------------------------------
+
+vite (^8.1.1)
+License: MIT.
+
+@vitejs/plugin-react (^6.0.3)
+License: MIT.
+
+typescript (~6.0.2)
+License: Apache-2.0.
+
+oxlint (^1.71.0)
+License: MIT.
+
+@types/node, @types/react, @types/react-dom
+License: MIT (DefinitelyTyped).
+
+--------------------------------------------------------------------------
+Execution note
+--------------------------------------------------------------------------
+Before adding any new third-party dependency, confirm license compatibility
+with Apache-2.0 distribution first and update this NOTICE file in the same
+change (see CONTRIBUTING.md checklist).
