@@ -17,7 +17,7 @@
 ## 1. 环境变量（.env / .env.example，deploy 仓维护模板）
 
 ```
-MYSQL_HOST=127.0.0.1  MYSQL_PORT=3306  MYSQL_DB=kb_rag  MYSQL_USER=kbrag  MYSQL_PASSWORD=<gen>
+MYSQL_HOST=127.0.0.1  MYSQL_PORT=13306  MYSQL_DB=kb_rag  MYSQL_USER=kbrag  MYSQL_PASSWORD=<gen>
 ES_URI=http://127.0.0.1:9200
 MILVUS_URI=http://127.0.0.1:19530          # lite 模式可空
 MINIO_ENDPOINT=http://127.0.0.1:9000  MINIO_ACCESS_KEY=..  MINIO_SECRET_KEY=..  MINIO_BUCKET=kb-files

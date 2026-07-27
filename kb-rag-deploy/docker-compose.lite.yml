@@ -33,7 +33,8 @@ services:
       - --collation-server=utf8mb4_unicode_ci
       - --default-authentication-plugin=mysql_native_password
     ports:
-      - "${MYSQL_PORT:-3306}:3306"
+      # 宿主机侧用 13306，避开本机可能已有的 MySQL 默认端口；容器内仍监听标准 3306
+      - "${MYSQL_PORT:-13306}:3306"
     volumes:
       - kb_rag_mysql_data:/var/lib/mysql
     healthcheck:

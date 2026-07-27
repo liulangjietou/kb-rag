@@ -15,7 +15,7 @@ spring:
     exclude:
       - org.springframework.boot.autoconfigure.neo4j.Neo4jAutoConfiguration
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:kb_rag}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:13306}/${MYSQL_DB:kb_rag}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USER:kbrag}
     password: ${MYSQL_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver

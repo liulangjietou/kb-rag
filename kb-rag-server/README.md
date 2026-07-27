@@ -118,7 +118,7 @@ Query 改写 → 多库路由 → 双路/三路召回（子片粒度）→ 库�
 
 ```bash
 SERVER_PORT=20000                            # 应用端口，parser 为 20001
-MYSQL_HOST=127.0.0.1  MYSQL_PORT=3306  MYSQL_DB=kb_rag  MYSQL_USER=kbrag  MYSQL_PASSWORD=
+MYSQL_HOST=127.0.0.1  MYSQL_PORT=13306  MYSQL_DB=kb_rag  MYSQL_USER=kbrag  MYSQL_PASSWORD=
 ES_URI=http://127.0.0.1:9200
 MILVUS_URI=                                  # 轻量模式留空
 NEO4J_URI=                                   # 留空即关闭 GraphRAG
