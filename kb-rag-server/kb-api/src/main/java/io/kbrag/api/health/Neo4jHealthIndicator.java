@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 /**
  * Neo4j probe of {@code /actuator/health}.
  *
- * <p>Registered only when a Bolt URI is configured, the same rule Milvus follows: a deployment that runs
+ * <p>Registered only when a Bolt URI is configured, the same rule Qdrant follows: a deployment that runs
  * no graph must not report DOWN for a dependency it deliberately does not have.
  *
  * @author owlzhangfq@gmail.com

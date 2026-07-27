@@ -1030,7 +1030,7 @@ paths:
     get:
       tags:
       - system
-      summary: 健康检查（含 MySQL/ES/MinIO/Milvus 探活）
+      summary: 健康检查（含 MySQL/ES/MinIO/Qdrant 探活）
       security: []
       responses:
         '200':
@@ -3093,7 +3093,7 @@ components:
           type: string
     MetadataFilter:
       type: object
-      description: 'M2-CONTRACTS.md §1.5：映射为 ES bool filter / Milvus expr，字段即
+      description: 'M2-CONTRACTS.md §1.5：映射为 ES bool filter / Qdrant 结构化 filter，字段即
 
         M1-CONTRACTS.md §6 引擎固定字段集（tag_ids/session_id/sender/msg_time）。
 
@@ -3464,7 +3464,7 @@ components:
       type: string
       enum:
       - es
-      - milvus
+      - qdrant
     ModelStatus:
       type: object
       properties:
@@ -3702,9 +3702,9 @@ components:
               properties:
                 status:
                   $ref: '#/components/schemas/ComponentHealth'
-            milvus:
+            qdrant:
               type: object
-              description: 仅 VECTOR_ENGINE=milvus 时探活，lite 模式可不出现
+              description: 仅 VECTOR_ENGINE=qdrant 时探活，lite 模式可不出现
               properties:
                 status:
                   $ref: '#/components/schemas/ComponentHealth'

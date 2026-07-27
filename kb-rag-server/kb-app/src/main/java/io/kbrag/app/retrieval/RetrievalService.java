@@ -727,7 +727,7 @@ public class RetrievalService {
      *
      * <p><b>Disabled rows are loaded, not filtered out here.</b> The engine side predicate already
      * excludes them, so a disabled row reaching this point means the engine copy of its flag is stale -
-     * which happens legitimately, for instance on the Milvus route where no partial update exists.
+     * which happens legitimately whenever an engine side write has not landed yet.
      * Filtering it out in the query would make it indistinguishable from a row that no longer exists,
      * and the self healing path would then delete a perfectly valid chunk from the engines, so
      * re-enabling it later would return nothing until the next rebuild. The two cases are therefore kept

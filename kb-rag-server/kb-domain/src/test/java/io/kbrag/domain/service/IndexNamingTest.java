@@ -35,7 +35,7 @@ class IndexNamingTest {
     @Test
     void shouldGiveTheFullModeFulltextIndexTheBm25Segment() {
         assertEquals("kb_" + KB_SUFFIX + "_bm25_v1",
-                naming.fulltextPhysicalName(KB_ID, VectorEngine.MILVUS, "tev4"));
+                naming.fulltextPhysicalName(KB_ID, VectorEngine.QDRANT, "tev4"));
     }
 
     @Test
@@ -67,7 +67,7 @@ class IndexNamingTest {
         // carries the vector field along.
         assertEquals("tev4", naming.fulltextEmbeddingSegment(VectorEngine.ES, "tev4"));
         assertEquals(KbConstants.EMBEDDING_SEGMENT_BM25,
-                naming.fulltextEmbeddingSegment(VectorEngine.MILVUS, "tev4"));
+                naming.fulltextEmbeddingSegment(VectorEngine.QDRANT, "tev4"));
     }
 
     @Test
@@ -85,6 +85,6 @@ class IndexNamingTest {
     @Test
     void shouldBuildAliasPerEngine() {
         assertEquals("kb_" + KB_SUFFIX + "_es", naming.alias(KB_ID, VectorEngine.ES));
-        assertEquals("kb_" + KB_SUFFIX + "_milvus", naming.alias(KB_ID, VectorEngine.MILVUS));
+        assertEquals("kb_" + KB_SUFFIX + "_qdrant", naming.alias(KB_ID, VectorEngine.QDRANT));
     }
 }

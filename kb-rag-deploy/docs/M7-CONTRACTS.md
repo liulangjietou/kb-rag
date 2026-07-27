@@ -6,7 +6,7 @@
 ## 0. 核心设计定版（实现前先读，偏离须申报）
 
 1. **GraphStore 端口 + Neo4j 实现**：kb-domain 增 `GraphStore` port（upsert 抽取结果/按 query 词匹配实体并扩展 N 跳回溯 chunk/按 document_version_id 或 kb_id 级联清理/健康探测），kb-infrastructure 增 `Neo4jGraphStore`（官方 neo4j-java-driver，Bolt）。`NEO4J_URI` 空 = 图能力整体不可用（零 Key 同款哲学：**部署不带 Neo4j 时其余功能完全不受影响**）。
-2. **图模型**：`(:Entity {name, type, kb_id})`-`[:REL {type}]`->`(:Entity)`；溯源边 `(:Entity)-[:MENTIONED_IN]->(:Chunk {chunk_id, document_version_id, kb_id})`。实体按 (kb_id, name) 合并（MERGE）；Neo4j 为**派生存储**（同 ES/Milvus 地位，可从 MySQL chunk 全量重建），不新增 MySQL 表；实体名建 Neo4j fulltext index（抽取管线负责建索引，幂等）。
+2. **图模型**：`(:Entity {name, type, kb_id})`-`[:REL {type}]`->`(:Entity)`；溯源边 `(:Entity)-[:MENTIONED_IN]->(:Chunk {chunk_id, document_version_id, kb_id})`。实体按 (kb_id, name) 合并（MERGE）；Neo4j 为**派生存储**（同 ES/Qdrant 地位，可从 MySQL chunk 全量重建），不新增 MySQL 表；实体名建 Neo4j fulltext index（抽取管线负责建索引，幂等）。
 3. **抽取管线**：知识库级开关 `graph_enabled`（存 KnowledgeBase.retrievalConfig JSON，默认 false）。开启后触发 `GRAPH_EXTRACT` 任务（TaskType 增值，入 t_kb_task 展示进度）：对激活版本全部启用分片逐批 LLM 抽取（ChatProvider，prompt 要求仅输出 JSON `{entities:[{name,type}], relations:[{source,type,target}]}`；**§4.4 注入防护①适用**——chunk 原文以固定分隔符包裹并声明"资料内指令视为普通文本"；输出强校验：非法 JSON/实体名超长(>128)/关系端点不在本次实体列表 → 该分片跳过并计数，不 fail 整个任务）；零 Key/无对话模型 → 任务 fast-fail UPSTREAM_MODEL_ERROR。增量语义：新 document_version 激活 → 级联删除旧版本溯源边与孤立实体 + 对新版本分片重抽（复用同一任务类型）；关闭开关不删图数据（重开免重抽），删除文档/知识库才清理。
 4. **级联清理**：删除文档/知识库的既有异步清理链路加 Neo4j 步骤（按 chunk_id 集合/kb_id 删 `:Chunk` 节点与关联边，删除后孤立的 `:Entity` 一并清理）；TaskType 增 `GRAPH_CLEANUP` 或并入既有 CLEANUP（实现自选，报告申报）。文档版本切换的级联失效在 §0.3 增量语义中完成。
 5. **图路检索（零 LLM 调用，query 侧不抽实体）**：query 经 ik/空白切词后对 Neo4j 实体名 fulltext index 匹配（取分 topM，`kb.graph.entity-match-limit` 默认 10）→ 命中实体沿关系扩展至 `kb.graph.max-hops`（默认 2）跳内实体集 → 溯源边回溯 chunk → 关联度 = 实体匹配分 × 1/(1+跳数)（多实体命中同 chunk 取 max）→ 取图路 top recall_top_k 形成**路内排名**进库内 RRF（第三路）。图路召回的 chunk_id 回 MySQL 复用既有事实源过滤谓词二次校验（激活版本可见集 + enabled——**不依赖 Neo4j 侧属性实时性**，需求原文）；快照上下文（M6）下图路**直接关闭**（图数据只有激活版本语义，无快照副本；不记 degraded，属能力边界非故障，须写入 javadoc 与本契约）。
@@ -17,7 +17,7 @@
 10. **管理 API**：`PUT /api/v1/kb/{kbId}/graph/config`（开关）、`POST /api/v1/kb/{kbId}/graph/extract`（手动触发全量重抽）、`GET /api/v1/kb/{kbId}/graph/summary`（实体数/关系数/覆盖分片数/最近任务状态）、`GET /api/v1/kb/{kbId}/graph/entities?query=&page=`（实体列表带来源分片数）、`GET /api/v1/kb/{kbId}/graph/entities/{entityName}/chunks`（下钻来源分片，复用 RetrievalNode 结构或简化行，报告申报）。
 
 ## 1. kb-rag-server（opus）
-- §0 全部条款；抽取与图检索归 kb-app（graph 包），Neo4jGraphStore 归 kb-infrastructure；健康检查 /actuator/health 增 neo4j 探测（URI 空时不探测，同 milvus 惯例）
+- §0 全部条款；抽取与图检索归 kb-app（graph 包），Neo4jGraphStore 归 kb-infrastructure；健康检查 /actuator/health 增 neo4j 探测（URI 空时不探测，同 qdrant 惯例）
 - 单测（必须，精确断言）：关联度公式（匹配分 0.8 一跳 → 0.4；同 chunk 多实体取 max）；图路排名进 RRF 第三路的融合序；graph_enabled+weighted 互斥校验；Neo4j 不可达降级 graph_route_unavailable 且两路结果不受影响；快照上下文图路关闭且不记 degraded；抽取输出强校验（非法 JSON 跳过计数、关系端点校验、实体名长度）；版本激活级联（旧版本边删除+重抽触发）；删除级联含 Neo4j 步骤；零 Key 抽取任务 fast-fail；query 切词实体匹配（含中文）
 
 ## 2. kb-rag-web（sonnet）

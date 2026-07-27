@@ -9,13 +9,13 @@ import io.kbrag.domain.model.VectorQuery;
 import java.util.List;
 
 /**
- * Outbound port of the vector route, implemented by Elasticsearch (lite mode) and Milvus (full
+ * Outbound port of the vector route, implemented by Elasticsearch (lite mode) and Qdrant (full
  * mode).
  *
  * <p><b>Score contract.</b> Both implementations must convert the engine specific score to the
  * standard cosine domain {@code [-1,1]} and then linearly map it to {@code [0,1]}:
  * Elasticsearch reports {@code (1+cos)/2} for a cosine dense_vector, so the implementation
- * restores {@code cos = score*2-1} before applying {@code (cos+1)/2}; Milvus reports the raw
+ * restores {@code cos = score*2-1} before applying {@code (cos+1)/2}; Qdrant reports the raw
  * cosine, which goes straight through the same final mapping. Every threshold in the retrieval
  * pipeline is applied to that normalised value, which is what makes the two engines behave
  * identically.
@@ -25,7 +25,7 @@ import java.util.List;
 public interface VectorStore {
 
     /**
-     * Engine code, {@code es} or {@code milvus}.
+     * Engine code, {@code es} or {@code qdrant}.
      *
      * @return engine code
      */

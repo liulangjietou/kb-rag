@@ -45,7 +45,7 @@ release 为准，不对历史 tag 做回溯打补丁。
 - 首次启动自动生成管理员账号 + 随机密码，强制首登改密（must_change_password）
 - 登录失败计数与锁定（5 次失败锁 15 分钟），记入 t_kb_login_audit 供审计
 - docker-compose 各服务镜像 tag 全部固定版本号，禁止使用 `latest`
-- Elasticsearch/MinIO/Milvus 均作为独立容器通过标准 API 调用，不修改其源码、不构成衍生作品
+- Elasticsearch/MinIO/Qdrant 均作为独立容器通过标准 API 调用，不修改其源码、不构成衍生作品
   （详见 NOTICE）
 - kb-rag-parser 解析链路：defusedxml 处理 XML、禁止任何出站网络请求、zip 解包路径校验、
   文件大小与总量上限（见 M1-CONTRACTS.md §6）

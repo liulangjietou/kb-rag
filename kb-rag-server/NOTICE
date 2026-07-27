@@ -43,18 +43,6 @@ not redistribute or resell it. Only the client library is a dependency, and
 that library is Apache-2.0.
 
 --------------------------------------------------------------------------
-Milvus Java SDK 2.4.9
---------------------------------------------------------------------------
-Component: io.milvus:milvus-sdk-java.
-License: Apache-2.0 (verified in the published pom).
-Used only in full mode (blank MILVUS_URI leaves the client unbuilt).
-The SDK ships a bulk writer that pulls the Parquet / Hadoop / cloud-SDK
-stack; this project writes through the regular upsert path only, so that
-transitive stack is excluded in kb-infrastructure/pom.xml. The exclusion is
-a size and dependency-hygiene decision, not a licensing one.
-The Milvus server itself is Apache-2.0 and runs as an independent container.
-
---------------------------------------------------------------------------
 MinIO Java SDK 8.5.17
 --------------------------------------------------------------------------
 Component: io.minio:minio.

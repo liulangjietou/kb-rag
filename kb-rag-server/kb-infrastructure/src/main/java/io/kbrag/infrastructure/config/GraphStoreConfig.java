@@ -22,7 +22,7 @@ import org.springframework.context.annotation.Configuration;
  * the URI.
  *
  * <p>The driver bean itself is created only when the URI is set, which is also what keeps the health
- * endpoint from probing a dependency the deployment does not run - the same rule Milvus follows.
+ * endpoint from probing a dependency the deployment does not run - the same rule Qdrant follows.
  *
  * @author owlzhangfq@gmail.com
  */

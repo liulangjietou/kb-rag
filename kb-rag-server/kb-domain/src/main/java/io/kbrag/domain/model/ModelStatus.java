@@ -21,7 +21,7 @@ public class ModelStatus {
     /** {@code false} means zero key mode: no embedding, BM25 single route retrieval. */
     private final boolean embeddingConfigured;
 
-    /** Configured vector engine code, {@code es} or {@code milvus}. */
+    /** Configured vector engine code, {@code es} or {@code qdrant}. */
     private final String vectorEngine;
 
     /** Embedding provider name, {@code none} when unconfigured. */

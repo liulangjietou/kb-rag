@@ -10,8 +10,8 @@ public enum VectorEngine {
     /** Lite mode, Elasticsearch dense_vector serves both BM25 and kNN. */
     ES,
 
-    /** Full mode, Milvus serves the vector route while Elasticsearch serves BM25. */
-    MILVUS;
+    /** Full mode, Qdrant serves the vector route while Elasticsearch serves BM25. */
+    QDRANT;
 
     /**
      * Resolves the engine from its configuration literal.

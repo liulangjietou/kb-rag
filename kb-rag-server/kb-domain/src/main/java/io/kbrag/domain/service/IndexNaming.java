@@ -48,7 +48,7 @@ public class IndexNaming {
      * Builds the physical name of a release snapshot, requirement section 4.7 "index snapshot".
      *
      * <p>Only the snapshot segment changes: a snapshot of the full mode Elasticsearch index keeps the
-     * {@code bm25} segment and a snapshot of a Milvus collection keeps its embedding segment, so the name
+     * {@code bm25} segment and a snapshot of a Qdrant collection keeps its embedding segment, so the name
      * still tells which engine and which embedding space the data belongs to. The sequence is knowledge
      * base level, which is what makes both engines of one release share the same {@code sN}.
      *
@@ -122,7 +122,7 @@ public class IndexNaming {
      * @return embedding segment of the full text index name
      */
     public String fulltextEmbeddingSegment(VectorEngine engine, String embeddingSegment) {
-        return engine == VectorEngine.MILVUS ? KbConstants.EMBEDDING_SEGMENT_BM25 : embeddingSegment;
+        return engine == VectorEngine.QDRANT ? KbConstants.EMBEDDING_SEGMENT_BM25 : embeddingSegment;
     }
 
     /**

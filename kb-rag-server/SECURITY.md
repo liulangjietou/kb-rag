@@ -79,6 +79,6 @@ kb-rag-server 是自托管（self-hosted）开源知识库 / RAG 系统的主服
 
 **依赖与运行**
 
-- 中间件（Elasticsearch / Milvus / MinIO / Neo4j / MySQL）均作为独立服务通过标准 API 调用，
+- 中间件（Elasticsearch / Qdrant / MinIO / Neo4j / MySQL）均作为独立服务通过标准 API 调用，
   不修改其源码、不构成衍生作品（详见 [NOTICE](NOTICE)）
 - schema 变更一律走 Flyway 版本化迁移，启动自动执行，禁止手工 DDL

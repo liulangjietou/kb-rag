@@ -135,8 +135,8 @@ check_port "MinIO API"       "${MINIO_PORT:-9000}"
 check_port "MinIO Console"   "${MINIO_CONSOLE_PORT:-9001}"
 
 if [[ "${DEPLOY_PROFILE}" == "full" ]]; then
-  check_port "Milvus"          "${MILVUS_PORT:-19530}"
-  check_port "Milvus Metrics"  "${MILVUS_METRICS_PORT:-9091}"
+  check_port "Qdrant"          "${QDRANT_PORT:-6333}"
+  check_port "Qdrant gRPC"     "${QDRANT_GRPC_PORT:-6334}"
   check_port "Redis(optional)" "${REDIS_PORT:-6379}"
 fi
 
@@ -157,7 +157,6 @@ check_secret "MYSQL_PASSWORD"            "${MYSQL_PASSWORD:-CHANGE_ME_mysql_pass
 check_secret "MINIO_ACCESS_KEY"          "${MINIO_ACCESS_KEY:-CHANGE_ME_minio_access_key}"
 check_secret "MINIO_SECRET_KEY"          "${MINIO_SECRET_KEY:-CHANGE_ME_minio_secret_key}"
 if [[ "${DEPLOY_PROFILE}" == "full" ]]; then
-  check_secret "MILVUS_MINIO_SECRET_KEY" "${MILVUS_MINIO_SECRET_KEY:-CHANGE_ME_milvus_minio_secret_key}"
 fi
 
 # ---------------------------------------------------------------------

@@ -35,7 +35,7 @@ score_threshold, fusion:{mode,w_vec,rrf_k}, rerank_enabled(默认 true 当模型
 rewrite_enabled(默认 false), messages, metadata_filter:{tag_ids[], session_id, sender,
 msg_time_from, msg_time_to}
 ```
-- metadata_filter 引擎侧映射：ES bool filter / Milvus expr（字段即 M1 契约引擎固定字段集）；索引管线须把 chunk.metadata 中这些键写入引擎字段
+- metadata_filter 引擎侧映射：ES bool filter / Qdrant 结构化 filter（字段即 M1 契约引擎固定字段集）；索引管线须把 chunk.metadata 中这些键写入引擎字段
 - 响应 nodes[].metadata 增：`norm_vector_score/norm_bm25_score/fused_score/rerank_score`（存在时）；顶层增 `applied:{rewrite_used_query, fusion_mode, threshold_applied_on}` 供调试页展示
 
 ### 1.6 model-status 响应结构（定版）

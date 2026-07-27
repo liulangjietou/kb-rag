@@ -9,7 +9,7 @@ import lombok.ToString;
  * One recalled chunk with the score already normalised by the store implementation.
  *
  * <p>Vector stores return the standard cosine similarity linearly mapped to {@code [0,1]}, so
- * scores are comparable across Elasticsearch and Milvus. Full text stores return the raw BM25
+ * scores are comparable across Elasticsearch and Qdrant. Full text stores return the raw BM25
  * score, which is only meaningful for ordering inside one query.
  *
  * @author owlzhangfq@gmail.com

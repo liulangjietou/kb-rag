@@ -24,7 +24,7 @@ public class IndexRegistry extends BaseEntity {
     @TableField("kb_id")
     private String kbId;
 
-    /** Engine code, {@code es} or {@code milvus}. */
+    /** Engine code, {@code es} or {@code qdrant}. */
     @TableField("engine")
     private String engine;
 

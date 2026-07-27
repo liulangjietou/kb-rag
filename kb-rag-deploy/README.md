@@ -6,7 +6,7 @@ kb-rag 是一个可自托管、开箱即用的企业知识库 / RAG（检索增�
 OpenAPI 接口契约、备份/预检脚本与总体文档。
 
 一句话架构：**Java 主服务（检索/管理编排）+ Python 解析服务（文档转 Markdown）+
-React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch 与 Milvus（检索引擎）/
+React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch 与 Qdrant（检索引擎）/
 MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 docker-compose 一键拉起中间件。**
 
 > 本仓库当前状态：**一期（M1-M7）已完成，二期进行中（M8 已完成、M9 开发中）**。
@@ -83,7 +83,7 @@ EMBEDDING_DIM=1024
 
 ### 升级到完整模式（full）
 
-需要独立向量引擎 Milvus 或多实例部署时的 Redis，切换到完整模式：
+需要独立向量引擎 Qdrant 或多实例部署时的 Redis，切换到完整模式：
 
 ```bash
 ./scripts/preflight.sh full
@@ -94,12 +94,12 @@ docker compose -f docker-compose.yml --profile redis up -d     # 含 redis（可
 `docker-compose.yml` 通过 Compose `include` 复用 `docker-compose.lite.yml` 的
 mysql/elasticsearch/minio 定义，额外叠加：
 
-- **milvus-standalone**（v2.4.x）：自带独立 `etcd`（元数据）与独立 `milvus-minio`
-  （向量分段对象存储），**不与应用侧 MinIO 混用**，避免两套业务的对象存储互相污染
+- **qdrant**（v1.18.x）：单容器自带存储，数据落在 `kb_rag_qdrant_data` 卷的
+  `/qdrant/storage`，不依赖额外的元数据服务或对象存储，也不占用应用侧 MinIO
 - **redis:7.2.x**：标注 optional，默认不随 `up` 启动，需 `--profile redis` 显式开启；
   单实例部署无需 Redis（`cache.provider=local`，见需求文档 §5 Redis 职责边界）
 
-lite → full 的索引迁移路径（切 `VECTOR_ENGINE=milvus` 后从 MySQL 事实源全量重建索引、
+lite → full 的索引迁移路径（切 `VECTOR_ENGINE=qdrant` 后从 MySQL 事实源全量重建索引、
 别名原子切换，重建期间 ES 持续服务）详见 `docs/M1-CONTRACTS.md` §3 与需求文档 §5。
 
 ## 四仓库说明
@@ -116,7 +116,7 @@ lite → full 的索引迁移路径（切 `VECTOR_ENGINE=milvus` 后从 MySQL �
 | 模式 | 中间件 | 内存要求 | 适用场景 |
 | --- | --- | --- | --- |
 | lite（轻量，默认） | MySQL + Elasticsearch（BM25+向量双职责） + MinIO | 约 **8GB** | 本地开发、小规模自托管、开源试用第一印象 |
-| full（完整） | lite 全部 + Milvus standalone（独立 etcd/minio） + Redis（可选） | 建议 **24GB**（中间件约 12GB + kb-rag-parser 8GB） | 独立向量引擎、多实例部署 |
+| full（完整） | lite 全部 + Qdrant（单容器，自带存储） + Redis（可选） | 建议 **16GB**（中间件约 4GB + kb-rag-parser 8GB） | 独立向量引擎、多实例部署 |
 | + graph（可选叠加，M7） | 在 lite 或 full 基础上 `--profile graph` 追加 Neo4j 5 | 额外约 **1GB**（512MB heap + 256MB pagecache，默认值可调） | 需要 GraphRAG 图检索能力时按需开启，不影响基线资源承诺 |
 
 kb-rag-parser 另分 CPU 档（最低 8GB 内存，100 页解析 SLA < 30min）与 GPU 档
@@ -129,10 +129,10 @@ containerize 与内存限制配置随后续里程碑（kb-rag-parser 仓库自�
 复制 `.env.example` 为 `.env` 并按注释修改。文件分两部分：
 
 1. **应用侧契约变量**（`docs/M1-CONTRACTS.md` §1）：kb-rag-server / kb-rag-parser 直接消费，
-   例如 `MYSQL_HOST` / `ES_URI` / `MILVUS_URI`（lite 模式可空） / `DASHSCOPE_API_KEY`
+   例如 `MYSQL_HOST` / `ES_URI` / `QDRANT_URI`（lite 模式可空） / `DASHSCOPE_API_KEY`
    （可空 = 零 Key 模式） / `NEO4J_URI`（可空 = 不使用图能力，M7）
 2. **docker-compose 专用变量**：仅供中间件容器初始化使用（如 `MYSQL_ROOT_PASSWORD`、
-   各服务端口、Milvus 专属 MinIO 凭据、备份与预检相关配置）
+   各服务端口、Qdrant 专属 MinIO 凭据、备份与预检相关配置）
 
 所有密码类变量默认值均为 `CHANGE_ME_*` 占位符，**`scripts/preflight.sh` 会在启动前
 拦截仍在使用占位口令的情况**，这是本项目防御式编程的唯一拦截点（避免在
@@ -257,7 +257,7 @@ P95 < 2s、完整链路（含 Query 改写）P95 < 3s**（见 docs/M2-CONTRACTS.
 
 应用版本发布门禁通过（或 force 放行）之后、状态切 `RELEASED` 之前，对关联知识库的
 物理索引执行一次**不可变快照**（ES `_clone`：源索引临时置只读 → clone → 两端解锁，
-段级硬链接毫秒级完成；Milvus 为同步批量拷贝），并固化当时的版本可见集
+段级硬链接毫秒级完成；Qdrant 为同步批量拷贝），并固化当时的版本可见集
 `visible_version_ids`。
 
 - 经 `RELEASED` 版本发起的对外调用（含 rollback 重新发布的历史版本）固定检索这份
@@ -310,7 +310,7 @@ python3 scripts/seed-bench.py --clean-only    # 压测结束后清理
 
 可选能力，**默认不开启**：compose 需显式加 `--profile graph` 才会启动 Neo4j，
 应用侧 `NEO4J_URI` 留空即代表不使用图能力，两者相互独立、互不阻塞，不影响
-lite 8GB / full 24GB 的资源承诺。
+lite 8GB / full 16GB 的资源承诺。
 
 ```bash
 # lite 模式启用 Neo4j（full 模式同样适用，替换 -f 的 compose 文件即可）
@@ -398,12 +398,12 @@ python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb
 ## 开源工程文档
 
 - [LICENSE](LICENSE)（Apache-2.0）
-- [NOTICE](NOTICE)：第三方依赖许可声明（MySQL / Elasticsearch / Milvus / MinIO /
+- [NOTICE](NOTICE)：第三方依赖许可声明（MySQL / Elasticsearch / Qdrant / MinIO /
   Neo4j / Redis / MinerU 预留未集成 / PaddleOCR）
 - [SECURITY.md](SECURITY.md)：漏洞报告渠道
 - [CONTRIBUTING.md](CONTRIBUTING.md)：分支模型、提交规范、PR 自查清单
 - [CHANGELOG.md](CHANGELOG.md)
-- [UPGRADING.md](UPGRADING.md)：升级指引（镜像 tag、Flyway 迁移、ES/Milvus schema
+- [UPGRADING.md](UPGRADING.md)：升级指引（镜像 tag、Flyway 迁移、ES/Qdrant schema
   变更、备份先行）
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：系统架构总览（组件拓扑、领域端口、
   检索链路、数据模型）

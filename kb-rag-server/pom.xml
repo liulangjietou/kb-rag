@@ -40,7 +40,6 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <mybatis-plus.version>3.5.7</mybatis-plus.version>
         <elasticsearch-java.version>8.13.4</elasticsearch-java.version>
-        <milvus-sdk.version>2.4.9</milvus-sdk.version>
         <minio.version>8.5.17</minio.version>
         <neo4j-java-driver.version>5.28.9</neo4j-java-driver.version>
         <commons-collections4.version>4.4</commons-collections4.version>
@@ -77,11 +76,6 @@
                 <groupId>co.elastic.clients</groupId>
                 <artifactId>elasticsearch-java</artifactId>
                 <version>${elasticsearch-java.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.milvus</groupId>
-                <artifactId>milvus-sdk-java</artifactId>
-                <version>${milvus-sdk.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.minio</groupId>

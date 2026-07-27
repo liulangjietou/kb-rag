@@ -1,7 +1,7 @@
 name: CI
 
 # Build and test on every push to main and on every pull request. The full unit test
-# suite needs no MySQL, Elasticsearch, MinIO, Milvus or Neo4j, so a plain runner is enough.
+# suite needs no MySQL, Elasticsearch, MinIO, Qdrant or Neo4j, so a plain runner is enough.
 on:
   push:
     branches: [main]
