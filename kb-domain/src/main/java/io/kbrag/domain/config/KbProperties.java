@@ -321,8 +321,19 @@ public class KbProperties {
         /** OpenAI compatible base URL of the provider. */
         private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 
-        /** Request timeout in milliseconds. */
+        /** Request timeout in milliseconds; the budget of the fast control-plane calls (routing, rewrite). */
         private int timeoutMs = 3000;
+
+        /**
+         * HTTP read timeout of answer generation in milliseconds.
+         *
+         * <p>Kept apart from {@link #timeoutMs} on purpose: routing and rewrite bound themselves with
+         * that short budget at the future level, but a full answer routinely needs tens of seconds -
+         * sharing one value either strangles generation (a real answer died at 3s in production use)
+         * or balloons the routing budget. This value only stretches the transport ceiling of the chat
+         * client; the fast paths keep their own future-level budgets.
+         */
+        private int generateTimeoutMs = 60000;
 
         /** Sampling temperature, zero keeps the rewrite reproducible. */
         private double temperature = 0.0d;

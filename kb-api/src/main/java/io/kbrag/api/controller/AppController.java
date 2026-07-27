@@ -12,6 +12,7 @@ import io.kbrag.app.appcenter.AppService;
 import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.openapi.KnowledgeApiService;
 import io.kbrag.common.api.Result;
+import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.App;
 import io.kbrag.domain.entity.AppVersion;
 import jakarta.validation.Valid;
@@ -27,6 +28,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -149,16 +151,35 @@ public class AppController {
      * @return generated answer with its references, or the event stream when {@code stream} is set
      */
     @PostMapping("/{appId}/chat-preview")
-    public ResponseEntity<?> chatPreview(@PathVariable String appId,
-                                         @Valid @RequestBody ChatPreviewRequest request) {
-        if (!request.isStream()) {
-            return ResponseEntity.ok(Result.success(KnowledgeChatResponse.from(knowledgeApiService.preview(
-                    appId, request.getAppVersionId(), request.toCommand(), null))));
+    public ResponseEntity<Result<KnowledgeChatResponse>> chatPreview(@PathVariable String appId,
+                                                                     @Valid @RequestBody ChatPreviewRequest request) {
+        // The streaming variant lives on its own mapping selected by the accept header: Spring picks the
+        // return value handler by the DECLARED type, so an SseEmitter smuggled through ResponseEntity<?>
+        // is handed to the message converters and dies with HttpMessageNotWritableException - the previous
+        // single-method shape never actually streamed. A body asking for a stream on the JSON mapping gets
+        // an actionable rejection instead of a broken 500.
+        if (request.isStream()) {
+            throw BizException.invalidParam("stream=true requires the Accept: text/event-stream header");
         }
+        return ResponseEntity.ok(Result.success(KnowledgeChatResponse.from(knowledgeApiService.preview(
+                appId, request.getAppVersionId(), request.toCommand(), null))));
+    }
+
+    /**
+     * Streaming console preview, selected when the client accepts {@code text/event-stream}.
+     *
+     * <p>The declared return type is the emitter itself - the only shape the async return value handler
+     * recognises statically.
+     *
+     * @param appId   application business id
+     * @param request chat payload
+     * @return event stream of the generation
+     */
+    @PostMapping(value = "/{appId}/chat-preview", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter chatPreviewStream(@PathVariable String appId,
+                                        @Valid @RequestBody ChatPreviewRequest request) {
         SseChatStreamListener listener = new SseChatStreamListener();
         knowledgeApiService.previewStreamAsync(appId, request.getAppVersionId(), request.toCommand(), listener);
-        // Content type on the response rather than a produces condition, so a client sending
-        // Accept: application/json with stream=true still receives its stream instead of a 406.
-        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).body(listener.emitter());
+        return listener.emitter();
     }
 }

@@ -65,7 +65,11 @@ public class DashScopeChatProvider implements ChatProvider {
      */
     public DashScopeChatProvider(KbProperties.Chat config) {
         this.config = config;
-        this.restClient = DashScopeHttp.client(config.getBaseUrl(), config.getApiKey(), config.getTimeoutMs());
+        // Connect keeps the short control-plane budget so network faults fail fast; the read ceiling is
+        // the generation budget - answer generation is the only call that legitimately needs it, and the
+        // fast paths (routing, rewrite) still cut themselves off earlier at the future level.
+        this.restClient = DashScopeHttp.client(config.getBaseUrl(), config.getApiKey(),
+                config.getTimeoutMs(), config.getGenerateTimeoutMs());
     }
 
     @Override

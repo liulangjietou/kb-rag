@@ -104,6 +104,8 @@ kb:
     api-key: ${CHAT_API_KEY:${DASHSCOPE_API_KEY:}}
     base-url: ${CHAT_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     timeout-ms: ${CHAT_TIMEOUT_MS:3000}
+    # Read ceiling of answer generation only; routing/rewrite keep their own shorter future budgets.
+    generate-timeout-ms: ${CHAT_GENERATE_TIMEOUT_MS:60000}
     temperature: ${CHAT_TEMPERATURE:0.0}
     max-tokens: ${CHAT_MAX_TOKENS:128}
     # Generation budget of the open chat endpoint; max-tokens above sizes a one line query rewrite and would

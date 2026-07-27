@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 /**
  * The open API, requirement section 4.8.
@@ -69,21 +70,36 @@ public class KnowledgeOpenApiController {
      * @return response body, or the server sent event stream when {@code stream} is set
      */
     @PostMapping("/chat")
-    public ResponseEntity<?> chat(@Valid @RequestBody KnowledgeCallRequest request,
-                                  HttpServletRequest httpRequest) {
+    public ResponseEntity<Result<KnowledgeChatResponse>> chat(@Valid @RequestBody KnowledgeCallRequest request,
+                                                              HttpServletRequest httpRequest) {
         requireAppId(request);
         ApiKeyPrincipal principal = principalOf(httpRequest);
-        if (!request.isStream()) {
-            return ResponseEntity.ok(Result.success(KnowledgeChatResponse.from(
-                    knowledgeApiService.chat(principal, request.toCommand()))));
+        // Streaming has its own mapping picked by the accept header; see chatStream. Spring resolves the
+        // return value handler from the DECLARED type, so an SseEmitter behind ResponseEntity<?> was fed
+        // to the message converters and failed with HttpMessageNotWritableException - the earlier
+        // single-method contract of "stream despite a JSON accept header" never actually worked.
+        if (request.isStream()) {
+            throw BizException.invalidParam("stream=true requires the Accept: text/event-stream header");
         }
+        return ResponseEntity.ok(Result.success(KnowledgeChatResponse.from(
+                knowledgeApiService.chat(principal, request.toCommand()))));
+    }
+
+    /**
+     * Streaming retrieval augmented generation, selected when the client accepts {@code text/event-stream}.
+     *
+     * @param request     chat payload
+     * @param httpRequest current request, source of the authenticated caller
+     * @return event stream of the generation
+     */
+    @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter chatStream(@Valid @RequestBody KnowledgeCallRequest request,
+                                 HttpServletRequest httpRequest) {
+        requireAppId(request);
+        ApiKeyPrincipal principal = principalOf(httpRequest);
         SseChatStreamListener listener = new SseChatStreamListener();
         knowledgeApiService.chatStreamAsync(principal, request.toCommand(), listener);
-        // The content type is set on the response rather than declared as a produces condition: a client that
-        // sends Accept: application/json and stream=true would otherwise be answered with a 406 instead of the
-        // stream it asked for.
-        return ResponseEntity.ok().contentType(MediaType.parseMediaType(EVENT_STREAM_CONTENT_TYPE))
-                .body(listener.emitter());
+        return listener.emitter();
     }
 
     /**

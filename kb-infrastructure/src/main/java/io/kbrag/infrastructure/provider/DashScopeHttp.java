@@ -49,7 +49,24 @@ public final class DashScopeHttp {
      * @return configured client
      */
     public static RestClient client(String baseUrl, String apiKey, int timeoutMs) {
-        Duration timeout = Duration.ofMillis(timeoutMs);
+        return client(baseUrl, apiKey, timeoutMs, timeoutMs);
+    }
+
+    /**
+     * Builds a client with separate connect and read ceilings.
+     *
+     * <p>Needed by the chat provider: connecting must fail fast (a short connect timeout keeps network
+     * problems visible), while reading a full generated answer legitimately takes far longer than any
+     * control-plane call is allowed to.
+     *
+     * @param baseUrl       base URL, may be blank when every call passes an absolute URL
+     * @param apiKey        bearer credential
+     * @param connectMs     connect timeout in milliseconds
+     * @param readTimeoutMs read timeout in milliseconds
+     * @return configured client
+     */
+    public static RestClient client(String baseUrl, String apiKey, int connectMs, int readTimeoutMs) {
+        Duration timeout = Duration.ofMillis(connectMs);
         // JdkClientHttpRequestFactory over HttpURLConnection on purpose: HttpURLConnection cannot
         // replay a streamed request body, so a 401 carrying WWW-Authenticate surfaces as an I/O
         // failure ("cannot retry due to server authentication") instead of a status code. That made
@@ -58,7 +75,7 @@ public final class DashScopeHttp {
         // status normally, so classify() can do its job.
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(timeout).build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
-        factory.setReadTimeout(timeout);
+        factory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
         RestClient.Builder builder = RestClient.builder()
                 .requestFactory(factory)
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + apiKey);
