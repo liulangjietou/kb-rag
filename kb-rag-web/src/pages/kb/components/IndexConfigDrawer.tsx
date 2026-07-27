@@ -1,8 +1,10 @@
 // Author: owlzhangfq@gmail.com
 import { useEffect, useState } from 'react';
-import { Alert, Button, Drawer, Form, InputNumber, Space, Switch, Typography, message } from 'antd';
+import { Alert, Button, Drawer, Form, InputNumber, Select, Space, Switch, Typography, message } from 'antd';
 import { updateIndexConfig } from '../../../api/kb';
-import type { ChatAggregationConfig, CleanRules, IndexConfig } from '../../../api/types';
+import type { ChatAggregationConfig, CleanRules, IndexConfig, SplitStrategy } from '../../../api/types';
+import { useModelStatus } from '../../../context/ModelStatusContext';
+import { LLM_SPLIT_REQUIRES_CHAT_MODEL, SPLIT_STRATEGY_META } from '../../../utils/statusMeta';
 import CleanRulesFields from './CleanRulesFields';
 
 // M1 pipeline defaults (M1-CONTRACTS.md section 4 "按长度策略切分... 默认 600 token / 重叠 100").
@@ -31,8 +33,11 @@ const DEFAULT_CHAT_AGGREGATION: ChatAggregationConfig = {
 // M4a-CONTRACTS.md section 2.4 defaults.
 const DEFAULT_HIDE_PARENT_WITH_DISABLED_CHILD = false;
 const DEFAULT_INHERIT_DISABLE_ANNOTATION = true;
+// Server default when a knowledge base has never had a strategy written (KnowledgeBaseService).
+const DEFAULT_SPLIT_STRATEGY: SplitStrategy = 'fixed_length';
 
 interface IndexConfigFormValues {
+  split_strategy: SplitStrategy;
   chunk_max_tokens: number;
   chunk_overlap: number;
   parent_child_enabled: boolean;
@@ -57,6 +62,7 @@ interface IndexConfigDrawerProps {
 
 function toFormValues(config: IndexConfig | null): IndexConfigFormValues {
   return {
+    split_strategy: config?.split_strategy ?? DEFAULT_SPLIT_STRATEGY,
     chunk_max_tokens: config?.chunk_max_tokens ?? DEFAULT_CHUNK_MAX_TOKENS,
     chunk_overlap: config?.chunk_overlap ?? DEFAULT_CHUNK_OVERLAP,
     parent_child_enabled: config?.parent_child.enabled ?? false,
@@ -88,6 +94,11 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
   const [form] = Form.useForm<IndexConfigFormValues>();
   const [submitting, setSubmitting] = useState(false);
   const parentChildEnabled = Form.useWatch('parent_child_enabled', form) ?? false;
+  const splitStrategy = Form.useWatch('split_strategy', form) ?? DEFAULT_SPLIT_STRATEGY;
+  // 'llm_semantic' is refused server-side without a chat model; disable the option rather than
+  // letting the save round-trip into an INVALID_PARAM.
+  const { modelStatus } = useModelStatus();
+  const chatConfigured = modelStatus?.chat_configured ?? false;
 
   useEffect(() => {
     if (open) {
@@ -99,10 +110,10 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
     const values = await form.validateFields();
     setSubmitting(true);
     try {
-      await updateIndexConfig(kbId, {
+      const result = await updateIndexConfig(kbId, {
         // The server replaces the whole index_config object from this body, so every key the kb
         // already has must be present here -- including the ones this drawer has no control for.
-        split_strategy: indexConfig?.split_strategy,
+        split_strategy: values.split_strategy,
         chunk_max_tokens: values.chunk_max_tokens,
         chunk_overlap: values.chunk_overlap,
         parent_child: {
@@ -117,7 +128,13 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
         hide_parent_with_disabled_child: values.hide_parent_with_disabled_child,
         inherit_disable_annotation: values.inherit_disable_annotation,
       });
-      message.success('索引配置已更新，使用旧配置的文档将标记为待重建');
+      // The server already counted the documents its new fingerprint invalidated; reporting that
+      // number beats the vague "使用旧配置的文档将标记为待重建" the drawer used to show.
+      message.success(
+        result.stale_documents > 0
+          ? `索引配置已更新，${result.stale_documents} 篇文档标记为待重建`
+          : '索引配置已更新，无文档需要重建',
+      );
       onSaved();
       onClose();
     } finally {
@@ -148,10 +165,38 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
         style={{ marginBottom: 16 }}
       />
       <Form<IndexConfigFormValues> form={form} layout="vertical">
+        <Typography.Title level={5}>切分策略</Typography.Title>
+        <Form.Item
+          name="split_strategy"
+          label="切分方式"
+          rules={[{ required: true, message: '请选择切分策略' }]}
+          extra={
+            splitStrategy === 'llm_semantic'
+              ? '由对话模型只输出切割点（不复述正文），结果落库缓存；适合无结构长文，成本高于定长切分'
+              : '按 token 长度顺序切分，配合下方重叠长度使用'
+          }
+        >
+          <Select
+            options={(Object.keys(SPLIT_STRATEGY_META) as SplitStrategy[]).map((code) => ({
+              value: code,
+              label: SPLIT_STRATEGY_META[code].label,
+              disabled: code === 'llm_semantic' && !chatConfigured,
+            }))}
+          />
+        </Form.Item>
+        {!chatConfigured && (
+          <Alert type="warning" showIcon message={LLM_SPLIT_REQUIRES_CHAT_MODEL} style={{ marginBottom: 16 }} />
+        )}
+
         <Typography.Title level={5}>分段参数</Typography.Title>
         <Form.Item
           name="chunk_max_tokens"
-          label="分段长度（token）"
+          label={splitStrategy === 'llm_semantic' ? '分段长度上限（token）' : '分段长度（token）'}
+          tooltip={
+            splitStrategy === 'llm_semantic'
+              ? 'LLM 语义切分下作为兜底上限：模型输出非法或超长时按此长度降级切分'
+              : undefined
+          }
           rules={[{ required: true, message: '请输入分段长度' }]}
         >
           <InputNumber min={50} max={4000} style={{ width: '100%' }} />

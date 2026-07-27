@@ -1,3 +1,4 @@
+// Author: owlzhangfq@gmail.com
 import type {
   AnchorType,
   AnnotationType,
@@ -22,6 +23,7 @@ import type {
   RunStatus,
   ScoreType,
   SourceMappingType,
+  SplitStrategy,
   ThresholdAppliedOn,
 } from '../api/types';
 
@@ -91,6 +93,19 @@ export const FUSION_MODE_META: Record<FusionMode, { color: string; label: string
  * graph_enabled knowledge base -- the server enforces the same rule as an INVALID_PARAM on save.
  */
 export const GRAPH_FUSION_MUTEX_HINT = '开启图路的知识库库内融合强制为 RRF';
+
+/**
+ * index_config.split_strategy picker meta. Only these two strategies exist server-side
+ * (SplitStrategy enum); parent/child chunking is not one of them -- it is an orthogonal switch
+ * layered on top of whichever strategy runs.
+ */
+export const SPLIT_STRATEGY_META: Record<SplitStrategy, TagMeta> = {
+  fixed_length: { color: 'default', label: '定长切分' },
+  llm_semantic: { color: 'purple', label: 'LLM 语义切分' },
+};
+
+/** Shown wherever 「LLM 语义切分」 has to be greyed out for want of a chat model. */
+export const LLM_SPLIT_REQUIRES_CHAT_MODEL = 'LLM 语义切分需要已配置对话模型，请先在系统设置中配置';
 
 export const IK_DICT_TYPE_META: Record<IkDictType, { color: string; label: string }> = {
   EXT: { color: 'success', label: '扩展词' },

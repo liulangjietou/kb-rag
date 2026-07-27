@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeftOutlined,
   CheckOutlined,
+  DeleteOutlined,
   InboxOutlined,
   MessageOutlined,
   ReloadOutlined,
@@ -24,7 +25,7 @@ import {
 } from 'antd';
 import type { UploadProps } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
-import { listDocuments, reindexDocument, uploadDocument } from '../../api/document';
+import { deleteDocument, listDocuments, reindexDocument, uploadDocument } from '../../api/document';
 import { confirmKbDocuments, getKnowledgeBase, rebuildKb } from '../../api/kb';
 import type { KbDocument, KnowledgeBase } from '../../api/types';
 import { formatFileSize } from '../../utils/format';
@@ -58,6 +59,7 @@ export default function KbDetailPage() {
   const [rebuildInitialCount, setRebuildInitialCount] = useState(0);
   const [selectedPendingIds, setSelectedPendingIds] = useState<string[]>([]);
   const [batchConfirming, setBatchConfirming] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadKb = useCallback(async () => {
@@ -126,6 +128,21 @@ export default function KbDetailPage() {
     await reindexDocument(docId);
     message.success('已提交重建任务');
     loadDocuments();
+  };
+
+  const handleDelete = async (doc: KbDocument) => {
+    setDeletingId(doc.doc_id);
+    try {
+      await deleteDocument(doc.doc_id);
+      message.success(`已删除 ${doc.file_name}`);
+      // Drop any drawer still pointing at the document that no longer exists.
+      setChunkDoc((prev) => (prev?.doc_id === doc.doc_id ? null : prev));
+      setPreviewDoc((prev) => (prev?.doc_id === doc.doc_id ? null : prev));
+      setVersionDocId((prev) => (prev === doc.doc_id ? null : prev));
+      loadDocuments();
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const handleRebuildStale = async () => {
@@ -326,7 +343,7 @@ export default function KbDetailPage() {
                     },
                     {
                       title: '操作',
-                      width: 260,
+                      width: 320,
                       render: (_, record: KbDocument) => (
                         <Space>
                           <Button size="small" onClick={() => setChunkDoc(record)}>
@@ -348,6 +365,24 @@ export default function KbDetailPage() {
                           >
                             <Button size="small" icon={<ReloadOutlined />}>
                               重建
+                            </Button>
+                          </Popconfirm>
+                          <Popconfirm
+                            title="删除该文档？"
+                            description={
+                              <>
+                                将连同它的<b>全部版本与分片</b>一并删除（含两个检索引擎中的副本），
+                                <br />
+                                删除后不可恢复，如需重新入库须重新上传。
+                              </>
+                            }
+                            okText="删除"
+                            okButtonProps={{ danger: true }}
+                            cancelText="取消"
+                            onConfirm={() => handleDelete(record)}
+                          >
+                            <Button size="small" danger icon={<DeleteOutlined />} loading={deletingId === record.doc_id}>
+                              删除
                             </Button>
                           </Popconfirm>
                         </Space>

@@ -106,7 +106,9 @@ info:
 
     自增 id、补 remark；⑤`ChatImportPreviewData` 补 skipped；⑥`DocumentPreview` 补
 
-    doc_id/process_status，`PreviewImage` 补 page_no/kind/status。
+    doc_id/process_status，`PreviewImage` 补 page_no/kind/status；⑦`IndexConfig` 补
+
+    split_strategy（新增 `SplitStrategy` 枚举，两个成员）与只读的 embedding_model。
 
     '
   version: 0.10.1-m9
@@ -3158,6 +3160,17 @@ components:
           type: integer
           default: 50
           minimum: 0
+    SplitStrategy:
+      type: string
+      description: '切分策略（server SplitStrategy 枚举，**当前只有这两个成员**——需求文档描述的
+        六种切分方式仅落地这两种，parent_child 是正交的独立开关不属于本枚举）。
+        fixed_length=按 token 长度顺切；llm_semantic=对话模型只输出切割点、结果落库缓存，
+        **要求已配置对话模型**，否则 PUT index-config 返回 INVALID_PARAM。
+        未知取值一律 INVALID_PARAM（校验先于写入，失败不改动既有配置）。'
+      enum:
+      - fixed_length
+      - llm_semantic
+      default: fixed_length
     IndexConfig:
       type: object
       description: '知识库索引配置（t_kb_knowledge_base.index_config JSON）。chunk_max_tokens/
@@ -3172,10 +3185,17 @@ components:
 
         '
       properties:
+        split_strategy:
+          $ref: '#/components/schemas/SplitStrategy'
+        embedding_model:
+          type: string
+          nullable: true
+          description: 当前索引所用嵌入模型，服务端赋值；PUT 请求体无此字段，不可回写
         chunk_max_tokens:
           type: integer
           default: 600
           minimum: 1
+          description: 定长切分的分段长度；LLM 语义切分下作为模型输出非法/超长时的降级兜底上限
         chunk_overlap:
           type: integer
           default: 100
