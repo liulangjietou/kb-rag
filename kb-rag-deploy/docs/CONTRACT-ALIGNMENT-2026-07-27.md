@@ -70,17 +70,49 @@ Author: owlzhangfq@gmail.com
 | `IkDictEntry` | 多了并不存在的自增 id；缺 remark |
 | `ChatImportPreviewData` | 缺 skipped |
 | `DocumentPreview`/`PreviewImage` | 缺 doc_id/process_status 与 page_no/kind/status |
+| `IndexConfig` | 缺 split_strategy 与 embedding_model（两者服务端都返回）；新增 `SplitStrategy` 枚举 |
 
 同时修订 `M4c-CONTRACTS.md` 的 "列表(prefix+末4位)" ——这句措辞被读成两个字段拼接，正是错位 3
 的直接诱因，现改为明确"展示串就是单个 prefix 字段，不存在独立末四位字段"。
 
-## 4. 已记录但本次未做的能力缺口
+## 4. 能力缺口（4 项，已于同批次补齐）
 
-不属于契约错位，是 web 侧尚未实现的能力，列此备查：
+不属于契约错位，是 server 早已提供、web 一直够不着的能力。四项已全部实现（kb-rag-web
+`feat/close-capability-gaps`）。
 
-- **切分策略无界面**：`index_config.split_strategy` 有六种取值，web 无选择控件。PUT 时已显式透传
-  当前值，不会丢——但用户只能通过 API 改。
-- **生成模型 / 门禁阈值无界面**：`chat_model` 与 `gate` 现在会原样透传保留，但仍无编辑入口。
-- **`DELETE /documents/{docId}`、`POST /retrieval-feedback`** 两个端点 web 无调用入口。
-- `PUT /kb/{kbId}/index-config` 的响应 `{stale_documents, fingerprint}` 被丢弃，web 靠轮询文档列表
-  推断重建进度。
+### 4.1 切分策略无界面 → 已加选择器
+
+**先纠正本报告初版的一处失实：`split_strategy` 并非"六种取值"。** server 的 `SplitStrategy`
+枚举实际只有两个成员：
+
+| code | 含义 | 前置条件 |
+|------|------|----------|
+| `fixed_length` | 定长切分（默认） | 无 |
+| `llm_semantic` | LLM 语义切分 | **需已配置对话模型**，否则 INVALID_PARAM |
+
+需求文档描述的六种切分方式只落地了这两种；`parent_child` 是正交的独立开关，不属于该枚举。
+界面按枚举给两个选项（不做自由输入——非法值会被 `requireSplitStrategyUsable` 拦成
+INVALID_PARAM），未配置对话模型时 `llm_semantic` 禁选。
+
+### 4.2 生成模型 / 门禁阈值无编辑入口 → 已加
+
+`chat_model` 为选填输入，留空即跟随服务端默认（经 `ChatProviderFactory` 按名解析）；`gate` 为
+开关 + `min_hit_rate`/`min_recall` 两个 0-1 阈值。**绝对阈值只在首次发布时作为放行依据**——已有
+正式版时门禁走同语料双跑，与此处阈值无关，界面上已写明这一点。
+
+两者进入表单后，此前为防丢失而做的"从上个版本原样透传"即被取代：快照的每个分支现在都由表单
+往返，语义比隐式携带更清楚。
+
+### 4.3 两个够不着的端点 → 已接入
+
+- `DELETE /documents/{docId}`：文档列表加删除按钮，二次确认写明连同**全部版本与分片**（含两个
+  引擎中的副本）一并删除且不可恢复。
+- `POST /retrieval-feedback`（需求 §4.5 结果好/坏反馈）：结果卡片加点赞/点踩。**注意这是服务端
+  有意的只记日志端点**（M4b-CONTRACTS.md §2 与偏离 §8：payload 无 dataset_id，BAD 无处安放且本期
+  无消费方），GOOD 的真正落地路径是既有的"收进评测集"。界面提示已写明，避免误以为点赞会生成
+  case。
+
+### 4.4 index-config 响应被丢弃 → 已使用
+
+PUT 返回的 `{stale_documents, fingerprint}` 现在用于提示"N 篇文档标记为待重建"。该计数只有服务端
+算得出，客户端要复现就得重新列举并比对全部文档。
