@@ -1,5 +1,6 @@
 package io.kbrag.app.alert;
 
+import io.kbrag.app.metrics.KbMetrics;
 import io.kbrag.domain.enums.AlertType;
 import io.kbrag.domain.enums.TaskType;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +22,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>Counted in memory rather than queried from the task table: the signal is about what is happening
  * now, and reading a lifetime table would need a time window that the counter expresses more directly.
  *
+ * <p>Every completion also lands in the M13 task metric here: this class is the one funnel both the
+ * success and the failure path already pass through, so the counter cannot miss a task type.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
@@ -33,6 +37,7 @@ public class TaskFailureTracker {
 
     private final AlertConfigService alertConfigService;
     private final AlertService alertService;
+    private final KbMetrics kbMetrics;
 
     private final Map<TaskType, AtomicInteger> consecutiveFailures = new EnumMap<>(TaskType.class);
 
@@ -46,6 +51,7 @@ public class TaskFailureTracker {
         if (taskType == null) {
             return;
         }
+        kbMetrics.recordTaskCompleted(taskType, false);
         int failures = consecutiveFailures.computeIfAbsent(taskType, type -> new AtomicInteger())
                 .incrementAndGet();
         int threshold = alertConfigService.current().getTaskFailThreshold();
@@ -68,6 +74,7 @@ public class TaskFailureTracker {
         if (taskType == null) {
             return;
         }
+        kbMetrics.recordTaskCompleted(taskType, true);
         AtomicInteger counter = consecutiveFailures.get(taskType);
         if (counter != null) {
             counter.set(0);

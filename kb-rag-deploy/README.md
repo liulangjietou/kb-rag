@@ -9,13 +9,15 @@ OpenAPI 接口契约、备份/预检脚本与总体文档。
 React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch 与 Qdrant（检索引擎）/
 MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 docker-compose 一键拉起中间件。**
 
-> 本仓库当前状态：**一期（M1-M7）已完成，二期进行中（M8 已完成、M9 开发中）**。
+> 本仓库当前状态：**一期（M1-M7）与二期（M8-M9）已完成，核心能力增强（M10-M13）已完成**。
 > 一期交付上传解析→混合检索（向量+BM25+图路三路融合）→分片标注→评测闭环→应用发布→
-> 多知识库路由→索引快照回滚→GraphRAG 的完整链路；二期在此基础上增强聊天记录导入
-> （TXT/HTML 格式、本地 OCR 兜底、重叠滑窗归并、映射档案维护界面，M8 已完成）与标注
-> 语义/图搜能力（M9，开发中，其内容暂不纳入本文档范围）。
+> 多知识库路由→索引快照回滚→GraphRAG 的完整链路；二期增强聊天记录导入
+> （TXT/HTML 格式、本地 OCR 兜底、重叠滑窗归并、映射档案维护界面，M8）与标注
+> 语义/图搜能力（M9）；核心能力增强补齐检索质量闭环（M10）、内容治理（M11）、
+> URL 导入与增量同步（M12）、Prometheus 业务指标（M13），见下文
+> [核心能力增强（M10-M13）](#核心能力增强m10-m13)。
 > 各里程碑契约见 [`docs/M1-CONTRACTS.md`](docs/M1-CONTRACTS.md) ~
-> [`docs/M9-CONTRACTS.md`](docs/M9-CONTRACTS.md)；系统整体架构与核心流程图见
+> [`docs/M13-CONTRACTS.md`](docs/M13-CONTRACTS.md)；系统整体架构与核心流程图见
 > [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 与 [`docs/FLOWS.md`](docs/FLOWS.md)。
 
 ## 目录
@@ -34,6 +36,7 @@ MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 dock
 - [GraphRAG 知识图谱（M7，可选）](#graphrag-知识图谱m7可选)
 - [Demo 数据集与聊天记录映射（M3）](#demo-数据集与聊天记录映射m3)
 - [聊天记录格式扩展与映射维护（M8）](#聊天记录格式扩展与映射维护m8)
+- [核心能力增强（M10-M13）](#核心能力增强m10-m13)
 - [接口契约（OpenAPI）](#接口契约openapi)
 - [开源工程文档](#开源工程文档)
 
@@ -376,6 +379,24 @@ docker compose -f docker-compose.lite.yml --profile graph up -d
 
 详见 [`docs/M8-CONTRACTS.md`](docs/M8-CONTRACTS.md)。
 
+## 核心能力增强（M10-M13）
+
+四个里程碑均为纯新增能力，无端点行为变化；契约见 `docs/M10~M13-CONTRACTS.md`：
+
+- **M10 检索质量闭环**：检索反馈持久化与转评测集、检索洞察（脱敏摘要/零命中/
+  降级标记）与内容缺口报表；新增 `INSIGHT_ENABLED` / `INSIGHT_RETENTION_DAYS` /
+  `INSIGHT_CLEANUP_BATCH_SIZE` / `INSIGHT_CLEANUP_CRON`
+- **M11 内容治理**：库级审核开关与 DRAFT→PENDING_REVIEW→PUBLISHED|REJECTED 状态机、
+  文档有效期窗口、回收站（trash/restore/purge + 保留期自动清除）；新增
+  `TRASH_RETENTION_DAYS` / `TRASH_PURGE_BATCH_SIZE` / `TRASH_PURGE_CRON` / `TRASH_PURGE_ENABLED`；
+  注意 `DELETE /documents/{docId}` 语义已改为移入回收站（见 CHANGELOG 醒目提示）
+- **M12 URL 导入与增量同步**：网页登记即抓、定时增量同步（四态结果、hash 去重）、
+  SSRF 防线；新增 `WEB_IMPORT_*` 六个变量；注意 `UPLOAD_ALLOWED_EXTENSIONS` 默认值已含 `html`
+- **M13 Prometheus 业务指标**：`/actuator/prometheus` 可抓取 `kb_search_seconds` /
+  `kb_task_completed_total` / `kb_task_backlog` / `kb_openapi_rejected_total` /
+  `kb_websource_sync_total` 及 JVM/HTTP 基础指标；无新环境变量，该端点与 health 同口径
+  暂无鉴权，生产由部署侧网络隔离
+
 ## 接口契约（OpenAPI）
 
 - [`docs/openapi/kb-server.yaml`](docs/openapi/kb-server.yaml)：kb-rag-server 管理台
@@ -415,6 +436,6 @@ python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb
 - [知识库需求文档（v1.14，唯一事实源）](docs/知识库需求文档.md)
 - [系统架构总览（ARCHITECTURE.md）](docs/ARCHITECTURE.md) /
   [核心流程图（FLOWS.md）](docs/FLOWS.md)
-- [M1](docs/M1-CONTRACTS.md) ~ [M9 开发契约](docs/M9-CONTRACTS.md)（按里程碑记录
+- [M1](docs/M1-CONTRACTS.md) ~ [M13 开发契约](docs/M13-CONTRACTS.md)（按里程碑记录
   实现细节与已接受偏离）
 - [OpenAPI 定义](docs/openapi/)

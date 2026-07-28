@@ -6,6 +6,62 @@
 
 ## [Unreleased]
 
+### Added
+
+- **运维可观测：Prometheus 业务指标（M13，docs/M13-CONTRACTS.md）**：kb-rag-server 自本版起
+  可被 Prometheus 抓取——补齐 `micrometer-registry-prometheus` 依赖激活既有 actuator 的
+  `/actuator/prometheus` 端点（JVM/HTTP 基础指标随 actuator 自动配置免费提供）；新增业务
+  指标：`kb_search_seconds`（Timer，标签 source=console/open_api、zero_hit、degraded，
+  preview 管理流量不计入）、`kb_task_completed_total`（Counter，type × success/failed）、
+  `kb_task_backlog`（Gauge，pending/running 抓取时实查 DB，DB 异常返回 NaN 不影响抓取）、
+  `kb_openapi_rejected_total`（Counter，按 error_code）、`kb_websource_sync_total`
+  （Counter，M12 四态）。纯新增：无表变更、无新环境变量、无端点行为变化；该端点与
+  health 同口径暂无鉴权，生产由部署侧网络隔离
+- **数据接入：URL 导入与增量同步（M12，docs/M12-CONTRACTS.md）**：①网页登记——
+  `POST/GET /kb/{kbId}/web-sources` 登记即抓/列表，`POST /web-sources/{id}/sync` 手动同步，
+  `PUT`/`DELETE /web-sources/{id}` 定时同步开关与移除登记；抓取产物统一走文档上传
+  管线（URL 派生稳定文件名，重抓同名加版本、content_hash 去重），登记与文档为弱绑定——
+  移除登记不删文档；②增量同步四态结果（SUCCESS/UNCHANGED/SKIPPED/FAILED）落行可见，
+  内容 hash 未变不建版本，绑定文档在回收站则跳过；③SSRF 防线：仅 http/https、拒内网/
+  回环/链路本地地址，重定向手动跟随且逐跳复验；④parser 新增通用 HTML 页面解析器
+  （非聊天记录通道）；web 知识库详情新增「网页导入」Tab；新增 `WEB_IMPORT_FETCH_TIMEOUT_MS` /
+  `WEB_IMPORT_MAX_PAGE_SIZE_MB` / `WEB_IMPORT_MAX_REDIRECTS` / `WEB_IMPORT_SYNC_CRON` /
+  `WEB_IMPORT_SYNC_ENABLED` / `WEB_IMPORT_SYNC_BATCH_SIZE`；OpenAPI 升 0.13.0-m12
+- **内容治理（M11，docs/M11-CONTRACTS.md）**：①审核发布——知识库级 `review_required`
+  开关（`PUT /kb/{kbId}/governance`），开启后新上传文档初始为 DRAFT，经
+  submit-review/approve/reject 状态机（DRAFT|REJECTED → PENDING_REVIEW →
+  PUBLISHED|REJECTED）发布后才参与检索；②文档有效期——`PUT /documents/{docId}/validity`
+  设置/清除 `effective_at`/`expires_at` 窗口，仅窗口内参与检索，expires_at 设为过去即
+  立即下架；③回收站——trash 列表/restore/purge 端点，超过保留期由定时任务自动清除；
+  治理三态均收敛为检索时的活跃集 DB 谓词过滤，不写引擎，状态变更即时生效（时间窗
+  穿越靠缓存 TTL 5 分钟内收敛）；web 知识库详情新增发布状态/有效期列、审核操作、
+  「回收站」Tab 与审核开关；新增 `TRASH_RETENTION_DAYS` / `TRASH_PURGE_BATCH_SIZE` /
+  `TRASH_PURGE_CRON` / `TRASH_PURGE_ENABLED`；OpenAPI 升 0.12.0-m11；存量文档升级后
+  默认 PUBLISHED/无有效期/不在回收站，检索结果与升级前一致；已发布应用快照不受
+  治理影响
+
+### Changed
+
+- **上传白名单默认值变更（M12，醒目提示）**：`UPLOAD_ALLOWED_EXTENSIONS` 默认值新增
+  `html`（网页抓取产物走上传管线的前提）。显式设置过该变量的部署需自行追加 `html`，
+  否则 URL 导入首次同步即报“不支持的文件类型”；html 无魔数，与 txt/md/csv 同样仅验
+  扩展名与大小
+- **`DELETE /api/v1/documents/{docId}` 语义变更（M11，醒目提示）**：URL 不变，但删除
+  由不可逆改为移入回收站（检索立即下线、数据保留、保留期内可 `POST
+  /documents/{docId}/restore` 还原）；原来的不可逆删除（含两个检索引擎副本）迁移至
+  `DELETE /documents/{docId}/purge`，且仅对回收站内文档有效（两段式防误删）。依赖旧
+  语义的调用方需改为先 DELETE 再 purge
+
+### Added
+
+- **检索质量闭环（M10，docs/M10-CONTRACTS.md）**：①检索反馈从 log-only 升级为持久化闭环——
+  `POST /retrieval-feedback` payload 不变（兼容红线）但落库为可管理行，新增知识库维度的反馈
+  列表与转评测集（case source=FEEDBACK）/忽略端点，web 知识库详情新增「反馈管理」Tab；
+  ②检索洞察：控制台调试与 OpenAPI 检索自动记录脱敏摘要/命中数/降级标记（评测运行不记录，
+  不存原文），新增明细分页与内容缺口报表端点（零命中率/Top 未命中 query 归一化分组），
+  web 新增「检索洞察」Tab；新增 `INSIGHT_ENABLED` / `INSIGHT_RETENTION_DAYS` /
+  `INSIGHT_CLEANUP_BATCH_SIZE` / `INSIGHT_CLEANUP_CRON`；OpenAPI 升 0.11.0-m10
+
 ### Changed
 
 - **full 模式向量引擎定为 Qdrant（不兼容变更）**：`VECTOR_ENGINE` 合法取值为 `es | qdrant`。

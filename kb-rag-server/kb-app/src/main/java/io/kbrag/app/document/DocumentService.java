@@ -11,8 +11,10 @@ import io.kbrag.domain.entity.Annotation;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.DocumentVersion;
+import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.DocumentVersionStatus;
 import io.kbrag.domain.enums.ProcessStatus;
+import io.kbrag.domain.enums.PublishStatus;
 import io.kbrag.domain.mapper.AnnotationMapper;
 import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.mapper.DocumentMapper;
@@ -62,6 +64,8 @@ public class DocumentService {
     private static final String CONTENT_TYPE_OCTET_STREAM = "application/octet-stream";
     private static final int NOT_STALE = 0;
     private static final int DISABLED = 0;
+    private static final int NOT_TRASHED = 0;
+    private static final int REVIEW_REQUIRED = 1;
 
     private final DocumentMapper documentMapper;
     private final DocumentVersionMapper documentVersionMapper;
@@ -87,27 +91,28 @@ public class DocumentService {
      */
     @Transactional(rollbackFor = Exception.class)
     public UploadOutcome upload(String kbId, String fileName, byte[] content) {
-        knowledgeBaseService.require(kbId);
+        KnowledgeBase knowledgeBase = knowledgeBaseService.require(kbId);
         String extension = uploadValidator.validate(fileName, content);
         String contentHash = HashUtil.sha256Hex(content);
         Document existing = findLogicalDocument(kbId, fileName);
         return existing == null
-                ? createDocument(kbId, fileName, extension, content, contentHash)
+                ? createDocument(knowledgeBase, fileName, extension, content, contentHash)
                 : addVersion(existing, extension, content, contentHash);
     }
 
     /**
      * Creates a document together with its first version.
      *
-     * @param kbId        target knowledge base
-     * @param fileName    original file name
-     * @param extension   validated lower case extension
-     * @param content     raw bytes
-     * @param contentHash digest of the raw bytes
+     * @param knowledgeBase target knowledge base, read for the governance switch
+     * @param fileName      original file name
+     * @param extension     validated lower case extension
+     * @param content       raw bytes
+     * @param contentHash   digest of the raw bytes
      * @return what the upload did
      */
-    private UploadOutcome createDocument(String kbId, String fileName, String extension, byte[] content,
-                                         String contentHash) {
+    private UploadOutcome createDocument(KnowledgeBase knowledgeBase, String fileName, String extension,
+                                         byte[] content, String contentHash) {
+        String kbId = knowledgeBase.getKbId();
         String docId = bizIdGenerator.documentId();
         String versionId = bizIdGenerator.documentVersionId();
 
@@ -118,6 +123,12 @@ public class DocumentService {
         document.setFileExt(extension);
         document.setFileSize((long) content.length);
         document.setProcessStatus(ProcessStatus.UPLOADED);
+        // Admission is decided once at creation. Later versions inherit the state: the review gates what
+        // the document is, not each revision - revisions are governed by the M4a version machinery.
+        document.setPublishStatus(knowledgeBase.getReviewRequired() != null
+                && knowledgeBase.getReviewRequired() == REVIEW_REQUIRED
+                ? PublishStatus.DRAFT : PublishStatus.PUBLISHED);
+        document.setTrashed(NOT_TRASHED);
         document.setConfigStale(NOT_STALE);
         documentMapper.insert(document);
 
@@ -223,7 +234,8 @@ public class DocumentService {
      *
      * <p>Chat imports are excluded by requiring an empty source key: a conversation carries its own
      * logical identity and its display name is not unique, so matching on the name would merge unrelated
-     * conversations into one document.
+     * conversations into one document. A trashed document is excluded too: appending a version to it
+     * would resurrect content the operator threw away, so the upload starts a fresh document instead.
      *
      * @param kbId     knowledge base business id
      * @param fileName original file name
@@ -233,6 +245,7 @@ public class DocumentService {
         return documentMapper.selectOne(new LambdaQueryWrapper<Document>()
                 .eq(Document::getKbId, kbId)
                 .eq(Document::getFileName, fileName)
+                .eq(Document::getTrashed, NOT_TRASHED)
                 .isNull(Document::getSourceKey)
                 .orderByDesc(Document::getId)
                 .last("limit 1"));
@@ -305,6 +318,9 @@ public class DocumentService {
     public IPage<Document> list(String kbId, ProcessStatus processStatus, long page, long size) {
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
                 .eq(Document::getKbId, kbId)
+                // Trashed documents live in the recycle bin listing only; showing them here would make
+                // "deleted" and "present" indistinguishable in the console.
+                .eq(Document::getTrashed, NOT_TRASHED)
                 .orderByDesc(Document::getId);
         if (processStatus != null) {
             wrapper.eq(Document::getProcessStatus, processStatus);

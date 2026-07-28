@@ -14,5 +14,8 @@ public enum CaseSource {
     DEBUG_PAGE,
 
     /** Brought in by the demo data set importer. */
-    IMPORTED
+    IMPORTED,
+
+    /** Converted from a persisted retrieval feedback row, the M10 contract section 2.1. */
+    FEEDBACK
 }

@@ -179,6 +179,12 @@ export interface KnowledgeBase {
    * emits a primitive boolean); optional here only so pre-M7 fixtures still type-check.
    */
   graph_enabled?: boolean;
+  /**
+   * M11-CONTRACTS.md section 2.2: when true, new documents of this KB start as DRAFT and must pass
+   * review before they become retrievable. Only future uploads read the switch. Optional so pre-M11
+   * fixtures still type-check; the server always emits it.
+   */
+  review_required?: boolean;
 }
 
 export interface CreateKbRequest {
@@ -212,6 +218,21 @@ export const IN_PROGRESS_STATUSES: ProcessStatus[] = ['UPLOADED', 'PARSING', 'PA
 export const FAILED_STATUSES: ProcessStatus[] = ['PARSE_FAILED', 'INDEX_FAILED'];
 
 /**
+ * t_kb_document.publish_status (M11-CONTRACTS.md section 2.1): the editorial state, orthogonal to
+ * process_status. Transitions: DRAFT | REJECTED -> PENDING_REVIEW -> PUBLISHED | REJECTED, with
+ * PUBLISHED terminal (taking content offline is an expiry or a trash operation, not a rollback).
+ */
+export type PublishStatus = 'DRAFT' | 'PENDING_REVIEW' | 'PUBLISHED' | 'REJECTED';
+
+/** Tag color + label per publish status, shared by the document list and the trash tab. */
+export const PUBLISH_STATUS_META: Record<PublishStatus, { color: string; label: string }> = {
+  DRAFT: { color: 'default', label: '草稿' },
+  PENDING_REVIEW: { color: 'processing', label: '待审核' },
+  PUBLISHED: { color: 'success', label: '已发布' },
+  REJECTED: { color: 'error', label: '已驳回' },
+};
+
+/**
  * DocumentResponse (server). The four upload-only fields at the bottom are populated exclusively by
  * POST /kb/{kbId}/documents (UploadOutcome) and are absent from the list/detail responses.
  * No updated_at is exposed.
@@ -226,6 +247,16 @@ export interface KbDocument {
   process_status: ProcessStatus;
   config_stale: boolean;
   fail_reason: string | null;
+  /** M11: editorial state; the server answers PUBLISHED for every document that predates M11. */
+  publish_status: PublishStatus;
+  /** M11: latest rejection reason, null unless publish_status is REJECTED. */
+  review_note: string | null;
+  /** M11: ISO lower bound of the validity window, null = no lower bound. */
+  effective_at: string | null;
+  /** M11: ISO upper bound of the validity window, null = no upper bound. */
+  expires_at: string | null;
+  /** M11: ISO instant the document entered the recycle bin, null outside it. */
+  trashed_at: string | null;
   created_at: string;
   /** Upload only: id of the document version this upload created. */
   version_id?: string;
@@ -920,8 +951,11 @@ export type AnchorType = 'SPAN' | 'DOCUMENT';
  */
 export type CaseStatus = 'ACTIVE' | 'EVIDENCE_STALE' | 'DEPRECATED';
 
-/** t_kb_eval_case.source (M4b-CONTRACTS.md section 1). */
-export type CaseSource = 'MANUAL' | 'DEBUG_PAGE' | 'IMPORTED';
+/**
+ * t_kb_eval_case.source (M4b-CONTRACTS.md section 1), extended by M10-CONTRACTS.md section 2.1:
+ * FEEDBACK marks cases born from converting a GOOD retrieval feedback in the feedback management tab.
+ */
+export type CaseSource = 'MANUAL' | 'DEBUG_PAGE' | 'IMPORTED' | 'FEEDBACK';
 
 /** t_kb_eval_run.status (M4b-CONTRACTS.md section 1). */
 export type RunStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
@@ -1733,3 +1767,138 @@ export interface GraphEntitySourceChunk {
   content: string;
   enabled: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Retrieval quality loop (M10-CONTRACTS.md sections 1/2)
+// ---------------------------------------------------------------------------
+
+/** t_kb_retrieval_feedback.verdict (M10-CONTRACTS.md section 1). */
+export type FeedbackVerdict = 'GOOD' | 'BAD';
+
+/**
+ * t_kb_retrieval_feedback.status (M10-CONTRACTS.md section 1): NEW is the only non-terminal
+ * state; CONVERTED and DISMISSED are both final server-side (a second convert/dismiss is
+ * rejected with INVALID_PARAM), so the UI hides the row actions once a row leaves NEW.
+ */
+export type FeedbackStatus = 'NEW' | 'CONVERTED' | 'DISMISSED';
+
+/**
+ * t_kb_retrieval_feedback row (M10-CONTRACTS.md section 2.1). The raw query is returned on
+ * purpose: the operator deciding whether to convert has to read the question actually asked.
+ * doc_id is null when the chunk was already deleted at submission time.
+ */
+export interface RetrievalFeedbackEntry {
+  feedback_id: string;
+  kb_id: string;
+  query: string;
+  chunk_id: string;
+  doc_id: string | null;
+  verdict: FeedbackVerdict;
+  status: FeedbackStatus;
+  /** Evaluation case created from this row, null until converted. */
+  converted_case_id: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+/** GET /api/v1/kb/{kbId}/retrieval-feedback query params (M10-CONTRACTS.md section 2.1). */
+export interface ListRetrievalFeedbackParams {
+  verdict?: FeedbackVerdict;
+  status?: FeedbackStatus;
+  page?: number;
+  size?: number;
+}
+
+/** POST /api/v1/retrieval-feedback/{feedbackId}/convert request body (M10-CONTRACTS.md section 2.1). */
+export interface ConvertFeedbackRequest {
+  dataset_id: string;
+}
+
+/** t_kb_search_insight.source (M10-CONTRACTS.md section 2.2): which entrance ran the retrieval. */
+export type SearchInsightSource = 'CONSOLE' | 'OPEN_API';
+
+/**
+ * t_kb_search_insight row (M10-CONTRACTS.md section 2.2). query_digest is masked and truncated
+ * server-side (never the raw query -- insight rows are statistics, not evidence); top_score is
+ * null on zero hits; degraded lists the degradation markers the call carried (e.g. embedding
+ * fallback), empty for a clean call.
+ */
+export interface SearchInsightEntry {
+  insight_id: string;
+  kb_id: string;
+  source: SearchInsightSource;
+  query_digest: string;
+  result_count: number;
+  top_score: number | null;
+  zero_hit: boolean;
+  degraded: string[];
+  request_id: string | null;
+  created_at: string;
+}
+
+/**
+ * GET /api/v1/kb/{kbId}/search-insights query params (M10-CONTRACTS.md section 2.2).
+ * from/to are ISO date-times, e.g. 2026-07-26T00:00:00.
+ */
+export interface ListSearchInsightParams {
+  zero_hit?: boolean;
+  from?: string;
+  to?: string;
+  page?: number;
+  size?: number;
+}
+
+/** One zero-hit query group of the stats report, newest digest of the group + occurrence count. */
+export interface TopZeroHitQuery {
+  query_digest: string;
+  count: number;
+  last_at: string | null;
+}
+
+/** GET /api/v1/kb/{kbId}/search-insights/stats response (M10-CONTRACTS.md section 2.2). */
+export interface SearchInsightStats {
+  total: number;
+  zero_hit_count: number;
+  /** zero_hit_count / total, 0 when the window is empty. */
+  zero_hit_rate: number;
+  degraded_count: number;
+  /** Most frequent zero-hit query groups, largest first (case/whitespace-normalized grouping). */
+  top_zero_hit_queries: TopZeroHitQuery[];
+}
+
+// ---------------------------------------------------------------------------
+// Web source / URL import (M12-CONTRACTS.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * t_kb_web_source.last_fetch_status (M12-CONTRACTS.md section 3.4). UNCHANGED and SKIPPED are
+ * successes of a kind: the fetch worked but writing anything would have been wrong (page hash
+ * identical / bound document sits in the recycle bin, respectively).
+ */
+export type WebSourceFetchStatus = 'SUCCESS' | 'UNCHANGED' | 'SKIPPED' | 'FAILED';
+
+/**
+ * t_kb_web_source row (M12-CONTRACTS.md section 1): one registered page URL and the outcome of
+ * its last sync. doc_id/file_name stay null until the first successful fetch; the binding is
+ * weak -- removing the registration never touches the document and vice versa.
+ */
+export interface WebSourceEntry {
+  source_id: string;
+  kb_id: string;
+  url: string;
+  doc_id: string | null;
+  file_name: string | null;
+  sync_enabled: boolean;
+  last_fetch_status: WebSourceFetchStatus | null;
+  last_fetch_at: string | null;
+  last_error: string | null;
+  created_at: string;
+}
+
+/** POST /api/v1/kb/{kbId}/web-sources request body (M12-CONTRACTS.md section 3.4). */
+export interface RegisterWebSourceRequest {
+  url: string;
+  /** Defaults to true server-side when omitted. */
+  sync_enabled?: boolean;
+}
+

@@ -140,6 +140,50 @@ public class ModelProviderConfig {
     }
 
     /**
+     * Selects the graph extraction chat provider, requirement section 4.9.
+     *
+     * <p>Shares the credential, model and base URL of {@code kb.chat} and only substitutes the token
+     * budget: {@code kb.chat.max-tokens} sizes a single line query rewrite, while one extraction answer
+     * is a JSON object carrying every entity and relation of the passage. Running out mid object yields
+     * truncated JSON, which the parser can only reject - the chunk is then counted as skipped and the
+     * loss shows up as "output validation failed" although nothing was wrong with the model's answer.
+     *
+     * @param properties bound configuration
+     * @return configured provider, or the unconfigured placeholder
+     */
+    @Bean
+    public ChatProvider graphExtractionChatProvider(KbProperties properties) {
+        KbProperties.Chat chatConfig = properties.getChat();
+        if (chatConfig.getApiKey() == null || chatConfig.getApiKey().isBlank()) {
+            log.info("graph extraction chat provider not configured, extraction disabled");
+            return new UnconfiguredChatProvider();
+        }
+        KbProperties.Chat extractConfig = withMaxTokens(chatConfig, properties.getGraph().getExtractMaxTokens());
+        log.info("graph extraction chat provider configured, model={}, maxTokens={}",
+                extractConfig.getModel(), extractConfig.getMaxTokens());
+        return new DashScopeChatProvider(extractConfig);
+    }
+
+    /**
+     * Copies a chat configuration substituting only the token budget.
+     *
+     * @param source    configuration to copy
+     * @param maxTokens generation budget to substitute
+     * @return copy carrying the substituted budget
+     */
+    private KbProperties.Chat withMaxTokens(KbProperties.Chat source, int maxTokens) {
+        KbProperties.Chat copy = new KbProperties.Chat();
+        copy.setProvider(source.getProvider());
+        copy.setModel(source.getModel());
+        copy.setApiKey(source.getApiKey());
+        copy.setBaseUrl(source.getBaseUrl());
+        copy.setTimeoutMs(source.getTimeoutMs());
+        copy.setTemperature(source.getTemperature());
+        copy.setMaxTokens(maxTokens);
+        return copy;
+    }
+
+    /**
      * Copies a chat configuration substituting the model and forcing temperature to zero, so the judge
      * provider can point at a different, reproducible model without a second credential set.
      *

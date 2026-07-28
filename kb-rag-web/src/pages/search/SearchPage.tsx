@@ -172,7 +172,8 @@ export default function SearchPage() {
       verdict,
     });
     setFeedbackByChunkId((prev) => ({ ...prev, [chunkId]: verdict }));
-    message.success(verdict === 'GOOD' ? '已标记为好结果' : '已标记为坏结果');
+    // M10-CONTRACTS.md section 3: BAD now lands as a manageable row, so tell the operator where it went.
+    message.success(verdict === 'GOOD' ? '已标记为好结果' : '已记录，可在知识库详情的反馈管理中查看');
   };
 
   const selectedNodes = result?.nodes.filter((node) => selectedChunkIds.includes(node.chunk_id)) ?? [];

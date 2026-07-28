@@ -1,37 +1,139 @@
 package io.kbrag.api.controller;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import io.kbrag.api.dto.ConvertFeedbackRequest;
+import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.RetrievalFeedbackRequest;
+import io.kbrag.api.dto.RetrievalFeedbackResponse;
+import io.kbrag.app.feedback.RetrievalFeedbackService;
 import io.kbrag.common.api.Result;
+import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.entity.RetrievalFeedback;
+import io.kbrag.domain.enums.FeedbackStatus;
+import io.kbrag.domain.enums.FeedbackVerdict;
 import jakarta.validation.Valid;
-import lombok.extern.slf4j.Slf4j;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Good/bad feedback on one debug page result, requirement section 4.5.
+ * Good/bad feedback on debug page results, requirement section 4.5 and the M10 contract section 2.1.
  *
- * <p>See the M4b contract section 2 and {@link RetrievalFeedbackRequest} for why this endpoint does
- * not persist anything: a {@code GOOD} verdict is already covered by
- * {@code POST /eval-datasets/{datasetId}/cases/from-retrieval}, which the debug page calls once an
- * operator names a target data set, and a standalone {@code BAD} table has no consumer this milestone.
+ * <p>The submission payload is unchanged from M4b - the compatibility line of the M10 contract - but
+ * the behaviour is upgraded from "log and forget" to a persisted row the console can list, convert
+ * into an evaluation case or dismiss.
  *
  * @author owlzhangfq@gmail.com
  */
-@Slf4j
 @RestController
+@RequiredArgsConstructor
 public class RetrievalFeedbackController {
 
+    private static final int DEFAULT_PAGE = 1;
+    private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final int MAX_PAGE_SIZE = 200;
+
+    private final RetrievalFeedbackService retrievalFeedbackService;
+
     /**
-     * Records a feedback signal without persisting it.
+     * Records one feedback signal.
      *
      * @param request feedback payload
-     * @return empty payload
+     * @return persisted row, {@code status=NEW}
      */
     @PostMapping("/api/v1/retrieval-feedback")
-    public Result<Void> feedback(@Valid @RequestBody RetrievalFeedbackRequest request) {
-        log.info("retrieval feedback received, kbId={}, chunkId={}, verdict={}",
-                request.kbId(), request.chunkId(), request.verdict());
-        return Result.success(null);
+    public Result<RetrievalFeedbackResponse> feedback(@Valid @RequestBody RetrievalFeedbackRequest request) {
+        FeedbackVerdict verdict = FeedbackVerdict.from(request.verdict());
+        if (verdict == null) {
+            throw BizException.invalidParam("verdict 仅支持 GOOD 或 BAD");
+        }
+        RetrievalFeedback feedback = retrievalFeedbackService.record(
+                request.kbId(), request.query(), request.chunkId(), verdict);
+        return Result.success(RetrievalFeedbackResponse.from(feedback));
+    }
+
+    /**
+     * Pages the feedback of one knowledge base, newest first.
+     *
+     * @param kbId    knowledge base business id
+     * @param verdict optional {@code GOOD} or {@code BAD} filter
+     * @param status  optional {@code NEW}, {@code CONVERTED} or {@code DISMISSED} filter
+     * @param page    one based page number
+     * @param size    page size
+     * @return paged rows
+     */
+    @GetMapping("/api/v1/kb/{kbId}/retrieval-feedback")
+    public Result<PageResponse<RetrievalFeedbackResponse>> list(
+            @PathVariable String kbId,
+            @RequestParam(required = false) String verdict,
+            @RequestParam(required = false) String status,
+            @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
+            @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
+        IPage<RetrievalFeedback> paged = retrievalFeedbackService.list(kbId,
+                parseVerdict(verdict), parseStatus(status), normalizePage(page), normalizeSize(size));
+        return Result.success(PageResponse.from(paged, RetrievalFeedbackResponse::from));
+    }
+
+    /**
+     * Converts one {@code GOOD} feedback into an evaluation case.
+     *
+     * @param feedbackId feedback business id
+     * @param request    target data set
+     * @return the same row, {@code status=CONVERTED} with the case id filled in
+     */
+    @PostMapping("/api/v1/retrieval-feedback/{feedbackId}/convert")
+    public Result<RetrievalFeedbackResponse> convert(@PathVariable String feedbackId,
+                                                     @Valid @RequestBody ConvertFeedbackRequest request) {
+        return Result.success(RetrievalFeedbackResponse.from(
+                retrievalFeedbackService.convert(feedbackId, request.datasetId())));
+    }
+
+    /**
+     * Dismisses one feedback.
+     *
+     * @param feedbackId feedback business id
+     * @return the same row, {@code status=DISMISSED}
+     */
+    @PostMapping("/api/v1/retrieval-feedback/{feedbackId}/dismiss")
+    public Result<RetrievalFeedbackResponse> dismiss(@PathVariable String feedbackId) {
+        return Result.success(RetrievalFeedbackResponse.from(
+                retrievalFeedbackService.dismiss(feedbackId)));
+    }
+
+    private FeedbackVerdict parseVerdict(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        FeedbackVerdict verdict = FeedbackVerdict.from(value);
+        if (verdict == null) {
+            throw BizException.invalidParam("verdict 仅支持 GOOD 或 BAD");
+        }
+        return verdict;
+    }
+
+    private FeedbackStatus parseStatus(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        FeedbackStatus status = FeedbackStatus.from(value);
+        if (status == null) {
+            throw BizException.invalidParam("status 仅支持 NEW、CONVERTED 或 DISMISSED");
+        }
+        return status;
+    }
+
+    private long normalizePage(long page) {
+        return page < DEFAULT_PAGE ? DEFAULT_PAGE : page;
+    }
+
+    private long normalizeSize(long size) {
+        if (size < 1) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(size, MAX_PAGE_SIZE);
     }
 }

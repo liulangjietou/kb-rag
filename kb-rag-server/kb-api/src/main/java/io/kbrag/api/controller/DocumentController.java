@@ -7,6 +7,7 @@ import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.ReparseRequest;
 import io.kbrag.app.document.DocumentPreviewService;
 import io.kbrag.app.document.DocumentService;
+import io.kbrag.app.governance.DocumentGovernanceService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.enums.ProcessStatus;
@@ -42,6 +43,7 @@ public class DocumentController {
 
     private final DocumentService documentService;
     private final DocumentPreviewService documentPreviewService;
+    private final DocumentGovernanceService documentGovernanceService;
 
     /**
      * Uploads a document and hands it over to the asynchronous pipeline.
@@ -152,14 +154,18 @@ public class DocumentController {
     }
 
     /**
-     * Removes a document, its versions and its chunks, including the engine copies.
+     * Moves a document into the recycle bin, out of retrieval but restorable.
+     *
+     * <p>The URL predates M11 and keeps its meaning of "delete this document" for every caller; what
+     * changed is that the deletion is now reversible until the retention period runs out or an
+     * explicit purge follows. Chunks, versions and engine copies stay untouched until then.
      *
      * @param docId document business id
      * @return empty success envelope
      */
     @DeleteMapping("/api/v1/documents/{docId}")
     public Result<Void> delete(@PathVariable String docId) {
-        documentService.delete(docId);
+        documentGovernanceService.trash(docId);
         return Result.success(null);
     }
 

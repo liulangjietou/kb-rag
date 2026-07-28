@@ -1,12 +1,12 @@
 # kb-rag 架构文档
 
-> 版本：v1.1（基线 = 一期 M1-M7 + 二期 M8/M9 及其后修复合并进各仓 main 的状态，2026-07-27；v1.0 基线为 M8）
-> 日期：2026-07-27
+> 版本：v1.2（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13，2026-07-28；v1.1 基线为 M9，v1.0 基线为 M8）
+> 日期：2026-07-28
 > 作者：RichardFyoung / Claude
 >
 > **文档定位**：本文描述系统的实际实现架构（以代码为准），与以下文档互补——
 > - `知识库需求文档.md`：需求与设计决策的唯一事实源（"为什么做、做什么"）
-> - `M1~M9-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
+> - `M1~M13-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
 > - `openapi/kb-server.yaml`、`openapi/kb-parser.yaml`：HTTP 接口的唯一契约源
 > - `FLOWS.md`：核心流程图（与本文配套阅读）
 
@@ -91,14 +91,14 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | 模块 | 职责 | 关键内容 |
 |---|---|---|
 | **kb-common** | 无 Spring 依赖的基础件 | `Result` 统一响应信封、`ErrorCode`、`BizException`/`ProviderException`、`JsonUtil`/`HashUtil`、`RequestIdHolder`、`KbConstants`（业务 ID 前缀与 `kb-sk-` Key 前缀） |
-| **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 23 张业务表一一对应）、30+ 枚举、60+ 领域模型、**13 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
-| **kb-infrastructure** | 端口实现，按外部依赖分包 | `search.es` / `search.qdrant` / `graph` / `provider.{chat,embedding,rerank,vision}` / `storage` / `parser` / `notify` / `config` |
-| **kb-app** | 应用编排层（架构主体） | 15 个业务域包：`kb` / `document` / `index` / `retrieval` / `graph` / `annotation` / `eval` / `appcenter` / `openapi` / `chat` / `alert` / `dict` / `auth` / `system` / `config` |
-| **kb-api** | HTTP 边界与装配点 | 23 个 Controller、过滤器/拦截器、SSE、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
+| **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 26 张业务表一一对应）、30+ 枚举、60+ 领域模型、**14 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
+| **kb-infrastructure** | 端口实现，按外部依赖分包 | `search.es` / `search.qdrant` / `graph` / `provider.{chat,embedding,rerank,vision}` / `storage` / `parser` / `notify` / `web` / `config` |
+| **kb-app** | 应用编排层（架构主体） | 20 个业务域包：`kb` / `document` / `index` / `retrieval` / `graph` / `annotation` / `eval` / `appcenter` / `openapi` / `chat` / `alert` / `dict` / `auth` / `system` / `config` / `feedback` / `insight` / `governance` / `websource` / `metrics` |
+| **kb-api** | HTTP 边界与装配点 | 24 个 Controller、过滤器/拦截器、SSE、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
 
 分层规则：Controller 只依赖 kb-app 的 Service 与 kb-domain 的 model/enum；kb-app 只依赖端口接口，**从不依赖 kb-infrastructure 具体类**；kb-infrastructure 实现端口，与 kb-app 互不感知。
 
-### 3.2 领域端口与实现（13 个）
+### 3.2 领域端口与实现（14 个）
 
 | 端口 | 实现（默认 / 降级） | 说明 |
 |---|---|---|
@@ -115,6 +115,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `WebhookNotifier` | `HttpWebhookNotifier` | 告警外发 |
 | `TokenEstimator` | `SimpleTokenEstimator` | 分片长度以 token 计、`max_content_length` 预算 |
 | `VersionPinChecker` | `AppVersionPinChecker` | 被应用版本可见集引用的文档版本禁止归档（已下线版本同样 pin——chunk 正文只在 MySQL） |
+| `WebPageFetcher`（M12） | `HttpWebPageFetcher` | 网页抓取（URL 导入/增量同步）：SSRF 防护由调用侧经 kb-domain 的 `UrlGuard` 前置校验，Content-Type 白名单、体积上限、超时控制 |
 
 **零 Key / 能力开关统一装置**：`ModelProviderConfig` 是唯一读模型凭据的地方，凭据为空即注入 `Unconfigured*` 实现；`GraphStoreConfig`（NEO4J_URI 空 → `DisabledGraphStore`）与 `QdrantClientConfig`（QDRANT_URI 空 → 不建 client、不注册健康探针）镜像同一模式。上游代码只写 `isConfigured()/isEnabled()` 一个分支，全链路无 null 检查——这是需求 §5"防御式编程只做一处且高复用"的落地点。
 
@@ -198,9 +199,9 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `ApiAuditArchiveService` | cron 03:30 | 审计日志归档 MinIO → 分批物理删除 |
 | `AppSnapshotRetentionService` | cron 04:15 | SUPERSEDED 版本快照按保留数清理（RELEASED 永不清理） |
 
-### 3.8 数据模型（23 张业务表，Flyway V1-V11）
+### 3.8 数据模型（26 张业务表，Flyway V1-V14）
 
-全部 InnoDB，统一 `id / created_at / updated_at / lock_version / deleted`，审计字段由 `AuditFieldFiller` 填充，业务 ID 带类型前缀（kb/doc/dv/ck/task/img/upt/an/evds/evc/evr/evre/app/av/ak/aud/smp）。
+全部 InnoDB，统一 `id / created_at / updated_at / lock_version / deleted`，审计字段由 `AuditFieldFiller` 填充，业务 ID 带类型前缀（kb/doc/dv/ck/task/img/upt/an/evds/evc/evr/evre/app/av/ak/aud/smp/rfb/si/ws）。
 
 | 迁移 | 表 / 变更 |
 |---|---|
@@ -215,6 +216,9 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V9（M8） | `t_kb_source_mapping`（映射档案，启动播种内置模板、只补缺不覆盖） |
 | V10（M9） | `t_kb_chunk` 加 `parent_start_offset` / `parent_end_offset`（子片在父片中的 [起,止) 字符偏移，切分副产物、不做事后反查；子片编辑/合并/拆分及父片编辑时失效置 null） |
 | V11（M9 后修复） | `t_kb_auth_token`（管理台登录 Token 落库，仅存 SHA-256 哈希，24h TTL 语义不变） |
+| V12（M10） | `t_kb_retrieval_feedback`（检索反馈，带幂等键）/ `t_kb_search_insight`（检索洞察埋点，只增不改） |
+| V13（M11） | `t_kb_document` 加 `publish_status` / `review_note` / `effective_at` / `expires_at` / `trashed` / `trashed_at`；`t_kb_knowledge_base` 加 `review_required` |
+| V14（M12） | `t_kb_web_source`（网页来源登记：URL/content_hash/四态同步状态/派生文档关联） |
 
 引擎侧可过滤字段全集（Qdrant 标量 / ES filter，建索引时显式声明）：`kb_id`、`doc_id`、`document_version_id`、`enabled`、`parent_id`、`chunk_type`、`tag_ids`、`session_id`、`sender`、`msg_time`、`chunk_seq`；其余 metadata 只存 MySQL。新增可过滤维度视为 schema 变更，走索引重建迁移。
 
@@ -233,14 +237,14 @@ Python 3.11+ / FastAPI + Uvicorn / pydantic 2。解析实现：**PyMuPDF**（pdf
 | 端点 | 用途 |
 |---|---|
 | `GET /health` | 存活探针 |
-| `POST /api/v1/parse` | multipart `file` + `file_ext`（pdf/docx/txt/md/xlsx/csv）→ markdown + 按页文本（`scanned`/`ocr_source` 标记）+ 图片 base64（`kind=embedded|page_render`）+ `warnings[]` |
+| `POST /api/v1/parse` | multipart `file` + `file_ext`（pdf/docx/txt/md/xlsx/csv/html/htm，html 为 M12 增量）→ markdown + 按页文本（`scanned`/`ocr_source` 标记）+ 图片 base64（`kind=embedded|page_render`）+ `warnings[]` |
 | `POST /api/v1/parse/chat` | multipart `file` + `file_ext`（csv/xlsx/txt/html）+ 可选 `mapping_profile`/`profile_yaml` → 统一 ChatMessage 会话结构 + `skipped` 统计 |
 
 ### 4.3 模块结构
 
 - `main.py`：端点 + `ThreadPoolExecutor(4)` 跑阻塞解析 + `asyncio.wait_for` 300s 超时；所有可恢复失败归一化为信封错误。
 - `config.py`：全部常量单点（100MB 文件上限、zip 解压 500MB/2000 条目上限、扫描页文本阈值、图片 100 张/10MB 上限、TXT 不匹配行 30% 失败线等）。
-- `parsers/`：`BaseParser` 策略接口 + `registry.py` 查表分派；pdf（扫描页判定 + 渲染，扫描页不再另抽内嵌图防双计）/ docx（段落表格图片按原始顺序，占位符插回）/ excel+csv（markdown 表格，每 sheet 一个 page_no）/ text。
+- `parsers/`：`BaseParser` 策略接口 + `registry.py` 查表分派；pdf（扫描页判定 + 渲染，扫描页不再另抽内嵌图防双计）/ docx（段落表格图片按原始顺序，占位符插回）/ excel+csv（markdown 表格，每 sheet 一个 page_no）/ text / html（M12 通用 HTML 页面：仅标准库 html.parser，标题/块级分段→markdown，零出站请求）。
 - `chat/`：`parser.py` 按格式编排；`mapping.py`（MappingProfile：csv/xlsx 候选列名 + txt 行正则 + html 选择器三段配置，来源优先级 请求内联 profile_yaml > 本地 mappings/*.yml > 按扩展名内置默认）；`txt_adapter.py`（行首正则 + 续行归并）；`html_adapter.py`（仅标准库的最小 DOM 选择器引擎，剥 script/style，img 只判存在不下载）；`normalize.py`（时间戳/消息类型归一）。语音/视频消息剔除并计入 `skipped`。
 - `ocr/engine.py`：`OcrEngine` 策略（NoOp / Paddle 懒加载），`OCR_ENGINE=paddle` 未装依赖时启动 fast-fail；单页 30s 超时、按页降级绝不整篇失败。三级次序：**server 侧 VLM（有 Key）→ 本地 PaddleOCR（离线）→ 跳过**；本地 OCR 成功回填 `pages[].text` 并置 `ocr_source=paddle`，server 据此跳过 VLM。
 - `security.py`：zip-slip/zip 炸弹校验、defusedxml 全局加固（XXE）；解析阶段无任何出站网络请求（SSRF 基线）。
@@ -265,7 +269,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | 路由 | 页面 |
 |---|---|
 | `/login`、`/change-password` | 登录（防爆破提示）、首登强制改密 |
-| `/kb`、`/kb/:kbId` | 知识库列表；详情（文档上传/状态轮询/分片标注 ChunkDrawer/版本 VersionDrawer/索引配置/聊天导入向导/图谱 GraphTab） |
+| `/kb`、`/kb/:kbId` | 知识库列表；详情（文档上传/状态轮询/审核与有效期操作/分片标注 ChunkDrawer/版本 VersionDrawer/索引配置/聊天导入向导；图谱 GraphTab / 反馈管理 / 检索洞察 / 回收站 / 网页导入等 Tab） |
 | `/search` | 检索调试（参数面板、分数明细、degraded 告警、收进评测集） |
 | `/chat` | 问答调试（JWT 走 `/apps/{id}/chat-preview` SSE） |
 | `/apps`、`/apps/:appId` | 应用中心（配置 / 版本与门禁 / API 调试三 tab） |
@@ -298,7 +302,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | `scripts/benchmark.sh` | 纯 bash+curl 压测（P50/P95/P99），验收口径 P95<2s；`seed-bench.py` 零 Key 直灌 10 万分片种子数据 |
 | `demo/` | 4 篇原创文档（md/docx/pdf/xlsx 各一，字节级可复现生成）+ `eval-cases.json`（10 条，含文档级锚定图片 case，按文件名+content_hash 关联导入） |
 | `mappings/` | 聊天记录列名映射模板分发（memotrace 等） |
-| `docs/` | 需求文档、M1-M9 契约、OpenAPI（`kb-server.yaml` 0.10.0-m9，75 条路径 / `kb-parser.yaml` 0.9.0-m8，3 端点）、备份恢复手册、本文档与 `FLOWS.md` |
+| `docs/` | 需求文档、M1-M13 契约、OpenAPI（`kb-server.yaml` 0.13.0-m12，92 条路径 / `kb-parser.yaml` 0.12.0-m12，3 端点）、备份恢复手册、本文档与 `FLOWS.md` |
 
 ---
 
@@ -318,6 +322,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 
 - `request_id` 全链路：`RequestIdFilter` 入口生成 → MDC → 响应头 → `X-Request-Id` 透传 parser 与 Provider 调用日志 → `TaskDecorator` 带入异步线程。
 - 健康：Actuator 组合探针（ES 必选；Qdrant/Neo4j 仅配置时注册；MinIO；parser `/health`）。
+- 指标（M13）：`/actuator/prometheus` 可直接抓取（micrometer-registry-prometheus，与 health 同口径暂不鉴权）；`KbMetrics` 门面承载四类业务指标——`kb_search_seconds`（Timer，source/zero_hit/degraded 标签）、`kb_task_completed_total`、`kb_openapi_rejected_total`、`kb_websource_sync_total`；`TaskBacklogMetrics` 提供 `kb_task_backlog`（pending/running 两支 gauge，DB 异常回 NaN 不失败抓取）；埋点全部骑在既有横切点上，记录失败绝不影响业务路径。
 - 告警：`AlertEvaluator` 三类触发 + 静默期，Webhook 未配置降级界面红点；日志仅 info/error、英文、错误码占位符。
 
 ### 7.4 一致性手法汇总

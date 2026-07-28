@@ -3,6 +3,9 @@ package io.kbrag.api.dto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.kbrag.app.document.UploadOutcome;
 import io.kbrag.domain.entity.Document;
+import io.kbrag.domain.enums.PublishStatus;
+
+import java.time.LocalDateTime;
 
 /**
  * Document view.
@@ -16,6 +19,11 @@ import io.kbrag.domain.entity.Document;
  * @param processStatus    processing state
  * @param configStale      {@code true} when the active version used an older configuration
  * @param failReason       classified failure cause
+ * @param publishStatus    editorial state, PUBLISHED for every document that predates M11
+ * @param reviewNote       latest rejection reason, {@code null} unless the state is REJECTED
+ * @param effectiveAt      ISO lower bound of the validity window, {@code null} means unbounded
+ * @param expiresAt        ISO upper bound of the validity window, {@code null} means unbounded
+ * @param trashedAt        ISO instant the document entered the recycle bin, {@code null} outside it
  * @param createdAt        ISO creation timestamp
  * @param versionId        version the upload produced, only present on the upload response
  * @param version          version number of that version, only present on the upload response
@@ -34,6 +42,11 @@ public record DocumentResponse(
         @JsonProperty("process_status") String processStatus,
         @JsonProperty("config_stale") boolean configStale,
         @JsonProperty("fail_reason") String failReason,
+        @JsonProperty("publish_status") String publishStatus,
+        @JsonProperty("review_note") String reviewNote,
+        @JsonProperty("effective_at") String effectiveAt,
+        @JsonProperty("expires_at") String expiresAt,
+        @JsonProperty("trashed_at") String trashedAt,
         @JsonProperty("created_at") String createdAt,
         @JsonProperty("version_id") String versionId,
         String version,
@@ -78,10 +91,21 @@ public record DocumentResponse(
                 entity.getProcessStatus() == null ? null : entity.getProcessStatus().name(),
                 entity.getConfigStale() != null && entity.getConfigStale() == STALE,
                 entity.getFailReason(),
+                // Rows written before the M11 migration carry a null column and are PUBLISHED by contract.
+                entity.getPublishStatus() == null
+                        ? PublishStatus.PUBLISHED.name() : entity.getPublishStatus().name(),
+                entity.getReviewNote(),
+                iso(entity.getEffectiveAt()),
+                iso(entity.getExpiresAt()),
+                iso(entity.getTrashedAt()),
                 entity.getCreatedAt() == null ? null : entity.getCreatedAt().toString(),
                 versionId,
                 version,
                 duplicated,
                 duplicateOfDocId);
+    }
+
+    private static String iso(LocalDateTime value) {
+        return value == null ? null : value.toString();
     }
 }

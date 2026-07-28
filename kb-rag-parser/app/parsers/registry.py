@@ -13,6 +13,7 @@ from app.errors import ErrorCode, UnsupportedFormatError
 from app.parsers.base import BaseParser
 from app.parsers.docx import DocxParser
 from app.parsers.excel import CsvParser, ExcelParser
+from app.parsers.html import HtmlParser
 from app.parsers.pdf import PdfParser
 from app.parsers.text import TextParser
 
@@ -23,6 +24,7 @@ _docx_parser = DocxParser()
 _text_parser = TextParser()
 _excel_parser = ExcelParser()
 _csv_parser = CsvParser()
+_html_parser = HtmlParser()
 
 # file_ext (lowercase, no leading dot) -> parser instance.
 _REGISTRY: dict[str, BaseParser] = {
@@ -32,6 +34,8 @@ _REGISTRY: dict[str, BaseParser] = {
     "md": _text_parser,
     "xlsx": _excel_parser,
     "csv": _csv_parser,
+    "html": _html_parser,
+    "htm": _html_parser,
 }
 
 

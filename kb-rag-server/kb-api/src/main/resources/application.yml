@@ -155,7 +155,7 @@ kb:
     bootstrap-username: ${AUTH_BOOTSTRAP_USERNAME:admin}
   upload:
     max-file-size-mb: ${UPLOAD_MAX_FILE_SIZE_MB:100}
-    allowed-extensions: ${UPLOAD_ALLOWED_EXTENSIONS:pdf,docx,txt,md,xlsx,csv,png,jpg,jpeg,webp,bmp,gif}
+    allowed-extensions: ${UPLOAD_ALLOWED_EXTENSIONS:pdf,docx,txt,md,xlsx,csv,html,png,jpg,jpeg,webp,bmp,gif}
   doc:
     version:
       # Non active READY versions kept per document; the older ones are archived and lose their chunks,
@@ -217,6 +217,9 @@ kb:
     # and the concurrency is how many run at a time inside a batch.
     extract-batch-size: ${GRAPH_EXTRACT_BATCH_SIZE:10}
     extract-concurrency: ${GRAPH_EXTRACT_CONCURRENCY:2}
+    # Budget of one extraction answer. Deliberately not kb.chat.max-tokens: that one sizes a single line
+    # query rewrite, and running out mid JSON makes the parser reject an answer that was in fact fine.
+    extract-max-tokens: ${GRAPH_EXTRACT_MAX_TOKENS:2048}
   web:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:20002,http://127.0.0.1:20002}
   eval:
@@ -247,6 +250,34 @@ kb:
     audit-archive-prefix: ${AUDIT_ARCHIVE_PREFIX:audit/}
     # Width of the query_digest column; the digest is masked first and truncated to this afterwards.
     query-digest-max-length: ${AUDIT_QUERY_DIGEST_MAX_LENGTH:200}
+  insight:
+    # Off switches only the recording points; the report endpoints and the cleanup keep working
+    # over whatever rows already exist.
+    enabled: ${INSIGHT_ENABLED:true}
+    # Days an insight row stays queryable. Insight rows are statistics, not evidence, so unlike the
+    # audit trail they are deleted without an object storage archive.
+    retention-days: ${INSIGHT_RETENTION_DAYS:90}
+    cleanup-batch-size: ${INSIGHT_CLEANUP_BATCH_SIZE:5000}
+    cleanup-cron: ${INSIGHT_CLEANUP_CRON:0 45 3 * * *}
+  governance:
+    # Days a trashed document stays restorable. The purge is the same irreversible removal the old
+    # DELETE endpoint performed, so the window is the operator's undo horizon.
+    trash-retention-days: ${TRASH_RETENTION_DAYS:30}
+    # Documents per purge batch; each one clears chunks and both engine copies, hence the small bound.
+    trash-purge-batch-size: ${TRASH_PURGE_BATCH_SIZE:100}
+    trash-purge-cron: ${TRASH_PURGE_CRON:0 10 4 * * *}
+    trash-purge-enabled: ${TRASH_PURGE_ENABLED:true}
+  web-import:
+    # Per request budget of one page fetch, connect and read alike.
+    fetch-timeout-ms: ${WEB_IMPORT_FETCH_TIMEOUT_MS:10000}
+    # Body ceiling enforced while streaming, so a hostile Content-Length cannot lie its way past it.
+    max-page-size-mb: ${WEB_IMPORT_MAX_PAGE_SIZE_MB:10}
+    # Redirect hops followed by hand; every hop is re-validated against the SSRF guard.
+    max-redirects: ${WEB_IMPORT_MAX_REDIRECTS:3}
+    sync-cron: ${WEB_IMPORT_SYNC_CRON:0 30 2 * * *}
+    sync-enabled: ${WEB_IMPORT_SYNC_ENABLED:true}
+    # Sources per scheduled pass; fetches are slow network calls, so a pass drains a bounded slice.
+    sync-batch-size: ${WEB_IMPORT_SYNC_BATCH_SIZE:50}
   app:
     # Retired application versions per application whose index snapshot is kept. Every snapshot is a full copy
     # of the corpus of every linked knowledge base, so this is the rollback depth traded against disk.

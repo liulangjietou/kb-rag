@@ -15,6 +15,7 @@ import {
   Popconfirm,
   Progress,
   Space,
+  Switch,
   Table,
   Tabs,
   Tag,
@@ -25,17 +26,30 @@ import {
 } from 'antd';
 import type { UploadProps } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
-import { deleteDocument, listDocuments, reindexDocument, uploadDocument } from '../../api/document';
-import { confirmKbDocuments, getKnowledgeBase, rebuildKb } from '../../api/kb';
+import {
+  approveDocument,
+  deleteDocument,
+  listDocuments,
+  reindexDocument,
+  submitDocumentReview,
+  uploadDocument,
+} from '../../api/document';
+import { confirmKbDocuments, getKnowledgeBase, rebuildKb, updateKbGovernance } from '../../api/kb';
+import { PUBLISH_STATUS_META } from '../../api/types';
 import type { KbDocument, KnowledgeBase } from '../../api/types';
 import { formatFileSize } from '../../utils/format';
 import { PROCESS_STATUS_META, metaOf } from '../../utils/statusMeta';
 import ChatImportWizard from './components/ChatImportWizard';
 import ChunkDrawer from './components/ChunkDrawer';
+import FeedbackTab from './components/FeedbackTab';
+import { RejectModal, ValidityModal } from './components/GovernanceModals';
 import GraphTab from './components/GraphTab';
 import IndexConfigDrawer from './components/IndexConfigDrawer';
+import InsightTab from './components/InsightTab';
 import ParsePreviewDrawer from './components/ParsePreviewDrawer';
+import TrashTab from './components/TrashTab';
 import VersionDrawer from './components/VersionDrawer';
+import WebSourcesTab from './components/WebSourcesTab';
 
 // Document list is polled every 3s while this page stays mounted, per M1-CONTRACTS.md section 7.
 // The same poll loop is reused to track rebuild progress (M2-CONTRACTS.md section 4): there is
@@ -60,6 +74,10 @@ export default function KbDetailPage() {
   const [selectedPendingIds, setSelectedPendingIds] = useState<string[]>([]);
   const [batchConfirming, setBatchConfirming] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // M11 governance: rows the validity/reject modals are pointing at, and the KB-level switch.
+  const [validityDoc, setValidityDoc] = useState<KbDocument | null>(null);
+  const [rejectDoc, setRejectDoc] = useState<KbDocument | null>(null);
+  const [governanceSaving, setGovernanceSaving] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadKb = useCallback(async () => {
@@ -134,7 +152,7 @@ export default function KbDetailPage() {
     setDeletingId(doc.doc_id);
     try {
       await deleteDocument(doc.doc_id);
-      message.success(`已删除 ${doc.file_name}`);
+      message.success(`已将 ${doc.file_name} 移入回收站`);
       // Drop any drawer still pointing at the document that no longer exists.
       setChunkDoc((prev) => (prev?.doc_id === doc.doc_id ? null : prev));
       setPreviewDoc((prev) => (prev?.doc_id === doc.doc_id ? null : prev));
@@ -173,6 +191,32 @@ export default function KbDetailPage() {
 
   const handleVersionActivated = () => {
     loadDocuments();
+  };
+
+  const handleSubmitReview = async (doc: KbDocument) => {
+    await submitDocumentReview(doc.doc_id);
+    message.success('已提交审核');
+    loadDocuments();
+  };
+
+  const handleApprove = async (doc: KbDocument) => {
+    await approveDocument(doc.doc_id);
+    message.success(`已通过并发布 ${doc.file_name}`);
+    loadDocuments();
+  };
+
+  // KB-level review_required switch (M11-CONTRACTS.md section 2.2): only affects future uploads,
+  // which is why flipping it does not touch loadDocuments.
+  const handleGovernanceToggle = async (checked: boolean) => {
+    if (!kbId) return;
+    setGovernanceSaving(true);
+    try {
+      await updateKbGovernance(kbId, checked);
+      message.success(checked ? '已开启审核：之后上传的新文档需审核通过后才参与检索' : '已关闭审核：之后上传的新文档直接发布');
+      loadKb();
+    } finally {
+      setGovernanceSaving(false);
+    }
   };
 
   const handleBatchConfirm = async () => {
@@ -227,6 +271,17 @@ export default function KbDetailPage() {
           </Typography.Title>
         </Space>
         <Space>
+          <Tooltip title="开启后，之后上传的新文档默认为草稿，需提交审核并通过后才参与检索；已有文档不受影响">
+            <Space size={4}>
+              <Typography.Text type="secondary">新文档需审核</Typography.Text>
+              <Switch
+                size="small"
+                checked={kb?.review_required ?? false}
+                loading={governanceSaving}
+                onChange={handleGovernanceToggle}
+              />
+            </Space>
+          </Tooltip>
           <Button icon={<MessageOutlined />} onClick={() => setChatImportOpen(true)}>
             导入聊天记录
           </Button>
@@ -298,7 +353,7 @@ export default function KbDetailPage() {
                   </p>
                   <p className="ant-upload-text">点击或拖拽文件到此处上传</p>
                   <p className="ant-upload-hint">
-                    支持 pdf / docx / txt / md / xlsx / csv，单文件不超过 100MB，可批量上传
+                    支持 pdf / docx / txt / md / xlsx / csv / html，单文件不超过 100MB，可批量上传
                   </p>
                 </Upload.Dragger>
 
@@ -324,7 +379,7 @@ export default function KbDetailPage() {
                     {
                       title: '处理状态',
                       dataIndex: 'process_status',
-                      width: 160,
+                      width: 120,
                       render: (status: KbDocument['process_status'], record: KbDocument) => {
                         const meta = metaOf(PROCESS_STATUS_META, status);
                         const tag = <Tag color={meta.color}>{meta.label}</Tag>;
@@ -336,6 +391,41 @@ export default function KbDetailPage() {
                       },
                     },
                     {
+                      title: '发布状态',
+                      dataIndex: 'publish_status',
+                      width: 100,
+                      render: (status: KbDocument['publish_status'], record: KbDocument) => {
+                        const meta = metaOf(PUBLISH_STATUS_META, status);
+                        const tag = <Tag color={meta.color}>{meta.label}</Tag>;
+                        // Surface the rejection reason right on the tag, per M11's review loop.
+                        return status === 'REJECTED' && record.review_note ? (
+                          <Tooltip title={`驳回原因：${record.review_note}`}>{tag}</Tooltip>
+                        ) : (
+                          tag
+                        );
+                      },
+                    },
+                    {
+                      title: '有效期',
+                      width: 90,
+                      render: (_, record: KbDocument) =>
+                        record.effective_at || record.expires_at ? (
+                          <Tooltip
+                            title={`生效：${record.effective_at ?? '不限'}，失效：${record.expires_at ?? '不限'}`}
+                          >
+                            <Tag
+                              color={
+                                record.expires_at && new Date(record.expires_at) <= new Date() ? 'error' : 'blue'
+                              }
+                            >
+                              {record.expires_at && new Date(record.expires_at) <= new Date() ? '已过期' : '已设置'}
+                            </Tag>
+                          </Tooltip>
+                        ) : (
+                          <Tag color="default">长期</Tag>
+                        ),
+                    },
+                    {
                       title: '索引配置',
                       dataIndex: 'config_stale',
                       width: 100,
@@ -343,9 +433,9 @@ export default function KbDetailPage() {
                     },
                     {
                       title: '操作',
-                      width: 320,
+                      width: 380,
                       render: (_, record: KbDocument) => (
-                        <Space>
+                        <Space wrap>
                           <Button size="small" onClick={() => setChunkDoc(record)}>
                             查看分片
                           </Button>
@@ -357,6 +447,32 @@ export default function KbDetailPage() {
                               预览确认
                             </Button>
                           )}
+                          {(record.publish_status === 'DRAFT' || record.publish_status === 'REJECTED') && (
+                            <Button size="small" type="link" onClick={() => handleSubmitReview(record)}>
+                              提交审核
+                            </Button>
+                          )}
+                          {record.publish_status === 'PENDING_REVIEW' && (
+                            <>
+                              <Popconfirm
+                                title="通过审核并发布？"
+                                description="发布后文档即参与检索，且不可退回草稿（下架需设置失效时间或移入回收站）"
+                                okText="通过"
+                                cancelText="取消"
+                                onConfirm={() => handleApprove(record)}
+                              >
+                                <Button size="small" type="link">
+                                  通过
+                                </Button>
+                              </Popconfirm>
+                              <Button size="small" type="link" danger onClick={() => setRejectDoc(record)}>
+                                驳回
+                              </Button>
+                            </>
+                          )}
+                          <Button size="small" type="link" onClick={() => setValidityDoc(record)}>
+                            有效期
+                          </Button>
                           <Popconfirm
                             title="确认重建该文档的解析与索引？"
                             okText="重建"
@@ -368,15 +484,15 @@ export default function KbDetailPage() {
                             </Button>
                           </Popconfirm>
                           <Popconfirm
-                            title="删除该文档？"
+                            title="移入回收站？"
                             description={
                               <>
-                                将连同它的<b>全部版本与分片</b>一并删除（含两个检索引擎中的副本），
+                                文档将移入回收站并立即从检索中下线；
                                 <br />
-                                删除后不可恢复，如需重新入库须重新上传。
+                                可在「回收站」标签页随时还原，超过保留期后自动清除。
                               </>
                             }
-                            okText="删除"
+                            okText="移入回收站"
                             okButtonProps={{ danger: true }}
                             cancelText="取消"
                             onConfirm={() => handleDelete(record)}
@@ -398,6 +514,29 @@ export default function KbDetailPage() {
             label: '知识图谱',
             children: kbId ? <GraphTab kbId={kbId} kb={kb} onKbChanged={loadKb} /> : null,
           },
+          // M10-CONTRACTS.md section 3: the retrieval quality loop's two console entrances.
+          {
+            key: 'feedback',
+            label: '反馈管理',
+            children: kbId ? <FeedbackTab kbId={kbId} /> : null,
+          },
+          {
+            key: 'insight',
+            label: '检索洞察',
+            children: kbId ? <InsightTab kbId={kbId} /> : null,
+          },
+          // M11-CONTRACTS.md section 2.2: reversible deletion lives here until retention expiry.
+          {
+            key: 'trash',
+            label: '回收站',
+            children: kbId ? <TrashTab kbId={kbId} onRestored={loadDocuments} /> : null,
+          },
+          // M12-CONTRACTS.md section 3.4: URL registration + incremental sync management.
+          {
+            key: 'webSources',
+            label: '网页导入',
+            children: kbId ? <WebSourcesTab kbId={kbId} onSynced={loadDocuments} /> : null,
+          },
         ]}
       />
 
@@ -414,6 +553,10 @@ export default function KbDetailPage() {
       />
 
       <VersionDrawer doc={versionDoc} onClose={() => setVersionDocId(null)} onActivated={handleVersionActivated} />
+
+      <ValidityModal doc={validityDoc} onClose={() => setValidityDoc(null)} onSaved={loadDocuments} />
+
+      <RejectModal doc={rejectDoc} onClose={() => setRejectDoc(null)} onRejected={loadDocuments} />
 
       {kbId && (
         <ChatImportWizard

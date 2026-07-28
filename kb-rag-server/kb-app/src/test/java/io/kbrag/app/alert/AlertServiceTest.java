@@ -1,5 +1,6 @@
 package io.kbrag.app.alert;
 
+import io.kbrag.app.metrics.KbMetrics;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.enums.AlertType;
@@ -7,6 +8,7 @@ import io.kbrag.domain.enums.TaskType;
 import io.kbrag.domain.mapper.ChunkIndexSyncMapper;
 import io.kbrag.domain.model.AlertConfig;
 import io.kbrag.domain.port.WebhookNotifier;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -161,7 +163,8 @@ class AlertServiceTest {
 
     @Test
     void shouldRaiseTaskFailuresOnlyOnceTheThresholdIsReached() {
-        TaskFailureTracker tracker = new TaskFailureTracker(alertConfigService, alertService);
+        TaskFailureTracker tracker = new TaskFailureTracker(alertConfigService, alertService,
+                new KbMetrics(new SimpleMeterRegistry()));
 
         tracker.recordFailure(TaskType.INDEX, "engine unreachable");
         tracker.recordFailure(TaskType.INDEX, "engine unreachable");
@@ -174,7 +177,8 @@ class AlertServiceTest {
 
     @Test
     void shouldResetTheFailureRunOnASuccess() {
-        TaskFailureTracker tracker = new TaskFailureTracker(alertConfigService, alertService);
+        TaskFailureTracker tracker = new TaskFailureTracker(alertConfigService, alertService,
+                new KbMetrics(new SimpleMeterRegistry()));
 
         tracker.recordFailure(TaskType.INDEX, "transient");
         tracker.recordFailure(TaskType.INDEX, "transient");
@@ -188,7 +192,8 @@ class AlertServiceTest {
 
     @Test
     void shouldCountFailureRunsPerTaskType() {
-        TaskFailureTracker tracker = new TaskFailureTracker(alertConfigService, alertService);
+        TaskFailureTracker tracker = new TaskFailureTracker(alertConfigService, alertService,
+                new KbMetrics(new SimpleMeterRegistry()));
 
         tracker.recordFailure(TaskType.INDEX, "one");
         tracker.recordFailure(TaskType.INDEX, "two");

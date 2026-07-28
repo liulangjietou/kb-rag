@@ -13,8 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Covers the hard validation of the extraction model output, requirement section 4.4: a malformed answer,
- * an over long entity name and a relation endpoint outside the entity list are all rejected as a whole so
- * the caller can count the chunk as skipped.
+ * an over long entity name are rejected as a whole so the caller can count the chunk as skipped, while a
+ * relation whose endpoint was never extracted only costs that one relation.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -85,10 +85,18 @@ class GraphExtractionParserTest {
     }
 
     @Test
-    void shouldRejectARelationWhoseEndpointWasNeverExtracted() {
-        assertNull(parser.parse("""
-                {"entities":[{"name":"A","type":"x"}],
-                 "relations":[{"source":"A","type":"knows","target":"B"}]}"""));
+    void shouldDropARelationWhoseEndpointWasNeverExtractedAndKeepTheRest() {
+        GraphExtractionParser.Result result = parser.parse("""
+                {"entities":[{"name":"A","type":"x"},{"name":"B","type":"x"}],
+                 "relations":[{"source":"A","type":"knows","target":"B"},
+                              {"source":"A","type":"knows","target":"未抽取到的实体"}]}""");
+
+        // 越界的那条被丢掉，同一答案里抽对的实体与关系照常保留：整体作废会让一条坏关系
+        // 拖垮整段的抽取成果，而"图里不长出无抽取依据的节点"这个目标丢掉该关系就已达成
+        assertNotNull(result);
+        assertEquals(2, result.entities().size());
+        assertEquals(1, result.relations().size());
+        assertEquals("B", result.relations().get(0).target());
     }
 
     @Test

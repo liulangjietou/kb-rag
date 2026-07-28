@@ -96,8 +96,68 @@ public class KbProperties {
     /** Open API policy: rate limit default, audit retention and archiving. */
     private OpenApi openApi = new OpenApi();
 
+    /** Search insight policy: recording switch and retention, the M10 contract section 2.3. */
+    private Insight insight = new Insight();
+
     /** Application release policy: index snapshot timeout and retention. */
     private App app = new App();
+
+    /** Content governance policy: recycle bin retention, the M11 contract section 2.3. */
+    private Governance governance = new Governance();
+
+    /** URL import policy: fetch limits and the scheduled sync pass, the M12 contract section 3.5. */
+    private WebImport webImport = new WebImport();
+
+    /**
+     * Content governance policy, the M11 contract section 2.3.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Governance {
+
+        /** Days a trashed document stays restorable before the purge pass removes it for good. */
+        private int trashRetentionDays = 30;
+
+        /**
+         * Documents one purge batch removes. A purge clears chunks and both engine copies per document,
+         * so the bound is a document count, much smaller than the row-count bounds of the log cleanups.
+         */
+        private int trashPurgeBatchSize = 100;
+
+        /** Cron expression of the daily purge pass. */
+        private String trashPurgeCron = "0 10 4 * * *";
+
+        /** {@code false} disables the purge pass; trashed documents then stay restorable forever. */
+        private boolean trashPurgeEnabled = true;
+    }
+
+    /**
+     * URL import policy, the M12 contract section 3.5.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class WebImport {
+
+        /** Connect and read timeout of one page fetch. */
+        private int fetchTimeoutMs = 10000;
+
+        /** Largest page body accepted, counted while streaming - Content-Length is not trusted. */
+        private int maxPageSizeMb = 10;
+
+        /** Redirect hops the fetcher follows manually, re-validating each target against SSRF. */
+        private int maxRedirects = 3;
+
+        /** Cron expression of the nightly incremental sync pass. */
+        private String syncCron = "0 30 2 * * *";
+
+        /** {@code false} disables the scheduled pass; manual sync stays available. */
+        private boolean syncEnabled = true;
+
+        /** Sources one scheduled pass re-fetches; fetching is slow outbound I/O, hence a count bound. */
+        private int syncBatchSize = 50;
+    }
 
     /**
      * Application release policy, requirement section 4.7 "index snapshot".
@@ -769,6 +829,16 @@ public class KbProperties {
         private int extractConcurrency = 2;
 
         /**
+         * Generation budget of one extraction call.
+         *
+         * <p>Separate from {@code kb.chat.max-tokens} because that one sizes a single line query rewrite:
+         * an extraction answer is a JSON object holding every entity and relation of the passage, and a
+         * budget that runs out mid object yields truncated JSON the parser can only reject - the chunk is
+         * then silently counted as skipped. A table heavy passage routinely needs several hundred tokens.
+         */
+        private int extractMaxTokens = 2048;
+
+        /**
          * Tells whether the deployment runs a graph at all.
          *
          * @return {@code true} when a Bolt URI is configured
@@ -874,5 +944,32 @@ public class KbProperties {
 
         /** Width of the {@code query_digest} column; the digest is truncated to it after masking. */
         private int queryDigestMaxLength = 200;
+    }
+
+    /**
+     * Search insight policy, the M10 contract section 2.3.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Insight {
+
+        /**
+         * {@code false} short circuits the recording points entirely; the report endpoints still
+         * serve whatever history exists. Used by tests and deployments that do not want the table.
+         */
+        private boolean enabled = true;
+
+        /** Days an insight row stays before the cleanup removes it. Never archived, unlike audit. */
+        private int retentionDays = 90;
+
+        /**
+         * Rows one cleanup batch deletes. Bounded so a retention pass never holds a long transaction
+         * over a table the request path keeps inserting into.
+         */
+        private int cleanupBatchSize = 5000;
+
+        /** Cron expression of the daily cleanup pass. */
+        private String cleanupCron = "0 45 3 * * *";
     }
 }

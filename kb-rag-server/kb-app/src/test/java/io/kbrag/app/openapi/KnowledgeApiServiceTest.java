@@ -2,6 +2,8 @@ package io.kbrag.app.openapi;
 
 import io.kbrag.app.appcenter.AppService;
 import io.kbrag.app.appcenter.AppVersionService;
+import io.kbrag.app.insight.SearchInsightService;
+import io.kbrag.app.metrics.KbMetrics;
 import io.kbrag.app.retrieval.AppliedInfo;
 import io.kbrag.app.retrieval.ImageQueryService;
 import io.kbrag.app.retrieval.RetrievalCommand;
@@ -30,6 +32,7 @@ import io.kbrag.domain.port.VisionProvider;
 import io.kbrag.domain.service.ChatPromptAssembler;
 import io.kbrag.domain.service.ContentBudgetTrimmer;
 import io.kbrag.domain.service.RequestOverridePolicy;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -76,6 +79,7 @@ class KnowledgeApiServiceTest {
     private ChatProvider chatProvider;
     private ApiAuditService apiAuditService;
     private VisionProvider visionProvider;
+    private SimpleMeterRegistry meterRegistry;
     private KnowledgeApiService service;
 
     @BeforeEach
@@ -89,9 +93,11 @@ class KnowledgeApiServiceTest {
         when(appService.require(APP_ID)).thenReturn(new App());
         when(chatProviderFactory.forModel(any())).thenReturn(chatProvider);
         visionProvider = mock(VisionProvider.class);
+        meterRegistry = new SimpleMeterRegistry();
         service = new KnowledgeApiService(appService, appVersionService, retrievalService, chatProviderFactory,
                 new ChatPromptAssembler(), new ContentBudgetTrimmer(), new RequestOverridePolicy(),
-                apiAuditService, new ImageQueryService(visionProvider, new KbProperties()));
+                apiAuditService, mock(SearchInsightService.class),
+                new ImageQueryService(visionProvider, new KbProperties()), new KbMetrics(meterRegistry));
     }
 
     @Test
@@ -109,6 +115,8 @@ class KnowledgeApiServiceTest {
         assertEquals("weighted", issued.getFusionMode());
         assertEquals(Boolean.TRUE, issued.getRerankEnabled());
         assertEquals(Boolean.FALSE, issued.getRewriteEnabled());
+        // The M13 search timer sits on the same insight point every open flow passes.
+        assertEquals(1, meterRegistry.get("kb.search").tag("source", "open_api").timer().count());
     }
 
     @Test

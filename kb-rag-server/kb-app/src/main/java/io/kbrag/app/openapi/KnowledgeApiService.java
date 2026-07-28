@@ -3,6 +3,8 @@ package io.kbrag.app.openapi;
 import io.kbrag.app.appcenter.AppService;
 import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.config.AsyncConfig;
+import io.kbrag.app.insight.SearchInsightService;
+import io.kbrag.app.metrics.KbMetrics;
 import io.kbrag.app.retrieval.ImageQueryService;
 import io.kbrag.app.retrieval.RetrievalCommand;
 import io.kbrag.app.retrieval.RetrievalIndexOverride;
@@ -14,6 +16,7 @@ import io.kbrag.common.context.RequestIdHolder;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.AppVersion;
 import io.kbrag.domain.enums.AppVersionStatus;
+import io.kbrag.domain.enums.InsightSource;
 import io.kbrag.domain.enums.TargetStage;
 import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.AppIndexSnapshot;
@@ -71,7 +74,9 @@ public class KnowledgeApiService {
     private final ContentBudgetTrimmer contentBudgetTrimmer;
     private final RequestOverridePolicy requestOverridePolicy;
     private final ApiAuditService apiAuditService;
+    private final SearchInsightService searchInsightService;
     private final ImageQueryService imageQueryService;
+    private final KbMetrics kbMetrics;
 
     /**
      * Runs one open search call.
@@ -87,6 +92,7 @@ public class KnowledgeApiService {
             ResolvedTarget target = resolve(principal, command);
             call = enrich(command);
             KnowledgeCallResult result = retrieve(target, call);
+            insight(call, result, startedAt);
             audit(principal, call.command(), target, result, startedAt, ApiAuditService.ENDPOINT_SEARCH);
             return result;
         } catch (BizException e) {
@@ -109,6 +115,7 @@ public class KnowledgeApiService {
             ResolvedTarget target = resolve(principal, command);
             call = enrich(command);
             KnowledgeCallResult retrieved = retrieve(target, call);
+            insight(call, retrieved, startedAt);
             String answer = generate(target, call.command(), retrieved.getNodes());
             KnowledgeCallResult result = withAnswer(retrieved, answer);
             audit(principal, call.command(), target, result, startedAt, ApiAuditService.ENDPOINT_CHAT);
@@ -138,6 +145,7 @@ public class KnowledgeApiService {
             ResolvedTarget target = resolve(principal, command);
             call = enrich(command);
             KnowledgeCallResult retrieved = retrieve(target, call);
+            insight(call, retrieved, startedAt);
             StringBuilder answer = new StringBuilder();
             streamGenerate(target, call.command(), retrieved.getNodes(), delta -> {
                 answer.append(delta);
@@ -557,6 +565,39 @@ public class KnowledgeApiService {
                 .latencyMs((int) (System.currentTimeMillis() - startedAt))
                 .overrideKeys(requestOverridePolicy.appliedKeys(command.getPresentedOverrideKeys()))
                 .errorCode(e.getErrorCode().name())
+                .requestId(RequestIdHolder.get())
+                .build());
+    }
+
+    /**
+     * The open API insight recording point, the M10 contract section 2.2.
+     *
+     * <p>Sits after a successful retrieval only: a rejected call never searched anything, so it belongs
+     * to the audit trail and not to the content gap report. The enriched query is what gets digested -
+     * the same choice the audit row makes - because it is the text the ranking actually came from.
+     * Chat calls record the counts of their retrieval stage; the generated answer changes nothing about
+     * whether the corpus could serve the question.
+     *
+     * <p>Also the open API sampling point of the M13 search metric, which shares the insight's boundary
+     * reasoning and adds what the insight row does not carry: the wall time since the call entered. For a
+     * chat call that is the retrieval stage only, since this runs before the generation starts.
+     *
+     * @param call      call parameters with the image text folded into the query
+     * @param result    retrieval outcome of the call
+     * @param startedAt epoch milliseconds the call entered the service at
+     */
+    private void insight(EnrichedCall call, KnowledgeCallResult result, long startedAt) {
+        List<RetrievalNodeView> nodes = result.getNodes();
+        int resultCount = CollectionUtils.isEmpty(nodes) ? 0 : nodes.size();
+        kbMetrics.recordSearch(InsightSource.OPEN_API, System.currentTimeMillis() - startedAt,
+                resultCount, result.getDegraded());
+        searchInsightService.recordAsync(SearchInsightService.InsightRecord.builder()
+                .source(InsightSource.OPEN_API)
+                .kbIds(result.routedKbIds())
+                .query(call.command().getQuery())
+                .resultCount(resultCount)
+                .topScore(CollectionUtils.isEmpty(nodes) ? null : nodes.get(0).getScore())
+                .degraded(result.getDegraded())
                 .requestId(RequestIdHolder.get())
                 .build());
     }

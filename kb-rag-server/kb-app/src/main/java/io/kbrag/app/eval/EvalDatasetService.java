@@ -270,6 +270,29 @@ public class EvalDatasetService {
     @Transactional(rollbackFor = Exception.class)
     public EvalCase collectFromRetrieval(String datasetId, String query, List<ChatMessage> messages,
                                          List<String> chunkIds, AnchorType anchorOverride) {
+        return collectFromRetrieval(datasetId, query, messages, chunkIds, anchorOverride,
+                CaseSource.DEBUG_PAGE);
+    }
+
+    /**
+     * Collects a case from recalled chunks with an explicit provenance, the M10 contract section 2.1.
+     *
+     * <p>Exists because the feedback conversion runs the exact collection path of the debug page but
+     * must not claim to be it: {@code source} is the one column an analyst filters by when judging
+     * where the cases of a data set came from.
+     *
+     * @param datasetId       data set business id
+     * @param query           query the retrieval ran
+     * @param messages        conversation history, may be empty
+     * @param chunkIds        recalled chunks selected as evidence
+     * @param anchorOverride  forces {@code DOCUMENT} anchoring, {@code null} lets an image chunk decide
+     * @param source          how the case entered the data set
+     * @return created case
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public EvalCase collectFromRetrieval(String datasetId, String query, List<ChatMessage> messages,
+                                         List<String> chunkIds, AnchorType anchorOverride,
+                                         CaseSource source) {
         if (CollectionUtils.isEmpty(chunkIds)) {
             throw BizException.invalidParam("chunk_ids must not be empty");
         }
@@ -299,7 +322,7 @@ public class EvalDatasetService {
         EvalCase evalCase = new EvalCase();
         evalCase.setCaseId(bizIdGenerator.evalCaseId());
         evalCase.setDatasetId(datasetId);
-        applyCommand(evalCase, command, CaseSource.DEBUG_PAGE);
+        applyCommand(evalCase, command, source);
         evalCaseMapper.insert(evalCase);
         bumpRevision(dataset, 1);
         log.info("evaluation case collected from retrieval, caseId={}, datasetId={}, anchorType={}",
