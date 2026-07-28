@@ -7,8 +7,10 @@ import io.kbrag.api.dto.CreateKnowledgeBaseRequest;
 import io.kbrag.api.dto.KnowledgeBaseResponse;
 import io.kbrag.api.dto.RebuildRequest;
 import io.kbrag.api.dto.UpdateIndexConfigRequest;
+import io.kbrag.api.dto.UpdateKbGovernanceRequest;
 import io.kbrag.app.chat.ChatImportService;
 import io.kbrag.app.document.DocumentPreviewService;
+import io.kbrag.app.governance.DocumentGovernanceService;
 import io.kbrag.app.index.RebuildService;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.Result;
@@ -53,6 +55,7 @@ public class KnowledgeBaseController {
     private final RebuildService rebuildService;
     private final DocumentPreviewService documentPreviewService;
     private final ChatImportService chatImportService;
+    private final DocumentGovernanceService documentGovernanceService;
 
     /**
      * Creates a knowledge base together with its physical indices and aliases.
@@ -180,6 +183,20 @@ public class KnowledgeBaseController {
             @Valid @RequestBody ChatImportConfirmRequest request) {
         List<String> imported = chatImportService.confirm(kbId, request.uploadToken(), request.sessionIds());
         return Result.success(Map.of(FIELD_IMPORTED_DOC_IDS, imported));
+    }
+
+    /**
+     * Flips the review switch of a knowledge base; only future uploads read it.
+     *
+     * @param kbId    business identifier
+     * @param request governance payload
+     * @return updated knowledge base
+     */
+    @PutMapping("/{kbId}/governance")
+    public Result<KnowledgeBaseResponse> updateGovernance(@PathVariable String kbId,
+                                                          @Valid @RequestBody UpdateKbGovernanceRequest request) {
+        return Result.success(toResponse(
+                documentGovernanceService.updateGovernance(kbId, request.reviewRequired())));
     }
 
     /**

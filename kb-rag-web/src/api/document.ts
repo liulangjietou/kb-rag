@@ -1,5 +1,5 @@
 // Author: owlzhangfq@gmail.com
-import { apiDelete, apiGet, apiPost, apiUpload } from './request';
+import { apiDelete, apiGet, apiPost, apiPut, apiUpload } from './request';
 import type {
   DocumentPreview,
   KbChunk,
@@ -29,9 +29,10 @@ export function reindexDocument(docId: string): Promise<void> {
 }
 
 /**
- * DELETE /api/v1/documents/{docId}: removes the document with every one of its versions and
- * chunks, including the copies held in the search engines. Irreversible -- there is no soft-delete
- * or restore path, so callers must confirm first.
+ * DELETE /api/v1/documents/{docId} (M11-CONTRACTS.md section 2.2): moves the document into the
+ * recycle bin. The URL predates M11 and kept its meaning of "delete this document", but the
+ * deletion is now reversible via the trash tab until the retention period runs out or an explicit
+ * purge follows.
  */
 export function deleteDocument(docId: string): Promise<void> {
   return apiDelete<void>(`/documents/${docId}`);
@@ -59,4 +60,56 @@ export function confirmDocument(docId: string): Promise<void> {
  */
 export function reparseDocument(docId: string, payload?: ReparseDocumentRequest): Promise<DocumentPreview> {
   return apiPost<DocumentPreview>(`/documents/${docId}/reparse`, payload);
+}
+
+// ---------------------------------------------------------------------------
+// Content governance (M11-CONTRACTS.md section 2.2)
+// ---------------------------------------------------------------------------
+
+/** POST /api/v1/documents/{docId}/submit-review: DRAFT | REJECTED -> PENDING_REVIEW. */
+export function submitDocumentReview(docId: string): Promise<KbDocument> {
+  return apiPost<KbDocument>(`/documents/${docId}/submit-review`);
+}
+
+/** POST /api/v1/documents/{docId}/approve: PENDING_REVIEW -> PUBLISHED, clears review_note. */
+export function approveDocument(docId: string): Promise<KbDocument> {
+  return apiPost<KbDocument>(`/documents/${docId}/approve`);
+}
+
+/** POST /api/v1/documents/{docId}/reject: PENDING_REVIEW -> REJECTED with a mandatory note. */
+export function rejectDocument(docId: string, note: string): Promise<KbDocument> {
+  return apiPost<KbDocument>(`/documents/${docId}/reject`, { note });
+}
+
+/**
+ * PUT /api/v1/documents/{docId}/validity: sets or clears the validity window. Null clears a bound,
+ * and an expires_at in the past is allowed on purpose -- it is how "take this offline now" works.
+ */
+export function updateDocumentValidity(
+  docId: string,
+  effectiveAt: string | null,
+  expiresAt: string | null,
+): Promise<KbDocument> {
+  return apiPut<KbDocument>(`/documents/${docId}/validity`, {
+    effective_at: effectiveAt,
+    expires_at: expiresAt,
+  });
+}
+
+/** GET /api/v1/kb/{kbId}/trash: pages the recycle bin, most recently trashed first. */
+export function listTrash(kbId: string, page?: number): Promise<PageResult<KbDocument>> {
+  return apiGet<PageResult<KbDocument>>(`/kb/${kbId}/trash`, { page });
+}
+
+/** POST /api/v1/documents/{docId}/restore: instant flag flip back out of the recycle bin. */
+export function restoreDocument(docId: string): Promise<KbDocument> {
+  return apiPost<KbDocument>(`/documents/${docId}/restore`);
+}
+
+/**
+ * DELETE /api/v1/documents/{docId}/purge: the irreversible removal, engine copies included. Only
+ * reachable for a document already in the trash -- the two-step confirmation against typos.
+ */
+export function purgeDocument(docId: string): Promise<void> {
+  return apiDelete<void>(`/documents/${docId}/purge`);
 }

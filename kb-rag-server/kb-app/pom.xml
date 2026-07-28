@@ -32,6 +32,15 @@
             <artifactId>spring-web</artifactId>
         </dependency>
         <!--
+          Business metrics facade (M13). Only the core API is needed here; the Prometheus registry
+          lives in kb-api next to the actuator that exposes it. Version managed by the Spring Boot
+          bill of materials.
+        -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+        </dependency>
+        <!--
           Query rewrite cache. Version managed by the Spring Boot bill of materials, so the cache
           library stays aligned with whatever the framework already pulls in for its own caching
           support instead of introducing a second lineage.

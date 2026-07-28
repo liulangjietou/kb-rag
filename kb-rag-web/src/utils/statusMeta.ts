@@ -11,6 +11,8 @@ import type {
   DocumentVersionStatus,
   EmbeddingStatus,
   EvalMode,
+  FeedbackStatus,
+  FeedbackVerdict,
   FusionMode,
   GraphTaskStatus,
   IkDictStatus,
@@ -22,9 +24,11 @@ import type {
   RollbackMode,
   RunStatus,
   ScoreType,
+  SearchInsightSource,
   SourceMappingType,
   SplitStrategy,
   ThresholdAppliedOn,
+  WebSourceFetchStatus,
 } from '../api/types';
 
 /** Ant Design Tag color + Chinese label per process_status, single source of truth for the UI. */
@@ -167,11 +171,45 @@ export const CASE_STATUS_META: Record<CaseStatus, TagMeta> = {
   DEPRECATED: { color: 'default', label: '已废弃' },
 };
 
-/** t_kb_eval_case.source Tag meta (M4b-CONTRACTS.md section 1). */
+/** t_kb_eval_case.source Tag meta (M4b-CONTRACTS.md section 1; FEEDBACK added by M10-CONTRACTS.md section 2.1). */
 export const CASE_SOURCE_META: Record<CaseSource, TagMeta> = {
   MANUAL: { color: 'default', label: '手动标注' },
   DEBUG_PAGE: { color: 'processing', label: '检索调试收录' },
   IMPORTED: { color: 'cyan', label: '导入' },
+  FEEDBACK: { color: 'gold', label: '反馈转化' },
+};
+
+/** t_kb_retrieval_feedback.verdict Tag meta (M10-CONTRACTS.md section 2.1). */
+export const FEEDBACK_VERDICT_META: Record<FeedbackVerdict, TagMeta> = {
+  GOOD: { color: 'success', label: '好结果' },
+  BAD: { color: 'error', label: '坏结果' },
+};
+
+/**
+ * t_kb_retrieval_feedback.status Tag meta (M10-CONTRACTS.md section 2.1). CONVERTED and
+ * DISMISSED are both terminal server-side; the feedback tab keys its row actions off NEW only.
+ */
+export const FEEDBACK_STATUS_META: Record<FeedbackStatus, TagMeta> = {
+  NEW: { color: 'processing', label: '待处理' },
+  CONVERTED: { color: 'success', label: '已转评测集' },
+  DISMISSED: { color: 'default', label: '已忽略' },
+};
+
+/** t_kb_search_insight.source Tag meta (M10-CONTRACTS.md section 2.2). */
+export const SEARCH_INSIGHT_SOURCE_META: Record<SearchInsightSource, TagMeta> = {
+  CONSOLE: { color: 'processing', label: '控制台调试' },
+  OPEN_API: { color: 'purple', label: 'OpenAPI' },
+};
+
+/**
+ * t_kb_web_source.last_fetch_status Tag meta (M12-CONTRACTS.md section 3.4). UNCHANGED/SKIPPED
+ * are deliberate non-writes, not failures, hence the neutral colors.
+ */
+export const WEB_SOURCE_STATUS_META: Record<WebSourceFetchStatus, TagMeta> = {
+  SUCCESS: { color: 'success', label: '已入库' },
+  UNCHANGED: { color: 'default', label: '内容未变' },
+  SKIPPED: { color: 'warning', label: '已跳过' },
+  FAILED: { color: 'error', label: '失败' },
 };
 
 /** t_kb_eval_run.status Tag meta (M4b-CONTRACTS.md sections 1/3.1). */

@@ -22,8 +22,8 @@ import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.GraphStore;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.GraphExtractionParser;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -65,7 +65,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class GraphExtractionService {
 
     /**
@@ -107,6 +106,33 @@ public class GraphExtractionService {
     private final GraphExtractionParser extractionParser;
     private final BizIdGenerator bizIdGenerator;
     private final KbProperties properties;
+
+    /**
+     * Wired explicitly rather than through Lombok so the extraction provider can be qualified: the
+     * primary {@code chatProvider} carries the single line rewrite budget, which truncates an extraction
+     * answer mid JSON.
+     */
+    public GraphExtractionService(KnowledgeBaseService knowledgeBaseService,
+                                  ActiveVersionResolver activeVersionResolver,
+                                  ChunkMapper chunkMapper,
+                                  DocumentVersionMapper documentVersionMapper,
+                                  KbTaskMapper kbTaskMapper,
+                                  GraphStore graphStore,
+                                  @Qualifier("graphExtractionChatProvider") ChatProvider chatProvider,
+                                  GraphExtractionParser extractionParser,
+                                  BizIdGenerator bizIdGenerator,
+                                  KbProperties properties) {
+        this.knowledgeBaseService = knowledgeBaseService;
+        this.activeVersionResolver = activeVersionResolver;
+        this.chunkMapper = chunkMapper;
+        this.documentVersionMapper = documentVersionMapper;
+        this.kbTaskMapper = kbTaskMapper;
+        this.graphStore = graphStore;
+        this.chatProvider = chatProvider;
+        this.extractionParser = extractionParser;
+        this.bizIdGenerator = bizIdGenerator;
+        this.properties = properties;
+    }
 
     /**
      * Opens or reuses the graph extraction task of a knowledge base, on the caller's thread.

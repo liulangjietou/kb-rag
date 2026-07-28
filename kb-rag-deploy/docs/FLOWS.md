@@ -1,7 +1,7 @@
 # kb-rag 流程图文档
 
-> 版本：v1.1（基线与 `ARCHITECTURE.md` 相同 = M1-M9 及其后修复合并进 main 的状态）
-> 日期：2026-07-27
+> 版本：v1.2（基线与 `ARCHITECTURE.md` 相同 = M1-M13 及其后修复的状态）
+> 日期：2026-07-28
 > 作者：RichardFyoung / Claude
 >
 > 图使用 Mermaid 绘制（GitHub / 主流 IDE 原生渲染）。每张图标注对应的核心类与契约出处，与代码不一致时以代码为准并须在同一 PR 内修订本文档（项目铁律②）。

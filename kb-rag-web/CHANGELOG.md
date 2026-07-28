@@ -1,10 +1,22 @@
 # Changelog
 
-本项目的版本记录遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 约定，按里程碑分节记录（对应 `kb-rag-deploy/docs/M1~M9-CONTRACTS.md`）。
+本项目的版本记录遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 约定，按里程碑分节记录（对应 `kb-rag-deploy/docs/M1~M13-CONTRACTS.md`）。
 
 ## [Unreleased]
 
 ### Added
+
+**M12 · 网页导入**（`docs/M12-CONTRACTS.md`）
+- 知识库详情新增「网页导入」Tab：URL 登记（登记即抓）、来源列表（最近同步四态 SUCCESS/UNCHANGED/SKIPPED/FAILED 标签 + 失败原因）、手动同步、定时同步开关、移除登记（二次确认，提示不删已导入文档）。
+- 注：M13 为纯后端运维指标（Prometheus），无前端改动。
+
+**M11 · 内容治理**（`docs/M11-CONTRACTS.md`）
+- 知识库详情文档列表新增发布状态 / 有效期列与审核操作（提审 / 通过 / 驳回，驳回理由录入）、有效期设置 / 清除弹窗；知识库级「上传需审核」开关（governance）。
+- 新增「回收站」Tab：已删文档列表、还原、彻底删除（二次确认）；文档删除按钮语义同步改为「移入回收站」。
+
+**M10 · 检索反馈与洞察**（`docs/M10-CONTRACTS.md`）
+- 知识库详情新增「反馈管理」Tab：反馈列表（有用 / 无用 + 原因）、转评测集（选择目标评测集）、忽略操作。
+- 新增「检索洞察」Tab：明细分页（脱敏摘要 / 命中数 / 降级标记）与内容缺口报表（零命中率、Top 未命中 query 分组）。
 
 **M9 · 标注迁移建议与图片检索输入**（`docs/M9-CONTRACTS.md`）
 - 待复核工作台：pending 行展开显示相似度迁移建议（`suggestions`：分数 + 内容预览 + 「迁移到此分片」确认框）。

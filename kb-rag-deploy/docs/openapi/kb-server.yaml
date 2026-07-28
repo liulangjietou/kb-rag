@@ -110,8 +110,39 @@ info:
 
     split_strategy（新增 `SplitStrategy` 枚举，两个成员）与只读的 embedding_model。
 
+
+    0.11.0-m10（检索质量闭环，docs/M10-CONTRACTS.md）：①`retrieval-feedback` 提交由
+
+    log-only 升级为持久化行并返回该行；②新增反馈管理端点（列表/转评测集/忽略）；
+
+    ③新增检索洞察端点（明细分页 + 内容缺口统计报表）；④`CaseSource` 枚举新增 FEEDBACK。
+
+
+    0.12.0-m11（内容治理，docs/M11-CONTRACTS.md）：①`Document` 新增治理字段
+
+    publish_status/review_note/effective_at/expires_at/trashed_at（新增 `PublishStatus`
+
+    枚举），`KnowledgeBase` 新增 review_required；②新增审核发布端点（submit-review/
+
+    approve/reject）、有效期端点（validity）、回收站端点（trash 列表/restore/purge）与
+
+    KB 级治理开关（governance）；③**DELETE /api/v1/documents/{docId} 语义变更**：
+
+    由不可逆删除改为移入回收站（可还原），不可逆删除迁移至 purge 端点。
+
+
+    0.13.0-m12（数据接入：URL 导入与增量同步，docs/M12-CONTRACTS.md）：①新增网页登记端点
+
+    （登记即抓 / 列表 / 手动同步 / 定时同步开关 / 移除登记，新增 `WebSource` schema 与
+
+    `WebSourceFetchStatus` 枚举）；②抓取产物统一走文档上传管线（同名加版本、content_hash
+
+    去重），登记与文档为弱绑定——移除登记不删文档；③上传白名单扩展 html 后缀
+
+    （UPLOAD_ALLOWED_EXTENSIONS 新增 html）。
+
     '
-  version: 0.10.1-m9
+  version: 0.13.0-m12
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -139,6 +170,12 @@ tags:
   description: Demo 一键导入（M3，docs/M3-CONTRACTS.md §3.7）
 - name: eval
   description: 评测体系：评测集/case/证据复核/评测运行与报告（M4b，docs/M4b-CONTRACTS.md）
+- name: insight
+  description: 检索洞察：零命中/降级记录明细与内容缺口报表（M10，docs/M10-CONTRACTS.md §2.2）
+- name: governance
+  description: 内容治理：审核发布/有效期/回收站（M11，docs/M11-CONTRACTS.md §2.2）
+- name: web-source
+  description: 数据接入：URL 登记导入与增量同步（M12，docs/M12-CONTRACTS.md §3.4）
 - name: app-center
   description: 应用中心：应用/版本/发布门禁与控制台 chat 预览（M4c，docs/M4c-CONTRACTS.md §2）
 - name: api-key
@@ -647,6 +684,372 @@ paths:
                 $ref: '#/components/schemas/DocumentPreviewResult'
         '400':
           $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    delete:
+      tags:
+      - governance
+      summary: 删除文档（M11 起：移入回收站，可还原）
+      description: 'M11-CONTRACTS.md §2.2：URL 早于 M11，语义由不可逆删除升级为移入回收站——
+        文档立即从检索中下线但数据保留，保留期内可通过 restore 还原；不可逆删除迁移至
+        purge 端点。已在回收站的文档重复删除返回 INVALID_PARAM。'
+      responses:
+        '200':
+          description: 已移入回收站
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/submit-review:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    post:
+      tags:
+      - governance
+      summary: 提交审核（DRAFT|REJECTED → PENDING_REVIEW）
+      description: 'M11-CONTRACTS.md §2.2：仅 DRAFT/REJECTED 可提交；其余状态返回
+        INVALID_PARAM；回收站内文档需先还原。'
+      responses:
+        '200':
+          description: 更新后的文档
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/approve:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    post:
+      tags:
+      - governance
+      summary: 审核通过（PENDING_REVIEW → PUBLISHED，清空 review_note）
+      description: 'M11-CONTRACTS.md §2.2：PUBLISHED 为终态，下架靠有效期或回收站；
+        非 PENDING_REVIEW 状态返回 INVALID_PARAM。'
+      responses:
+        '200':
+          description: 更新后的文档
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/reject:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    post:
+      tags:
+      - governance
+      summary: 审核驳回（PENDING_REVIEW → REJECTED，note 必填）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [note]
+              properties:
+                note:
+                  type: string
+                  maxLength: 512
+                  description: 驳回理由，落入 Document.review_note
+      responses:
+        '200':
+          description: 更新后的文档
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/validity:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    put:
+      tags:
+      - governance
+      summary: 设置/清除文档有效期窗口
+      description: 'M11-CONTRACTS.md §2.2：两端均可为 null 表示不设界；expires_at 允许
+        为过去时刻（立即下架）；两端都非空时要求 expires_at > effective_at；时间为
+        无时区 ISO 字面量（如 2026-07-26T00:00:00）。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                effective_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+                expires_at:
+                  type: string
+                  format: date-time
+                  nullable: true
+      responses:
+        '200':
+          description: 更新后的文档
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/restore:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    post:
+      tags:
+      - governance
+      summary: 从回收站还原文档
+      description: 'M11-CONTRACTS.md §2.2：纯 DB 标记翻转，无需重建索引，还原后立即恢复
+        可检索（受其发布状态/有效期约束）；不在回收站的文档返回 INVALID_PARAM。'
+      responses:
+        '200':
+          description: 更新后的文档
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/documents/{docId}/purge:
+    parameters:
+    - $ref: '#/components/parameters/DocId'
+    delete:
+      tags:
+      - governance
+      summary: 彻底删除（仅限回收站内文档，不可逆）
+      description: 'M11-CONTRACTS.md §2.2：M11 前 DELETE 的不可逆删除迁移到这里：连同
+        全部版本/分片/两个检索引擎副本一并删除。仅对回收站内文档有效（两段式防误删），
+        否则返回 INVALID_PARAM。超过保留期的回收站文档由定时任务自动执行同一逻辑。'
+      responses:
+        '200':
+          description: 已彻底删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/trash:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags:
+      - governance
+      summary: 回收站列表（按移入时间倒序分页）
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/governance:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    put:
+      tags:
+      - governance
+      summary: 更新 KB 级治理开关（review_required）
+      description: 'M11-CONTRACTS.md §2.2：仅影响开关翻转后新上传的文档（含新版本不重置
+        存量状态），存量文档发布状态不变。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [review_required]
+              properties:
+                review_required:
+                  type: boolean
+      responses:
+        '200':
+          description: 更新后的知识库
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/web-sources:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - web-source
+      summary: 登记网页地址并立即抓取入库
+      description: 'M12-CONTRACTS.md §3.4：同步执行首次抓取，响应行携带抓取结果（last_fetch_status）；
+        抓取失败不回滚登记（FAILED + last_error 落在行上）。同库同 URL（规范化后）重复登记返回
+        INVALID_PARAM；非 http/https、内网/回环地址被 SSRF 防线拒绝（重定向逐跳复验）。抓取产物走
+        文档上传管线：同名加版本、content_hash 去重。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  maxLength: 2048
+                sync_enabled:
+                  type: boolean
+                  default: true
+                  description: 缺省开启定时同步
+      responses:
+        '200':
+          description: 登记行（含首次抓取结果）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSourceResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags:
+      - web-source
+      summary: 网页登记列表（按登记时间倒序分页）
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSourceListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/web-sources/{sourceId}/sync:
+    parameters:
+    - name: sourceId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - web-source
+      summary: 手动触发一次同步
+      description: 'M12-CONTRACTS.md §3.4：抓取结果不以请求错误形式暴露——响应永远 200，四态结果
+        （SUCCESS/UNCHANGED/SKIPPED/FAILED）落在行的 last_fetch_status/last_error 上，与定时
+        同步记录方式一致。绑定文档被彻底删除后，下次同步用存储的文件名重新建档并重新绑定。'
+      responses:
+        '200':
+          description: 同步后的登记行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSourceResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/web-sources/{sourceId}:
+    parameters:
+    - name: sourceId
+      in: path
+      required: true
+      schema:
+        type: string
+    put:
+      tags:
+      - web-source
+      summary: 开关定时同步
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sync_enabled]
+              properties:
+                sync_enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: 更新后的登记行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSourceResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - web-source
+      summary: 移除登记（弱绑定：已入库文档保留）
+      description: 'M12-CONTRACTS.md §3.4：物理删除登记行（释放同库同 URL 的唯一约束，允许
+        重新登记）；它喂过的文档不受影响，删文档走回收站/purge 通道。'
+      responses:
+        '200':
+          description: 已移除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/kb/{kbId}/graph/config:
@@ -1543,8 +1946,9 @@ paths:
       tags:
       - eval
       summary: 检索结果反馈标注
-      description: 'verdict=GOOD 即一键收进评测集（同 cases/from-retrieval 语义承载，source=DEBUG_PAGE）；
-        verdict=BAD 记 info 日志且不落库（M4b-CONTRACTS.md §2）。'
+      description: 'payload 与 M4b 完全兼容（M10 兼容红线）。M10 起不再是 log-only：GOOD/BAD
+        均落库为一条 status=NEW 的反馈行，返回该行；后续可在反馈管理中转评测集（仅 GOOD）或忽略
+        （M10-CONTRACTS.md §2.1）。'
       requestBody:
         required: true
         content:
@@ -1553,11 +1957,190 @@ paths:
               $ref: '#/components/schemas/RetrievalFeedbackRequest'
       responses:
         '200':
-          description: 已受理
+          description: 已落库（status=NEW）
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/EmptyResult'
+                $ref: '#/components/schemas/RetrievalFeedbackResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/retrieval-feedback:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags:
+      - eval
+      summary: 反馈管理列表（倒序分页）
+      description: 知识库维度分页列出反馈行，可按 verdict/status 过滤（M10-CONTRACTS.md §2.1）。
+      parameters:
+      - name: verdict
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/RetrievalFeedbackVerdict'
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/FeedbackStatus'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalFeedbackPageResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/retrieval-feedback/{feedbackId}/convert:
+    parameters:
+    - $ref: '#/components/parameters/FeedbackId'
+    post:
+      tags:
+      - eval
+      summary: 反馈转评测 case
+      description: '仅 verdict=GOOD 且 status=NEW 的行可转：按反馈的 query+chunk 建一条
+        source=FEEDBACK 的评测 case，反馈行置 CONVERTED 并回填 converted_case_id；
+        CONVERTED/DISMISSED 均为终态，重复操作返回 INVALID_PARAM（M10-CONTRACTS.md §2.1）。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConvertFeedbackRequest'
+      responses:
+        '200':
+          description: 已转化（status=CONVERTED）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalFeedbackResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/retrieval-feedback/{feedbackId}/dismiss:
+    parameters:
+    - $ref: '#/components/parameters/FeedbackId'
+    post:
+      tags:
+      - eval
+      summary: 忽略反馈
+      description: 仅 status=NEW 的行可忽略；DISMISSED 为终态（M10-CONTRACTS.md §2.1）。
+      responses:
+        '200':
+          description: 已忽略（status=DISMISSED）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetrievalFeedbackResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/search-insights:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags:
+      - insight
+      summary: 检索洞察明细（倒序分页）
+      description: '检索发生时自动记录（控制台调试 + OpenAPI；评测运行不记录），仅存脱敏摘要不存原文；
+        可按 zero_hit 与时间范围过滤（M10-CONTRACTS.md §2.2）。'
+      parameters:
+      - name: zero_hit
+        in: query
+        required: false
+        schema:
+          type: boolean
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          example: 2026-07-26T00:00:00
+        description: ISO 本地日期时间下界（不带时区后缀）
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          example: 2026-07-27T00:00:00
+        description: ISO 本地日期时间上界（不带时区后缀）
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchInsightPageResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/search-insights/stats:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags:
+      - insight
+      summary: 内容缺口统计报表
+      description: '总检索/零命中数与占比/降级数 + Top 零命中 query 分组（大小写与空白归一化分组，
+        展示该组最新一条脱敏摘要）；from 缺省为最近 7 天（M10-CONTRACTS.md §2.2）。'
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          example: 2026-07-26T00:00:00
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          example: 2026-07-27T00:00:00
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchInsightStatsResult'
         '400':
           $ref: '#/components/responses/InvalidParam'
         '404':
@@ -2389,6 +2972,13 @@ components:
       schema:
         type: string
       description: API Key 业务主键（key_id，M4c）
+    FeedbackId:
+      name: feedbackId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 检索反馈业务主键（feedback_id，M10）
   responses:
     InvalidParam:
       description: 参数校验失败
@@ -2599,6 +3189,10 @@ components:
         graph_enabled:
           type: boolean
           description: M7 GraphRAG：本库是否开启实体关系抽取与图检索路（M7-CONTRACTS.md §0.3）
+        review_required:
+          type: boolean
+          description: M11 内容治理：开启后新上传文档初始为 DRAFT，需审核通过后才参与检索；
+            仅影响开关翻转后的新上传，存量文档状态不变（M11-CONTRACTS.md §2.2）
         description:
           type: string
           nullable: true
@@ -2646,6 +3240,16 @@ components:
       - INDEXING
       - INDEXED
       - INDEX_FAILED
+    PublishStatus:
+      type: string
+      description: '文档发布状态（t_kb_document.publish_status，M11-CONTRACTS.md §2.1），与
+        process_status 正交。状态机：DRAFT|REJECTED → PENDING_REVIEW → PUBLISHED|REJECTED，
+        PUBLISHED 为终态（下架靠有效期或回收站，不退回草稿）。M11 前存量文档一律 PUBLISHED。'
+      enum:
+      - DRAFT
+      - PENDING_REVIEW
+      - PUBLISHED
+      - REJECTED
     Document:
       type: object
       properties:
@@ -2672,6 +3276,28 @@ components:
           type: string
           nullable: true
           maxLength: 1024
+        publish_status:
+          $ref: '#/components/schemas/PublishStatus'
+        review_note:
+          type: string
+          nullable: true
+          maxLength: 512
+          description: 最近一次驳回理由；仅 REJECTED 状态非空，审核通过时清空
+        effective_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 有效期下界（含）；null 表示不设下界（M11-CONTRACTS.md §2.1）
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 有效期上界（不含）；null 表示永久有效；允许设为过去时刻实现立即下架
+        trashed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 进入回收站的时刻；不在回收站时为 null（文档列表不含回收站文档）
         created_at:
           type: string
           format: date-time
@@ -2706,6 +3332,74 @@ components:
                 type: array
                 items:
                   $ref: '#/components/schemas/Document'
+              page:
+                type: integer
+              total:
+                type: integer
+    WebSourceFetchStatus:
+      type: string
+      description: '最近一次同步结果（t_kb_web_source.last_fetch_status，M12-CONTRACTS.md §3.4）。
+        UNCHANGED/SKIPPED 是“抓到但不应写”：页面内容 hash 未变 / 绑定文档在回收站中。'
+      enum:
+      - SUCCESS
+      - UNCHANGED
+      - SKIPPED
+      - FAILED
+    WebSource:
+      type: object
+      description: 网页登记行（M12-CONTRACTS.md §1）。doc_id/file_name 首次成功抓取前为 null；
+        登记与文档为弱绑定，移除登记不删文档，删文档不动登记
+      properties:
+        source_id:
+          type: string
+        kb_id:
+          type: string
+        url:
+          type: string
+        doc_id:
+          type: string
+          nullable: true
+        file_name:
+          type: string
+          nullable: true
+          description: 由 URL 派生的稳定文件名（host-path摘要-urlHash前8位.后缀），重抓同名加版本
+        sync_enabled:
+          type: boolean
+        last_fetch_status:
+          allOf:
+          - $ref: '#/components/schemas/WebSourceFetchStatus'
+          nullable: true
+        last_fetch_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+          maxLength: 512
+          description: FAILED/SKIPPED 的原因；成功/未变时为 null
+        created_at:
+          type: string
+          format: date-time
+    WebSourceResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/WebSource'
+    WebSourceListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebSource'
               page:
                 type: integer
               total:
@@ -3851,12 +4545,13 @@ components:
       - DEPRECATED
     CaseSource:
       type: string
-      description: case 来源。DEBUG_PAGE 来自检索调试页一键收进（含检索结果反馈 GOOD 判定），IMPORTED
-        来自 Demo 评测集导入
+      description: case 来源。DEBUG_PAGE 来自检索调试页一键收进，IMPORTED 来自 Demo 评测集导入，
+        FEEDBACK 来自反馈管理的转评测集操作（M10-CONTRACTS.md §2.1）
       enum:
       - MANUAL
       - DEBUG_PAGE
       - IMPORTED
+      - FEEDBACK
     RunStatus:
       type: string
       description: t_kb_eval_run.status。零 Key 环境下 VECTOR_ONLY/HYBRID/HYBRID_RERANK
@@ -3883,10 +4578,179 @@ components:
       - DEPRECATE
     RetrievalFeedbackVerdict:
       type: string
-      description: 检索结果反馈判定（M4b-CONTRACTS.md §2）
+      description: 检索结果反馈判定（M10-CONTRACTS.md §2.1）
       enum:
       - GOOD
       - BAD
+    FeedbackStatus:
+      type: string
+      description: t_kb_retrieval_feedback.status；CONVERTED/DISMISSED 均为终态（M10-CONTRACTS.md
+        §2.1）
+      enum:
+      - NEW
+      - CONVERTED
+      - DISMISSED
+    RetrievalFeedback:
+      type: object
+      description: t_kb_retrieval_feedback 行；query 为原文（管理台鉴权后可见），doc_id 在
+        分片已删时为空
+      properties:
+        feedback_id:
+          type: string
+        kb_id:
+          type: string
+        query:
+          type: string
+        chunk_id:
+          type: string
+        doc_id:
+          type: string
+          nullable: true
+        verdict:
+          $ref: '#/components/schemas/RetrievalFeedbackVerdict'
+        status:
+          $ref: '#/components/schemas/FeedbackStatus'
+        converted_case_id:
+          type: string
+          nullable: true
+        note:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    RetrievalFeedbackResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/RetrievalFeedback'
+    RetrievalFeedbackPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RetrievalFeedback'
+        page:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+    RetrievalFeedbackPageResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/RetrievalFeedbackPage'
+    ConvertFeedbackRequest:
+      type: object
+      required:
+      - dataset_id
+      properties:
+        dataset_id:
+          type: string
+          description: 目标评测集（须属于反馈所在知识库）
+    SearchInsightSource:
+      type: string
+      description: 检索洞察记录入口（M10-CONTRACTS.md §2.2）
+      enum:
+      - CONSOLE
+      - OPEN_API
+    SearchInsight:
+      type: object
+      description: t_kb_search_insight 行；仅存脱敏截断后的 query_digest，不存原文；
+        top_score 零命中时为空；degraded 为降级标记数组（无降级时为空数组）
+      properties:
+        insight_id:
+          type: string
+        kb_id:
+          type: string
+        source:
+          $ref: '#/components/schemas/SearchInsightSource'
+        query_digest:
+          type: string
+        result_count:
+          type: integer
+        top_score:
+          type: number
+          format: double
+          nullable: true
+        zero_hit:
+          type: boolean
+        degraded:
+          type: array
+          items:
+            type: string
+        request_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    SearchInsightPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchInsight'
+        page:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+    SearchInsightPageResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/SearchInsightPage'
+    TopZeroHitQuery:
+      type: object
+      description: 零命中 query 分组（大小写与空白归一化后同组），展示该组最新一条的脱敏摘要
+      properties:
+        query_digest:
+          type: string
+        count:
+          type: integer
+          format: int64
+        last_at:
+          type: string
+          format: date-time
+          nullable: true
+    SearchInsightStats:
+      type: object
+      description: 内容缺口统计报表（M10-CONTRACTS.md §2.2）；窗口内无记录时各项为 0
+      properties:
+        total:
+          type: integer
+          format: int64
+        zero_hit_count:
+          type: integer
+          format: int64
+        zero_hit_rate:
+          type: number
+          format: double
+        degraded_count:
+          type: integer
+          format: int64
+        top_zero_hit_queries:
+          type: array
+          items:
+            $ref: '#/components/schemas/TopZeroHitQuery'
+    SearchInsightStatsResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/SearchInsightStats'
     EvalCaseEvidence:
       type: object
       description: t_kb_eval_case.evidences 数组元素；DOCUMENT 锚定时 span 为空
@@ -4174,8 +5038,8 @@ components:
           nullable: true
     RetrievalFeedbackRequest:
       type: object
-      description: 'M4b-CONTRACTS.md §2：verdict=GOOD 等价于一键收进评测集（source=DEBUG_PAGE 草稿
-        case）；verdict=BAD 仅记 info 日志，不落库。'
+      description: 'M10-CONTRACTS.md §2.1：payload 与 M4b 完全兼容；GOOD/BAD 均落库为
+        status=NEW 的反馈行，后续在反馈管理中处置。'
       required:
       - kb_id
       - query

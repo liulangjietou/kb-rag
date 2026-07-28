@@ -2,6 +2,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式。
 
+## [未发布] - M12
+
+### 新增
+
+- `POST /api/v1/parse` 的 `file_ext` 扩展至 `html`/`htm`（M12-CONTRACTS.md §2，通用网页解析通道，与 M8 的聊天记录 HTML 适配器无关）：`app/parsers/html.py` 仅用标准库 `html.parser`（不引入 bs4/markdownify），事件式提取为 markdown——`<title>` 提为 `# 标题`，`h1..h6` 映射 markdown 标题前缀，块级标签切段、内联标签并入所在段；`script`/`style`/`noscript`/`template` 内容整体丢弃；固定单页、无图片产出。解析全程**零网络 I/O**（外部图片/脚本/样式一律不拉取），URL 导入的 SSRF 面全部收敛在 kb-rag-server 的抓取器侧。
+- pytest 新增（`tests/test_parse_html.py`）：标题/小标题/段落提取、script/style 丢弃、实体解码、空白归并、破损标记容错、htm 后缀注册等。
+
 ## [未发布] - M8
 
 ### 新增

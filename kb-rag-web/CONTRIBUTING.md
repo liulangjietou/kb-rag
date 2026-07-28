@@ -2,7 +2,7 @@
 
 感谢你对 kb-rag-web 感兴趣。本仓库承载 kb-rag 知识库 RAG 系统的前端管理台；后端接口、
 部署编排与总体文档请分别参见 kb-rag-server / kb-rag-parser / kb-rag-deploy 仓库
-（接口契约见 `kb-rag-deploy/docs/M1~M9-CONTRACTS.md`，前端架构见
+（接口契约见 `kb-rag-deploy/docs/M1~M13-CONTRACTS.md`，前端架构见
 `kb-rag-deploy/docs/ARCHITECTURE.md` 第 5 节）。
 
 ## 代码原创红线

@@ -172,6 +172,33 @@ public class BizIdGenerator {
         return generate(KbConstants.SOURCE_MAPPING_ID_PREFIX);
     }
 
+    /**
+     * Generates a retrieval feedback row id.
+     *
+     * @return prefixed identifier
+     */
+    public String retrievalFeedbackId() {
+        return generate(KbConstants.RETRIEVAL_FEEDBACK_ID_PREFIX);
+    }
+
+    /**
+     * Generates a search insight row id.
+     *
+     * @return prefixed identifier
+     */
+    public String searchInsightId() {
+        return generate(KbConstants.SEARCH_INSIGHT_ID_PREFIX);
+    }
+
+    /**
+     * Generates a registered web source id.
+     *
+     * @return prefixed identifier
+     */
+    public String webSourceId() {
+        return generate(KbConstants.WEB_SOURCE_ID_PREFIX);
+    }
+
     private String generate(String prefix) {
         String random = UUID.randomUUID().toString().replace("-", "").substring(0, RANDOM_LENGTH);
         return prefix + KbConstants.ID_SEPARATOR + random;

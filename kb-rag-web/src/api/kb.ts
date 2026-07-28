@@ -62,3 +62,11 @@ export function rebuildKb(kbId: string, payload?: RebuildRequest): Promise<void>
 export function confirmKbDocuments(kbId: string, payload?: ConfirmDocumentsRequest): Promise<void> {
   return apiPost<void>(`/kb/${kbId}/documents/confirm`, payload);
 }
+
+/**
+ * PUT /api/v1/kb/{kbId}/governance (M11-CONTRACTS.md section 2.2): flips the review switch. Only
+ * future uploads read it -- documents already present keep their publish_status.
+ */
+export function updateKbGovernance(kbId: string, reviewRequired: boolean): Promise<KnowledgeBase> {
+  return apiPut<KnowledgeBase>(`/kb/${kbId}/governance`, { review_required: reviewRequired });
+}

@@ -21,6 +21,7 @@ import io.kbrag.domain.model.KbRetrievalConfig;
  * @param graphEnabled            graph route switch, inlined for the same reason the index configuration
  *                                is: the console renders it on the knowledge base card and a second
  *                                request per row would be N+1
+ * @param reviewRequired          {@code true} makes new documents start as DRAFT instead of PUBLISHED
  * @param createdAt               ISO creation timestamp
  *
  * @author owlzhangfq@gmail.com
@@ -32,7 +33,10 @@ public record KnowledgeBaseResponse(
         @JsonProperty("index_config") KbIndexConfig indexConfig,
         @JsonProperty("current_config_fingerprint") String currentConfigFingerprint,
         @JsonProperty("graph_enabled") boolean graphEnabled,
+        @JsonProperty("review_required") boolean reviewRequired,
         @JsonProperty("created_at") String createdAt) {
+
+    private static final int REVIEW_REQUIRED = 1;
 
     /**
      * Maps an entity onto its view.
@@ -51,6 +55,7 @@ public record KnowledgeBaseResponse(
                 indexConfig,
                 entity.getCurrentConfigFingerprint(),
                 retrievalConfig != null && retrievalConfig.graphEnabled(),
+                entity.getReviewRequired() != null && entity.getReviewRequired() == REVIEW_REQUIRED,
                 entity.getCreatedAt() == null ? null : entity.getCreatedAt().toString());
     }
 }

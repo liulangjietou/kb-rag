@@ -107,8 +107,11 @@ public class GraphExtractionParser {
                 continue;
             }
             if (!entities.containsKey(source) || !entities.containsKey(target)) {
-                log.info("graph extraction answer rejected, reason=relation endpoint outside the entity list");
-                return null;
+                // 丢这一条，不作废整个答案：目标是"图里不长出没有抽取依据的节点"，跳过越界关系即可达成，
+                // 而整体拒绝会让同一段里已经抽对的实体和关系一起陪葬——上面缺 source/target 的分支
+                // 本来就是这么处理的，两者同为"这条关系不可用"，没有理由区别对待。
+                log.info("graph extraction relation dropped, reason=endpoint outside the entity list");
+                continue;
             }
             relations.add(new GraphRelation(source, typeOf(node, DEFAULT_RELATION_TYPE), target));
         }
@@ -129,17 +132,26 @@ public class GraphExtractionParser {
      */
     private JsonNode readObject(String raw) {
         if (raw == null || raw.isBlank()) {
+            log.info("graph extraction answer rejected, reason=empty answer");
             return null;
         }
         int start = raw.indexOf(JSON_OBJECT_START);
         int end = raw.lastIndexOf(JSON_OBJECT_END);
         if (start < 0 || end <= start) {
+            // 最常见的成因是生成预算耗尽把 JSON 截断在半路，此时根本没有收尾的花括号。
+            // 长度一并打出来，便于对照 kb.graph.extract-max-tokens 判断是否又是被截断。
+            log.info("graph extraction answer rejected, reason=no json object boundary, length={}", raw.length());
             return null;
         }
         try {
             JsonNode node = JsonUtil.mapper().readTree(raw.substring(start, end + 1));
-            return node != null && node.isObject() ? node : null;
+            if (node == null || !node.isObject()) {
+                log.info("graph extraction answer rejected, reason=payload is not an object");
+                return null;
+            }
+            return node;
         } catch (Exception e) {
+            log.info("graph extraction answer rejected, reason=malformed json, detail={}", e.getMessage());
             return null;
         }
     }

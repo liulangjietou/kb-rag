@@ -7,6 +7,44 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 新增（M13）
+
+- Prometheus 业务指标：`kb-api/pom.xml` 补齐 `micrometer-registry-prometheus` 依赖，激活既有 actuator 的 `/actuator/prometheus` 端点（JVM/HTTP 基础指标随自动配置免费提供）。业务指标经 `KbMetrics` 门面单点注册：`kb_search_seconds`（Timer，标签 source=console/open_api、zero_hit、degraded；chat-preview 管理流量不计入）、`kb_task_completed_total`（Counter，type × success/failed）、`kb_openapi_rejected_total`（Counter，按 error_code）、`kb_websource_sync_total`（Counter，按 M12 同步四态）、`kb_task_backlog`（`TaskBacklogMetrics` gauge，pending/running 两支，抓取时实查 DB，DB 异常返回 NaN 不使抓取失败）
+- 纯新增：无表变更、无新环境变量、无既有端点行为变化；该端点与 health 同口径暂不鉴权，生产由部署侧网络隔离
+
+### 新增（M12）
+
+- `[schema]` Flyway `V14__web_source.sql`：新增 `t_kb_web_source`（网页来源登记，ID 前缀 `ws`）
+- URL 导入登记即抓：`POST|GET /api/v1/kb/{kbId}/web-sources`、`POST /api/v1/web-sources/{id}/sync`（手动同步）、`PUT|DELETE /api/v1/web-sources/{id}`（定时同步开关 / 移除登记）；抓取产物统一走既有文档上传管线（URL 派生稳定文件名，重抓同名建新版本、`content_hash` 去重），登记与文档为弱绑定——移除登记不删文档
+- 增量同步四态（SUCCESS / UNCHANGED / SKIPPED / FAILED）落行可见：内容 hash 未变不建版本记 UNCHANGED，绑定文档在回收站则 SKIPPED；定时任务按批扫描（`WEB_IMPORT_SYNC_CRON`，默认 02:30）
+- SSRF 防线收敛在 kb-domain 领域服务 `UrlGuard`：仅 http/https、拒内网 / 回环 / 链路本地地址；重定向由 `HttpWebPageFetcher` 手动跟随且逐跳复验，Content-Type 白名单、流式体积上限（`WEB_IMPORT_MAX_PAGE_SIZE_MB`）、超时控制（`WEB_IMPORT_FETCH_TIMEOUT_MS`）
+- 新增出站端口 `WebPageFetcher`（实现 `HttpWebPageFetcher`）；新增环境变量 `WEB_IMPORT_FETCH_TIMEOUT_MS` / `WEB_IMPORT_MAX_PAGE_SIZE_MB` / `WEB_IMPORT_MAX_REDIRECTS` / `WEB_IMPORT_SYNC_CRON` / `WEB_IMPORT_SYNC_ENABLED` / `WEB_IMPORT_SYNC_BATCH_SIZE`
+
+### 变更（M12）
+
+- **上传白名单默认值变更（醒目提示）**：`UPLOAD_ALLOWED_EXTENSIONS` 默认值新增 `html`（网页抓取产物走上传管线的前提）。显式设置过该变量的部署需自行追加 `html`，否则 URL 导入首次同步即报「不支持的文件类型」；html 无魔数，与 txt/md/csv 同样仅验扩展名与大小
+
+### 新增（M11）
+
+- `[schema]` Flyway `V13__document_governance.sql`：`t_kb_document` 增 `publish_status` / `review_note` / `effective_at` / `expires_at` / `trashed` / `trashed_at`，`t_kb_knowledge_base` 增 `review_required`；存量文档升级后默认 PUBLISHED / 无有效期 / 不在回收站，检索结果与升级前一致
+- 审核发布：知识库级 `review_required` 开关（`PUT /api/v1/kb/{kbId}/governance`），开启后新上传文档初始为 DRAFT，经 submit-review / approve / reject 状态机（DRAFT|REJECTED → PENDING_REVIEW → PUBLISHED|REJECTED）发布后才参与检索
+- 文档有效期：`PUT /api/v1/documents/{docId}/validity` 设置 / 清除 `effective_at` / `expires_at` 窗口，仅窗口内参与检索，`expires_at` 设为过去即立即下架
+- 回收站：trash 列表 / restore / purge 端点，超过保留期（`TRASH_RETENTION_DAYS`，默认 30）由定时任务分批物理清除
+- 治理三态均收敛为检索时的活跃集 DB 谓词过滤，不写引擎，状态变更即时生效（时间窗穿越靠缓存 TTL 5 分钟内收敛）；已发布应用快照固化可见集，不受治理影响
+- 新增环境变量 `TRASH_RETENTION_DAYS` / `TRASH_PURGE_BATCH_SIZE` / `TRASH_PURGE_CRON` / `TRASH_PURGE_ENABLED`
+
+### 变更（M11）
+
+- **`DELETE /api/v1/documents/{docId}` 语义变更（醒目提示）**：URL 不变，但删除由不可逆改为移入回收站（检索立即下线、数据保留、保留期内可 `POST /api/v1/documents/{docId}/restore` 还原）；原来的不可逆删除（含两个检索引擎副本）迁移至 `DELETE /api/v1/documents/{docId}/purge`，且仅对回收站内文档有效（两段式防误删）。依赖旧语义的调用方需改为先 DELETE 再 purge
+
+### 新增（M10）
+
+- `[schema]` Flyway `V12__retrieval_feedback_and_search_insight.sql`：新增 `t_kb_retrieval_feedback`（ID 前缀 `rfb`）与 `t_kb_search_insight`（ID 前缀 `si`）
+- 检索反馈从 log-only 升级为持久化闭环：`POST /api/v1/retrieval-feedback` payload 不变（兼容红线）但落库为可管理行（有用 / 无用 + 原因，幂等键防重复提交）；新增知识库维度的反馈列表、转评测集（case source=FEEDBACK）与忽略端点
+- 检索洞察：控制台调试与 OpenAPI 检索自动记录脱敏摘要 / 命中数 / 降级标记（评测运行不记录，不存原文）；新增明细分页与内容缺口报表端点（零命中率 / Top 未命中 query 归一化分组）
+- 洞察行保留期清理（`INSIGHT_RETENTION_DAYS`，默认 90）：统计而非证据，到期分批直删、不做对象存储归档
+- 新增环境变量 `INSIGHT_ENABLED` / `INSIGHT_RETENTION_DAYS` / `INSIGHT_CLEANUP_BATCH_SIZE` / `INSIGHT_CLEANUP_CRON`
+
 ### 变更（M9 之后）
 
 - **full 模式向量引擎定为 Qdrant（不兼容变更）**：`VectorEngine` 枚举取值为 `ES` / `QDRANT`，

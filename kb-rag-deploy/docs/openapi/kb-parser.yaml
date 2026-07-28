@@ -26,7 +26,13 @@ info:
     依赖则启动 fast-fail）；扫描页三级次序 kb-server 侧 VLM → parser 侧 PaddleOCR
     → 跳过降级；OCR 成功的扫描页文本直接回填并标记 `pages[].ocr_source=paddle`，
     kb-rag-server 对带该标记的页不再调 VLM。
-  version: "0.9.0-m8"
+
+    M12 增量（docs/M12-CONTRACTS.md §2）：`/api/v1/parse` 的 `file_ext` 白名单扩为
+    pdf/docx/txt/md/xlsx/csv/html/htm——新增通用 HTML 页面解析器（仅标准库
+    html.parser，title 与 h1-h6 映射标题、块级元素分段，剔除
+    script/style/noscript/template，单页返回、不产出图片、绝不请求任何远程资源；
+    URL 抓取与 SSRF 防护在 kb-rag-server 侧）。
+  version: "0.12.0-m12"
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -48,7 +54,8 @@ paths:
       tags: [parse]
       summary: 解析文档
       description: |
-        支持格式：pdf(pymupdf) / docx(python-docx) / txt / md / xlsx(openpyxl) / csv。
+        支持格式：pdf(pymupdf) / docx(python-docx) / txt / md / xlsx(openpyxl) / csv /
+        html·htm(标准库 html.parser，M12)。
         multipart 请求：`file` 为二进制文件，`file_ext` 为表单字段声明的扩展名
         （用于分派到对应解析策略，独立于文件名后缀，避免伪造扩展名绕过策略选择）。
 
@@ -178,7 +185,9 @@ components:
   schemas:
     SupportedFileExt:
       type: string
-      enum: [pdf, docx, txt, md, xlsx, csv]
+      description: |
+        html/htm 为 M12 增量（docs/M12-CONTRACTS.md §2，通用 HTML 页面解析）。
+      enum: [pdf, docx, txt, md, xlsx, csv, html, htm]
 
     ChatFileExt:
       type: string

@@ -42,4 +42,8 @@ public class KnowledgeBase extends BaseEntity {
     /** Knowledge base level retrieval defaults serialised as JSON, overridden by request parameters. */
     @TableField("retrieval_config")
     private String retrievalConfig;
+
+    /** {@code 1} makes a freshly created document start as DRAFT instead of PUBLISHED (M11 governance). */
+    @TableField("review_required")
+    private Integer reviewRequired;
 }

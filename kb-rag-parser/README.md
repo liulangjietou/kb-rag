@@ -1,12 +1,12 @@
 # kb-rag-parser
 
-kb-rag 知识库项目的 Python 文档解析微服务（M1 基线 + M3 多模态/聊天记录增量 + M8 导入与解析增强增量）。只负责"文件解析"这一件事：把上传的文档转成结构化的 `markdown` + 按页文本 + 图片二进制，把聊天记录导出（csv/xlsx/txt/html）转成结构化会话消息；不做任何模型调用（VLM 图文理解/嵌入/切分等由 kb-rag-server 侧负责，见需求文档 §4.2 服务职责边界、M3-CONTRACTS.md §0），扫描页 OCR 的 PaddleOCR 兜底（M8-CONTRACTS.md §0.4）是唯一例外，且默认关闭。
+kb-rag 知识库项目的 Python 文档解析微服务（M1 基线 + M3 多模态/聊天记录增量 + M8 导入与解析增强增量 + M12 通用 HTML 页面解析增量）。只负责"文件解析"这一件事：把上传的文档转成结构化的 `markdown` + 按页文本 + 图片二进制，把聊天记录导出（csv/xlsx/txt/html）转成结构化会话消息；不做任何模型调用（VLM 图文理解/嵌入/切分等由 kb-rag-server 侧负责，见需求文档 §4.2 服务职责边界、M3-CONTRACTS.md §0），扫描页 OCR 的 PaddleOCR 兜底（M8-CONTRACTS.md §0.4）是唯一例外，且默认关闭。
 
 ## 技术栈
 
 - Python 3.11+
 - FastAPI + Uvicorn
-- PyMuPDF（pdf）/ python-docx（docx）/ openpyxl（xlsx）/ 标准库 csv（csv）/ 标准库 html.parser（html 聊天记录）/ PyYAML（聊天列名映射/行模板/DOM 选择器档案）
+- PyMuPDF（pdf）/ python-docx（docx）/ openpyxl（xlsx）/ 标准库 csv（csv）/ 标准库 html.parser（html 聊天记录 + M12 通用 HTML 页面）/ PyYAML（聊天列名映射/行模板/DOM 选择器档案）
 - 可选：PaddleOCR（`requirements-ocr.txt`，`OCR_ENGINE=paddle` 时才需要，默认不装）
 
 ## 许可注意
@@ -82,7 +82,7 @@ python3 -m venv .venv
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `file` | file | 待解析的文档 |
-| `file_ext` | form 字段 | 文件扩展名（不带点），如 `pdf`/`docx`/`txt`/`md`/`xlsx`/`csv` |
+| `file_ext` | form 字段 | 文件扩展名（不带点），如 `pdf`/`docx`/`txt`/`md`/`xlsx`/`csv`/`html`/`htm` |
 
 成功响应 `data` 结构（M3-CONTRACTS.md §2.1，向后兼容 M1）：
 
@@ -159,6 +159,7 @@ html（M8-CONTRACTS.md §0.2，DOM 选择器）：
 | `md` | 标准库 | 原样透传，本身已是 markdown |
 | `xlsx` | openpyxl | 每个 sheet 对应一个 `page_no`，同时渲染为 markdown 表格 |
 | `csv` | 标准库 `csv` | 自动探测分隔符（逗号/分号/tab），渲染为 markdown 表格 |
+| `html` / `htm` | 标准库 `html.parser`（M12） | 通用 HTML 页面→markdown：`<title>` 与 h1-h6 映射为标题、块级元素分段，剔除 script/style/noscript/template；单页返回（`page_no=1`）、不产出图片、绝不请求远程资源（URL 抓取与 SSRF 防护在 kb-rag-server 侧） |
 
 新增文档格式只需在 `app/parsers/` 下新增一个 `BaseParser` 实现，并在 `app/parsers/registry.py` 里注册一行 —— 策略注册表模式，主流程 `app/main.py` 无需改动。
 
@@ -193,6 +194,7 @@ app/
     docx.py           docx 解析（python-docx）：段落/表格 + 内嵌图片
     text.py           txt/md 解析
     excel.py          xlsx（openpyxl）/ csv（标准库）解析
+    html.py           M12 通用 HTML 页面解析（标准库 html.parser）：标题/块级分段→markdown，零出站请求
     images.py         pdf/docx 共用的图片采集与数量/字节上限保护
   chat/
     mapping.py         映射档案加载：csv/xlsx 列名候选 + M8 txt 行模板/html 选择器（app/mappings/*.yml 或随请求传入的 profile_yaml）
@@ -240,7 +242,7 @@ M8（M8-CONTRACTS.md §0.1/§0.2/§0.3/§0.4，均待真实样例到位后校准
   `docs/ARCHITECTURE.md` §4（kb-rag-parser 架构）
 - 端到端业务流程（文档导入、聊天记录导入等完整链路，本服务只是其中一环）：`docs/FLOWS.md`
 - 各里程碑契约（本服务行为的规范来源，本仓库的实现与偏离说明均以其为准）：
-  `docs/M1-CONTRACTS.md`、`docs/M3-CONTRACTS.md`、`docs/M8-CONTRACTS.md`
+  `docs/M1-CONTRACTS.md`、`docs/M3-CONTRACTS.md`、`docs/M8-CONTRACTS.md`、`docs/M12-CONTRACTS.md`
 - 接口契约（OpenAPI）：`docs/openapi/kb-parser.yaml`
 - 贡献与安全：本仓库的 `CONTRIBUTING.md` / `SECURITY.md`；跨仓库通用约定另见
   kb-rag-deploy 仓库同名文件

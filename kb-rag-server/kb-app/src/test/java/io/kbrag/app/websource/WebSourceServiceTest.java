@@ -1,0 +1,281 @@
+package io.kbrag.app.websource;
+
+import io.kbrag.app.document.DocumentService;
+import io.kbrag.app.document.UploadOutcome;
+import io.kbrag.app.kb.KnowledgeBaseService;
+import io.kbrag.app.metrics.KbMetrics;
+import io.kbrag.app.support.MybatisLambdaCache;
+import io.kbrag.common.exception.BizException;
+import io.kbrag.common.util.HashUtil;
+import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.entity.Document;
+import io.kbrag.domain.entity.WebSource;
+import io.kbrag.domain.enums.WebSourceFetchStatus;
+import io.kbrag.domain.mapper.DocumentMapper;
+import io.kbrag.domain.mapper.WebSourceMapper;
+import io.kbrag.domain.port.WebPageFetcher;
+import io.kbrag.domain.service.BizIdGenerator;
+import io.kbrag.domain.service.UrlGuard;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * Covers the sync state machine of the M12 contract: everything a fetch produces must go through
+ * the one upload chain, an unchanged page must write nothing, a trashed document must stay
+ * untouched, a purged one must be rebuilt and rebound, and no sync failure may ever escape onto
+ * the scheduler thread or the register call.
+ *
+ * @author owlzhangfq@gmail.com
+ */
+class WebSourceServiceTest {
+
+    private static final String KB_ID = "kb_1";
+    private static final String SOURCE_ID = "ws_1";
+    private static final String URL = "https://example.com/docs/guide";
+    private static final byte[] BODY = "<html><body>guide</body></html>".getBytes(StandardCharsets.UTF_8);
+
+    private WebSourceMapper webSourceMapper;
+    private DocumentMapper documentMapper;
+    private DocumentService documentService;
+    private KnowledgeBaseService knowledgeBaseService;
+    private UrlGuard urlGuard;
+    private WebPageFetcher webPageFetcher;
+    private BizIdGenerator bizIdGenerator;
+    private KbProperties properties;
+    private SimpleMeterRegistry meterRegistry;
+    private WebSourceService service;
+
+    @BeforeEach
+    void setUp() {
+        MybatisLambdaCache.register(WebSource.class, Document.class);
+        webSourceMapper = mock(WebSourceMapper.class);
+        documentMapper = mock(DocumentMapper.class);
+        documentService = mock(DocumentService.class);
+        knowledgeBaseService = mock(KnowledgeBaseService.class);
+        urlGuard = mock(UrlGuard.class);
+        webPageFetcher = mock(WebPageFetcher.class);
+        bizIdGenerator = mock(BizIdGenerator.class);
+        properties = new KbProperties();
+        meterRegistry = new SimpleMeterRegistry();
+        service = new WebSourceService(webSourceMapper, documentMapper, documentService,
+                knowledgeBaseService, urlGuard, webPageFetcher, bizIdGenerator, properties,
+                new KbMetrics(meterRegistry));
+        when(urlGuard.validate(anyString())).thenAnswer(invocation ->
+                URI.create(invocation.getArgument(0, String.class)));
+        when(bizIdGenerator.webSourceId()).thenReturn(SOURCE_ID);
+    }
+
+    @Test
+    void shouldRegisterAndRunTheFirstFetchThroughTheUploadChain() {
+        when(webSourceMapper.selectCount(any())).thenReturn(0L);
+        when(webPageFetcher.fetch(URL)).thenReturn(page());
+        when(documentService.upload(eq(KB_ID), anyString(), eq(BODY))).thenReturn(outcome("doc_1"));
+
+        WebSource source = service.register(KB_ID, URL, true);
+
+        verify(webSourceMapper).insert(source);
+        assertEquals(WebSourceFetchStatus.SUCCESS, source.getLastFetchStatus());
+        assertEquals("doc_1", source.getDocId());
+        assertEquals(HashUtil.sha256Hex(BODY), source.getLastContentHash());
+        // The derived name is host plus path slug plus a hash prefix, under the upload extension.
+        assertTrue(source.getFileName().startsWith("example.com-docs-guide-"));
+        assertTrue(source.getFileName().endsWith(".html"));
+        assertNull(source.getLastError());
+        // The M13 sync counter rides the same record funnel, so a success must show up there too.
+        assertEquals(1, meterRegistry.get("kb.websource.sync").tag("status", "success").counter().count());
+    }
+
+    @Test
+    void shouldRejectADuplicateUrlWithinTheSameKnowledgeBase() {
+        when(webSourceMapper.selectCount(any())).thenReturn(1L);
+
+        assertThrows(BizException.class, () -> service.register(KB_ID, URL, true));
+        verify(webSourceMapper, never()).insert(any(WebSource.class));
+    }
+
+    @Test
+    void shouldKeepTheRegistrationWhenTheFirstFetchFails() {
+        // The operator registered the page, not the luck of this minute: the row must survive and
+        // carry the failure for them to read.
+        when(webSourceMapper.selectCount(any())).thenReturn(0L);
+        when(webPageFetcher.fetch(URL)).thenThrow(new IllegalStateException("connection refused"));
+
+        WebSource source = assertDoesNotThrow(() -> service.register(KB_ID, URL, true));
+
+        verify(webSourceMapper).insert(source);
+        assertEquals(WebSourceFetchStatus.FAILED, source.getLastFetchStatus());
+        assertEquals("connection refused", source.getLastError());
+        verify(documentService, never()).upload(any(), any(), any());
+    }
+
+    @Test
+    void shouldWriteNothingWhenThePageIsUnchanged() {
+        WebSource source = boundSource();
+        source.setLastContentHash(HashUtil.sha256Hex(BODY));
+        when(webPageFetcher.fetch(URL)).thenReturn(page());
+
+        service.sync(source);
+
+        assertEquals(WebSourceFetchStatus.UNCHANGED, source.getLastFetchStatus());
+        assertNull(source.getLastError());
+        verify(documentService, never()).upload(any(), any(), any());
+        verify(webSourceMapper).updateById(source);
+    }
+
+    @Test
+    void shouldSkipWhileTheBoundDocumentSitsInTheTrash() {
+        // Feeding a version into a trashed document would silently resurrect removed content.
+        WebSource source = boundSource();
+        when(webPageFetcher.fetch(URL)).thenReturn(page());
+        when(documentMapper.selectOne(any())).thenReturn(trashedDocument());
+
+        service.sync(source);
+
+        assertEquals(WebSourceFetchStatus.SKIPPED, source.getLastFetchStatus());
+        assertNotNull(source.getLastError());
+        verify(documentService, never()).upload(any(), any(), any());
+    }
+
+    @Test
+    void shouldRebindAfterAPurgeRemovedTheDocument() {
+        // The purge broke the binding; the next sync recreates the document under the same stable
+        // file name and the registration follows it.
+        WebSource source = boundSource();
+        when(webPageFetcher.fetch(URL)).thenReturn(page());
+        when(documentMapper.selectOne(any())).thenReturn(null);
+        when(documentService.upload(KB_ID, source.getFileName(), BODY)).thenReturn(outcome("doc_new"));
+
+        service.sync(source);
+
+        assertEquals(WebSourceFetchStatus.SUCCESS, source.getLastFetchStatus());
+        assertEquals("doc_new", source.getDocId());
+        verify(documentService).upload(KB_ID, "example.com-docs-guide-abcd1234.html", BODY);
+    }
+
+    @Test
+    void shouldRecordAFailureTruncatedAndNeverRethrow() {
+        WebSource source = boundSource();
+        when(webPageFetcher.fetch(URL)).thenThrow(new IllegalStateException("x".repeat(600)));
+
+        assertDoesNotThrow(() -> service.sync(source));
+
+        assertEquals(WebSourceFetchStatus.FAILED, source.getLastFetchStatus());
+        // The cause must fit the 512 char column instead of failing the status write itself.
+        assertEquals(512, source.getLastError().length());
+        verify(webSourceMapper).updateById(source);
+    }
+
+    @Test
+    void shouldSkipTheScheduledPassWhenDisabled() {
+        properties.getWebImport().setSyncEnabled(false);
+
+        service.scheduledSync();
+
+        verify(webSourceMapper, never()).selectList(any());
+    }
+
+    @Test
+    void shouldSyncOneBoundedBatchAndContinuePastAFailingSource() {
+        properties.getWebImport().setSyncBatchSize(2);
+        WebSource failing = boundSource();
+        WebSource healthy = boundSource();
+        healthy.setSourceId("ws_2");
+        healthy.setUrl(URL + "/second");
+        when(webSourceMapper.selectList(any())).thenReturn(List.of(failing, healthy));
+        when(webPageFetcher.fetch(URL)).thenThrow(new IllegalStateException("down"));
+        when(webPageFetcher.fetch(URL + "/second")).thenReturn(page());
+        when(documentMapper.selectOne(any())).thenReturn(null);
+        when(documentService.upload(any(), any(), any())).thenReturn(outcome("doc_2"));
+
+        assertEquals(2, service.syncEnabledSources());
+
+        assertEquals(WebSourceFetchStatus.FAILED, failing.getLastFetchStatus());
+        assertEquals(WebSourceFetchStatus.SUCCESS, healthy.getLastFetchStatus());
+    }
+
+    @Test
+    void shouldSwallowAFailureOfTheScheduledPass() {
+        when(webSourceMapper.selectList(any())).thenThrow(new IllegalStateException("db down"));
+
+        assertDoesNotThrow(() -> service.scheduledSync());
+    }
+
+    @Test
+    void shouldRemoveTheRegistrationPhysically() {
+        // A soft delete would hold uk_kb_url hostage and make the URL unregisterable forever.
+        WebSource source = boundSource();
+        source.setId(7L);
+        when(webSourceMapper.selectOne(any())).thenReturn(source);
+
+        service.remove(SOURCE_ID);
+
+        verify(webSourceMapper).hardDeleteById(7L);
+        verify(webSourceMapper, never()).deleteById(any(Long.class));
+    }
+
+    @Test
+    void shouldDeriveAStableBoundedFileName() {
+        String urlHash = HashUtil.sha256Hex(URL);
+        String name = WebSourceService.deriveFileName(URI.create(URL), urlHash, "html");
+
+        assertEquals("example.com-docs-guide-" + urlHash.substring(0, 8) + ".html", name);
+        // A root URL keeps just the host.
+        assertTrue(WebSourceService.deriveFileName(URI.create("https://example.com/"), urlHash, "html")
+                .startsWith("example.com-"));
+        // A pathological path is truncated but the disambiguating hash suffix always survives.
+        String longName = WebSourceService.deriveFileName(
+                URI.create("https://example.com/" + "a/".repeat(300)), urlHash, "html");
+        assertEquals(200, longName.length());
+        assertTrue(longName.endsWith("-" + urlHash.substring(0, 8) + ".html"));
+    }
+
+    private WebSource boundSource() {
+        WebSource source = new WebSource();
+        source.setSourceId(SOURCE_ID);
+        source.setKbId(KB_ID);
+        source.setUrl(URL);
+        source.setUrlHash(HashUtil.sha256Hex(URL));
+        source.setDocId("doc_1");
+        source.setFileName("example.com-docs-guide-abcd1234.html");
+        source.setSyncEnabled(1);
+        return source;
+    }
+
+    private Document trashedDocument() {
+        Document document = new Document();
+        document.setDocId("doc_1");
+        document.setKbId(KB_ID);
+        document.setTrashed(1);
+        return document;
+    }
+
+    private WebPageFetcher.FetchedPage page() {
+        return new WebPageFetcher.FetchedPage(BODY, "html");
+    }
+
+    private UploadOutcome outcome(String docId) {
+        Document document = new Document();
+        document.setDocId(docId);
+        document.setKbId(KB_ID);
+        return new UploadOutcome(document, "dv_1", "v1", false, null);
+    }
+}

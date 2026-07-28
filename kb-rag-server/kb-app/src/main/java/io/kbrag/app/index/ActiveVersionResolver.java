@@ -5,11 +5,13 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.Document;
+import io.kbrag.domain.enums.PublishStatus;
 import io.kbrag.domain.mapper.DocumentMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -30,11 +32,19 @@ import java.util.List;
  * it must never be completed from here - that is the very substitution requirement section 4.7 forbids, the
  * one that made a rollback recall nothing.
  *
+ * <p><b>The single governance gate (M11 contract section 2.1).</b> Publication state, validity window and the
+ * recycle bin are all row predicates of this one query, never columns in a search engine: a governance change
+ * flips the database row and invalidates this cache, and no index is rebuilt. A window that opens or closes
+ * with nobody operating the console takes effect when the cache entry expires, which is the accepted delay.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service
 public class ActiveVersionResolver {
+
+    /** Value of {@code trashed} outside the recycle bin. */
+    private static final int NOT_TRASHED = 0;
 
     private final DocumentMapper documentMapper;
     private final Cache<String, List<String>> cache;
@@ -72,9 +82,14 @@ public class ActiveVersionResolver {
     }
 
     private List<String> load(String kbId) {
+        LocalDateTime now = LocalDateTime.now();
         List<Document> documents = documentMapper.selectList(new LambdaQueryWrapper<Document>()
                 .eq(Document::getKbId, kbId)
-                .isNotNull(Document::getCurrentVersionId));
+                .isNotNull(Document::getCurrentVersionId)
+                .eq(Document::getTrashed, NOT_TRASHED)
+                .eq(Document::getPublishStatus, PublishStatus.PUBLISHED)
+                .and(w -> w.isNull(Document::getEffectiveAt).or().le(Document::getEffectiveAt, now))
+                .and(w -> w.isNull(Document::getExpiresAt).or().gt(Document::getExpiresAt, now)));
         return documents.stream().map(Document::getCurrentVersionId).toList();
     }
 }

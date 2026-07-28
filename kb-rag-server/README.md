@@ -12,7 +12,8 @@ kb-rag-server            # parent，统一依赖版本
 ├── kb-domain            # 实体 + Mapper + 枚举 + 纯领域算法（切分、融合、指纹、评测指标、门禁裁决）+ 出站端口接口
 ├── kb-infrastructure    # 端口实现：Elasticsearch、Qdrant、Neo4j、MinIO、模型 Provider、parser 客户端、Webhook
 ├── kb-app               # 应用编排：kb / document / index / retrieval / graph / annotation / eval /
-│                        #           appcenter / openapi / chat / alert / dict / auth / system / config
+│                        #           appcenter / openapi / chat / alert / dict / auth / system / config /
+│                        #           feedback / insight / governance / websource / metrics
 └── kb-api               # Controller + DTO + 过滤器 + 健康探针 + Flyway 脚本 + 启动类
 ```
 
@@ -40,6 +41,10 @@ kb-infrastructure 实现 kb-domain 定义的端口接口，kb-app 只依赖端�
 | M7 | GraphRAG：实体 / 关系抽取入 Neo4j、图路作为库内第三路进 RRF、级联清理、图谱管理端点 |
 | M8 | 导入与解析增强：聊天记录 TXT/HTML 格式、聊天聚合重叠滑窗与检索侧近重复归并、字段映射档案维护 |
 | M9 | 标注语义与图搜：父片按偏移精确剔除禁用子片、标注跨版本相似度辅助迁移（对称 Dice）、图片 query |
+| M10 | 检索质量闭环：检索反馈（有用 / 无用 + 原因）持久化、检索洞察埋点与统计报表、零命中问题与内容缺口清单 |
+| M11 | 内容治理：文档审核状态机（草稿 / 待审 / 已发布 / 已驳回）、有效期调度（生效 / 过期自动下线）、回收站软删除与恢复 |
+| M12 | 数据接入：网页 URL 导入（登记即抓取）、增量同步四态（成功 / 未变更 / 失败 / 跳过）、SSRF 防护、通用 HTML 解析 |
+| M13 | 运维指标：Prometheus 端点激活，检索耗时 / 任务完成 / 开放 API 拒绝 / 网页同步四类业务指标 + 任务积压 gauge |
 
 ## 环境要求
 
@@ -162,7 +167,7 @@ mvn -B -ntp -DskipTests package
 java -jar kb-api/target/kb-rag-server.jar
 ```
 
-启动时 Flyway 自动执行迁移（当前 V1–V11，23 张业务表）。数据库中没有管理员账号时会创建 `admin` 并把随机密码打印到启动日志（只打印一次），首次登录强制改密。
+启动时 Flyway 自动执行迁移（当前 V1–V14，26 张业务表）。数据库中没有管理员账号时会创建 `admin` 并把随机密码打印到启动日志（只打印一次），首次登录强制改密。
 
 跑测试：
 
@@ -175,7 +180,7 @@ mvn -B -ntp verify        # CI 跑的命令，等价于全量单测 + 打包
 
 ## 接口
 
-接口清单不在本文件维护，以 OpenAPI 契约为准：`kb-rag-deploy/docs/openapi/kb-server.yaml`（75 条路径 / 92 个操作）。契约先行——改动端点或 DTO 时先改 yaml 再改代码。
+接口清单不在本文件维护，以 OpenAPI 契约为准：`kb-rag-deploy/docs/openapi/kb-server.yaml`（92 条路径 / 111 个操作）。契约先行——改动端点或 DTO 时先改 yaml 再改代码。
 
 鉴权分两条完全独立的链路：
 
@@ -188,7 +193,7 @@ mvn -B -ntp verify        # CI 跑的命令，等价于全量单测 + 打包
 
 统一响应体：成功 `{"code":"OK","message":"success","data":...,"request_id":"..."}`，失败 `{"code":"...","message":"...","request_id":"..."}`。`request_id` 在入口过滤器生成（可由 `X-Request-Id` 请求头指定），写入日志 MDC，透传给 parser 服务，并随异步线程池的 `TaskDecorator` 传到 worker 线程。
 
-`/actuator` 的暴露白名单为 `health,info,prometheus`；健康探针含 MySQL、Elasticsearch、MinIO，配置了 Qdrant / Neo4j 时各自增加一项。指标端点需要额外引入 micrometer 的 Prometheus registry 才会真正出现，当前依赖里没有它，所以实际可用的是 `health` 与 `info`。
+`/actuator` 的暴露白名单为 `health,info,prometheus`；健康探针含 MySQL、Elasticsearch、MinIO，配置了 Qdrant / Neo4j 时各自增加一项。M13 起依赖里已包含 micrometer 的 Prometheus registry，`/actuator/prometheus` 可直接抓取：业务指标为 `kb_search_seconds`（Timer，source / zero_hit / degraded 标签）、`kb_task_completed_total`、`kb_openapi_rejected_total`、`kb_websource_sync_total` 三个 Counter 与 `kb_task_backlog`（pending / running 两支 gauge，数据库不可用时回 NaN 不失败）。该端点与 health 同口径暂不鉴权。
 
 ## 文档导航
 
@@ -198,7 +203,7 @@ mvn -B -ntp verify        # CI 跑的命令，等价于全量单测 + 打包
 |---|---|
 | `ARCHITECTURE.md` | 四仓总体架构；§3 是本服务的模块、端口、检索链路、索引管线、异步与数据模型 |
 | `FLOWS.md` | 端到端流程时序（上传入库、检索、发布、评测、导入） |
-| `M1~M9-CONTRACTS.md` | 各里程碑的开发契约与「实现期修订」——实现与契约的偏离都记在这里 |
+| `M1~M13-CONTRACTS.md` | 各里程碑的开发契约与「实现期修订」——实现与契约的偏离都记在这里 |
 | `openapi/kb-server.yaml` | 本服务的 API 契约 |
 | `openapi/kb-parser.yaml` | parser 服务的 API 契约 |
 | `backup-restore.md` | 备份与恢复演练步骤、RPO/RTO |

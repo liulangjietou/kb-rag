@@ -3,9 +3,12 @@ package io.kbrag.domain.entity;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import io.kbrag.domain.enums.ProcessStatus;
+import io.kbrag.domain.enums.PublishStatus;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
+
+import java.time.LocalDateTime;
 
 /**
  * Document master record. Holds the pointer to the currently active version.
@@ -47,6 +50,30 @@ public class Document extends BaseEntity {
     /** Single valued processing state. */
     @TableField("process_status")
     private ProcessStatus processStatus;
+
+    /** Editorial state, orthogonal to the processing state (M11 governance). */
+    @TableField("publish_status")
+    private PublishStatus publishStatus;
+
+    /** Latest rejection reason, cleared on approval. */
+    @TableField("review_note")
+    private String reviewNote;
+
+    /** Instant the document becomes retrievable, {@code null} for no lower bound. */
+    @TableField("effective_at")
+    private LocalDateTime effectiveAt;
+
+    /** Instant the document stops being retrievable, {@code null} for no upper bound. */
+    @TableField("expires_at")
+    private LocalDateTime expiresAt;
+
+    /** {@code 1} while the document sits in the recycle bin, out of retrieval but restorable. */
+    @TableField("trashed")
+    private Integer trashed;
+
+    /** When the document entered the recycle bin, drives the retention purge. */
+    @TableField("trashed_at")
+    private LocalDateTime trashedAt;
 
     /** Set when the knowledge base configuration fingerprint no longer matches the active version. */
     @TableField("config_stale")

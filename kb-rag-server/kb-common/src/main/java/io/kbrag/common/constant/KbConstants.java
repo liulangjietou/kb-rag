@@ -64,6 +64,15 @@ public final class KbConstants {
     /** Business id prefix of a chat import mapping profile row. */
     public static final String SOURCE_MAPPING_ID_PREFIX = "smp";
 
+    /** Business id prefix of a retrieval feedback row. */
+    public static final String RETRIEVAL_FEEDBACK_ID_PREFIX = "rfb";
+
+    /** Business id prefix of a search insight row. */
+    public static final String SEARCH_INSIGHT_ID_PREFIX = "si";
+
+    /** Business id prefix of a registered web source row. */
+    public static final String WEB_SOURCE_ID_PREFIX = "ws";
+
     /**
      * Fixed prefix of every open API key plaintext, requirement section 4.8 "kb-sk-{prefix}{random}".
      *

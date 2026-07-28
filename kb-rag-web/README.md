@@ -2,7 +2,7 @@
 
 知识库 RAG 系统的前端管理台。技术栈：Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；静态检查用 oxlint；不引入 Redux/Zustand 等状态管理库（登录态与模型状态均用 React Context）。
 
-对应 `kb-rag-deploy/docs/ARCHITECTURE.md` 第 5 节（web 架构）与 `docs/M1~M9-CONTRACTS.md` 各里程碑契约。
+对应 `kb-rag-deploy/docs/ARCHITECTURE.md` 第 5 节（web 架构）与 `docs/M1~M13-CONTRACTS.md` 各里程碑契约。
 
 ## 快速开始
 
@@ -34,7 +34,7 @@ npm run dev      # 启动开发服务器，默认端口 20002
 | `/login` | - | 登录页 | 登录成功后若 `must_change_password=true` 强制跳转改密页 |
 | `/change-password` | - | 首登改密页 | 修改成功后放行到知识库列表 |
 | `/kb` | 知识库 | 知识库列表 | 卡片形式展示，支持新建（弹窗）、删除（二次确认）、空态引导 |
-| `/kb/:kbId` | 知识库 | 知识库详情 | 文档拖拽上传、文档列表（状态标签 + 3s 轮询）、失败原因提示、索引配置编辑与重建、分片抽屉、版本抽屉（pinned 标记）、聊天记录导入向导、知识图谱 Tab |
+| `/kb/:kbId` | 知识库 | 知识库详情 | 文档拖拽上传、文档列表（状态标签 + 3s 轮询）、失败原因提示、审核与有效期操作（M11）、索引配置编辑与重建、分片抽屉、版本抽屉（pinned 标记）、聊天记录导入向导；知识图谱 / 反馈管理 / 检索洞察 / 回收站 / 网页导入等 Tab |
 | `/search` | 检索调试 | 检索调试 | 知识库选择 + 参数面板（改写/召回/融合/重排/过滤/返回分组折叠），结果卡片展示各路原始分/归一化分/`fused_score`/`rerank_score`，`degraded` 非空时顶部告警，可收进评测集 |
 | `/chat` | 问答调试 | 问答调试 | 走 `/apps/{id}/chat-preview` SSE 流式问答（JWT 鉴权） |
 | `/apps` | 应用中心 | 应用列表 | 应用的新建与列表 |
@@ -79,6 +79,6 @@ src/
 
 - 整体架构（web 一节）：`kb-rag-deploy/docs/ARCHITECTURE.md` 第 5 节
 - 关键流程时序图（含前端参与的每条链路）：`kb-rag-deploy/docs/FLOWS.md`
-- 各里程碑接口契约：`kb-rag-deploy/docs/M1~M9-CONTRACTS.md`
+- 各里程碑接口契约：`kb-rag-deploy/docs/M1~M13-CONTRACTS.md`
 - 参与贡献、提交规范：`CONTRIBUTING.md`
 - 安全问题上报：`SECURITY.md`

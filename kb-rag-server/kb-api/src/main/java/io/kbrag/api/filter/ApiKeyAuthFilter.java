@@ -1,5 +1,6 @@
 package io.kbrag.api.filter;
 
+import io.kbrag.app.metrics.KbMetrics;
 import io.kbrag.app.openapi.ApiAuditService;
 import io.kbrag.app.openapi.ApiKeyPrincipal;
 import io.kbrag.app.openapi.ApiKeyService;
@@ -57,6 +58,7 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
     private final ApiKeyService apiKeyService;
     private final ApiRateLimiter apiRateLimiter;
     private final ApiAuditService apiAuditService;
+    private final KbMetrics kbMetrics;
     private final KbProperties properties;
 
     @Override
@@ -134,11 +136,15 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
      * <p>A rate limited response also carries {@code Retry-After}, which is what lets a well behaved agent back
      * off by the amount the server actually wants rather than by a guess.
      *
+     * <p>The one funnel every rejection leaves through, so it is also where the M13 rejection counter sits -
+     * unlike the audit row it counts the credential failures too, since a counter needs no key id to be useful.
+     *
      * @param response outbound response
      * @param e        rejection
      */
     private void writeError(HttpServletResponse response, BizException e) throws IOException {
         ErrorCode errorCode = e.getErrorCode();
+        kbMetrics.recordOpenApiRejected(errorCode.name());
         log.info("open api call rejected, errorCode={}, reason={}", errorCode, e.getMessage());
         response.setStatus(errorCode.getHttpStatus());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);

@@ -1,5 +1,6 @@
 package io.kbrag.app.index;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.Document;
@@ -9,10 +10,12 @@ import io.kbrag.domain.mapper.DocumentVersionMapper;
 import io.kbrag.domain.enums.ProcessStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -104,6 +107,26 @@ class ActiveVersionResolverTest {
         // The invalidation is wired into the activation rather than left to the caller, so no activation path
         // can forget it.
         assertEquals(List.of(SECOND_VERSION), resolver.activeVersionIds(KB_ID));
+    }
+
+    @Test
+    void shouldFilterTheSetThroughTheGovernanceGate() {
+        // The resolver is the single place governance takes effect: the trash flag, the review state
+        // and both bounds of the validity window must all be part of the row filter, or a governed
+        // document would keep serving queries.
+        when(documentMapper.selectList(any())).thenReturn(List.of(document(FIRST_VERSION)));
+        resolver.activeVersionIds(KB_ID);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<LambdaQueryWrapper<Document>> captor =
+                ArgumentCaptor.forClass((Class) LambdaQueryWrapper.class);
+        verify(documentMapper).selectList(captor.capture());
+
+        String where = captor.getValue().getSqlSegment();
+        assertTrue(where.contains("trashed"));
+        assertTrue(where.contains("publish_status"));
+        assertTrue(where.contains("effective_at IS NULL OR effective_at <="));
+        assertTrue(where.contains("expires_at IS NULL OR expires_at >"));
     }
 
     private Document document(String currentVersionId) {
