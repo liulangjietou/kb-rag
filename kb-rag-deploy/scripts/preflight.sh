@@ -91,7 +91,7 @@ get_total_mem_gb() {
 }
 
 REQUIRED_GB=8
-[[ "${DEPLOY_PROFILE}" == "full" ]] && REQUIRED_GB=24
+[[ "${DEPLOY_PROFILE}" == "full" ]] && REQUIRED_GB=16
 
 TOTAL_GB="$(get_total_mem_gb)"
 if [[ "${TOTAL_GB}" -eq 0 ]]; then
@@ -157,6 +157,9 @@ check_secret "MYSQL_PASSWORD"            "${MYSQL_PASSWORD:-CHANGE_ME_mysql_pass
 check_secret "MINIO_ACCESS_KEY"          "${MINIO_ACCESS_KEY:-CHANGE_ME_minio_access_key}"
 check_secret "MINIO_SECRET_KEY"          "${MINIO_SECRET_KEY:-CHANGE_ME_minio_secret_key}"
 if [[ "${DEPLOY_PROFILE}" == "full" ]]; then
+  # Qdrant 的 API Key 必填：容器只要收到 QDRANT__SERVICE__API_KEY 这个变量就会开启鉴权，
+  # 留空反而变成"鉴权已开但没有可用密钥"，届时应用侧每次读写向量都会拿到 401。
+  check_secret "QDRANT_API_KEY" "${QDRANT_API_KEY:-CHANGE_ME_qdrant_api_key}"
 fi
 
 # ---------------------------------------------------------------------

@@ -26,14 +26,16 @@ services:
   # 单进程自带存储，不需要额外的元数据服务或对象存储，full 模式因此只比 lite 多这一个容器。
   #
   # 数据落在 kb_rag_qdrant_data 卷的 /qdrant/storage 下，容器重建不丢数据。
-  # QDRANT_API_KEY 留空即免鉴权（本机部署默认），填写后所有请求需带 api-key 头。
+  # QDRANT_API_KEY 必填：Qdrant 只要收到 QDRANT__SERVICE__API_KEY 这个变量就开启鉴权，
+  # 留空传下去等于"鉴权已开但密钥为空"，任何请求都会 401（/healthz 例外，所以容器仍显示 healthy）。
+  # 设好后应用侧与 curl 都需带 api-key 头。
   # ------------------------------------------------------------------
   qdrant:
     image: qdrant/qdrant:v1.18.3
     container_name: kb-rag-qdrant
     restart: unless-stopped
     environment:
-      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-CHANGE_ME_qdrant_api_key}
     volumes:
       - kb_rag_qdrant_data:/qdrant/storage
     ports:
