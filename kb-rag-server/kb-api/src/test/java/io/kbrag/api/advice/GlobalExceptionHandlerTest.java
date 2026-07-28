@@ -4,9 +4,11 @@ import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.io.UnsupportedEncodingException;
 
@@ -65,6 +67,19 @@ class GlobalExceptionHandlerTest {
                 handler.handleBiz(BizException.invalidParam("bad input"), request, response);
 
         assertNotNull(entity);
+    }
+
+    @Test
+    void shouldAnswerAnUnknownPathWithNotFoundRatherThanInternalError() {
+        ResponseEntity<Result<Void>> entity = handler.handleNoResourceFound(
+                new NoResourceFoundException(HttpMethod.POST, "api/v1/knowledge/search/api/v1/knowledge/search"));
+
+        assertNotNull(entity);
+        assertEquals(ErrorCode.NOT_FOUND.getHttpStatus(), entity.getStatusCode().value());
+        assertNotNull(entity.getBody());
+        assertEquals(ErrorCode.NOT_FOUND.name(), entity.getBody().getCode());
+        // 报文里回显路径，调用方一眼能看出是自己把 baseURL 和路径拼了两遍
+        assertTrue(entity.getBody().getMessage().contains("api/v1/knowledge/search/api/v1/knowledge/search"));
     }
 
     @Test
