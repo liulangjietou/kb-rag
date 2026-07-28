@@ -17,6 +17,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -141,6 +142,24 @@ public class GlobalExceptionHandler {
         log.info("upload rejected, errorCode={}, reason=size limit exceeded", ErrorCode.INVALID_PARAM);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Result.failure(ErrorCode.INVALID_PARAM, "file exceeds the configured size limit"));
+    }
+
+    /**
+     * Handles requests whose path matches no handler.
+     *
+     * <p>Exists because the catch all below would otherwise answer a mistyped URL with
+     * {@code 500 INTERNAL_ERROR} and log a full stack trace: the caller is told the service broke when
+     * the path is simply wrong, and every wrong URL an integration tries buries real failures under
+     * error level noise. A path that does not exist is a client error, so it gets 404 and one info line.
+     *
+     * @param e resource not found exception
+     * @return error envelope mapped to {@link ErrorCode#NOT_FOUND}
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Result<Void>> handleNoResourceFound(NoResourceFoundException e) {
+        log.info("request rejected, errorCode={}, path={}", ErrorCode.NOT_FOUND, e.getResourcePath());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Result.failure(ErrorCode.NOT_FOUND, "no handler for " + e.getResourcePath()));
     }
 
     /**
