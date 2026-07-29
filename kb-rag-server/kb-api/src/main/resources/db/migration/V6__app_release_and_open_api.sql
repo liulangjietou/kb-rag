@@ -1,54 +1,52 @@
--- Milestone M4c schema increment: applications, version release with the evaluation gate, API keys
--- and the outbound call audit trail.
--- The baseline and V1-V5 are never edited after release, so every later change arrives as its own migration.
+-- 里程碑 M4c 的结构增量：应用、带评测门禁的版本发布、API Key，以及对外调用的审计流水。
+-- 基线与 V1-V5 发布后不再修改，因此后续每一次变更都以独立的迁移脚本落地。
+SET NAMES utf8mb4;
 
 CREATE TABLE t_kb_app
 (
-    id           BIGINT       NOT NULL AUTO_INCREMENT,
-    app_id       VARCHAR(64)  NOT NULL COMMENT 'business identifier exposed by the API',
-    name         VARCHAR(128) NOT NULL COMMENT 'display name',
-    description  VARCHAR(1024)         DEFAULT NULL COMMENT 'free text description',
-    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    lock_version INT          NOT NULL DEFAULT 0,
-    deleted      TINYINT      NOT NULL DEFAULT 0,
+    id           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    app_id       VARCHAR(64)  NOT NULL COMMENT '对外暴露的业务标识',
+    name         VARCHAR(128) NOT NULL COMMENT '展示名称',
+    description  VARCHAR(1024)         DEFAULT NULL COMMENT '自由文本描述',
+    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    lock_version INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    deleted      TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除标记，1 表示已删除',
     PRIMARY KEY (id),
     UNIQUE KEY uk_app_id (app_id)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
-  COLLATE = utf8mb4_general_ci COMMENT ='knowledge base application';
+  COLLATE = utf8mb4_general_ci COMMENT ='知识库应用';
 
 CREATE TABLE t_kb_app_version
 (
-    id              BIGINT      NOT NULL AUTO_INCREMENT,
-    app_version_id  VARCHAR(64) NOT NULL COMMENT 'business identifier exposed by the API',
-    app_id          VARCHAR(64) NOT NULL COMMENT 'owning application',
-    version         VARCHAR(16) NOT NULL COMMENT 'display version, V1.0 then V2.0 and so on',
+    id              BIGINT      NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    app_version_id  VARCHAR(64) NOT NULL COMMENT '对外暴露的业务标识',
+    app_id          VARCHAR(64) NOT NULL COMMENT '所属应用',
+    version         VARCHAR(16) NOT NULL COMMENT '展示版本号，依次为 V1.0、V2.0 ……',
     status          VARCHAR(24) NOT NULL DEFAULT 'DRAFT'
-        COMMENT 'DRAFT/TESTING/GATING/GATE_PASSED/GATE_LOG_ONLY/GATE_BLOCKED/RELEASED/SUPERSEDED',
-    -- Frozen at release time and never re-read from the knowledge base afterwards, requirement
-    -- section 4.7 "configuration snapshot": single kb_id (multi base arrives with M5), the retrieval
-    -- parameters and the question answering prompt block.
-    config          JSON        NOT NULL COMMENT 'full retrieval and prompt configuration snapshot',
-    gate_dataset_id VARCHAR(64)          DEFAULT NULL COMMENT 'baseline evaluation data set, null skips the gate',
-    gate_run_ids    JSON                 DEFAULT NULL COMMENT 'the two run ids of the dual run, candidate first',
-    gate_verdict    VARCHAR(16)          DEFAULT NULL COMMENT 'PASS/BLOCKED/LOG_ONLY, three state gate outcome',
-    gate_reason     VARCHAR(32)          DEFAULT NULL COMMENT 'classified reason behind gate_verdict',
-    gate_report     JSON                 DEFAULT NULL COMMENT 'intersection metrics of both sides plus the tolerance',
-    force_released  TINYINT     NOT NULL DEFAULT 0 COMMENT '1 when an administrator forced the release',
-    force_operator  VARCHAR(64)          DEFAULT NULL COMMENT 'who forced the release, audit trail',
-    changelog       VARCHAR(1024)        DEFAULT NULL COMMENT 'version description',
-    released_at     DATETIME             DEFAULT NULL COMMENT 'last time this version became the released one',
-    -- Virtual column plus unique index is what enforces "at most one released version per application"
-    -- in the database rather than in application code, requirement section 4.7. It resolves to NULL for
-    -- every other status and for soft deleted rows, and MySQL allows any number of NULLs in a unique
-    -- index, so only the released rows compete for the slot.
+        COMMENT '版本状态：DRAFT/TESTING/GATING/GATE_PASSED/GATE_LOG_ONLY/GATE_BLOCKED/RELEASED/SUPERSEDED',
+    -- 发布时冻结，此后再也不会回到知识库重新读取，对应需求文档 4.7 节「配置快照」：
+    -- 单个 kb_id（多知识库在 M5 才引入）、检索参数，以及问答提示词块。
+    config          JSON        NOT NULL COMMENT '完整的检索与提示词配置快照',
+    gate_dataset_id VARCHAR(64)          DEFAULT NULL COMMENT '门禁基线评测数据集，为 null 时跳过门禁',
+    gate_run_ids    JSON                 DEFAULT NULL COMMENT '双跑的两个运行 id，候选版本在前',
+    gate_verdict    VARCHAR(16)          DEFAULT NULL COMMENT '门禁三态结论：PASS 通过 / BLOCKED 拦截 / LOG_ONLY 仅记录',
+    gate_reason     VARCHAR(32)          DEFAULT NULL COMMENT 'gate_verdict 背后归类后的原因',
+    gate_report     JSON                 DEFAULT NULL COMMENT '双方交集指标与容差阈值',
+    force_released  TINYINT     NOT NULL DEFAULT 0 COMMENT '管理员强制发布时置 1',
+    force_operator  VARCHAR(64)          DEFAULT NULL COMMENT '强制发布的操作人，用于审计',
+    changelog       VARCHAR(1024)        DEFAULT NULL COMMENT '版本说明',
+    released_at     DATETIME             DEFAULT NULL COMMENT '本版本最近一次成为发布版的时间',
+    -- 「一个应用最多一个发布版」这条约束靠虚拟列加唯一索引在数据库层强制，而不是放在应用代码里，
+    -- 对应需求文档 4.7 节。其余状态和逻辑删除行上它都求值为 NULL，而 MySQL 的唯一索引允许任意多个
+    -- NULL，因此只有处于发布状态的行才会去争这个槽位。
     released_slot   VARCHAR(64) GENERATED ALWAYS AS
-        (IF(status = 'RELEASED' AND deleted = 0, app_id, NULL)) VIRTUAL,
-    created_at      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    lock_version    INT         NOT NULL DEFAULT 0,
-    deleted         TINYINT     NOT NULL DEFAULT 0,
+        (IF(status = 'RELEASED' AND deleted = 0, app_id, NULL)) VIRTUAL COMMENT '发布槽位虚拟列，仅发布版求值为 app_id，其余为 NULL',
+    created_at      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    lock_version    INT         NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    deleted         TINYINT     NOT NULL DEFAULT 0 COMMENT '逻辑删除标记，1 表示已删除',
     PRIMARY KEY (id),
     UNIQUE KEY uk_app_version_id (app_version_id),
     UNIQUE KEY uk_released_slot (released_slot),
@@ -56,55 +54,54 @@ CREATE TABLE t_kb_app_version
     KEY idx_status (status)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
-  COLLATE = utf8mb4_general_ci COMMENT ='application version: configuration snapshot and release state machine';
+  COLLATE = utf8mb4_general_ci COMMENT ='应用版本：配置快照与发布状态机';
 
 CREATE TABLE t_kb_api_key
 (
-    id           BIGINT       NOT NULL AUTO_INCREMENT,
-    key_id       VARCHAR(64)  NOT NULL COMMENT 'business identifier exposed by the API',
-    name         VARCHAR(128) NOT NULL COMMENT 'display name of the caller this key was issued to',
-    -- Only the digest is stored: the plaintext is shown once at creation and never again, so a database
-    -- dump cannot be replayed against the open API, requirement section 4.8.
-    key_hash     CHAR(64)     NOT NULL COMMENT 'SHA-256 of the plaintext key',
-    prefix       VARCHAR(32)  NOT NULL COMMENT 'display only form, leading segment plus the last 4 characters',
-    status       VARCHAR(16)  NOT NULL DEFAULT 'ENABLED' COMMENT 'ENABLED/DISABLED',
-    qps_limit    INT          NOT NULL DEFAULT 10 COMMENT 'token bucket rate of this key',
-    app_scope    JSON                  DEFAULT NULL COMMENT 'allowed app ids, null authorises every application',
-    last_used_at DATETIME              DEFAULT NULL COMMENT 'last successful authentication',
-    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    lock_version INT          NOT NULL DEFAULT 0,
-    deleted      TINYINT      NOT NULL DEFAULT 0,
+    id           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    key_id       VARCHAR(64)  NOT NULL COMMENT '对外暴露的业务标识',
+    name         VARCHAR(128) NOT NULL COMMENT '该 Key 所签发给的调用方展示名称',
+    -- 只存摘要：明文仅在创建时展示一次、此后再也不会出现，因此即使数据库被拖库，
+    -- 也无法拿去重放开放接口，对应需求文档 4.8 节。
+    key_hash     CHAR(64)     NOT NULL COMMENT '明文 Key 的 SHA-256 摘要',
+    prefix       VARCHAR(32)  NOT NULL COMMENT '仅用于展示的形式：前缀段加末尾 4 位',
+    status       VARCHAR(16)  NOT NULL DEFAULT 'ENABLED' COMMENT '状态：ENABLED 启用 / DISABLED 停用',
+    qps_limit    INT          NOT NULL DEFAULT 10 COMMENT '该 Key 的令牌桶速率',
+    app_scope    JSON                  DEFAULT NULL COMMENT '授权的应用 id 列表，为 null 时授权全部应用',
+    last_used_at DATETIME              DEFAULT NULL COMMENT '最近一次认证成功的时间',
+    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    lock_version INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    deleted      TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除标记，1 表示已删除',
     PRIMARY KEY (id),
     UNIQUE KEY uk_key_id (key_id),
     UNIQUE KEY uk_key_hash (key_hash),
     KEY idx_status (status)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
-  COLLATE = utf8mb4_general_ci COMMENT 'API key of the open API: hash storage, scope and quota';
+  COLLATE = utf8mb4_general_ci COMMENT ='开放接口的 API Key：摘要存储、授权范围与配额';
 
 CREATE TABLE t_kb_api_audit_log
 (
-    id             BIGINT      NOT NULL AUTO_INCREMENT,
-    audit_log_id   VARCHAR(64) NOT NULL COMMENT 'business identifier exposed by the console query API',
-    key_id         VARCHAR(64) NOT NULL COMMENT 'calling API key, never the plaintext key',
-    app_id         VARCHAR(64)          DEFAULT NULL COMMENT 'application called',
-    app_version_id VARCHAR(64)          DEFAULT NULL COMMENT 'application version served, null when rejected',
-    target_stage   VARCHAR(16)          DEFAULT NULL COMMENT 'RELEASE/BETA, the version stage that was called',
-    endpoint       VARCHAR(32)  NOT NULL COMMENT 'search/chat',
-    -- Masked by the section 4.2 rules and then truncated: an audit trail must stay readable without
-    -- becoming a second copy of the personal data the knowledge base already masks.
-    query_digest   VARCHAR(200)         DEFAULT NULL COMMENT 'masked and truncated query',
-    hit_doc_ids    JSON                 DEFAULT NULL COMMENT 'document ids of the returned nodes',
-    latency_ms     INT         NOT NULL DEFAULT 0 COMMENT 'server side duration',
-    degraded       JSON                 DEFAULT NULL COMMENT 'degradation markers of this call',
-    override_keys  JSON                 DEFAULT NULL COMMENT 'request level overrides applied, requirement section 5',
-    error_code     VARCHAR(32)          DEFAULT NULL COMMENT 'business error code when the call was rejected',
-    request_id     VARCHAR(64)          DEFAULT NULL COMMENT 'correlation id of the call',
-    created_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    lock_version   INT         NOT NULL DEFAULT 0,
-    deleted        TINYINT     NOT NULL DEFAULT 0,
+    id             BIGINT      NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    audit_log_id   VARCHAR(64) NOT NULL COMMENT '控制台查询接口对外暴露的业务标识',
+    key_id         VARCHAR(64) NOT NULL COMMENT '发起调用的 API Key 标识，绝不记录明文 Key',
+    app_id         VARCHAR(64)          DEFAULT NULL COMMENT '被调用的应用',
+    app_version_id VARCHAR(64)          DEFAULT NULL COMMENT '实际服务的应用版本，请求被拒绝时为 null',
+    target_stage   VARCHAR(16)          DEFAULT NULL COMMENT '被调用的版本阶段：RELEASE 正式 / BETA 灰度',
+    endpoint       VARCHAR(32)  NOT NULL COMMENT '被调用的端点：search/chat',
+    -- 先按 4.2 节规则脱敏再截断：审计流水既要保持可读，又不能变成知识库已经脱敏过的那份个人数据的副本。
+    query_digest   VARCHAR(200)         DEFAULT NULL COMMENT '脱敏并截断后的查询文本',
+    hit_doc_ids    JSON                 DEFAULT NULL COMMENT '返回结果所属的文档 id 列表',
+    latency_ms     INT         NOT NULL DEFAULT 0 COMMENT '服务端耗时，毫秒',
+    degraded       JSON                 DEFAULT NULL COMMENT '本次调用的降级标记',
+    override_keys  JSON                 DEFAULT NULL COMMENT '本次生效的请求级覆盖参数，对应需求文档第 5 节',
+    error_code     VARCHAR(32)          DEFAULT NULL COMMENT '调用被拒绝时的业务错误码',
+    request_id     VARCHAR(64)          DEFAULT NULL COMMENT '本次调用的链路追踪 id',
+    created_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    lock_version   INT         NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    deleted        TINYINT     NOT NULL DEFAULT 0 COMMENT '逻辑删除标记，1 表示已删除',
     PRIMARY KEY (id),
     UNIQUE KEY uk_audit_log_id (audit_log_id),
     KEY idx_key_id (key_id),
@@ -113,14 +110,14 @@ CREATE TABLE t_kb_api_audit_log
     KEY idx_version_stage (app_version_id, target_stage)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
-  COLLATE = utf8mb4_general_ci COMMENT 'outbound API call audit, archived to object storage after the retention window';
+  COLLATE = utf8mb4_general_ci COMMENT ='对外接口调用审计，超过保留期后归档到对象存储';
 
--- Additive columns on the M4b table: the release gate recomputes Recall@K on the intersection of the
--- effective cases of both runs, which needs the per case evidence counts the judgment already produced
--- and previously discarded. Deriving them back from overlap_ratios would compare a per evidence best
--- ratio against an aggregate coverage decision and silently disagree with the run's own metrics.
+-- 给 M4b 的表补两个增量列：发布门禁要在两次运行的有效用例交集上重算 Recall@K，
+-- 而这需要评判过程本来就算出、但之前被丢弃的逐用例证据计数。
+-- 若改为从 overlap_ratios 反推，等于拿「每条证据的最佳覆盖率」去比对「聚合覆盖判定」，
+-- 会与该次运行自己的指标悄悄对不上。
 ALTER TABLE t_kb_eval_result
     ADD COLUMN evidence_hit_count   INT NOT NULL DEFAULT 0
-        COMMENT 'evidences covered within the top K, gate intersection recomputation input',
+        COMMENT 'Top K 内被覆盖的证据数，门禁交集重算的输入',
     ADD COLUMN evidence_total_count INT NOT NULL DEFAULT 0
-        COMMENT 'evidences the case declares, gate intersection recomputation input';
+        COMMENT '该用例声明的证据总数，门禁交集重算的输入';
