@@ -1,8 +1,10 @@
 package io.kbrag.api.filter;
 
+import io.kbrag.app.auth.PrincipalResolver;
 import io.kbrag.app.auth.TokenStore;
 import io.kbrag.common.constant.KbConstants;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.context.UserContextHolder;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -12,11 +14,14 @@ import org.springframework.web.servlet.HandlerInterceptor;
 import java.util.Optional;
 
 /**
- * Verifies the bearer token of every management call.
+ * Verifies the bearer token of every management call and binds the caller for the rest of the request.
  *
  * <p>The login endpoint and the actuator are excluded by the MVC registration; everything else needs a
  * valid token. Using a custom header instead of a cookie removes cross site request forgery from the
  * threat model entirely.
+ *
+ * <p>The permissions of the caller are resolved once here rather than wherever they happen to be needed,
+ * so a single request cannot see a grant change take effect halfway through it.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -31,6 +36,7 @@ public class AuthInterceptor implements HandlerInterceptor {
     public static final String ATTR_TOKEN = "kb.token";
 
     private final TokenStore tokenStore;
+    private final PrincipalResolver principalResolver;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
@@ -45,6 +51,15 @@ public class AuthInterceptor implements HandlerInterceptor {
         }
         request.setAttribute(ATTR_USERNAME, username.get());
         request.setAttribute(ATTR_TOKEN, token);
+        UserContextHolder.set(principalResolver.resolve(username.get()));
         return true;
+    }
+
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler,
+                               Exception ex) {
+        // Container threads are pooled, so an unbound entry left behind would be read by whoever gets the
+        // thread next. Cleared here rather than in postHandle, which a thrown exception skips.
+        UserContextHolder.clear();
     }
 }

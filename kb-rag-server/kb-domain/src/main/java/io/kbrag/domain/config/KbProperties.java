@@ -652,6 +652,51 @@ public class KbProperties {
 
         /** Bootstrap administrator user name created on an empty database. */
         private String bootstrapUsername = "admin";
+
+        /** Corporate directory single sign on. */
+        private Ldap ldap = new Ldap();
+
+        /**
+         * Corporate directory single sign on.
+         *
+         * <p>Off by default, and the console hides the single sign on tab when it is: a deployment that
+         * has no domain controller must still be able to log in with a local account, and offering a
+         * button that can only time out is worse than not offering it.
+         */
+        @Getter
+        @Setter
+        @ToString
+        public static class Ldap {
+
+            /** Whether single sign on is offered at all. */
+            private boolean enabled = false;
+
+            /** Directory URL, {@code ldap://host:389} or {@code ldaps://host:636}. */
+            private String url;
+
+            /**
+             * Suffix appended to the login name to form the bind principal, {@code @corp.example.com}.
+             *
+             * <p>Users type the bare login name; the suffix is deployment knowledge, not something to
+             * make every person retype on every login.
+             */
+            private String domainSuffix;
+
+            /** Connect timeout in milliseconds, bounds a login against an unreachable controller. */
+            private int connectTimeoutMs = 3000;
+
+            /** Read timeout in milliseconds. */
+            private int readTimeoutMs = 5000;
+
+            /**
+             * Role code granted to a directory account on its first login.
+             *
+             * <p>Read only on purpose. The alternative, no role at all, means a person who authenticated
+             * successfully lands on an empty console and files a ticket; the alternative in the other
+             * direction hands write access to anyone with a domain account.
+             */
+            private String defaultRoleCode = "VIEWER";
+        }
     }
 
     /**

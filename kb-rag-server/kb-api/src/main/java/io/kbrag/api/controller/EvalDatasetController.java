@@ -1,11 +1,15 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.CreateEvalDatasetRequest;
 import io.kbrag.api.dto.EvalDatasetResponse;
 import io.kbrag.api.dto.ImportDemoEvalDatasetResponse;
+import io.kbrag.app.auth.AccessGuard;
+import io.kbrag.app.auth.KbScopeGuard;
 import io.kbrag.app.eval.EvalDatasetService;
 import io.kbrag.app.eval.EvalDemoImportService;
 import io.kbrag.common.api.Result;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.EvalDataset;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +35,7 @@ public class EvalDatasetController {
 
     private final EvalDatasetService evalDatasetService;
     private final EvalDemoImportService evalDemoImportService;
+    private final KbScopeGuard kbScopeGuard;
 
     /**
      * Creates an evaluation data set.
@@ -40,8 +45,10 @@ public class EvalDatasetController {
      * @return created data set
      */
     @PostMapping("/api/v1/kb/{kbId}/eval-datasets")
+    @RequiresPermission(PermissionCodes.EVAL_WRITE)
     public Result<EvalDatasetResponse> create(@PathVariable String kbId,
                                               @Valid @RequestBody CreateEvalDatasetRequest request) {
+        AccessGuard.requireKbAccess(kbId);
         EvalDataset dataset = evalDatasetService.create(kbId, request.name(), request.description());
         return Result.success(EvalDatasetResponse.from(evalDatasetService.detail(dataset.getDatasetId())));
     }
@@ -53,7 +60,9 @@ public class EvalDatasetController {
      * @return data sets, newest first, each with its latest run summary
      */
     @GetMapping("/api/v1/kb/{kbId}/eval-datasets")
+    @RequiresPermission(PermissionCodes.EVAL_READ)
     public Result<List<EvalDatasetResponse>> list(@PathVariable String kbId) {
+        AccessGuard.requireKbAccess(kbId);
         return Result.success(evalDatasetService.list(kbId).stream().map(EvalDatasetResponse::from).toList());
     }
 
@@ -64,7 +73,9 @@ public class EvalDatasetController {
      * @return import outcome, idempotent by data set name
      */
     @PostMapping("/api/v1/kb/{kbId}/eval-datasets/import-demo")
+    @RequiresPermission(PermissionCodes.EVAL_WRITE)
     public Result<ImportDemoEvalDatasetResponse> importDemo(@PathVariable String kbId) {
+        AccessGuard.requireKbAccess(kbId);
         return Result.success(ImportDemoEvalDatasetResponse.from(evalDemoImportService.importDemo(kbId)));
     }
 
@@ -75,7 +86,9 @@ public class EvalDatasetController {
      * @return detail together with its latest run summary
      */
     @GetMapping("/api/v1/eval-datasets/{datasetId}")
+    @RequiresPermission(PermissionCodes.EVAL_READ)
     public Result<EvalDatasetResponse> detail(@PathVariable String datasetId) {
+        kbScopeGuard.requireDatasetAccess(datasetId);
         return Result.success(EvalDatasetResponse.from(evalDatasetService.detail(datasetId)));
     }
 
@@ -86,7 +99,9 @@ public class EvalDatasetController {
      * @return empty payload
      */
     @DeleteMapping("/api/v1/eval-datasets/{datasetId}")
+    @RequiresPermission(PermissionCodes.EVAL_WRITE)
     public Result<Void> delete(@PathVariable String datasetId) {
+        kbScopeGuard.requireDatasetAccess(datasetId);
         evalDatasetService.delete(datasetId);
         return Result.success(null);
     }

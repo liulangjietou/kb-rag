@@ -5,6 +5,8 @@ import { useNavigate } from 'react-router-dom';
 import { deleteKnowledgeBase, listKnowledgeBases } from '../../api/kb';
 import { getDemoStatus, importDemo } from '../../api/system';
 import type { DemoStatus, KnowledgeBase } from '../../api/types';
+import { useAuth } from '../../auth/AuthContext';
+import { PERMISSIONS } from '../../auth/permissions';
 import CreateKbModal from './components/CreateKbModal';
 
 export default function KbListPage() {
@@ -14,6 +16,10 @@ export default function KbListPage() {
   const [demoStatus, setDemoStatus] = useState<DemoStatus | null>(null);
   const [demoImporting, setDemoImporting] = useState(false);
   const navigate = useNavigate();
+  const { can } = useAuth();
+  // Reading a base and changing the set of bases are different rights: kb:read alone gets the list and
+  // the detail screens, nothing that creates or removes one. The server enforces this again.
+  const canWrite = can(PERMISSIONS.KB_WRITE);
 
   const loadKbs = useCallback(async () => {
     setLoading(true);
@@ -62,29 +68,39 @@ export default function KbListPage() {
         <Typography.Title level={4} style={{ margin: 0 }}>
           知识库
         </Typography.Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
-          新建知识库
-        </Button>
+        {canWrite && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+            新建知识库
+          </Button>
+        )}
       </div>
 
       <Spin spinning={loading}>
         {!loading && kbs.length === 0 ? (
-          <Empty description="还没有知识库，点击右上角「新建知识库」开始创建，上传文档后即可在此进行检索调试">
-            <Space>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
-                立即新建
-              </Button>
-              <Tooltip title={demoStatus && !demoStatus.available ? '未找到 Demo 素材目录，暂不可用' : undefined}>
-                <Button
-                  icon={<ThunderboltOutlined />}
-                  loading={demoImporting}
-                  disabled={!demoStatus?.available}
-                  onClick={handleDemoImport}
-                >
-                  {demoStatus?.imported ? '查看 Demo 知识库' : '一键导入 Demo 知识库'}
+          <Empty
+            description={
+              canWrite
+                ? '还没有知识库，点击右上角「新建知识库」开始创建，上传文档后即可在此进行检索调试'
+                : '当前账号暂无可访问的知识库，如需开通请联系管理员'
+            }
+          >
+            {canWrite && (
+              <Space>
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+                  立即新建
                 </Button>
-              </Tooltip>
-            </Space>
+                <Tooltip title={demoStatus && !demoStatus.available ? '未找到 Demo 素材目录，暂不可用' : undefined}>
+                  <Button
+                    icon={<ThunderboltOutlined />}
+                    loading={demoImporting}
+                    disabled={!demoStatus?.available}
+                    onClick={handleDemoImport}
+                  >
+                    {demoStatus?.imported ? '查看 Demo 知识库' : '一键导入 Demo 知识库'}
+                  </Button>
+                </Tooltip>
+              </Space>
+            )}
           </Empty>
         ) : (
           <Row gutter={[16, 16]}>
@@ -98,21 +114,25 @@ export default function KbListPage() {
                     <span key="detail" onClick={() => navigate(`/kb/${kb.kb_id}`)}>
                       查看详情
                     </span>,
-                    <Popconfirm
-                      key="delete"
-                      title="确认删除该知识库？"
-                      description="删除后其下文档与索引将一并清理，此操作不可恢复"
-                      okText="删除"
-                      okType="danger"
-                      cancelText="取消"
-                      onConfirm={(e) => {
-                        e?.stopPropagation();
-                        handleDelete(kb.kb_id);
-                      }}
-                      onCancel={(e) => e?.stopPropagation()}
-                    >
-                      <span onClick={(e) => e.stopPropagation()}>删除</span>
-                    </Popconfirm>,
+                    ...(canWrite
+                      ? [
+                          <Popconfirm
+                            key="delete"
+                            title="确认删除该知识库？"
+                            description="删除后其下文档与索引将一并清理，此操作不可恢复"
+                            okText="删除"
+                            okType="danger"
+                            cancelText="取消"
+                            onConfirm={(e) => {
+                              e?.stopPropagation();
+                              handleDelete(kb.kb_id);
+                            }}
+                            onCancel={(e) => e?.stopPropagation()}
+                          >
+                            <span onClick={(e) => e.stopPropagation()}>删除</span>
+                          </Popconfirm>,
+                        ]
+                      : []),
                   ]}
                 >
                   <Typography.Paragraph ellipsis={{ rows: 2 }} type="secondary">

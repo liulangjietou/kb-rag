@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.AlertConfigResponse;
 import io.kbrag.api.dto.DemoStatusResponse;
 import io.kbrag.api.dto.ModelStatusResponse;
@@ -11,6 +12,7 @@ import io.kbrag.app.system.ModelStatusService;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.model.AlertConfig;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -48,6 +50,9 @@ public class SystemController {
      * @return model status
      */
     @GetMapping("/model-status")
+    // Readable by anyone who can open a knowledge base too: the retrieval screens explain a missing
+    // capability with this answer, and an operator without system rights would otherwise see a blank reason.
+    @RequiresPermission({PermissionCodes.SYSTEM_CONFIG, PermissionCodes.KB_READ})
     public Result<ModelStatusResponse> modelStatus() {
         return Result.success(ModelStatusResponse.from(modelStatusService.current()));
     }
@@ -58,6 +63,7 @@ public class SystemController {
      * @return current settings
      */
     @GetMapping("/alert-config")
+    @RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
     public Result<AlertConfigResponse> alertConfig() {
         return Result.success(AlertConfigResponse.from(alertConfigService.current()));
     }
@@ -69,6 +75,7 @@ public class SystemController {
      * @return stored settings
      */
     @PutMapping("/alert-config")
+    @RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
     public Result<AlertConfigResponse> updateAlertConfig(
             @Valid @RequestBody UpdateAlertConfigRequest request) {
         AlertConfig updated = alertConfigService.update(
@@ -90,6 +97,7 @@ public class SystemController {
      * @return empty success envelope
      */
     @PostMapping("/alert-config/test")
+    @RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
     public Result<Void> testAlert() {
         if (!alertService.sendTest(TEST_MESSAGE)) {
             throw new BizException(ErrorCode.INTERNAL_ERROR,
@@ -104,6 +112,7 @@ public class SystemController {
      * @return knowledge base business id
      */
     @PostMapping("/demo/import")
+    @RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
     public Result<Map<String, String>> importDemo() {
         return Result.success(Map.of(FIELD_KB_ID, demoImportService.importDemo()));
     }
@@ -114,6 +123,7 @@ public class SystemController {
      * @return demo state
      */
     @GetMapping("/demo/status")
+    @RequiresPermission({PermissionCodes.SYSTEM_CONFIG, PermissionCodes.KB_READ})
     public Result<DemoStatusResponse> demoStatus() {
         return Result.success(DemoStatusResponse.from(demoImportService.status()));
     }

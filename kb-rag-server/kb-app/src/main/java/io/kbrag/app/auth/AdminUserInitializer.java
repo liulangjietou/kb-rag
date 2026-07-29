@@ -2,7 +2,10 @@ package io.kbrag.app.auth;
 
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.AdminUser;
+import io.kbrag.domain.enums.UserSource;
+import io.kbrag.domain.enums.UserStatus;
 import io.kbrag.domain.mapper.AdminUserMapper;
+import io.kbrag.domain.service.BizIdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -20,6 +23,10 @@ import java.util.Base64;
  * log and flagged as mandatory to rotate. A hard coded default would be the single most exploited
  * weakness of a self hosted deployment.
  *
+ * <p>The account is granted the super administrator role in the same step. Creating it without a role
+ * would produce a deployment nobody can administer: the user management screen is itself guarded by a
+ * permission, so there would be no way in to grant the first one.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
@@ -35,6 +42,8 @@ public class AdminUserInitializer implements ApplicationRunner {
     private final AdminUserMapper adminUserMapper;
     private final KbProperties properties;
     private final BCryptPasswordEncoder passwordEncoder;
+    private final BizIdGenerator idGenerator;
+    private final UserService userService;
 
     @Override
     public void run(ApplicationArguments args) {
@@ -46,10 +55,15 @@ public class AdminUserInitializer implements ApplicationRunner {
         String username = properties.getAuth().getBootstrapUsername();
         String password = generatePassword();
         AdminUser user = new AdminUser();
+        user.setUserId(idGenerator.userId());
         user.setUsername(username);
+        user.setDisplayName(username);
+        user.setSource(UserSource.LOCAL);
+        user.setStatus(UserStatus.ENABLED);
         user.setPasswordHash(passwordEncoder.encode(password));
         user.setMustChangePassword(MUST_CHANGE);
         adminUserMapper.insert(user);
+        userService.grantBootstrapRole(user.getUserId());
         log.info("bootstrap administrator created, username={}, password={}, "
                 + "this password is printed once and must be changed at first login", username, password);
     }

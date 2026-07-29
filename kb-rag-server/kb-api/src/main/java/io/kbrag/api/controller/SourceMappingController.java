@@ -1,11 +1,13 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.SourceMappingCopyRequest;
 import io.kbrag.api.dto.SourceMappingRequest;
 import io.kbrag.api.dto.SourceMappingResponse;
 import io.kbrag.app.chat.SourceMappingService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.enums.SourceMappingType;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -43,6 +45,7 @@ public class SourceMappingController {
      * @return profiles, built-in ones first
      */
     @GetMapping
+    @RequiresPermission(PermissionCodes.KB_READ)
     public Result<List<SourceMappingResponse>> list(
             @RequestParam(name = "source_type", required = false) String sourceType) {
         return Result.success(sourceMappingService.list(parseType(sourceType)).stream()
@@ -57,6 +60,7 @@ public class SourceMappingController {
      * @return created profile
      */
     @PostMapping
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<SourceMappingResponse> create(@Valid @RequestBody SourceMappingRequest request) {
         return Result.success(SourceMappingResponse.from(sourceMappingService.create(
                 request.name(), request.resolvedType(), request.profileYaml())));
@@ -70,6 +74,7 @@ public class SourceMappingController {
      * @return updated profile
      */
     @PutMapping("/{mappingId}")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<SourceMappingResponse> update(@PathVariable String mappingId,
                                                 @Valid @RequestBody SourceMappingRequest request) {
         return Result.success(SourceMappingResponse.from(sourceMappingService.update(
@@ -88,6 +93,7 @@ public class SourceMappingController {
      * @return created profile
      */
     @PostMapping("/{mappingId}/copy")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<SourceMappingResponse> copy(
             @PathVariable String mappingId,
             @RequestBody(required = false) SourceMappingCopyRequest request) {
@@ -102,6 +108,7 @@ public class SourceMappingController {
      * @return empty success envelope
      */
     @DeleteMapping("/{mappingId}")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<Void> delete(@PathVariable String mappingId) {
         sourceMappingService.delete(mappingId);
         return Result.success(null);

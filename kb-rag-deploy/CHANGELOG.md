@@ -8,6 +8,17 @@
 
 ### Added
 
+- **权限体系：功能权限 + 知识库数据权限 + 单点登录（M15）**：新增 `docs/M15-CONTRACTS.md`（开发契约，
+  含 6 张表的数据模型、18 个权限码与 5 个内置角色矩阵、两层授权的执行点、单点登录行为与升级说明）；
+  `.env.example` 新增权限/SSO 分节：`AUTH_LDAP_ENABLED`（默认 false，不配就是升级前的行为）、
+  `AUTH_LDAP_URL`、`AUTH_LDAP_DOMAIN_SUFFIX`、`AUTH_LDAP_CONNECT_TIMEOUT_MS`、`AUTH_LDAP_READ_TIMEOUT_MS`、
+  `AUTH_LDAP_DEFAULT_ROLE_CODE`（默认 `VIEWER`，目录账号首登自动建号时授予）。**升级提示**：Flyway
+  `V16__rbac.sql` 会把存量账号（含 `admin`）全部提为 `SUPER_ADMIN`，否则升级后没人能进用户管理页
+  发出第一个角色；未配置 LDAP 的部署登录页不会出现单点登录 Tab。
+- OpenAPI 升至 `0.15.0-m15`：新增 `/api/v1/auth/sso-available`（免认证）、`/api/v1/users` 与
+  `/api/v1/roles` 两组端点与相应 schema；`LoginRequest` 增 `mode`（LOCAL/SSO，缺省读作 LOCAL），
+  `/auth/me` 返回体补角色/权限/库范围；`ErrorCode` 增 `FORBIDDEN`，新增 `PermissionDenied` 403 响应。
+
 - **三期第一批：连接器 / 元数据抽取 / 切分扩展 / 混合重排 / 多模态索引 / 以图搜图（M14，docs/M14-CONTRACTS.md）**：
   ①外部数据源连接器——连接器 SPI（`ExternalConnector`/`ConnectorRouter`，为后续 Confluence/飞书预留）+
   首个实现 S3/OSS 兼容对象存储；`POST/GET /kb/{kbId}/ext-sources` 登记/列表、`POST

@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.ExtSourceItemResponse;
 import io.kbrag.api.dto.ExtSourceResponse;
 import io.kbrag.api.dto.ExtSourceSyncAcceptedResponse;
@@ -7,9 +8,12 @@ import io.kbrag.api.dto.ExtSourceTestResponse;
 import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.RegisterExtSourceRequest;
 import io.kbrag.api.dto.UpdateExtSourceRequest;
+import io.kbrag.app.auth.AccessGuard;
+import io.kbrag.app.auth.KbScopeGuard;
 import io.kbrag.app.extsource.ExtSourceCommand;
 import io.kbrag.app.extsource.ExtSourceService;
 import io.kbrag.common.api.Result;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.ExtSource;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +45,7 @@ public class ExtSourceController {
     private static final int MAX_PAGE_SIZE = 200;
 
     private final ExtSourceService extSourceService;
+    private final KbScopeGuard kbScopeGuard;
 
     /**
      * Registers an external source and triggers its first scan asynchronously.
@@ -50,8 +55,10 @@ public class ExtSourceController {
      * @return registration row; the first scan's outcome appears on it once the scan finishes
      */
     @PostMapping("/api/v1/kb/{kbId}/ext-sources")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<ExtSourceResponse> register(@PathVariable String kbId,
                                               @Valid @RequestBody RegisterExtSourceRequest request) {
+        AccessGuard.requireKbAccess(kbId);
         ExtSource source = extSourceService.register(kbId, new ExtSourceCommand(
                 request.sourceType().trim(),
                 request.name().trim(),
@@ -75,10 +82,12 @@ public class ExtSourceController {
      * @return paged sources, secret always masked
      */
     @GetMapping("/api/v1/kb/{kbId}/ext-sources")
+    @RequiresPermission(PermissionCodes.KB_READ)
     public Result<PageResponse<ExtSourceResponse>> list(
             @PathVariable String kbId,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
+        AccessGuard.requireKbAccess(kbId);
         return Result.success(PageResponse.from(
                 extSourceService.list(kbId, normalizePage(page), normalizeSize(size)),
                 ExtSourceResponse::from));
@@ -91,7 +100,9 @@ public class ExtSourceController {
      * @return acceptance acknowledgement
      */
     @PostMapping("/api/v1/ext-sources/{sourceId}/sync")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<ExtSourceSyncAcceptedResponse> sync(@PathVariable String sourceId) {
+        kbScopeGuard.requireExtSourceAccess(sourceId);
         extSourceService.ensureExists(sourceId);
         extSourceService.syncAsync(sourceId);
         return Result.success(ExtSourceSyncAcceptedResponse.of());
@@ -106,10 +117,12 @@ public class ExtSourceController {
      * @return paged item rows
      */
     @GetMapping("/api/v1/ext-sources/{sourceId}/items")
+    @RequiresPermission(PermissionCodes.KB_READ)
     public Result<PageResponse<ExtSourceItemResponse>> items(
             @PathVariable String sourceId,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
+        kbScopeGuard.requireExtSourceAccess(sourceId);
         return Result.success(PageResponse.from(
                 extSourceService.listItems(sourceId, normalizePage(page), normalizeSize(size)),
                 ExtSourceItemResponse::from));
@@ -123,8 +136,10 @@ public class ExtSourceController {
      * @return updated source, secret masked
      */
     @PutMapping("/api/v1/ext-sources/{sourceId}")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<ExtSourceResponse> update(@PathVariable String sourceId,
                                             @Valid @RequestBody UpdateExtSourceRequest request) {
+        kbScopeGuard.requireExtSourceAccess(sourceId);
         return Result.success(ExtSourceResponse.from(extSourceService.update(sourceId, new ExtSourceCommand(
                 null,
                 request.name().trim(),
@@ -144,7 +159,9 @@ public class ExtSourceController {
      * @return probe outcome
      */
     @PostMapping("/api/v1/ext-sources/{sourceId}/test")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<ExtSourceTestResponse> test(@PathVariable String sourceId) {
+        kbScopeGuard.requireExtSourceAccess(sourceId);
         return Result.success(ExtSourceTestResponse.from(extSourceService.testConnection(sourceId)));
     }
 
@@ -155,7 +172,9 @@ public class ExtSourceController {
      * @return empty success envelope
      */
     @DeleteMapping("/api/v1/ext-sources/{sourceId}")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<Void> remove(@PathVariable String sourceId) {
+        kbScopeGuard.requireExtSourceAccess(sourceId);
         extSourceService.remove(sourceId);
         return Result.success(null);
     }

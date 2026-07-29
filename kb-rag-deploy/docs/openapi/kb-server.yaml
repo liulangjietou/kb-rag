@@ -164,8 +164,21 @@ info:
 
     model。全部纯新增、缺省即现状（详见 M14-CONTRACTS.md §0 兼容红线）。
 
+
+    M15（权限体系）新增：①`/api/v1/auth/sso-available` 供登录页决定是否展示单点登录入口，
+
+    `LoginRequest` 增 `mode`（LOCAL/SSO，缺省读作 LOCAL，既有客户端不受影响）；②`/api/v1/users`
+
+    与 `/api/v1/roles` 两组用户与角色管理端点；③`/api/v1/auth/me` 返回体扩为 `MeResponse`
+
+    （补 display_name/source/roles/permissions/kb_scope_all/kb_ids）；④`ErrorCode` 增 `FORBIDDEN`，
+
+    功能权限不足统一 403 `PermissionDenied`，知识库越权同样 403（不降级为 404）。
+
+    详见 M15-CONTRACTS.md §3。
+
     '
-  version: 0.14.0-m14
+  version: 0.15.0-m15
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -174,7 +187,9 @@ servers:
   description: 本地开发（kb-rag-server 默认端口，见契约 §0）
 tags:
 - name: auth
-  description: 登录、改密、当前用户
+  description: 登录（本地口令/单点登录）、改密、当前用户
+- name: rbac
+  description: 权限体系：用户与角色管理、权限目录（M15，docs/M15-CONTRACTS.md §3）
 - name: knowledge-base
   description: 知识库管理
 - name: document
@@ -219,8 +234,10 @@ paths:
     post:
       tags:
       - auth
-      summary: 管理员登录
-      description: 登录失败记入 t_kb_login_audit；连续失败 5 次锁定 15 分钟。
+      summary: 管理员登录（本地口令 / 单点登录）
+      description: 'mode=LOCAL 校验本地口令；mode=SSO 走目录 bind，目录账号首登自动建号并授予配置的默认角色。
+
+        登录失败记入 t_kb_login_audit；连续失败 5 次锁定 15 分钟，但目录不可达（DIRECTORY_UNAVAILABLE）不计入失败次数。'
       security: []
       requestBody:
         required: true
@@ -275,6 +292,327 @@ paths:
                 $ref: '#/components/schemas/UserInfoResult'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/v1/auth/sso-available:
+    get:
+      tags:
+      - auth
+      summary: 单点登录入口是否可用
+      description: 免认证；登录页据此决定是否渲染单点登录 Tab。开关来自 kb.auth.ldap.enabled 与 url 是否配置。
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SsoAvailabilityResult'
+  /api/v1/users:
+    get:
+      tags:
+      - rbac
+      summary: 用户分页列表（USER_MANAGE）
+      description: 行内填 role_names 供列表展示；role_ids 只在详情返回。
+      parameters:
+      - name: keyword
+        in: query
+        description: 按登录名/显示名/邮箱模糊匹配
+        schema: {type: string}
+      - name: status
+        in: query
+        schema: {type: string, enum: [ENABLED, DISABLED]}
+      - name: source
+        in: query
+        schema: {type: string, enum: [LOCAL, LDAP]}
+      - name: page
+        in: query
+        schema: {type: integer, default: 1}
+      - name: size
+        in: query
+        schema: {type: integer, default: 20}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleUserPageResult'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+    post:
+      tags:
+      - rbac
+      summary: 创建本地账号（USER_MANAGE）
+      description: 无自助注册，账号只由管理员创建；初始口令由创建者设定，被建账号首登强制改密。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '200':
+          description: 新建账号
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleUserResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/users/{userId}:
+    parameters:
+    - name: userId
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags:
+      - rbac
+      summary: 用户详情（USER_MANAGE）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleUserResult'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - rbac
+      summary: 修改显示名与邮箱（USER_MANAGE）
+      description: 登录名不可改——会话令牌与全部审计行都以它为键。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: 更新后的账号
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleUserResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+    delete:
+      tags:
+      - rbac
+      summary: 删除账号（USER_MANAGE）
+      description: 不允许删除自己；删除同时清理角色关联并吊销该账号的会话。
+      responses:
+        '200':
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/users/{userId}/status:
+    parameters:
+    - name: userId
+      in: path
+      required: true
+      schema: {type: string}
+    put:
+      tags:
+      - rbac
+      summary: 启用/停用账号（USER_MANAGE）
+      description: 不允许停用自己；停用即刻吊销该账号已签发的会话。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserStatusRequest'
+      responses:
+        '200':
+          description: 更新后的账号
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleUserResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/users/{userId}/roles:
+    parameters:
+    - name: userId
+      in: path
+      required: true
+      schema: {type: string}
+    put:
+      tags:
+      - rbac
+      summary: 全量替换用户角色（USER_MANAGE）
+      description: 提交完整集合而非增删差异；改完立即失效该账号的权限缓存。不允许改自己的角色。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignRolesRequest'
+      responses:
+        '200':
+          description: 更新后的账号
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsoleUserResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/users/{userId}/reset-password:
+    parameters:
+    - name: userId
+      in: path
+      required: true
+      schema: {type: string}
+    post:
+      tags:
+      - rbac
+      summary: 重置口令（USER_MANAGE）
+      description: 不校验旧口令（前提就是已无人知道它）；重置后置 must_change_password 并吊销会话。目录账号无本地口令，返回 INVALID_PARAM。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetUserPasswordRequest'
+      responses:
+        '200':
+          description: 已重置
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/roles:
+    get:
+      tags:
+      - rbac
+      summary: 角色列表（ROLE_MANAGE）
+      description: 裸数组，角色总量小不分页。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleListResult'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+    post:
+      tags:
+      - rbac
+      summary: 新建角色（ROLE_MANAGE）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveRoleRequest'
+      responses:
+        '200':
+          description: 新建角色
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/roles/permissions:
+    get:
+      tags:
+      - rbac
+      summary: 权限目录（ROLE_MANAGE）
+      description: 角色编辑页勾选网格的数据源，按 module 分组。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PermissionListResult'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/roles/{roleId}:
+    parameters:
+    - name: roleId
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags:
+      - rbac
+      summary: 角色详情（ROLE_MANAGE）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleResult'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - rbac
+      summary: 修改角色（ROLE_MANAGE）
+      description: 权限集合与库范围都是全量替换；code 只在创建时读取，更新时忽略（配置与建号默认角色都引用它）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveRoleRequest'
+      responses:
+        '200':
+          description: 更新后的角色
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoleResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+    delete:
+      tags:
+      - rbac
+      summary: 删除角色（ROLE_MANAGE）
+      description: 内置角色与仍被账号持有的角色不可删，返回 INVALID_PARAM。
+      responses:
+        '200':
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
   /api/v1/source-mappings:
     get:
       tags: [source-mapping]
@@ -3154,7 +3492,9 @@ components:
       scheme: bearer
       description: '自定义 Header：Authorization: Bearer <token>。服务端 token 表/内存缓存维护，
 
-        有效期 24h；除 /api/v1/auth/login 与 /actuator/** 外全部拦截。
+        有效期 24h；除 /api/v1/auth/login、/api/v1/auth/sso-available 与 /actuator/** 外全部拦截。
+
+        M15 起认证之后还有一道功能权限拦截：命中 @RequiresPermission 且主体不持有其中任一权限码时返回 403 FORBIDDEN。
 
         '
     ApiKeyBearer:
@@ -3295,13 +3635,24 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+    PermissionDenied:
+      description: '已登录但无权（FORBIDDEN），M15。两种情形用同一响应：缺少该端点所需的功能权限码，
+
+        或目标知识库不在调用方的库范围内。后者不降级为 404：库存在与否不是对方能靠接口探知的事，
+
+        但把越权伪装成不存在会让正当调用方在自己搞错 kb_id 时无从分辨。'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
   schemas:
     ErrorCode:
       type: string
-      description: M1 错误码子集 + M4c 对外开放 API 新增错误码，HTTP 状态码见括注
+      description: M1 错误码子集 + M4c 对外开放 API 新增错误码 + M15 FORBIDDEN，HTTP 状态码见括注
       enum:
       - INVALID_PARAM
       - UNAUTHORIZED
+      - FORBIDDEN
       - NOT_FOUND
       - INVALID_API_KEY
       - API_KEY_DISABLED
@@ -3366,6 +3717,14 @@ components:
         password:
           type: string
           format: password
+        mode:
+          type: string
+          nullable: true
+          enum:
+          - LOCAL
+          - SSO
+          description: 进来的入口；M15 新增，缺省读作 LOCAL，既有客户端不需改动。两个入口互不串用：
+            本地账号走 SSO、目录账号走本地口令均拒绝
     LoginData:
       type: object
       properties:
@@ -3394,15 +3753,44 @@ components:
           format: password
     UserInfo:
       type: object
+      description: 当前登录账号视图（MeResponse）。M15 起携带权限码与库范围，供控制台隐藏用不了的菜单与按钮；
+        那只是展示，每个码到服务端会再校一次
       properties:
         username:
           type: string
+        display_name:
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+          enum:
+          - LOCAL
+          - LDAP
         must_change_password:
           type: boolean
         last_login_at:
           type: string
           format: date-time
           nullable: true
+        roles:
+          type: array
+          items:
+            type: string
+          description: 持有的角色 code
+        permissions:
+          type: array
+          items:
+            type: string
+          description: 拉平后的权限码集合
+        kb_scope_all:
+          type: boolean
+          description: true 时可见全部知识库，kb_ids 无意义
+        kb_ids:
+          type: array
+          items:
+            type: string
+          description: 可见知识库 id，仅当 kb_scope_all=false 时有意义
     UserInfoResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
@@ -3410,6 +3798,260 @@ components:
         properties:
           data:
             $ref: '#/components/schemas/UserInfo'
+    SsoAvailability:
+      type: object
+      properties:
+        sso_available:
+          type: boolean
+          description: kb.auth.ldap.enabled 为 true 且 url 已配置时为 true
+    SsoAvailabilityResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/SsoAvailability'
+    ConsoleUser:
+      type: object
+      description: 控制台用户行（M15-CONTRACTS.md §3.2）。口令哈希与它的缺失都不外露
+      properties:
+        user_id:
+          type: string
+        username:
+          type: string
+        display_name:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        source:
+          type: string
+          enum:
+          - LOCAL
+          - LDAP
+        status:
+          type: string
+          enum:
+          - ENABLED
+          - DISABLED
+        must_change_password:
+          type: boolean
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        role_ids:
+          type: array
+          items:
+            type: string
+          description: 仅详情/写操作响应填充，列表为空数组
+        role_names:
+          type: array
+          items:
+            type: string
+          description: 仅列表响应填充，详情为空数组
+    ConsoleUserPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConsoleUser'
+        page:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+    ConsoleUserPageResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/ConsoleUserPage'
+    ConsoleUserResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/ConsoleUser'
+    CreateUserRequest:
+      type: object
+      required:
+      - username
+      - password
+      properties:
+        username:
+          type: string
+          maxLength: 64
+          description: 登录名，在本地与目录账号间全局唯一
+        display_name:
+          type: string
+          nullable: true
+          maxLength: 64
+          description: 缺省回落到登录名
+        email:
+          type: string
+          format: email
+          nullable: true
+          maxLength: 128
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 64
+          description: 初始口令，被建账号首登强制轮换
+        role_ids:
+          type: array
+          nullable: true
+          items:
+            type: string
+    UpdateUserRequest:
+      type: object
+      description: 可改字段只有这两个；username 故意缺席
+      properties:
+        display_name:
+          type: string
+          nullable: true
+          maxLength: 64
+        email:
+          type: string
+          format: email
+          nullable: true
+          maxLength: 128
+    UpdateUserStatusRequest:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - ENABLED
+          - DISABLED
+    AssignRolesRequest:
+      type: object
+      description: 完整集合而非增删差异；传空数组即收回全部角色
+      properties:
+        role_ids:
+          type: array
+          items:
+            type: string
+    ResetUserPasswordRequest:
+      type: object
+      required:
+      - new_password
+      properties:
+        new_password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 64
+    Role:
+      type: object
+      description: 角色行，含权限集合与数据范围（M15-CONTRACTS.md §1.4）
+      properties:
+        role_id:
+          type: string
+        code:
+          type: string
+          maxLength: 64
+          description: 稳定角色码，创建后不可改
+        name:
+          type: string
+          maxLength: 64
+        description:
+          type: string
+          nullable: true
+          maxLength: 255
+        builtin:
+          type: boolean
+          description: 随产品下发的角色，不可删除
+        kb_scope_all:
+          type: boolean
+        kb_ids:
+          type: array
+          items:
+            type: string
+          description: kb_scope_all=true 时为空数组
+        permission_codes:
+          type: array
+          items:
+            type: string
+    RoleResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/Role'
+    RoleListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/Role'
+    SaveRoleRequest:
+      type: object
+      required:
+      - name
+      properties:
+        code:
+          type: string
+          nullable: true
+          maxLength: 64
+          description: 创建时必传并转大写；更新时忽略
+        name:
+          type: string
+          maxLength: 64
+        description:
+          type: string
+          nullable: true
+          maxLength: 255
+        kb_scope_all:
+          type: boolean
+        kb_ids:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: kb_scope_all=true 时忽略
+        permission_codes:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: 完整权限集合，不是增量
+    PermissionEntry:
+      type: object
+      description: 权限目录一行，角色编辑页勾选网格据此渲染
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        module:
+          type: string
+        module_name:
+          type: string
+    PermissionListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/PermissionEntry'
     CreateKbRequest:
       type: object
       required:

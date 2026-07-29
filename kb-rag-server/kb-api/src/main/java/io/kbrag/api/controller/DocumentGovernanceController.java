@@ -1,12 +1,16 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.DocumentResponse;
 import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.RejectDocumentRequest;
 import io.kbrag.api.dto.UpdateValidityRequest;
+import io.kbrag.app.auth.AccessGuard;
+import io.kbrag.app.auth.KbScopeGuard;
 import io.kbrag.app.governance.DocumentGovernanceService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.PermissionCodes;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -28,6 +32,11 @@ import java.time.format.DateTimeParseException;
  * <p>The document delete endpoint itself lives in {@link DocumentController} because its URL
  * predates M11; only its semantics moved here, to a trash operation.
  *
+ * <p>The submission is granted by {@code doc:write} and everything downstream of it by {@code doc:review}:
+ * the point of the state machine is that the author of a version is not the account that admits it. The
+ * recycle bin listing accepts either, because it is the screen both of them work from - a reviewer who
+ * cannot open it has nowhere to restore from, and an author who cannot open it cannot see what was deleted.
+ *
  * @author owlzhangfq@gmail.com
  */
 @RestController
@@ -39,6 +48,7 @@ public class DocumentGovernanceController {
     private static final int MAX_PAGE_SIZE = 200;
 
     private final DocumentGovernanceService documentGovernanceService;
+    private final KbScopeGuard kbScopeGuard;
 
     /**
      * Submits a draft or a rejected document for review.
@@ -47,7 +57,9 @@ public class DocumentGovernanceController {
      * @return updated document
      */
     @PostMapping("/api/v1/documents/{docId}/submit-review")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<DocumentResponse> submitReview(@PathVariable String docId) {
+        kbScopeGuard.requireDocumentAccess(docId);
         return Result.success(DocumentResponse.from(documentGovernanceService.submitReview(docId)));
     }
 
@@ -58,7 +70,9 @@ public class DocumentGovernanceController {
      * @return updated document
      */
     @PostMapping("/api/v1/documents/{docId}/approve")
+    @RequiresPermission(PermissionCodes.DOC_REVIEW)
     public Result<DocumentResponse> approve(@PathVariable String docId) {
+        kbScopeGuard.requireDocumentAccess(docId);
         return Result.success(DocumentResponse.from(documentGovernanceService.approve(docId)));
     }
 
@@ -70,8 +84,10 @@ public class DocumentGovernanceController {
      * @return updated document
      */
     @PostMapping("/api/v1/documents/{docId}/reject")
+    @RequiresPermission(PermissionCodes.DOC_REVIEW)
     public Result<DocumentResponse> reject(@PathVariable String docId,
                                            @Valid @RequestBody RejectDocumentRequest request) {
+        kbScopeGuard.requireDocumentAccess(docId);
         return Result.success(DocumentResponse.from(
                 documentGovernanceService.reject(docId, request.note().trim())));
     }
@@ -84,8 +100,10 @@ public class DocumentGovernanceController {
      * @return updated document
      */
     @PutMapping("/api/v1/documents/{docId}/validity")
+    @RequiresPermission(PermissionCodes.DOC_REVIEW)
     public Result<DocumentResponse> updateValidity(@PathVariable String docId,
                                                    @RequestBody UpdateValidityRequest request) {
+        kbScopeGuard.requireDocumentAccess(docId);
         return Result.success(DocumentResponse.from(documentGovernanceService.updateValidity(docId,
                 parseTime(request.effectiveAt(), "effective_at"),
                 parseTime(request.expiresAt(), "expires_at"))));
@@ -100,10 +118,12 @@ public class DocumentGovernanceController {
      * @return paged trashed documents
      */
     @GetMapping("/api/v1/kb/{kbId}/trash")
+    @RequiresPermission({PermissionCodes.DOC_REVIEW, PermissionCodes.DOC_WRITE})
     public Result<PageResponse<DocumentResponse>> listTrash(
             @PathVariable String kbId,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
+        AccessGuard.requireKbAccess(kbId);
         return Result.success(PageResponse.from(
                 documentGovernanceService.listTrash(kbId, normalizePage(page), normalizeSize(size)),
                 DocumentResponse::from));
@@ -116,7 +136,9 @@ public class DocumentGovernanceController {
      * @return updated document
      */
     @PostMapping("/api/v1/documents/{docId}/restore")
+    @RequiresPermission(PermissionCodes.DOC_REVIEW)
     public Result<DocumentResponse> restore(@PathVariable String docId) {
+        kbScopeGuard.requireDocumentAccess(docId);
         return Result.success(DocumentResponse.from(documentGovernanceService.restore(docId)));
     }
 
@@ -127,7 +149,9 @@ public class DocumentGovernanceController {
      * @return empty success envelope
      */
     @DeleteMapping("/api/v1/documents/{docId}/purge")
+    @RequiresPermission(PermissionCodes.DOC_REVIEW)
     public Result<Void> purge(@PathVariable String docId) {
+        kbScopeGuard.requireDocumentAccess(docId);
         documentGovernanceService.purge(docId);
         return Result.success(null);
     }

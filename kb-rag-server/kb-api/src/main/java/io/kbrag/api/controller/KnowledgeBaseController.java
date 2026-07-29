@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.ChatImportConfirmRequest;
 import io.kbrag.api.dto.ChatImportPreviewResponse;
 import io.kbrag.api.dto.ConfirmDocumentsRequest;
@@ -8,6 +9,7 @@ import io.kbrag.api.dto.KnowledgeBaseResponse;
 import io.kbrag.api.dto.RebuildRequest;
 import io.kbrag.api.dto.UpdateIndexConfigRequest;
 import io.kbrag.api.dto.UpdateKbGovernanceRequest;
+import io.kbrag.app.auth.AccessGuard;
 import io.kbrag.app.chat.ChatImportService;
 import io.kbrag.app.document.DocumentPreviewService;
 import io.kbrag.app.governance.DocumentGovernanceService;
@@ -15,6 +17,7 @@ import io.kbrag.app.index.RebuildService;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.model.KbIndexConfig;
 import jakarta.validation.Valid;
@@ -37,6 +40,10 @@ import java.util.Map;
 
 /**
  * Knowledge base management endpoints.
+ *
+ * <p>Every endpoint naming an existing base asserts the caller's data scope covers it. The listing does not:
+ * it is trimmed to the visible bases instead, because a picker that hides what it may not offer is the
+ * useful behaviour, while a refusal would be one.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -64,17 +71,19 @@ public class KnowledgeBaseController {
      * @return created knowledge base
      */
     @PostMapping
+    @RequiresPermission(PermissionCodes.KB_WRITE)
     public Result<KnowledgeBaseResponse> create(@Valid @RequestBody CreateKnowledgeBaseRequest request) {
         KnowledgeBase created = knowledgeBaseService.create(request.name(), request.description());
         return Result.success(toResponse(created));
     }
 
     /**
-     * Lists every knowledge base.
+     * Lists the knowledge bases the caller may see.
      *
      * @return knowledge bases, newest first
      */
     @GetMapping
+    @RequiresPermission(PermissionCodes.KB_READ)
     public Result<List<KnowledgeBaseResponse>> list() {
         return Result.success(knowledgeBaseService.list().stream().map(this::toResponse).toList());
     }
@@ -86,7 +95,9 @@ public class KnowledgeBaseController {
      * @return knowledge base
      */
     @GetMapping("/{kbId}")
+    @RequiresPermission(PermissionCodes.KB_READ)
     public Result<KnowledgeBaseResponse> get(@PathVariable String kbId) {
+        AccessGuard.requireKbAccess(kbId);
         return Result.success(toResponse(knowledgeBaseService.require(kbId)));
     }
 
@@ -102,8 +113,10 @@ public class KnowledgeBaseController {
      * @return number of stale documents and the recomputed fingerprint
      */
     @PutMapping("/{kbId}/index-config")
+    @RequiresPermission(PermissionCodes.KB_WRITE)
     public Result<Map<String, Object>> updateIndexConfig(@PathVariable String kbId,
                                                          @Valid @RequestBody UpdateIndexConfigRequest request) {
+        AccessGuard.requireKbAccess(kbId);
         KnowledgeBase knowledgeBase = knowledgeBaseService.require(kbId);
         KbIndexConfig config = request.toIndexConfig(knowledgeBaseService.indexConfigOf(knowledgeBase));
         int stale = knowledgeBaseService.updateIndexConfig(kbId, config, request.retrievalConfig());
@@ -122,8 +135,10 @@ public class KnowledgeBaseController {
      * @return queued document ids
      */
     @PostMapping("/{kbId}/rebuild")
+    @RequiresPermission(PermissionCodes.KB_WRITE)
     public Result<Map<String, Object>> rebuild(@PathVariable String kbId,
                                                @RequestBody(required = false) RebuildRequest request) {
+        AccessGuard.requireKbAccess(kbId);
         List<String> queued = rebuildService.submit(kbId, request == null ? null : request.docIds());
         return Result.success(Map.of(FIELD_QUEUED_DOC_IDS, queued));
     }
@@ -136,9 +151,11 @@ public class KnowledgeBaseController {
      * @return confirmed document ids
      */
     @PostMapping("/{kbId}/documents/confirm")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<Map<String, Object>> confirmDocuments(
             @PathVariable String kbId,
             @RequestBody(required = false) ConfirmDocumentsRequest request) {
+        AccessGuard.requireKbAccess(kbId);
         List<String> confirmed = documentPreviewService.confirmAll(kbId,
                 request == null ? null : request.docIds());
         return Result.success(Map.of(FIELD_CONFIRMED_DOC_IDS, confirmed));
@@ -153,10 +170,12 @@ public class KnowledgeBaseController {
      * @return match preview carrying the token the confirmation needs
      */
     @PostMapping("/{kbId}/chat-imports")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<ChatImportPreviewResponse> previewChatImport(
             @PathVariable String kbId,
             @RequestParam("file") MultipartFile file,
             @RequestParam(name = "mapping_profile", required = false) String mappingProfile) {
+        AccessGuard.requireKbAccess(kbId);
         if (file == null || file.isEmpty()) {
             throw BizException.invalidParam("file is required");
         }
@@ -178,9 +197,11 @@ public class KnowledgeBaseController {
      * @return document ids that were created or given a new version
      */
     @PostMapping("/{kbId}/chat-imports/confirm")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<Map<String, Object>> confirmChatImport(
             @PathVariable String kbId,
             @Valid @RequestBody ChatImportConfirmRequest request) {
+        AccessGuard.requireKbAccess(kbId);
         List<String> imported = chatImportService.confirm(kbId, request.uploadToken(), request.sessionIds());
         return Result.success(Map.of(FIELD_IMPORTED_DOC_IDS, imported));
     }
@@ -193,8 +214,10 @@ public class KnowledgeBaseController {
      * @return updated knowledge base
      */
     @PutMapping("/{kbId}/governance")
+    @RequiresPermission(PermissionCodes.KB_WRITE)
     public Result<KnowledgeBaseResponse> updateGovernance(@PathVariable String kbId,
                                                           @Valid @RequestBody UpdateKbGovernanceRequest request) {
+        AccessGuard.requireKbAccess(kbId);
         return Result.success(toResponse(
                 documentGovernanceService.updateGovernance(kbId, request.reviewRequired())));
     }
@@ -206,7 +229,9 @@ public class KnowledgeBaseController {
      * @return empty success envelope
      */
     @DeleteMapping("/{kbId}")
+    @RequiresPermission(PermissionCodes.KB_DELETE)
     public Result<Void> delete(@PathVariable String kbId) {
+        AccessGuard.requireKbAccess(kbId);
         knowledgeBaseService.delete(kbId);
         return Result.success(null);
     }

@@ -1,9 +1,12 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.AnnotationMigrationResponse;
 import io.kbrag.api.dto.MigrateAnnotationRequest;
 import io.kbrag.app.annotation.AnnotationMigrationService;
+import io.kbrag.app.auth.KbScopeGuard;
 import io.kbrag.common.api.Result;
+import io.kbrag.domain.constant.PermissionCodes;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AnnotationController {
 
     private final AnnotationMigrationService annotationMigrationService;
+    private final KbScopeGuard kbScopeGuard;
 
     /**
      * Applies an annotation of an older version to a chunk of the active one and closes the review item.
@@ -38,8 +42,10 @@ public class AnnotationController {
      * @return what was replayed and the state the annotation is now in
      */
     @PostMapping("/{annotationId}/migrate")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<AnnotationMigrationResponse> migrate(@PathVariable String annotationId,
                                                        @Valid @RequestBody MigrateAnnotationRequest request) {
+        kbScopeGuard.requireAnnotationAccess(annotationId);
         return Result.success(AnnotationMigrationResponse.from(
                 annotationMigrationService.migrate(annotationId, request.targetChunkId())));
     }

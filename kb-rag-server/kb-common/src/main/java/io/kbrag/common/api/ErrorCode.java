@@ -22,6 +22,15 @@ public enum ErrorCode {
     /** Missing, expired or malformed bearer token. */
     UNAUTHORIZED(401, "unauthorized"),
 
+    /**
+     * Authenticated console user lacks the permission code, or the knowledge base is outside the data
+     * scope of every role it holds.
+     *
+     * <p>Distinct from {@link #UNAUTHORIZED} on purpose: the console must not bounce an authenticated
+     * user back to the login page for an operation their account is simply not allowed to perform.
+     */
+    FORBIDDEN(403, "permission denied"),
+
     /** Referenced business resource does not exist or was soft deleted. */
     NOT_FOUND(404, "resource not found"),
 

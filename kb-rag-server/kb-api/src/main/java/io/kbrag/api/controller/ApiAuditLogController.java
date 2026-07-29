@@ -1,12 +1,14 @@
 package io.kbrag.api.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.ApiAuditLogResponse;
 import io.kbrag.api.dto.ApiAuditStatsResponse;
 import io.kbrag.api.dto.PageResponse;
 import io.kbrag.app.openapi.ApiAuditService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.ApiAuditLog;
 import io.kbrag.domain.enums.TargetStage;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +30,7 @@ import java.time.format.DateTimeParseException;
 @RestController
 @RequestMapping("/api/v1/api-audit-logs")
 @RequiredArgsConstructor
+@RequiresPermission(PermissionCodes.AUDIT_READ)
 public class ApiAuditLogController {
 
     private static final int DEFAULT_PAGE = 1;

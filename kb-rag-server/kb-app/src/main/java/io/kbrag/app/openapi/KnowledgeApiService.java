@@ -2,6 +2,7 @@ package io.kbrag.app.openapi;
 
 import io.kbrag.app.appcenter.AppService;
 import io.kbrag.app.appcenter.AppVersionService;
+import io.kbrag.app.auth.AccessGuard;
 import io.kbrag.app.config.AsyncConfig;
 import io.kbrag.app.insight.SearchInsightService;
 import io.kbrag.app.metrics.KbMetrics;
@@ -215,9 +216,7 @@ public class KnowledgeApiService {
     public KnowledgeCallResult preview(String appId, String appVersionId, KnowledgeCallCommand command,
                                        ChatStreamListener listener) {
         appService.require(appId);
-        AppVersion version = appVersionId == null || appVersionId.isBlank()
-                ? appVersionService.requireNewest(appId)
-                : appVersionService.require(appVersionId);
+        AppVersion version = previewVersion(appId, appVersionId);
         // Deliberately not snapshot bound even when the previewed version is the released one: a preview exists
         // to try a configuration against the corpus as it is now, and it is also how an operator proves a
         // snapshot isolates a release - the same query returns the new content here and does not there
@@ -233,6 +232,50 @@ public class KnowledgeApiService {
         listener.onReferences(retrieved.getNodes());
         listener.onDone(RequestIdHolder.get(), retrieved.getDegraded(), retrieved.routedKbIds());
         return retrieved;
+    }
+
+    /**
+     * Checks the console caller against every knowledge base a preview would retrieve from.
+     *
+     * <p>Callers have to invoke this on the request thread, which is why it is a separate method instead of the
+     * first lines of {@link #preview}: the streamed preview runs on an executor, and the authenticated user
+     * lives in a thread local that the executors' task decorator does not carry across - it propagates the
+     * request id and nothing else. A check placed inside the preview would therefore find no user and wave the
+     * call through, on exactly the transport the console uses by default.
+     *
+     * <p>An application naming a base outside the caller's scope is rejected rather than previewed against the
+     * subset it may see. A preview exists to show what the release will answer; one that quietly dropped a base
+     * would answer a question nobody asked and read as a retrieval problem.
+     *
+     * @param appId        application business id
+     * @param appVersionId version to preview, {@code null} takes the newest one
+     */
+    public void requirePreviewKbAccess(String appId, String appVersionId) {
+        appService.require(appId);
+        List<KbRef> kbRefs = appVersionService.parseConfig(previewVersion(appId, appVersionId)).getKbRefs();
+        if (CollectionUtils.isEmpty(kbRefs)) {
+            // An unconfigured version names no base to authorise; the preview itself rejects it with the
+            // message that actually explains what is missing.
+            return;
+        }
+        Set<String> kbIds = new LinkedHashSet<>(kbRefs.size());
+        for (KbRef ref : kbRefs) {
+            kbIds.add(ref.kbId());
+        }
+        AccessGuard.requireKbAccess(kbIds);
+    }
+
+    /**
+     * Picks the version a preview targets.
+     *
+     * @param appId        application business id
+     * @param appVersionId requested version, {@code null} or blank takes the newest one
+     * @return version to preview
+     */
+    private AppVersion previewVersion(String appId, String appVersionId) {
+        return appVersionId == null || appVersionId.isBlank()
+                ? appVersionService.requireNewest(appId)
+                : appVersionService.require(appVersionId);
     }
 
     /**

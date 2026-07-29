@@ -1,39 +1,37 @@
-import {
-  AppstoreOutlined,
-  DatabaseOutlined,
-  ExperimentOutlined,
-  LogoutOutlined,
-  MessageOutlined,
-  SearchOutlined,
-  SettingOutlined,
-} from '@ant-design/icons';
+import { LogoutOutlined } from '@ant-design/icons';
 import { Alert, Layout, Menu, Space, Typography } from 'antd';
+import { useMemo } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { useModelStatus } from '../context/ModelStatusContext';
+import { landingPath, visibleNavEntries } from './navigation';
 
 const { Header, Sider, Content, Footer } = Layout;
-
-const MENU_ITEMS = [
-  { key: '/kb', icon: <DatabaseOutlined />, label: '知识库' },
-  { key: '/search', icon: <SearchOutlined />, label: '检索调试' },
-  { key: '/chat', icon: <MessageOutlined />, label: '问答调试' },
-  { key: '/apps', icon: <AppstoreOutlined />, label: '应用中心' },
-  { key: '/eval', icon: <ExperimentOutlined />, label: '评测中心' },
-  { key: '/settings', icon: <SettingOutlined />, label: '系统设置' },
-];
 
 /**
  * Authenticated app shell: left sider navigation + top header + content outlet.
  * Also owns the global "embedding not configured" banner (M1-CONTRACTS.md section 7).
+ *
+ * <p>The menu lists only what the account may open. That is a courtesy, not a control: every screen
+ * behind it is guarded again by the router and once more by the server.
  */
 export default function MainLayout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { username, logout } = useAuth();
+  const { displayName, canAny, logout } = useAuth();
   const { modelStatus } = useModelStatus();
 
-  const selectedKey = MENU_ITEMS.find((item) => location.pathname.startsWith(item.key))?.key ?? '/kb';
+  const menuItems = useMemo(
+    () => visibleNavEntries(canAny).map(({ key, icon, label }) => ({ key, icon, label })),
+    [canAny],
+  );
+  // Longest prefix wins so that /kb/:kbId does not also light up a future /kb-something entry, and the
+  // fallback follows the same rule the router uses for "/" instead of assuming /kb is reachable.
+  const selectedKey =
+    menuItems
+      .map((item) => item.key)
+      .filter((key) => location.pathname === key || location.pathname.startsWith(`${key}/`))
+      .sort((a, b) => b.length - a.length)[0] ?? landingPath(canAny);
 
   const handleLogout = () => {
     logout();
@@ -60,14 +58,14 @@ export default function MainLayout() {
           theme="dark"
           mode="inline"
           selectedKeys={[selectedKey]}
-          items={MENU_ITEMS}
+          items={menuItems}
           onClick={({ key }) => navigate(key)}
         />
       </Sider>
       <Layout>
         <Header style={{ background: '#fff', display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
           <Space>
-            <Typography.Text>{username ?? ''}</Typography.Text>
+            <Typography.Text>{displayName ?? ''}</Typography.Text>
             <a onClick={handleLogout}>
               <LogoutOutlined /> 退出登录
             </a>

@@ -7,6 +7,24 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 新增（M15）
+
+- `[schema]` Flyway `V16__rbac.sql`：`t_kb_admin_user` 增 `user_id` / `display_name` / `email` / `source` / `status`，`password_hash` 改为可空（目录账号没有本地口令）；新增 `t_kb_role`（角色，ID 前缀 `role`）、`t_kb_permission`（权限目录）、`t_kb_user_role`、`t_kb_role_permission`、`t_kb_role_kb`（角色→知识库数据范围）。内置 5 角色 `SUPER_ADMIN` / `KB_ADMIN` / `EDITOR` / `REVIEWER` / `VIEWER` 与 18 个权限码随迁移落库
+- **存量账号一律提权为 `SUPER_ADMIN`**（含 `admin`）：否则升级后没人能进用户管理页发出第一个角色
+- 功能权限：`@RequiresPermission`（`String[] value()`，any-of 语义）+ `PermissionInterceptor` 在 web 层拦一次；已铺到 24 个 Controller 共 103 处，18 个权限码全部有引用；不足时统一返回 403 `FORBIDDEN`
+- 知识库级数据权限：路径带 `{kbId}` 走 `AccessGuard.requireKbAccess`，路径只带业务 id 走 `KbScopeGuard` 的 9 个 `require*Access` 反查所属库；越权同样 403，不降级为 404
+- 检索与列表按可见库裁剪：`KnowledgeBaseService.list()` 对无全局范围的主体加 `kb_id IN (...)`，范围为空直接返空列表；控制台 search / chat 落到同一道裁剪
+- 单点登录：新增出站端口 `DirectoryAuthenticator`（实现 `LdapDirectoryAuthenticator`，裸 JNDI simple bind，不引入 Spring LDAP），`POST /api/v1/auth/login` 增 `mode`（LOCAL/SSO，缺省读作 LOCAL），新增 `GET /api/v1/auth/sso-available`（免认证）；目录账号首登自动建号并授予配置的默认角色
+- 用户与角色管理端点：`/api/v1/users` 8 个（分页列表 / 建号 / 详情 / 改资料 / 启停 / 换角色 / 重置口令 / 删除）、`/api/v1/roles` 6 个（列表 / 新建 / 权限目录 / 详情 / 修改 / 删除）
+- 权限缓存 `PrincipalResolver`（进程内，按 username），改角色定义即全量失效；停用账号立即吊销其已签发会话
+- 新增环境变量 `AUTH_LDAP_ENABLED` / `AUTH_LDAP_URL` / `AUTH_LDAP_DOMAIN_SUFFIX` / `AUTH_LDAP_CONNECT_TIMEOUT_MS` / `AUTH_LDAP_READ_TIMEOUT_MS` / `AUTH_LDAP_DEFAULT_ROLE_CODE`
+
+### 变更（M15）
+
+- 登录失败锁定口径修正：域控不可达（`DIRECTORY_UNAVAILABLE`）不计入连续失败次数——否则一次域控抖动会把所有重试过的账号一起锁 15 分钟
+- `GET /api/v1/auth/me` 返回体扩展（纯新增字段）：补 `display_name` / `source` / `roles` / `permissions` / `kb_scope_all` / `kb_ids`
+- 两个登录入口互不串用：本地账号走 SSO、目录账号走本地口令均直接拒绝，避免同名域账号继承本地管理员的权限
+
 ### 新增（M13）
 
 - Prometheus 业务指标：`kb-api/pom.xml` 补齐 `micrometer-registry-prometheus` 依赖，激活既有 actuator 的 `/actuator/prometheus` 端点（JVM/HTTP 基础指标随自动配置免费提供）。业务指标经 `KbMetrics` 门面单点注册：`kb_search_seconds`（Timer，标签 source=console/open_api、zero_hit、degraded；chat-preview 管理流量不计入）、`kb_task_completed_total`（Counter，type × success/failed）、`kb_openapi_rejected_total`（Counter，按 error_code）、`kb_websource_sync_total`（Counter，按 M12 同步四态）、`kb_task_backlog`（`TaskBacklogMetrics` gauge，pending/running 两支，抓取时实查 DB，DB 异常返回 NaN 不使抓取失败）

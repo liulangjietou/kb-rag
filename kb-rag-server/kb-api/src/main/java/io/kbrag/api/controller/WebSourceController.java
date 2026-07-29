@@ -1,11 +1,15 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.RegisterWebSourceRequest;
 import io.kbrag.api.dto.UpdateWebSourceRequest;
 import io.kbrag.api.dto.WebSourceResponse;
+import io.kbrag.app.auth.AccessGuard;
+import io.kbrag.app.auth.KbScopeGuard;
 import io.kbrag.app.websource.WebSourceService;
 import io.kbrag.common.api.Result;
+import io.kbrag.domain.constant.PermissionCodes;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -36,6 +40,7 @@ public class WebSourceController {
     private static final int MAX_PAGE_SIZE = 200;
 
     private final WebSourceService webSourceService;
+    private final KbScopeGuard kbScopeGuard;
 
     /**
      * Registers a URL and runs its first fetch immediately.
@@ -45,8 +50,10 @@ public class WebSourceController {
      * @return registration carrying the outcome of the first fetch
      */
     @PostMapping("/api/v1/kb/{kbId}/web-sources")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<WebSourceResponse> register(@PathVariable String kbId,
                                               @Valid @RequestBody RegisterWebSourceRequest request) {
+        AccessGuard.requireKbAccess(kbId);
         boolean syncEnabled = request.syncEnabled() == null || request.syncEnabled();
         return Result.success(WebSourceResponse.from(
                 webSourceService.register(kbId, request.url().trim(), syncEnabled)));
@@ -61,10 +68,12 @@ public class WebSourceController {
      * @return paged registrations
      */
     @GetMapping("/api/v1/kb/{kbId}/web-sources")
+    @RequiresPermission(PermissionCodes.KB_READ)
     public Result<PageResponse<WebSourceResponse>> list(
             @PathVariable String kbId,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
+        AccessGuard.requireKbAccess(kbId);
         return Result.success(PageResponse.from(
                 webSourceService.list(kbId, normalizePage(page), normalizeSize(size)),
                 WebSourceResponse::from));
@@ -77,7 +86,9 @@ public class WebSourceController {
      * @return registration carrying the outcome of this fetch
      */
     @PostMapping("/api/v1/web-sources/{sourceId}/sync")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<WebSourceResponse> sync(@PathVariable String sourceId) {
+        kbScopeGuard.requireWebSourceAccess(sourceId);
         return Result.success(WebSourceResponse.from(webSourceService.syncNow(sourceId)));
     }
 
@@ -89,8 +100,10 @@ public class WebSourceController {
      * @return updated registration
      */
     @PutMapping("/api/v1/web-sources/{sourceId}")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<WebSourceResponse> update(@PathVariable String sourceId,
                                             @Valid @RequestBody UpdateWebSourceRequest request) {
+        kbScopeGuard.requireWebSourceAccess(sourceId);
         return Result.success(WebSourceResponse.from(
                 webSourceService.updateSyncEnabled(sourceId, request.syncEnabled())));
     }
@@ -102,7 +115,9 @@ public class WebSourceController {
      * @return empty success envelope
      */
     @DeleteMapping("/api/v1/web-sources/{sourceId}")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<Void> remove(@PathVariable String sourceId) {
+        kbScopeGuard.requireWebSourceAccess(sourceId);
         webSourceService.remove(sourceId);
         return Result.success(null);
     }

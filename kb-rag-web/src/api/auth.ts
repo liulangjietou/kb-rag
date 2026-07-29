@@ -1,9 +1,26 @@
 // Author: owlzhangfq@gmail.com
 import { apiGet, apiPost } from './request';
-import type { ChangePasswordRequest, CurrentUser, LoginRequest, LoginResponse } from './types';
+import type {
+  ChangePasswordRequest,
+  CurrentUser,
+  LoginRequest,
+  LoginResponse,
+  SsoAvailability,
+} from './types';
 
 export function login(payload: LoginRequest): Promise<LoginResponse> {
   return apiPost<LoginResponse>('/auth/login', payload);
+}
+
+/**
+ * GET /api/v1/auth/sso-available: whether a corporate directory is wired into this deployment.
+ *
+ * Unauthenticated on purpose -- the login page has to render before anybody has a session. A failure
+ * here is treated as "no directory" by the caller: offering a tab that cannot work is worse than not
+ * offering it, and the local form is always available as the way in.
+ */
+export function getSsoAvailability(): Promise<SsoAvailability> {
+  return apiGet<SsoAvailability>('/auth/sso-available');
 }
 
 export function changePassword(payload: ChangePasswordRequest): Promise<void> {

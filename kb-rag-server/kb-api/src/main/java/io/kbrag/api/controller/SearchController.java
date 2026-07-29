@@ -1,13 +1,16 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.SearchRequest;
 import io.kbrag.api.dto.SearchResponse;
+import io.kbrag.app.auth.AccessGuard;
 import io.kbrag.app.insight.SearchInsightService;
 import io.kbrag.app.metrics.KbMetrics;
 import io.kbrag.app.retrieval.RetrievalService;
 import io.kbrag.app.retrieval.SearchOutcome;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.context.RequestIdHolder;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.enums.InsightSource;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -49,8 +52,10 @@ public class SearchController {
      * @return nodes, degradation markers and the applied parameter summary
      */
     @PostMapping("/api/v1/kb/{kbId}/search")
+    @RequiresPermission(PermissionCodes.SEARCH_DEBUG)
     public Result<SearchResponse> search(@PathVariable String kbId,
                                          @Valid @RequestBody SearchRequest request) {
+        AccessGuard.requireKbAccess(kbId);
         long startedAt = System.currentTimeMillis();
         SearchOutcome outcome = retrievalService.search(kbId, request.toCommand());
         int resultCount = CollectionUtils.isEmpty(outcome.getNodes()) ? 0 : outcome.getNodes().size();
