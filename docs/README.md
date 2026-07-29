@@ -32,9 +32,9 @@ docker compose -f kb-rag-deploy/docker-compose.lite.yml up -d
 ```
 
 完整的部署模式、资源要求矩阵、各里程碑接口契约与架构流程图，见
-[`kb-rag-deploy/README.md`](kb-rag-deploy/README.md) 与 `kb-rag-deploy/docs/`。
+[`../kb-rag-deploy/README.md`](../kb-rag-deploy/README.md) 与 `../kb-rag-deploy/docs`。
 
 ## 安全说明
 
-`.env` 已在 `.gitignore` 中忽略，任何真实密钥、口令均不入库；提交前请以
+`.env` 已在 `../.gitignore` 中忽略，任何真实密钥、口令均不入库；提交前请以
 `.env.example` 为模板，确保仅提交占位值。
