@@ -25,6 +25,7 @@
 ```
 - `kind=embedded`：pdf/docx 内嵌图片；`kind=page_render`：整页无文本层（扫描件），把该页渲染为 PNG（150 dpi）
 - **扫描页判定**：该页抽取文本去空白后长度 < `SCANNED_PAGE_TEXT_THRESHOLD`（默认 20 字符）即视为扫描页，`pages[].scanned=true` 且产出一个 `page_render` 图片，其占位符插入该页文本位置
+- **乱码页判定**（后补，与代码一致）：文本层长度达标但可识别字符（ASCII/CJK/假名/中日标点等区段）占比 < `GARBLED_PAGE_VALID_CHAR_RATIO_PCT`%（默认 50，可环境变量覆盖）——典型为内嵌子集字体 ToUnicode CMap 缺失/损坏导致的错码位"字形汤"——该页降级走扫描页路径：乱码文本**置空不入库**，产出 `page_render` 图片交 OCR/VLM 兜底，并在 `data.warnings[]` 记录一条说明
 - 占位符格式固定 `[[IMAGE:{image_id}]]`，一行独占，便于 server 精确替换
 - 图片上限保护：单文档图片数上限（默认 100，`MAX_IMAGES_PER_DOC`）、单图字节上限（默认 10MB），超限跳过并在响应 `data.warnings[]` 中说明（不失败整篇）
 

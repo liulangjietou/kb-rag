@@ -667,7 +667,7 @@ public class KbProperties {
 
         /** Accepted lower case extensions. */
         private List<String> allowedExtensions =
-                List.of("pdf", "docx", "txt", "md", "xlsx", "csv",
+                List.of("pdf", "docx", "txt", "md", "sql", "xlsx", "csv",
                         "png", "jpg", "jpeg", "webp", "bmp", "gif");
     }
 

@@ -32,6 +32,7 @@ _REGISTRY: dict[str, BaseParser] = {
     "docx": _docx_parser,
     "txt": _text_parser,
     "md": _text_parser,
+    "sql": _text_parser,
     "xlsx": _excel_parser,
     "csv": _csv_parser,
     "html": _html_parser,

@@ -33,7 +33,7 @@ PARSER_EXECUTOR_MAX_WORKERS = 4
 
 # Supported file extensions (registry keys), kept in one place to avoid
 # scattering the whitelist across modules.
-SUPPORTED_FILE_EXTENSIONS = frozenset({"pdf", "docx", "txt", "md", "xlsx", "csv"})
+SUPPORTED_FILE_EXTENSIONS = frozenset({"pdf", "docx", "txt", "md", "sql", "xlsx", "csv"})
 
 # Zip-based formats that must go through the zip safety precheck before
 # being handed to python-docx / openpyxl.
@@ -68,6 +68,16 @@ SCANNED_PAGE_TEXT_THRESHOLD = _read_int_env("SCANNED_PAGE_TEXT_THRESHOLD", 20)
 # DPI used to render a scanned page to PNG. Fixed by the contract, not
 # environment-configurable (only the threshold above is).
 SCANNED_PAGE_RENDER_DPI = 150
+
+# A page whose text layer *exists* but decodes mostly to unrecognizable
+# code points (typical of an embedded subset font with a missing/broken
+# ToUnicode CMap: CJK content surfaces as e.g. Myanmar/box glyph soup) is
+# treated as garbled. When fewer than this percentage of its
+# non-whitespace characters fall in recognizable Unicode ranges
+# (ASCII/CJK/kana/CJK punctuation, see app/parsers/pdf.py), the page
+# falls back to the scanned-page path (page render + OCR/VLM) instead of
+# indexing the glyph soup.
+GARBLED_PAGE_VALID_CHAR_RATIO_PCT = _read_int_env("GARBLED_PAGE_VALID_CHAR_RATIO_PCT", 50)
 
 # Per-document image-count cap and per-image byte-size cap. Exceeding
 # either just skips that one image and records a warning (see
