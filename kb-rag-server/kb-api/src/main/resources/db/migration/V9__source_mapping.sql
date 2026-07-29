@@ -1,35 +1,33 @@
--- Milestone M8 schema increment: the chat import mapping profile table behind the console's import
--- mapping tab. The baseline and V1-V8 are never edited after release, so every later change arrives as
--- its own migration.
+-- 里程碑 M8 的结构增量：控制台「导入映射」页签背后的聊天导入映射模板表。
+-- 基线与 V1-V8 发布后不再修改，因此后续每一次变更都以独立的迁移脚本落地。
 --
--- The requirement document announced this table for the first phase, but no migration ever created it:
--- phase one carried the mapping profiles as yml files next to the parser instead. The migration therefore
--- creates the table rather than adding the columns M8 needs to an existing one.
+-- 需求文档在一期就提出了这张表，但当时没有任何迁移脚本创建过它：一期是把映射模板以 yml 文件的
+-- 形式放在解析器旁边的。因此这个迁移是新建表，而不是在既有表上补 M8 需要的列。
+SET NAMES utf8mb4;
 
 CREATE TABLE t_kb_source_mapping
 (
-    id           BIGINT       NOT NULL AUTO_INCREMENT,
-    mapping_id   VARCHAR(64)  NOT NULL COMMENT 'business identifier exposed by the API',
-    -- Also the value the mapping_profile import parameter carried while the profiles were yml files, so
-    -- an import addressing a built-in profile by its name keeps working after this table arrives.
-    name         VARCHAR(128) NOT NULL COMMENT 'profile name, unique across built-in and custom rows',
-    source_type  VARCHAR(16)  NOT NULL COMMENT 'CSV/XLSX/TXT/HTML, the export extension this profile reads',
-    -- No description column: the body carries its own comment header, the console edits it in a text
-    -- area, and a second field could only disagree with what the operator is already reading.
-    profile_yaml MEDIUMTEXT   NOT NULL COMMENT 'full yaml body forwarded to the parser on every parse call',
-    -- A seeded template is copied, never edited or deleted: the next release recalibrates it against a
-    -- real export sample, which would silently revert an in place edit.
-    is_builtin   TINYINT      NOT NULL DEFAULT 0 COMMENT '1 seeded template, 0 operator created',
-    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    lock_version INT          NOT NULL DEFAULT 0,
-    deleted      TINYINT      NOT NULL DEFAULT 0,
+    id           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    mapping_id   VARCHAR(64)  NOT NULL COMMENT '对外暴露的业务标识',
+    -- 模板还是 yml 文件的时候，导入参数 mapping_profile 传的也是这个值，
+    -- 因此按名称寻址内置模板的导入请求，在这张表落地之后依然可以正常工作。
+    name         VARCHAR(128) NOT NULL COMMENT '模板名称，内置与自建模板共用同一个命名空间且唯一',
+    source_type  VARCHAR(16)  NOT NULL COMMENT '本模板所读取的导出文件类型：CSV/XLSX/TXT/HTML',
+    -- 不设 description 列：yaml 正文自带注释头，控制台是在文本域里直接编辑它的，
+    -- 再来一个独立字段只会和运营人员正在读的内容对不上。
+    profile_yaml MEDIUMTEXT   NOT NULL COMMENT '完整 yaml 正文，每次解析调用都原样转发给解析器',
+    -- 内置模板只能被复制，不能被编辑或删除：下个版本会拿真实导出样本重新校准它，
+    -- 那会悄悄覆盖掉原地做的修改。
+    is_builtin   TINYINT      NOT NULL DEFAULT 0 COMMENT '1 内置模板，0 运营人员自建',
+    created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    lock_version INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    deleted      TINYINT      NOT NULL DEFAULT 0 COMMENT '逻辑删除标记，1 表示已删除',
     PRIMARY KEY (id),
     UNIQUE KEY uk_mapping_id (mapping_id),
-    -- The name is an address, not a label: the import parameter resolves a profile by it, so two rows
-    -- sharing one name would leave the resolution to pick between them arbitrarily.
+    -- 名称是地址而不是标签：导入参数靠它解析出模板，两行同名会让解析结果变成任意挑一个。
     UNIQUE KEY uk_name (name),
     KEY idx_source_type (source_type)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
-  COLLATE = utf8mb4_general_ci COMMENT ='chat import mapping profile forwarded to the parser';
+  COLLATE = utf8mb4_general_ci COMMENT ='聊天导入映射模板，转发给解析器使用';
