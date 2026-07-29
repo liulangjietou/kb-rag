@@ -58,11 +58,19 @@ import WebSourcesTab from './components/WebSourcesTab';
 // each targeted document's config_stale flag flip back to false.
 const POLL_INTERVAL_MS = 3000;
 
+// 与 DocumentController 的 DEFAULT_PAGE_SIZE 对齐：首屏不传 size 时服务端就按 20 返回，
+// 前端跟着写 20 才不会出现"表格标了每页 10 条、实际拿回 20 条"的错位。
+const DEFAULT_DOC_PAGE_SIZE = 20;
+const DOC_PAGE_SIZE_OPTIONS = ['20', '50', '100'];
+
 export default function KbDetailPage() {
   const { kbId } = useParams<{ kbId: string }>();
   const navigate = useNavigate();
   const [kb, setKb] = useState<KnowledgeBase | null>(null);
   const [documents, setDocuments] = useState<KbDocument[]>([]);
+  const [docPage, setDocPage] = useState(1);
+  const [docPageSize, setDocPageSize] = useState(DEFAULT_DOC_PAGE_SIZE);
+  const [docTotal, setDocTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [chunkDoc, setChunkDoc] = useState<KbDocument | null>(null);
   const [previewDoc, setPreviewDoc] = useState<KbDocument | null>(null);
@@ -87,10 +95,32 @@ export default function KbDetailPage() {
     setKb(detail);
   }, [kbId]);
 
-  const loadDocuments = useCallback(async () => {
+  /**
+   * 翻页状态放在 ref 里而不是进 useCallback 依赖：这个函数有二十余处无参调用（上传、删除、
+   * 重建、各 Tab 的回调），若依赖 page 就会在每次翻页时重建，连带把挂载时那个 useEffect
+   * 再跑一遍。无参调用的语义因此是"刷新当前页"，翻页则显式传页码。
+   */
+  const docPageRef = useRef(1);
+  const docPageSizeRef = useRef(DEFAULT_DOC_PAGE_SIZE);
+
+  const loadDocuments = useCallback(async (page?: number, size?: number) => {
     if (!kbId) return;
-    const result = await listDocuments(kbId);
+    const targetPage = page ?? docPageRef.current;
+    const targetSize = size ?? docPageSizeRef.current;
+    const result = await listDocuments(kbId, { page: targetPage, size: targetSize });
+    // 删掉末页最后一条后该页会空掉，此时按 total 直接跳到真正的末页——逐页回退在页码
+    // 远超范围时会递归几十次，而服务端对越界页码只是返回空列表、并不纠正 page
+    const lastPage = Math.max(1, Math.ceil(result.total / targetSize));
+    if (result.items.length === 0 && targetPage > lastPage) {
+      await loadDocuments(lastPage, targetSize);
+      return;
+    }
     setDocuments(result.items);
+    setDocTotal(result.total);
+    docPageRef.current = result.page;
+    docPageSizeRef.current = result.size;
+    setDocPage(result.page);
+    setDocPageSize(result.size);
   }, [kbId]);
 
   useEffect(() => {
@@ -354,7 +384,7 @@ export default function KbDetailPage() {
                   </p>
                   <p className="ant-upload-text">点击或拖拽文件到此处上传</p>
                   <p className="ant-upload-hint">
-                    支持 pdf / docx / txt / md / xlsx / csv / html，单文件不超过 100MB，可批量上传
+                    支持 pdf / docx / txt / md / sql / xlsx / csv / html，单文件不超过 100MB，可批量上传
                   </p>
                 </Upload.Dragger>
 
@@ -362,7 +392,15 @@ export default function KbDetailPage() {
                   rowKey="doc_id"
                   loading={loading}
                   dataSource={documents}
-                  pagination={false}
+                  pagination={{
+                    current: docPage,
+                    pageSize: docPageSize,
+                    total: docTotal,
+                    showSizeChanger: true,
+                    pageSizeOptions: DOC_PAGE_SIZE_OPTIONS,
+                    showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 个文档`,
+                    onChange: (page, size) => loadDocuments(page, size),
+                  }}
                   rowSelection={{
                     selectedRowKeys: selectedPendingIds,
                     onChange: (keys) => setSelectedPendingIds(keys as string[]),
