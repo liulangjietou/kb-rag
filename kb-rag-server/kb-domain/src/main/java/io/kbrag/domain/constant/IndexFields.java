@@ -53,6 +53,15 @@ public final class IndexFields {
     /** Embedding vector. */
     public static final String VECTOR = "vector";
 
+    /**
+     * Namespace prefix of the operator extracted metadata fields, the M14 contract section 3.2.
+     *
+     * <p>The prefix exists only engine side: MySQL stores the raw rule key, and prefixing on the way
+     * into the engines is what keeps an operator chosen key from ever colliding with a column of the
+     * fixed mapping above.
+     */
+    public static final String EXT_PREFIX = "ext_";
+
     private IndexFields() {
     }
 }

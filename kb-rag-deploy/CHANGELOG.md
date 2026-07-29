@@ -8,6 +8,42 @@
 
 ### Added
 
+- **三期第一批：连接器 / 元数据抽取 / 切分扩展 / 混合重排 / 多模态索引 / 以图搜图（M14，docs/M14-CONTRACTS.md）**：
+  ①外部数据源连接器——连接器 SPI（`ExternalConnector`/`ConnectorRouter`，为后续 Confluence/飞书预留）+
+  首个实现 S3/OSS 兼容对象存储；`POST/GET /kb/{kbId}/ext-sources` 登记/列表、`POST
+  /ext-sources/{id}/sync` 手动异步同步、`GET /ext-sources/{id}/items` 对象明细、
+  `PUT`/`POST .../test`/`DELETE /ext-sources/{id}` 更新/连通性测试/移除；按 prefix 扫描桶内对象
+  走既有上传管线入库（派生稳定文件名，ETag 未变→UNCHANGED 不重传、变了→新版本），源与文档
+  弱绑定——移除登记或对象消失均不删文档（SKIPPED）；两张新表 `t_kb_ext_source`/
+  `t_kb_ext_source_item`（Flyway V15）；②配置化元数据抽取——知识库级 `metadata_rules`
+  （constant/regex/keyword_match 三类，≤10 条），切分后逐 chunk 抽取入 metadata 并以 `ext_`
+  前缀镜像引擎，检索侧 `metadata_filter.custom` 等值过滤；规则计入 chunk 指纹；③切分策略扩展——
+  新增 `separator`（分隔符/正则）、`heading`（markdown 标题层级）、`page`（解析页边界）三个
+  TextSplitter 策略，超长段统一回落 fixed_length，与父子分片互斥（组合报 INVALID_PARAM）；
+  ④Rerank 混合模式——`rerank_mode=hybrid` 将语义重排分与归一化 BM25 分线性加权（`rerank_w_semantic`
+  默认 0.7）决定排序，仅影响排序、不改变 `score_threshold` 的绝对阈值语义，rerank 降级链路照旧；
+  ⑤视觉理解整页索引——知识库级 `multimodal_enabled` 开关，开启且多模态 provider 配置时对 IMAGE
+  类 chunk（内嵌图/独立上传图/扫描页整页渲染）额外产多模态向量（DashScope multimodal-embedding-v1，
+  1024 维，物理索引 `{kbId}_mm`），检索新增第三召回路进 RRF 融合（图文同空间，文本可命中图），
+  VLM 文本代理链路保留不变；⑥以图搜图入口——管理台检索调试页 `SearchRequest.images`（裸 base64，
+  ≤3 张/单张 5MB/总量 10MB），multimodal 开启时图片直接嵌入多模态空间检索、否则回落 VLM 转写。
+  web：知识库详情新增「外部数据源」Tab、索引配置抽屉增切分条件字段/元数据抽取分组/多模态开关、
+  检索调试页增重排模式选择与图片上传；新增 `EXT_SOURCE_SYNC_CRON`/`EXT_SOURCE_SYNC_ENABLED`/
+  `EXT_SOURCE_SYNC_BATCH_SIZE`/`EXT_SOURCE_MAX_OBJECTS_PER_SOURCE`/`EXT_SOURCE_FETCH_TIMEOUT_MS`、
+  `MULTIMODAL_EMBEDDING_MODEL`/`MULTIMODAL_EMBEDDING_API_KEY`/`MULTIMODAL_EMBEDDING_DIM`/
+  `MULTIMODAL_EMBEDDING_URL`/`MULTIMODAL_EMBEDDING_TIMEOUT_MS`、`RETRIEVAL_RERANK_MODE`/
+  `RETRIEVAL_RERANK_W_SEMANTIC`；`degraded` 枚举新增 `mm_route_unavailable`（多模态检索不可用降级）/
+  `mm_route_skipped`（加权融合下多模态路跳过）；OpenAPI 升 0.14.0-m14。纯新增表/端点/配置键，
+  存量行为零变化——新 JSON 配置字段缺省即现状（`metadata_rules` 空、`split_strategy` 旧值不变、
+  `rerank_mode=semantic`、`multimodal_enabled=false`）；`MULTIMODAL_EMBEDDING_API_KEY` 留空则
+  继承 `DASHSCOPE_API_KEY`，两者皆空 = 多模态能力整体关闭
+
+### Security
+
+- **外部数据源凭证明文存储（M14，醒目声明）**：`t_kb_ext_source.secret_key` 明文落库，读 API
+  恒返回 `******`、更新时传空 = 保留旧值。取舍前提与 D17 一致——管理台单管理员 + 网络隔离；
+  引入 KMS/信封加密属权限体系批次，不在本期范围。部署侧务必保证数据库与网络访问隔离
+
 - **运维可观测：Prometheus 业务指标（M13，docs/M13-CONTRACTS.md）**：kb-rag-server 自本版起
   可被 Prometheus 抓取——补齐 `micrometer-registry-prometheus` 依赖激活既有 actuator 的
   `/actuator/prometheus` 端点（JVM/HTTP 基础指标随 actuator 自动配置免费提供）；新增业务

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.constant.ChunkMetadataKeys;
+import io.kbrag.domain.constant.IndexFields;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.ChunkIndexSync;
 import io.kbrag.domain.enums.IndexSyncStatus;
@@ -15,6 +16,7 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -120,6 +122,10 @@ public class ChunkIndexWriter {
      * everything else stays in MySQL. A key that is absent simply leaves its engine field empty, so a
      * document without chat metadata is indexed exactly as before rather than being rejected.
      *
+     * <p>The one exception is the operator extracted metadata of the M14 contract section 3.2: every
+     * key outside the reserved set is mirrored under the {@code ext_} namespace so the retrieval side
+     * can filter on it, while MySQL keeps the raw key name.
+     *
      * @param chunk  fact source row
      * @param vector embedding, {@code null} when the target declares no vector field
      * @return engine document
@@ -138,10 +144,38 @@ public class ChunkIndexWriter {
                 .sessionId(text(metadata.get(ChunkMetadataKeys.SESSION_ID)))
                 .sender(text(metadata.get(ChunkMetadataKeys.SENDER)))
                 .msgTime(epochMillis(metadata.get(ChunkMetadataKeys.MSG_TIME)))
+                .extMetadata(extMetadataOf(metadata))
                 .chunkSeq(chunk.getSeq())
                 .content(chunk.getContent())
                 .vector(vector)
                 .build();
+    }
+
+    /**
+     * Collects the operator extracted keys under the engine side {@code ext_} namespace.
+     *
+     * <p>Only strings and string lists cross over - those are the two shapes the metadata rules
+     * produce, and anything else in the column is a platform structure that has no engine field.
+     *
+     * @param metadata parsed metadata document
+     * @return prefixed extracted values, empty when the chunk carries none
+     */
+    private Map<String, Object> extMetadataOf(Map<String, Object> metadata) {
+        Map<String, Object> ext = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : metadata.entrySet()) {
+            if (ChunkMetadataKeys.RESERVED.contains(entry.getKey())) {
+                continue;
+            }
+            if (entry.getValue() instanceof String value && !value.isBlank()) {
+                ext.put(IndexFields.EXT_PREFIX + entry.getKey(), value);
+            } else if (entry.getValue() instanceof List<?>) {
+                List<String> values = stringList(entry.getValue());
+                if (!values.isEmpty()) {
+                    ext.put(IndexFields.EXT_PREFIX + entry.getKey(), values);
+                }
+            }
+        }
+        return ext;
     }
 
     /**

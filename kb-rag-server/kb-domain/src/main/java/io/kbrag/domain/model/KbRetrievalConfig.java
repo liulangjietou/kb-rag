@@ -52,6 +52,20 @@ public class KbRetrievalConfig {
     @JsonProperty("rerank_enabled")
     private Boolean rerankEnabled;
 
+    /**
+     * Rerank ordering mode, the M14 contract section 5. {@code null} falls through to the deployment
+     * default {@code semantic}, so a base configured before M14 keeps the pure semantic ordering.
+     */
+    @JsonProperty("rerank_mode")
+    private String rerankMode;
+
+    /**
+     * Semantic weight of the {@code hybrid} rerank mode, within {@code [0,1]}, the M14 contract section
+     * 5. The BM25 weight is its complement. {@code null} falls through to the deployment default.
+     */
+    @JsonProperty("rerank_w_semantic")
+    private Double rerankWSemantic;
+
     /** Query rewrite switch. */
     @JsonProperty("rewrite_enabled")
     private Boolean rewriteEnabled;

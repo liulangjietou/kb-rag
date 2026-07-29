@@ -59,4 +59,13 @@ public class ModelStatus {
 
     /** Vision model name, {@code none} when unconfigured. */
     private final String visionModel;
+
+    /** {@code false} disables the multimodal page index switch and greys it out (M14 contract 6.2). */
+    private final boolean multimodalConfigured;
+
+    /** Multimodal embedding provider name, {@code none} when unconfigured. */
+    private final String multimodalProvider;
+
+    /** Multimodal embedding model name, {@code none} when unconfigured. */
+    private final String multimodalModel;
 }

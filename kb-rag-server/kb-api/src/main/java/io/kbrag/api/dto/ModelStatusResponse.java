@@ -20,6 +20,9 @@ import io.kbrag.domain.model.ModelStatus;
  * @param visionConfigured    {@code false} means images are stored without a textual proxy
  * @param visionProvider      vision provider name, {@code none} when unconfigured
  * @param visionModel         vision model name, {@code none} when unconfigured
+ * @param multimodalConfigured {@code false} disables the multimodal page index switch
+ * @param multimodalProvider  multimodal embedding provider name, {@code none} when unconfigured
+ * @param multimodalModel     multimodal embedding model name, {@code none} when unconfigured
  *
  * @author owlzhangfq@gmail.com
  */
@@ -37,7 +40,10 @@ public record ModelStatusResponse(
         @JsonProperty("chat_model") String chatModel,
         @JsonProperty("vision_configured") boolean visionConfigured,
         @JsonProperty("vision_provider") String visionProvider,
-        @JsonProperty("vision_model") String visionModel) {
+        @JsonProperty("vision_model") String visionModel,
+        @JsonProperty("multimodal_configured") boolean multimodalConfigured,
+        @JsonProperty("multimodal_provider") String multimodalProvider,
+        @JsonProperty("multimodal_model") String multimodalModel) {
 
     /**
      * Maps a domain snapshot onto the transport shape.
@@ -60,6 +66,9 @@ public record ModelStatusResponse(
                 status.getChatModel(),
                 status.isVisionConfigured(),
                 status.getVisionProvider(),
-                status.getVisionModel());
+                status.getVisionModel(),
+                status.isMultimodalConfigured(),
+                status.getMultimodalProvider(),
+                status.getMultimodalModel());
     }
 }

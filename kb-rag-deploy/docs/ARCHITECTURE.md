@@ -1,12 +1,12 @@
 # kb-rag 架构文档
 
-> 版本：v1.2（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13，2026-07-28；v1.1 基线为 M9，v1.0 基线为 M8）
-> 日期：2026-07-28
+> 版本：v1.3（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14，2026-07-29；v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
+> 日期：2026-07-29
 > 作者：RichardFyoung / Claude
 >
 > **文档定位**：本文描述系统的实际实现架构（以代码为准），与以下文档互补——
 > - `知识库需求文档.md`：需求与设计决策的唯一事实源（"为什么做、做什么"）
-> - `M1~M13-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
+> - `M1~M14-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
 > - `openapi/kb-server.yaml`、`openapi/kb-parser.yaml`：HTTP 接口的唯一契约源
 > - `FLOWS.md`：核心流程图（与本文配套阅读）
 
@@ -91,14 +91,14 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | 模块 | 职责 | 关键内容 |
 |---|---|---|
 | **kb-common** | 无 Spring 依赖的基础件 | `Result` 统一响应信封、`ErrorCode`、`BizException`/`ProviderException`、`JsonUtil`/`HashUtil`、`RequestIdHolder`、`KbConstants`（业务 ID 前缀与 `kb-sk-` Key 前缀） |
-| **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 26 张业务表一一对应）、30+ 枚举、60+ 领域模型、**14 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
-| **kb-infrastructure** | 端口实现，按外部依赖分包 | `search.es` / `search.qdrant` / `graph` / `provider.{chat,embedding,rerank,vision}` / `storage` / `parser` / `notify` / `web` / `config` |
+| **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 28 张业务表一一对应）、30+ 枚举、60+ 领域模型、**16 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
+| **kb-infrastructure** | 端口实现，按外部依赖分包 | `search.es` / `search.qdrant` / `graph` / `provider.{chat,embedding,rerank,vision}` / `connector` / `storage` / `parser` / `notify` / `web` / `config` |
 | **kb-app** | 应用编排层（架构主体） | 20 个业务域包：`kb` / `document` / `index` / `retrieval` / `graph` / `annotation` / `eval` / `appcenter` / `openapi` / `chat` / `alert` / `dict` / `auth` / `system` / `config` / `feedback` / `insight` / `governance` / `websource` / `metrics` |
 | **kb-api** | HTTP 边界与装配点 | 24 个 Controller、过滤器/拦截器、SSE、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
 
 分层规则：Controller 只依赖 kb-app 的 Service 与 kb-domain 的 model/enum；kb-app 只依赖端口接口，**从不依赖 kb-infrastructure 具体类**；kb-infrastructure 实现端口，与 kb-app 互不感知。
 
-### 3.2 领域端口与实现（14 个）
+### 3.2 领域端口与实现（16 个）
 
 | 端口 | 实现（默认 / 降级） | 说明 |
 |---|---|---|
@@ -116,6 +116,8 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `TokenEstimator` | `SimpleTokenEstimator` | 分片长度以 token 计、`max_content_length` 预算 |
 | `VersionPinChecker` | `AppVersionPinChecker` | 被应用版本可见集引用的文档版本禁止归档（已下线版本同样 pin——chunk 正文只在 MySQL） |
 | `WebPageFetcher`（M12） | `HttpWebPageFetcher` | 网页抓取（URL 导入/增量同步）：SSRF 防护由调用侧经 kb-domain 的 `UrlGuard` 前置校验，Content-Type 白名单、体积上限、超时控制 |
+| `MultimodalEmbeddingProvider`（M14） | `DashScopeMultimodalEmbeddingProvider` / `NoopMultimodalEmbeddingProvider` | 视觉理解整页索引与以图搜图的共用向量通道（DashScope multimodal-embedding-v1）；未配置时注入 Noop 实现，开关置灰、多模态路跳过并记 `mm_route_unavailable`；开启但多模态权重为 0 时跳过并记 `mm_route_skipped` |
+| `ExternalConnector`（M14） | `S3CompatibleConnector` | 外部数据源 SPI：扫描 S3/OSS 兼容对象存储、拉取对象体馈入普通上传链；source_type 为路由键，本期仅 s3 一种实现 |
 
 **零 Key / 能力开关统一装置**：`ModelProviderConfig` 是唯一读模型凭据的地方，凭据为空即注入 `Unconfigured*` 实现；`GraphStoreConfig`（NEO4J_URI 空 → `DisabledGraphStore`）与 `QdrantClientConfig`（QDRANT_URI 空 → 不建 client、不注册健康探针）镜像同一模式。上游代码只写 `isConfigured()/isEnabled()` 一个分支，全链路无 null 检查——这是需求 §5"防御式编程只做一处且高复用"的落地点。
 
@@ -146,7 +148,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `VectorScoreNormalizer` | 跨引擎向量分统一：ES `(1+cos)/2` 先还原、Qdrant 原生 cosine，统一映射到 [0,1]；两实现共享一份"引擎一致性单测" |
 | `FusionRouter` → `RrfFusion`/`WeightedFusion` | 加权融合先按候选集 min-max 归一化；开图路的库强制 RRF（`GraphFusionPolicy`——图关联度是第三种量纲） |
 | `CrossKbRrfFusion` + `KbQuotaAllocator` | 跨库只用名次不用分数；rerank 候选预算是**全局总量**按权重配额切分（向下取整、余量归最高权重库） |
-| `RerankService` | 候选上限 50（父子开启时联动 `max(50, top_n×5)`，硬上限 100）；超时 1.5s 降级粗排；rerank 分是唯一跨库跨路可比的绝对分 |
+| `RerankService` | 候选上限 50（父子开启时联动 `max(50, top_n×5)`，硬上限 100）；超时 1.5s 降级粗排；rerank 分是唯一跨库跨路可比的绝对分；M14 新增 `rerank_mode=hybrid`：将语义重排分与原始融合分按 `rerank_w_semantic`（0-1，默认 0.7）线性加权，`semantic` 模式与旧行为一致 |
 | `ParentChildMerger` | 召回/融合/rerank 全在子片粒度，之后按 parent_id 归并、父片得分取子片 max；目标父片数 `max(top_n×3, 20)` |
 | `DisabledChildVisibility` + `ParentTextRedactor`（M9） | 含禁用子片的父片：默认整片返回并标注 `disabled_child_ids`；M9 起对偏移非 null 的禁用子片按 [start,end) **倒序**精确剔除文本段、置省略标记与 `redacted_child_count`；任一禁用子片偏移为 null 则整片回退（半剔除比不剔除更误导）；库级开关 `hide_parent_with_disabled_child` 打开则整父片隐藏 |
 | `ScoreThresholdPolicy` | 阈值只作用于 rerank 分；降级时作用于标准 cosine 分；BM25 单路阈值失效并透出 `threshold_inactive`；`score_type` 必须如实上报 |
@@ -158,7 +160,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 **图路（M7）**：`GraphRetrievalService` 检索侧零 LLM——query 轻量切词（`GraphQueryTokenizer`）→ Neo4j 实体名 fulltext（cjk 分析器）匹配 → N 跳扩展（默认 2）→ 溯源边回 chunk，关联度 = 归一化匹配分 / (1+跳数)（`GraphRelevanceScorer`）；快照上下文图路直接关闭且不记降级（能力边界而非故障）。抽取侧 `GraphExtractionService` 逐分片 LLM 抽取 + 输出强校验（非法跳过计 `t_kb_task.skipped_count`）。
 
-**degraded 枚举**（`DegradedReason`，与需求 §4.8 一一对应）：`query_rewrite_timeout/error/unavailable`、`rerank_timeout/error/unavailable`、`vector_route_unavailable`、`route_fallback_all`、`threshold_inactive`、`snapshot_index_missing`、`graph_route_unavailable`、`image_understanding_unavailable`（M9）。
+**degraded 枚举**（`DegradedReason`，与需求 §4.8 一一对应）：`query_rewrite_timeout/error/unavailable`、`rerank_timeout/error/unavailable`、`vector_route_unavailable`、`route_fallback_all`、`threshold_inactive`、`snapshot_index_missing`、`graph_route_unavailable`、`image_understanding_unavailable`（M9）、`mm_route_skipped`/`mm_route_unavailable`（M14：多模态开启但权重 0 跳过 / provider 未配置或失败）。
 
 ### 3.5 索引管线（`io.kbrag.app.document` + `io.kbrag.app.index`）
 
@@ -199,9 +201,9 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `ApiAuditArchiveService` | cron 03:30 | 审计日志归档 MinIO → 分批物理删除 |
 | `AppSnapshotRetentionService` | cron 04:15 | SUPERSEDED 版本快照按保留数清理（RELEASED 永不清理） |
 
-### 3.8 数据模型（26 张业务表，Flyway V1-V14）
+### 3.8 数据模型（28 张业务表，Flyway V1-V15）
 
-全部 InnoDB，统一 `id / created_at / updated_at / lock_version / deleted`，审计字段由 `AuditFieldFiller` 填充，业务 ID 带类型前缀（kb/doc/dv/ck/task/img/upt/an/evds/evc/evr/evre/app/av/ak/aud/smp/rfb/si/ws）。
+全部 InnoDB，统一 `id / created_at / updated_at / lock_version / deleted`，审计字段由 `AuditFieldFiller` 填充，业务 ID 带类型前缀（kb/doc/dv/ck/task/img/upt/an/evds/evc/evr/evre/app/av/ak/aud/smp/rfb/si/ws/exts）。
 
 | 迁移 | 表 / 变更 |
 |---|---|
@@ -219,6 +221,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V12（M10） | `t_kb_retrieval_feedback`（检索反馈，带幂等键）/ `t_kb_search_insight`（检索洞察埋点，只增不改） |
 | V13（M11） | `t_kb_document` 加 `publish_status` / `review_note` / `effective_at` / `expires_at` / `trashed` / `trashed_at`；`t_kb_knowledge_base` 加 `review_required` |
 | V14（M12） | `t_kb_web_source`（网页来源登记：URL/content_hash/四态同步状态/派生文档关联） |
+| V15（M14） | `t_kb_ext_source`（外部对象存储源登记：端点/桶/前缀/凭证，secret_key 从不回读、库内 name 唯一）/ `t_kb_ext_source_item`（逐对象同步结果：object_key_hash 去重、etag 未变检查、四态 last_status，弱绑定于派生文档） |
 
 引擎侧可过滤字段全集（Qdrant 标量 / ES filter，建索引时显式声明）：`kb_id`、`doc_id`、`document_version_id`、`enabled`、`parent_id`、`chunk_type`、`tag_ids`、`session_id`、`sender`、`msg_time`、`chunk_seq`；其余 metadata 只存 MySQL。新增可过滤维度视为 schema 变更，走索引重建迁移。
 
@@ -302,7 +305,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | `scripts/benchmark.sh` | 纯 bash+curl 压测（P50/P95/P99），验收口径 P95<2s；`seed-bench.py` 零 Key 直灌 10 万分片种子数据 |
 | `demo/` | 4 篇原创文档（md/docx/pdf/xlsx 各一，字节级可复现生成）+ `eval-cases.json`（10 条，含文档级锚定图片 case，按文件名+content_hash 关联导入） |
 | `mappings/` | 聊天记录列名映射模板分发（memotrace 等） |
-| `docs/` | 需求文档、M1-M13 契约、OpenAPI（`kb-server.yaml` 0.13.0-m12，92 条路径 / `kb-parser.yaml` 0.12.0-m12，3 端点）、备份恢复手册、本文档与 `FLOWS.md` |
+| `docs/` | 需求文档、M1-M14 契约、OpenAPI（`kb-server.yaml` 0.14.0-m14，97 条路径 / `kb-parser.yaml` 0.12.0-m12，3 端点）、备份恢复手册、本文档与 `FLOWS.md` |
 
 ---
 

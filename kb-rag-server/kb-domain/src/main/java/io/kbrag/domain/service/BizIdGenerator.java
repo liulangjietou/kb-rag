@@ -199,6 +199,15 @@ public class BizIdGenerator {
         return generate(KbConstants.WEB_SOURCE_ID_PREFIX);
     }
 
+    /**
+     * Generates a registered external data source id.
+     *
+     * @return prefixed identifier
+     */
+    public String extSourceId() {
+        return generate(KbConstants.EXT_SOURCE_ID_PREFIX);
+    }
+
     private String generate(String prefix) {
         String random = UUID.randomUUID().toString().replace("-", "").substring(0, RANDOM_LENGTH);
         return prefix + KbConstants.ID_SEPARATOR + random;

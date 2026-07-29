@@ -8,6 +8,8 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
 
+import java.util.List;
+
 /**
  * Typed view of the {@code t_kb_knowledge_base.index_config} JSON column.
  *
@@ -68,6 +70,50 @@ public class KbIndexConfig {
     private ChatAggregationParams chatAggregation = ChatAggregationParams.defaults();
 
     /**
+     * Operator declared metadata extraction rules, the M14 contract section 3.1, at most
+     * {@link MetadataRule#MAX_RULES}.
+     *
+     * <p>Inside the chunk fingerprint: the rules decide what metadata a build stamps on every chunk,
+     * so editing them has to mark the affected documents configuration stale exactly like changing
+     * the splitter would.
+     */
+    @JsonProperty("metadata_rules")
+    private List<MetadataRule> metadataRules;
+
+    /**
+     * Block delimiter of the M14 {@code separator} splitting strategy, {@code null} lets the strategy
+     * fall back to its own default; ignored by every other strategy.
+     */
+    @JsonProperty("split_separator")
+    private String splitSeparator;
+
+    /** Whether {@link #splitSeparator} is a regular expression, the M14 {@code separator} strategy. */
+    @JsonProperty("split_separator_is_regex")
+    private boolean splitSeparatorIsRegex;
+
+    /**
+     * Markdown heading depth of the M14 {@code heading} splitting strategy, {@code 0} lets the strategy
+     * fall back to its own default depth; ignored by every other strategy.
+     */
+    @JsonProperty("split_heading_level")
+    private int splitHeadingLevel;
+
+    /**
+     * Turns on the multimodal vector route for this knowledge base, the M14 contract section 6.2.
+     *
+     * <p>Off by default so shipping the feature changes nothing: a knowledge base that never set it
+     * keeps the exact chunk fingerprint it had before M14. When on and a multimodal provider is
+     * configured, the pipeline produces an extra vector for every image bearing chunk and retrieval
+     * gains a third recall route. When on but no provider is configured the switch is stored and the
+     * indexing is skipped, the same zero key tolerance the text vector route already has.
+     *
+     * <p>Inside the chunk fingerprint: flipping it changes what the pipeline produces, so it has to
+     * mark the affected documents configuration stale exactly like changing the splitter would.
+     */
+    @JsonProperty("multimodal_enabled")
+    private boolean multimodalEnabled;
+
+    /**
      * Suppresses a parent chunk entirely as soon as one of its children is disabled.
      *
      * <p>Off by default. The one phase semantics return the whole parent and merely report which of
@@ -112,6 +158,15 @@ public class KbIndexConfig {
     }
 
     /**
+     * Resolves the metadata extraction rules, never {@code null}.
+     *
+     * @return declared rules, empty when the column carried none
+     */
+    public List<MetadataRule> metadataRulesOrEmpty() {
+        return metadataRules == null ? List.of() : metadataRules;
+    }
+
+    /**
      * Resolves the parent child parameters, never {@code null}.
      *
      * @return parent child parameters, disabled when the column carried none
@@ -150,6 +205,7 @@ public class KbIndexConfig {
      * @return validated split parameters
      */
     public SplitParams splitParams(SplitParams.CacheContext cacheContext) {
-        return SplitParams.of(chunkMaxTokens, chunkOverlap, cacheContext);
+        return SplitParams.of(chunkMaxTokens, chunkOverlap, cacheContext, splitSeparator,
+                splitSeparatorIsRegex, splitHeadingLevel);
     }
 }

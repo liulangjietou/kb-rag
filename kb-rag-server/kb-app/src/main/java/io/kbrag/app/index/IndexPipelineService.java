@@ -45,6 +45,8 @@ import io.kbrag.domain.service.DocumentCleaner;
 import io.kbrag.domain.service.DocumentVersionPlanner;
 import io.kbrag.domain.service.ImageChunkLinker;
 import io.kbrag.domain.service.ImagePlaceholderResolver;
+import io.kbrag.domain.service.MetadataRuleExtractor;
+import io.kbrag.domain.service.PageSplitter;
 import io.kbrag.domain.service.ParentChildSplitter;
 import io.kbrag.domain.service.SplitterRouter;
 import io.kbrag.domain.service.VersionFingerprintFactory;
@@ -116,11 +118,13 @@ public class IndexPipelineService {
     private final DocumentParserClient parserClient;
     private final SplitterRouter splitterRouter;
     private final ParentChildSplitter parentChildSplitter;
+    private final PageSplitter pageSplitter;
     private final ChunkTextHasher chunkTextHasher;
     private final EmbeddingProvider embeddingProvider;
     private final ChunkEmbedder chunkEmbedder;
     private final VisionProvider visionProvider;
     private final ChunkIndexWriter chunkIndexWriter;
+    private final MultimodalIndexManager multimodalIndexManager;
     private final KnowledgeBaseService knowledgeBaseService;
     private final BizIdGenerator bizIdGenerator;
     private final VersionFingerprintFactory fingerprintFactory;
@@ -128,6 +132,7 @@ public class IndexPipelineService {
     private final DocumentCleaner documentCleaner;
     private final ImagePlaceholderResolver placeholderResolver;
     private final ImageChunkLinker imageChunkLinker;
+    private final MetadataRuleExtractor metadataRuleExtractor;
     private final DocumentVersionActivator versionActivator;
     private final VersionArtifactReuser versionArtifactReuser;
     private final VersionRetentionService versionRetentionService;
@@ -349,7 +354,7 @@ public class IndexPipelineService {
                     .stream().map(Chunk::getChunkId).toList();
 
             List<Chunk> chunks = split(document, version, staged, config, task);
-            index(document, chunks, task);
+            index(document, version, chunks, config, task);
             removeObsolete(document.getKbId(), versionId, obsolete);
 
             if (activate) {
@@ -420,7 +425,7 @@ public class IndexPipelineService {
         version.setEmbeddingVersion(embeddingProvider.model());
         documentVersionMapper.updateById(version);
         updateProgress(task, PROGRESS_CHUNKED);
-        index(document, copied, task);
+        index(document, version, copied, config, task);
         activateAndFollowUp(document, version);
         completeTask(task);
         return true;
@@ -570,7 +575,7 @@ public class IndexPipelineService {
         updateProcessStatus(document, ProcessStatus.INDEXING, null);
         deleteExistingChunks(document.getKbId(), version.getVersionId());
         List<Chunk> chunks = split(document, version, staged, config, task);
-        index(document, chunks, task);
+        index(document, version, chunks, config, task);
         activateAndFollowUp(document, version);
         completeTask(task);
     }
@@ -750,19 +755,41 @@ public class IndexPipelineService {
     private List<Chunk> splitSingleLevel(Document document, DocumentVersion version, StagedContent staged,
                                          KbIndexConfig config, boolean embeddingConfigured,
                                          boolean standaloneImage) {
-        List<SplitChunk> splitChunks = splitterRouter.resolve(config.getSplitStrategy())
-                .split(staged.proxied().getMarkdown(), config.splitParams(cacheContextOf(document, version)));
+        List<SplitChunk> splitChunks = splitPage(config, standaloneImage)
+                ? pageSplitter.split(readParsedQuietly(document, version), staged.proxied().getMarkdown(),
+                        config.splitParams(cacheContextOf(document, version)))
+                : splitterRouter.resolve(config.getSplitStrategy())
+                        .split(staged.proxied().getMarkdown(),
+                                config.splitParams(cacheContextOf(document, version)));
         Map<Integer, List<String>> imagesByChunk = imageChunkLinker.link(staged.proxied().getMarkdown(),
                 staged.proxied().getPlacements(), splitChunks.stream().map(SplitChunk::getContent).toList());
+        List<MetadataRuleExtractor.PreparedRule> rules =
+                metadataRuleExtractor.prepare(config.metadataRulesOrEmpty());
         List<Chunk> chunks = new ArrayList<>(splitChunks.size());
         for (int index = 0; index < splitChunks.size(); index++) {
             List<String> imageKeys = imagesByChunk.get(index);
-            Chunk chunk = persistChunk(document, version, splitChunks.get(index), null, embeddingConfigured,
+            SplitChunk splitChunk = splitChunks.get(index);
+            Chunk chunk = persistChunk(document, version, splitChunk, null, embeddingConfigured,
                     standaloneImage ? ChunkType.IMAGE : ChunkType.TEXT,
-                    metadataOf(imageKeys, splitChunks.get(index)));
+                    metadataOf(imageKeys, splitChunk,
+                            metadataRuleExtractor.extract(rules, splitChunk.getContent())));
             chunks.add(chunk);
         }
         return chunks;
+    }
+
+    /**
+     * Tells whether the single level split should route through the page strategy.
+     *
+     * <p>A standalone image is never page split: it has no parse artifact and its whole text comes from
+     * the vision model, so the page strategy would find nothing and drop the one chunk the image needs.
+     *
+     * @param config          knowledge base index configuration
+     * @param standaloneImage {@code true} when the document is one uploaded image
+     * @return {@code true} when the page strategy applies
+     */
+    private boolean splitPage(KbIndexConfig config, boolean standaloneImage) {
+        return !standaloneImage && PageSplitter.STRATEGY_CODE.equals(config.getSplitStrategy());
     }
 
     /**
@@ -791,6 +818,8 @@ public class IndexPipelineService {
         }
         Map<Integer, List<String>> imagesByChunk = imageChunkLinker.link(staged.proxied().getMarkdown(),
                 staged.proxied().getPlacements(), childContents);
+        List<MetadataRuleExtractor.PreparedRule> rules =
+                metadataRuleExtractor.prepare(config.metadataRulesOrEmpty());
 
         List<Chunk> children = new ArrayList<>();
         int childIndex = 0;
@@ -799,7 +828,8 @@ public class IndexPipelineService {
                     ChunkType.TEXT, null);
             for (SplitChunk child : group.getChildren()) {
                 children.add(persistChunk(document, version, child, parent.getChunkId(), embeddingConfigured,
-                        ChunkType.TEXT, metadataOf(imagesByChunk.get(childIndex++), child)));
+                        ChunkType.TEXT, metadataOf(imagesByChunk.get(childIndex++), child,
+                                metadataRuleExtractor.extract(rules, child.getContent()))));
             }
         }
         return children;
@@ -807,14 +837,20 @@ public class IndexPipelineService {
 
     /**
      * Merges the image links a chunk carries with the title/summary/keywords the LLM semantic
-     * splitter attaches to it, requirement section 4.3.
+     * splitter attaches to it, requirement section 4.3, and with the operator extracted metadata of
+     * the M14 contract section 3.2.
+     *
+     * <p>The extracted values go in first so a reserved key wins any collision: the platform written
+     * semantics of {@code title} or {@code image_urls} must never be silently replaced by a rule an
+     * operator happened to name the same way.
      *
      * @param imageKeys  object storage keys of the images this chunk contains, may be empty
      * @param splitChunk splitter output, {@code null} metadata for every strategy but the LLM one
+     * @param extracted  metadata rule output for this chunk, may be empty
      * @return JSON metadata document, {@code null} when there is nothing to store
      */
-    private String metadataOf(List<String> imageKeys, SplitChunk splitChunk) {
-        Map<String, Object> metadata = new LinkedHashMap<>();
+    private String metadataOf(List<String> imageKeys, SplitChunk splitChunk, Map<String, Object> extracted) {
+        Map<String, Object> metadata = new LinkedHashMap<>(extracted);
         if (CollectionUtils.isNotEmpty(imageKeys)) {
             metadata.put(ChunkMetadataKeys.IMAGE_URLS, imageKeys);
         }
@@ -863,12 +899,23 @@ public class IndexPipelineService {
         return chunk;
     }
 
-    private void index(Document document, List<Chunk> chunks, KbTask task) {
+    /**
+     * Writes the chunks of a version to the main indexes and, when enabled, to the multimodal one.
+     *
+     * @param document document record
+     * @param version  version being built, source of the multimodal image media types
+     * @param chunks   indexable chunks of the version
+     * @param config   knowledge base index configuration
+     * @param task     running task
+     */
+    private void index(Document document, DocumentVersion version, List<Chunk> chunks,
+                       KbIndexConfig config, KbTask task) {
         if (CollectionUtils.isEmpty(chunks)) {
             updateProgress(task, PROGRESS_INDEXED);
             return;
         }
         chunkIndexWriter.write(document.getKbId(), chunks, chunkEmbedder.embed(chunks));
+        multimodalIndexManager.index(document.getKbId(), version.getVersionId(), chunks, config);
         updateProgress(task, PROGRESS_INDEXED);
     }
 

@@ -35,10 +35,30 @@ public final class SplitParams {
      */
     private final CacheContext cacheContext;
 
-    private SplitParams(int maxTokens, int overlapTokens, CacheContext cacheContext) {
+    /**
+     * Block delimiter of the M14 {@code separator} strategy, {@code null} for every other strategy; a
+     * {@code null} lets the separator splitter fall back to its own default rather than forcing every
+     * caller of the two argument factory to name one.
+     */
+    private final String separator;
+
+    /** Whether {@link #separator} is a regular expression, only read by the {@code separator} strategy. */
+    private final boolean separatorIsRegex;
+
+    /**
+     * Markdown heading depth of the M14 {@code heading} strategy, {@code 0} for every other strategy; a
+     * {@code 0} lets the heading splitter fall back to its own default depth.
+     */
+    private final int headingLevel;
+
+    private SplitParams(int maxTokens, int overlapTokens, CacheContext cacheContext,
+                        String separator, boolean separatorIsRegex, int headingLevel) {
         this.maxTokens = maxTokens;
         this.overlapTokens = overlapTokens;
         this.cacheContext = cacheContext;
+        this.separator = separator;
+        this.separatorIsRegex = separatorIsRegex;
+        this.headingLevel = headingLevel;
     }
 
     /**
@@ -64,13 +84,32 @@ public final class SplitParams {
      * @return validated parameters
      */
     public static SplitParams of(int maxTokens, int overlapTokens, CacheContext cacheContext) {
+        return of(maxTokens, overlapTokens, cacheContext, null, false, 0);
+    }
+
+    /**
+     * Builds the parameter set carrying the M14 {@code separator} and {@code heading} strategy inputs
+     * alongside the LLM cache coordinates.
+     *
+     * @param maxTokens        maximum estimated tokens per chunk, must be positive
+     * @param overlapTokens    overlap in estimated tokens, must be zero or positive and below
+     *                         {@code maxTokens}
+     * @param cacheContext     cache coordinates, {@code null} disables caching for this call
+     * @param separator        {@code separator} strategy delimiter, {@code null} keeps the strategy default
+     * @param separatorIsRegex whether {@code separator} is a regular expression
+     * @param headingLevel     {@code heading} strategy depth, {@code 0} keeps the strategy default
+     * @return validated parameters
+     */
+    public static SplitParams of(int maxTokens, int overlapTokens, CacheContext cacheContext,
+                                 String separator, boolean separatorIsRegex, int headingLevel) {
         if (maxTokens <= 0) {
             throw new IllegalArgumentException("maxTokens must be positive");
         }
         if (overlapTokens < 0 || overlapTokens >= maxTokens) {
             throw new IllegalArgumentException("overlapTokens must be within [0, maxTokens)");
         }
-        return new SplitParams(maxTokens, overlapTokens, cacheContext);
+        return new SplitParams(maxTokens, overlapTokens, cacheContext, separator, separatorIsRegex,
+                headingLevel);
     }
 
     /**
@@ -79,7 +118,7 @@ public final class SplitParams {
      * @return 600 token chunks with 100 token overlap
      */
     public static SplitParams defaults() {
-        return new SplitParams(DEFAULT_MAX_TOKENS, DEFAULT_OVERLAP_TOKENS, null);
+        return new SplitParams(DEFAULT_MAX_TOKENS, DEFAULT_OVERLAP_TOKENS, null, null, false, 0);
     }
 
     /**

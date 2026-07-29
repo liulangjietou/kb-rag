@@ -88,6 +88,17 @@ kb:
     base-url: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     batch-size: ${EMBEDDING_BATCH_SIZE:10}
     timeout-ms: ${EMBEDDING_TIMEOUT_MS:30000}
+  multimodal-embedding:
+    provider: ${MULTIMODAL_EMBEDDING_PROVIDER:dashscope}
+    model: ${MULTIMODAL_EMBEDDING_MODEL:multimodal-embedding-v1}
+    dimension: ${MULTIMODAL_EMBEDDING_DIM:1024}
+    # Blank switches the whole multimodal capability off; inherits the shared DashScope key by default,
+    # so setting DASHSCOPE_API_KEY alone turns image indexing/search on (M14 contract section 6.1).
+    api-key: ${MULTIMODAL_EMBEDDING_API_KEY:${DASHSCOPE_API_KEY:}}
+    # DashScope exposes multimodal embedding outside the OpenAI compatible surface, so this is a full URL.
+    url: ${MULTIMODAL_EMBEDDING_URL:https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding}
+    batch-size: ${MULTIMODAL_EMBEDDING_BATCH_SIZE:8}
+    timeout-ms: ${MULTIMODAL_EMBEDDING_TIMEOUT_MS:30000}
   rerank:
     provider: ${RERANK_PROVIDER:dashscope}
     model: ${RERANK_MODEL:gte-rerank-v2}
@@ -186,6 +197,10 @@ kb:
     rewrite-max-history-turns: ${RETRIEVAL_REWRITE_MAX_HISTORY_TURNS:6}
     # On by default, but only takes effect when a rerank model is configured.
     rerank-enabled: ${RETRIEVAL_RERANK_ENABLED:true}
+    # M14 contract section 5: semantic keeps the pre-M14 pure-rerank ordering; hybrid blends the
+    # normalized BM25 score in at weight (1 - rerank-w-semantic). Only the ordering changes.
+    rerank-mode: ${RETRIEVAL_RERANK_MODE:semantic}
+    rerank-w-semantic: ${RETRIEVAL_RERANK_W_SEMANTIC:0.7}
     parent-candidate-factor: ${RETRIEVAL_PARENT_CANDIDATE_FACTOR:3}
     parent-candidate-floor: ${RETRIEVAL_PARENT_CANDIDATE_FLOOR:20}
     max-linked-kb: ${RETRIEVAL_MAX_LINKED_KB:15}
@@ -278,6 +293,15 @@ kb:
     sync-enabled: ${WEB_IMPORT_SYNC_ENABLED:true}
     # Sources per scheduled pass; fetches are slow network calls, so a pass drains a bounded slice.
     sync-batch-size: ${WEB_IMPORT_SYNC_BATCH_SIZE:50}
+  ext-source:
+    sync-cron: ${EXT_SOURCE_SYNC_CRON:0 0 3 * * *}
+    sync-enabled: ${EXT_SOURCE_SYNC_ENABLED:true}
+    # Sources per scheduled pass; each source scans a whole bucket, hence the smaller slice.
+    sync-batch-size: ${EXT_SOURCE_SYNC_BATCH_SIZE:10}
+    # Objects ingested per scan; a longer listing marks the sync PARTIAL instead of running away.
+    max-objects-per-source: ${EXT_SOURCE_MAX_OBJECTS_PER_SOURCE:500}
+    # Per call budget against the object store, connect and read alike.
+    fetch-timeout-ms: ${EXT_SOURCE_FETCH_TIMEOUT_MS:30000}
   app:
     # Retired application versions per application whose index snapshot is kept. Every snapshot is a full copy
     # of the corpus of every linked knowledge base, so this is the rollback depth traded against disk.

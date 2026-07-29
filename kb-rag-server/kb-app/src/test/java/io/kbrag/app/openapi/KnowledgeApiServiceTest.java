@@ -5,7 +5,6 @@ import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.insight.SearchInsightService;
 import io.kbrag.app.metrics.KbMetrics;
 import io.kbrag.app.retrieval.AppliedInfo;
-import io.kbrag.app.retrieval.ImageQueryService;
 import io.kbrag.app.retrieval.RetrievalCommand;
 import io.kbrag.app.retrieval.RetrievalIndexOverride;
 import io.kbrag.app.retrieval.RetrievalNodeView;
@@ -25,10 +24,8 @@ import io.kbrag.domain.model.AppPromptConfig;
 import io.kbrag.domain.model.ChatMessage;
 import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
-import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ChatProviderFactory;
-import io.kbrag.domain.port.VisionProvider;
 import io.kbrag.domain.service.ChatPromptAssembler;
 import io.kbrag.domain.service.ContentBudgetTrimmer;
 import io.kbrag.domain.service.RequestOverridePolicy;
@@ -78,7 +75,6 @@ class KnowledgeApiServiceTest {
     private ChatProviderFactory chatProviderFactory;
     private ChatProvider chatProvider;
     private ApiAuditService apiAuditService;
-    private VisionProvider visionProvider;
     private SimpleMeterRegistry meterRegistry;
     private KnowledgeApiService service;
 
@@ -92,12 +88,10 @@ class KnowledgeApiServiceTest {
         apiAuditService = mock(ApiAuditService.class);
         when(appService.require(APP_ID)).thenReturn(new App());
         when(chatProviderFactory.forModel(any())).thenReturn(chatProvider);
-        visionProvider = mock(VisionProvider.class);
         meterRegistry = new SimpleMeterRegistry();
         service = new KnowledgeApiService(appService, appVersionService, retrievalService, chatProviderFactory,
                 new ChatPromptAssembler(), new ContentBudgetTrimmer(), new RequestOverridePolicy(),
-                apiAuditService, mock(SearchInsightService.class),
-                new ImageQueryService(visionProvider, new KbProperties()), new KbMetrics(meterRegistry));
+                apiAuditService, mock(SearchInsightService.class), new KbMetrics(meterRegistry));
     }
 
     @Test
@@ -394,67 +388,61 @@ class KnowledgeApiServiceTest {
     }
 
     @Test
-    void shouldFoldTheImageTextIntoTheQueryBeforeTheRetrievalPipelineRuns() {
+    void shouldPassTheAttachedImagesUntouchedIntoTheRetrievalCommand() {
         stubVersion(AppVersionStatus.RELEASED);
         stubSearch(node("doc_1", "第一段"));
-        when(visionProvider.isConfigured()).thenReturn(true);
-        when(visionProvider.describeImage(any(), anyString())).thenReturn("一个金属法兰盘的照片");
 
-        service.search(principal(List.of()), commandWithImages(List.of(image())));
+        String image = image();
+        service.search(principal(List.of()), commandWithImages(List.of(image)));
 
-        // The rewrite stage lives inside RetrievalService, so a query that already carries the image text
-        // when the command is issued is proof that the concatenation happened before the rewrite.
-        assertEquals("保险条款怎么算\n[图片内容] 一个金属法兰盘的照片", capturedRetrieval().getQuery());
+        // The open API no longer folds images itself: the single dispatch point lives in RetrievalService, so
+        // the raw images and the untouched query are what the pipeline receives.
+        RetrievalCommand issued = capturedRetrieval();
+        assertEquals(List.of(image), issued.getImages());
+        assertEquals("保险条款怎么算", issued.getQuery());
     }
 
     @Test
-    void shouldAuditTheConcatenatedQueryRatherThanTheWrittenOne() {
+    void shouldDigestTheEffectiveQueryTheRankingCameFromIntoTheAuditRow() {
         stubVersion(AppVersionStatus.RELEASED);
         stubSearch(node("doc_1", "第一段"));
-        when(visionProvider.isConfigured()).thenReturn(true);
-        when(visionProvider.describeImage(any(), anyString())).thenReturn("一个金属法兰盘的照片");
 
         service.search(principal(List.of()), commandWithImages(List.of(image())));
 
-        // An operator reading the trail has to see the text the ranking actually came from.
-        assertEquals("保险条款怎么算\n[图片内容] 一个金属法兰盘的照片", capturedAudit().getQuery());
+        // An operator reading the trail has to see the text the ranking actually came from; the pipeline
+        // reports it back through the applied summary, which after an image dispatch or a rewrite may differ
+        // from the written question.
+        assertEquals("q", capturedAudit().getQuery());
     }
 
     @Test
-    void shouldReportTheImageDegradationNextToThePipelineMarkers() {
+    void shouldPassTheImageRouteDegradationThroughFromThePipeline() {
         stubVersion(AppVersionStatus.RELEASED);
         when(retrievalService.search(eq(List.of(KbRef.of(KB_ID))), any())).thenReturn(new SearchOutcome(
                 new ArrayList<>(List.of(node("doc_1", "第一段"))),
-                List.of(DegradedReason.VECTOR_ROUTE_UNAVAILABLE.code()), applied()));
-        when(visionProvider.isConfigured()).thenReturn(false);
+                List.of(DegradedReason.IMAGE_UNDERSTANDING_UNAVAILABLE.code(),
+                        DegradedReason.VECTOR_ROUTE_UNAVAILABLE.code()), applied()));
 
         KnowledgeCallResult result = service.search(principal(List.of()),
                 commandWithImages(List.of(image())));
 
+        // The image stage now runs inside RetrievalService, so its marker travels in the search outcome and
+        // the open API forwards it flat, without a merge step of its own.
         assertEquals(List.of(DegradedReason.IMAGE_UNDERSTANDING_UNAVAILABLE.code(),
                 DegradedReason.VECTOR_ROUTE_UNAVAILABLE.code()), result.getDegraded());
-        // The written question still ran: an unreadable image never costs the caller its text search.
-        assertEquals("保险条款怎么算", capturedRetrieval().getQuery());
     }
 
     @Test
-    void shouldRejectAnImageOnlyCallWhoseImageCouldNotBeUnderstood() {
+    void shouldAuditARejectionTheRetrievalPipelineRaised() {
         stubVersion(AppVersionStatus.RELEASED);
-        when(visionProvider.isConfigured()).thenReturn(false);
-        KnowledgeCallCommand command = KnowledgeCallCommand.builder()
-                .appId(APP_ID)
-                .query("  ")
-                .messages(List.of())
-                .images(List.of(image()))
-                .presentedOverrideKeys(Set.of())
-                .build();
+        when(retrievalService.search(eq(List.of(KbRef.of(KB_ID))), any()))
+                .thenThrow(new BizException(ErrorCode.INVALID_PARAM, "图片无法识别且未提供文字问题"));
 
-        BizException failure =
-                assertThrows(BizException.class, () -> service.search(principal(List.of()), command));
+        BizException failure = assertThrows(BizException.class,
+                () -> service.search(principal(List.of()), commandWithImages(List.of(image()))));
 
         assertEquals(ErrorCode.INVALID_PARAM, failure.getErrorCode());
-        verify(retrievalService, never()).search(anyList(), any());
-        // The rejection is audited like any other: an agent's failed call is part of the trail.
+        // A rejection the dispatch single point raised is audited like any other failed call.
         assertEquals(ErrorCode.INVALID_PARAM.name(), capturedAudit().getErrorCode());
     }
 

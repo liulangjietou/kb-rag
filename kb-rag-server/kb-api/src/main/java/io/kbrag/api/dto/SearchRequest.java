@@ -5,15 +5,18 @@ import io.kbrag.app.retrieval.RetrievalCommand;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.model.ChatMessage;
 import io.kbrag.domain.model.MetadataFilter;
+import io.kbrag.domain.model.MetadataRule;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.collections4.MapUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Retrieval payload.
@@ -24,11 +27,15 @@ import java.util.List;
  * defaults; it never means "off".
  *
  * @param query          user query
+ * @param images         base64 encoded images attached to the query, bounded and validated by the one
+ *                       image gate, the M14 contract section 7
  * @param recallTopK     candidates recalled per route
  * @param topN           number of returned nodes
  * @param scoreThreshold absolute score threshold, only honoured when a comparable score exists
  * @param fusion         fusion strategy and its parameters
  * @param rerankEnabled  rerank switch, defaults to on when a rerank model is configured
+ * @param rerankMode     rerank ordering mode, {@code semantic} or {@code hybrid}, the M14 contract section 5
+ * @param rerankWSemantic semantic weight of the {@code hybrid} rerank mode, within {@code [0,1]}
  * @param rewriteEnabled query rewrite switch, defaults to off
  * @param messages       conversation used to resolve references during the rewrite
  * @param metadataFilter narrowing predicate pushed down to the engines
@@ -37,6 +44,7 @@ import java.util.List;
  */
 public record SearchRequest(
         @NotBlank(message = "must not be blank") String query,
+        List<String> images,
         @JsonProperty("recall_top_k") Integer recallTopK,
         @JsonProperty("top_n") Integer topN,
         @JsonProperty("score_threshold")
@@ -44,6 +52,10 @@ public record SearchRequest(
         @DecimalMax(value = "1.0", message = "must be at most 1.0") Double scoreThreshold,
         @Valid FusionRequest fusion,
         @JsonProperty("rerank_enabled") Boolean rerankEnabled,
+        @JsonProperty("rerank_mode") String rerankMode,
+        @JsonProperty("rerank_w_semantic")
+        @DecimalMin(value = "0.0", message = "must be at least 0")
+        @DecimalMax(value = "1.0", message = "must be at most 1") Double rerankWSemantic,
         @JsonProperty("rewrite_enabled") Boolean rewriteEnabled,
         List<MessageRequest> messages,
         @JsonProperty("metadata_filter") MetadataFilterRequest metadataFilter) {
@@ -80,13 +92,15 @@ public record SearchRequest(
      * @param sender      chat message sender
      * @param msgTimeFrom inclusive lower bound of the message timestamp in epoch milliseconds
      * @param msgTimeTo   inclusive upper bound of the message timestamp in epoch milliseconds
+     * @param custom      equality predicates on operator extracted metadata, keyed by the raw rule key
      */
     public record MetadataFilterRequest(
             @JsonProperty("tag_ids") List<String> tagIds,
             @JsonProperty("session_id") String sessionId,
             String sender,
             @JsonProperty("msg_time_from") Long msgTimeFrom,
-            @JsonProperty("msg_time_to") Long msgTimeTo) {
+            @JsonProperty("msg_time_to") Long msgTimeTo,
+            Map<String, String> custom) {
 
         /**
          * Maps the transport shape onto the domain predicate.
@@ -107,8 +121,26 @@ public record SearchRequest(
                     .sender(sender())
                     .msgTimeFrom(msgTimeFrom())
                     .msgTimeTo(msgTimeTo())
+                    .custom(validatedCustom())
                     .build();
             return filter.isEmpty() ? null : filter;
+        }
+
+        /**
+         * Checks every custom filter key against the metadata key shape, the M14 contract section 3.3.
+         *
+         * @return custom map, {@code null} when none was supplied
+         */
+        private Map<String, String> validatedCustom() {
+            if (MapUtils.isEmpty(custom())) {
+                return null;
+            }
+            for (String key : custom().keySet()) {
+                if (key == null || !MetadataRule.KEY_PATTERN.matcher(key).matches()) {
+                    throw BizException.invalidParam("invalid custom metadata filter key: " + key);
+                }
+            }
+            return custom();
         }
     }
 
@@ -123,6 +155,7 @@ public record SearchRequest(
     public RetrievalCommand toCommand() {
         return RetrievalCommand.builder()
                 .query(query)
+                .images(images)
                 .recallTopK(recallTopK)
                 .topN(topN)
                 .scoreThreshold(scoreThreshold)
@@ -130,6 +163,8 @@ public record SearchRequest(
                 .wVec(fusion == null ? null : fusion.wVec())
                 .rrfK(fusion == null ? null : fusion.rrfK())
                 .rerankEnabled(rerankEnabled)
+                .rerankMode(rerankMode)
+                .rerankWSemantic(rerankWSemantic)
                 .rewriteEnabled(rewriteEnabled)
                 .messages(toMessages())
                 .metadataFilter(toMetadataFilter())

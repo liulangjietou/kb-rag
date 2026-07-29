@@ -3,6 +3,7 @@ package io.kbrag.infrastructure.search.es;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.FieldValue;
 import co.elastic.clients.elasticsearch._types.Refresh;
+import co.elastic.clients.elasticsearch._types.mapping.DynamicTemplate;
 import co.elastic.clients.elasticsearch._types.mapping.Property;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
@@ -24,6 +25,7 @@ import io.kbrag.domain.model.RetrievalFilter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.collections4.MapUtils;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -51,6 +53,9 @@ public class EsIndexAdmin {
     private static final String SIMILARITY_COSINE = "cosine";
     private static final String ERROR_ALREADY_EXISTS = "resource_already_exists_exception";
 
+    /** Name of the dynamic template that maps every {@code ext_*} field to a keyword. */
+    private static final String EXT_TEMPLATE_NAME = "ext_metadata";
+
     /** Bulk item status of a partial update whose document does not exist. */
     private static final int STATUS_NOT_FOUND = 404;
 
@@ -67,6 +72,13 @@ public class EsIndexAdmin {
             boolean exists = client.indices().exists(b -> b.index(spec.getPhysicalIndexName())).value();
             if (!exists) {
                 createIndex(spec);
+            } else {
+                // Idempotent template refresh for indexes created before M14: without it a rebuild that
+                // starts writing ext_ fields into an old physical index would let the default dynamic
+                // mapping type them as text, and every equality filter on them would silently miss.
+                client.indices().putMapping(request -> request
+                        .index(spec.getPhysicalIndexName())
+                        .dynamicTemplates(extDynamicTemplates()));
             }
             pointAliasAtSingleIndex(spec);
             log.info("es index ready, index={}, alias={}, vectorField={}",
@@ -371,6 +383,13 @@ public class EsIndexAdmin {
                 return r;
             })));
         }
+        if (MapUtils.isNotEmpty(metadata.getCustom())) {
+            // Equality per entry, AND across entries; a keyword_match key holds an array and a term
+            // query on a keyword array matches when any element equals, which is exactly the
+            // "array contains" semantics the M14 contract section 3.3 asks for.
+            metadata.getCustom().forEach((key, value) -> filters.add(
+                    Query.of(q -> q.term(t -> t.field(IndexFields.EXT_PREFIX + key).value(value)))));
+        }
     }
 
     private Query termsQuery(String field, List<String> values) {
@@ -424,8 +443,23 @@ public class EsIndexAdmin {
                         .numberOfReplicas(replicas))
                 .mappings(mappings -> mappings
                         .properties(mappingProperties)
+                        .dynamicTemplates(extDynamicTemplates())
                         .meta(META_SCHEMA_VERSION, JsonData.of(spec.getSchemaVersion()))));
         log.info("es index created, index={}, analyzer={}", spec.getPhysicalIndexName(), analyzer);
+    }
+
+    /**
+     * Declares the {@code ext_*} namespace of the operator extracted metadata, the M14 contract
+     * section 3.2: the keys are chosen per knowledge base at configuration time, so they cannot be
+     * part of the fixed field list and a dynamic template types them instead.
+     *
+     * @return single entry template list in the shape the mapping API expects
+     */
+    private List<Map<String, DynamicTemplate>> extDynamicTemplates() {
+        DynamicTemplate template = DynamicTemplate.of(t -> t
+                .match(IndexFields.EXT_PREFIX + "*")
+                .mapping(keyword()));
+        return List.of(Map.of(EXT_TEMPLATE_NAME, template));
     }
 
     /**
@@ -481,6 +515,9 @@ public class EsIndexAdmin {
         document.put(IndexFields.MSG_TIME, record.getMsgTime());
         document.put(IndexFields.CHUNK_SEQ, record.getChunkSeq());
         document.put(IndexFields.CONTENT, record.getContent());
+        if (MapUtils.isNotEmpty(record.getExtMetadata())) {
+            document.putAll(record.getExtMetadata());
+        }
         if (record.getVector() != null) {
             document.put(IndexFields.VECTOR, toFloatList(record.getVector()));
         }

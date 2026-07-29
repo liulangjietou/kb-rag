@@ -60,6 +60,9 @@ public class FixedLengthTextSplitter implements TextSplitter {
     /** Upper bound of the characters {@link String#trim()} removes, mirrored so offsets match the text. */
     private static final char TRIM_BOUNDARY = ' ';
 
+    /** Newline that rejoins the blocks the M14 separator and heading strategies pack together. */
+    private static final String BLOCK_JOINER = "\n";
+
     private final TokenEstimator tokenEstimator;
 
     @Override
@@ -97,6 +100,64 @@ public class FixedLengthTextSplitter implements TextSplitter {
             }
         }
         return chunks;
+    }
+
+    /**
+     * Packs pre-segmented blocks into chunks, the packing half of the fixed length strategy the M14
+     * {@code separator} and {@code heading} strategies reuse rather than each owning an overflow path
+     * of its own, the contract section 4.
+     *
+     * <p>A block that fits is packed greedily with its neighbours up to the token budget; a block that
+     * alone exceeds the budget is re-split by the full fixed length algorithm so an over long paragraph
+     * or heading section still lands in chunks that respect {@code chunk_max_tokens} instead of being
+     * emitted whole. The packed chunks carry no source offsets: a strategy that packs blocks cannot be
+     * combined with parent child splitting, which is the only reader of an offset.
+     *
+     * @param blocks logical blocks in reading order, blank blocks ignored
+     * @param params split parameters
+     * @return ordered chunks
+     */
+    public List<SplitChunk> packBlocks(List<String> blocks, SplitParams params) {
+        List<SplitChunk> chunks = new ArrayList<>();
+        if (blocks == null || blocks.isEmpty()) {
+            return chunks;
+        }
+        List<String> buffer = new ArrayList<>();
+        int bufferTokens = 0;
+        int seq = 0;
+        for (String block : blocks) {
+            if (block == null || block.isBlank()) {
+                continue;
+            }
+            int blockTokens = tokenEstimator.estimate(block);
+            if (blockTokens > params.getMaxTokens()) {
+                if (!buffer.isEmpty()) {
+                    chunks.add(newBlockChunk(seq++, buffer));
+                    buffer = new ArrayList<>();
+                    bufferTokens = 0;
+                }
+                for (SplitChunk piece : split(block, params)) {
+                    chunks.add(new SplitChunk(seq++, piece.getContent(), piece.getTokenCount()));
+                }
+                continue;
+            }
+            if (!buffer.isEmpty() && bufferTokens + blockTokens > params.getMaxTokens()) {
+                chunks.add(newBlockChunk(seq++, buffer));
+                buffer = new ArrayList<>();
+                bufferTokens = 0;
+            }
+            buffer.add(block);
+            bufferTokens += blockTokens;
+        }
+        if (!buffer.isEmpty()) {
+            chunks.add(newBlockChunk(seq, buffer));
+        }
+        return chunks;
+    }
+
+    private SplitChunk newBlockChunk(int seq, List<String> blocks) {
+        String content = String.join(BLOCK_JOINER, blocks).trim();
+        return new SplitChunk(seq, content, tokenEstimator.estimate(content));
     }
 
     /**

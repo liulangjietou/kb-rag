@@ -2,7 +2,12 @@ package io.kbrag.domain.service;
 
 import io.kbrag.common.util.HashUtil;
 import io.kbrag.domain.model.KbIndexConfig;
+import io.kbrag.domain.model.MetadataRule;
+import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Produces the reuse fingerprints of a document version.
@@ -57,11 +62,40 @@ public class VersionFingerprintFactory {
      * @return hexadecimal digest
      */
     public String chunkFingerprint(KbIndexConfig config) {
-        return HashUtil.sha256Hex(String.join(SEPARATOR,
+        List<String> segments = new ArrayList<>(List.of(
                 "strategy=" + config.getSplitStrategy(),
                 "chunk_max_tokens=" + config.getChunkMaxTokens(),
                 "chunk_overlap=" + config.getChunkOverlap(),
                 config.parentChildOrDisabled().fingerprintSegment()));
+        // Appended only when rules exist: a knowledge base that never declared any keeps the exact
+        // fingerprint it had before M14, so shipping the feature marks nothing configuration stale.
+        if (CollectionUtils.isNotEmpty(config.metadataRulesOrEmpty())) {
+            segments.add("metadata_rules=" + config.metadataRulesOrEmpty().stream()
+                    .map(MetadataRule::fingerprintSegment)
+                    .reduce((left, right) -> left + ";" + right)
+                    .orElse(""));
+        }
+        // Only the strategy that reads a parameter folds it in, for the same reason: a fixed length or
+        // llm_semantic base never carried these keys, so adding them unconditionally would rebuild every
+        // pre-M14 knowledge base for a value it does not use.
+        if (SeparatorTextSplitter.STRATEGY_CODE.equals(config.getSplitStrategy())) {
+            String separator = config.getSplitSeparator() == null || config.getSplitSeparator().isEmpty()
+                    ? SeparatorTextSplitter.DEFAULT_SEPARATOR : config.getSplitSeparator();
+            segments.add("split_separator=" + separator + ";is_regex=" + config.isSplitSeparatorIsRegex());
+        } else if (HeadingTextSplitter.STRATEGY_CODE.equals(config.getSplitStrategy())) {
+            int level = config.getSplitHeadingLevel() < HeadingTextSplitter.MIN_HEADING_LEVEL
+                    || config.getSplitHeadingLevel() > HeadingTextSplitter.MAX_HEADING_LEVEL
+                    ? HeadingTextSplitter.DEFAULT_HEADING_LEVEL : config.getSplitHeadingLevel();
+            segments.add("split_heading_level=" + level);
+        }
+        // Appended only when on, for the same compatibility reason as the metadata rules: a knowledge
+        // base that never turned multimodal indexing on keeps the exact fingerprint it had before M14,
+        // so shipping the feature marks nothing configuration stale, while flipping the switch on marks
+        // every affected document stale so a rebuild backfills or clears the multimodal vectors.
+        if (config.isMultimodalEnabled()) {
+            segments.add("multimodal_enabled=true");
+        }
+        return HashUtil.sha256Hex(String.join(SEPARATOR, segments));
     }
 
     /**

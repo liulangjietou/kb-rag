@@ -13,6 +13,9 @@ public enum RetrievalSource {
     /** BM25 full text route. */
     BM25,
 
+    /** Multimodal vector route, the M14 contract section 6.3. */
+    MM,
+
     /** Graph route, reserved for M7. */
     GRAPH;
 

@@ -141,8 +141,31 @@ info:
 
     （UPLOAD_ALLOWED_EXTENSIONS 新增 html）。
 
+
+    0.14.0-m14（六特性：外部数据源连接器/配置化元数据抽取/切分策略扩展/Rerank 混合模式/视觉理解
+
+    整页索引/以图搜图，docs/M14-CONTRACTS.md）：①新增外部数据源端点（登记/列表/手动同步/对象明细/
+
+    编辑/连通性测试/移除，新增 `ext-source` tag 与 `ExtSource`/`ExtSourceItem` schema，secret 恒
+
+    脱敏返回 `******`、更新传空=保留旧值）；②`IndexConfig` 增 `metadata_rules`（常量/正则/词表
+
+    三类抽取规则，新增 `MetadataRule` schema）、`split_separator`/`split_separator_is_regex`/
+
+    `split_heading_level`（配合 `SplitStrategy` 扩展的 separator/heading/page 三策略）、
+
+    `multimodal_enabled`（KB 级多模态整页索引开关）；③`SearchRequest` 增 `images`（以图搜图，裸
+
+    base64、≤3 张）、`rerank_mode`（semantic 默认/hybrid）、`rerank_w_semantic`（hybrid 语义权重，
+
+    默认 0.7）、`MetadataFilter.custom`（抽取键等值过滤）；④`DegradedReason` 补
+
+    `mm_route_skipped`/`mm_route_unavailable`；⑤`ModelStatus` 补 multimodal_configured/provider/
+
+    model。全部纯新增、缺省即现状（详见 M14-CONTRACTS.md §0 兼容红线）。
+
     '
-  version: 0.13.0-m12
+  version: 0.14.0-m14
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -176,6 +199,8 @@ tags:
   description: 内容治理：审核发布/有效期/回收站（M11，docs/M11-CONTRACTS.md §2.2）
 - name: web-source
   description: 数据接入：URL 登记导入与增量同步（M12，docs/M12-CONTRACTS.md §3.4）
+- name: ext-source
+  description: 外部数据源连接器：S3/OSS 兼容对象存储登记、扫描与增量同步（M14，docs/M14-CONTRACTS.md §2）
 - name: app-center
   description: 应用中心：应用/版本/发布门禁与控制台 chat 预览（M4c，docs/M4c-CONTRACTS.md §2）
 - name: api-key
@@ -1050,6 +1075,242 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/ext-sources:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - ext-source
+      summary: 登记外部数据源并异步触发首同步
+      description: 'M14-CONTRACTS.md §2.3：落行后异步受理首次扫描（对象数不可控，不同步阻塞登记，
+        与 M12 登记即抓的差异点）；同 KB 重名 INVALID_PARAM。secret_key 明文落库、读 API 恒脱敏。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source_type, name, endpoint, bucket, access_key, secret_key]
+              properties:
+                source_type:
+                  type: string
+                  maxLength: 16
+                  description: 连接器类型路由键，本期仅 s3
+                name:
+                  type: string
+                  maxLength: 128
+                endpoint:
+                  type: string
+                  maxLength: 512
+                  description: 对象存储服务端点，不过 UrlGuard（管理员配置项，合法场景即内网 MinIO/OSS）
+                region:
+                  type: string
+                  maxLength: 64
+                bucket:
+                  type: string
+                  maxLength: 128
+                prefix:
+                  type: string
+                  maxLength: 512
+                access_key:
+                  type: string
+                  maxLength: 256
+                secret_key:
+                  type: string
+                  maxLength: 512
+                sync_enabled:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: 登记行（首同步结果异步回填）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtSourceResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    get:
+      tags:
+      - ext-source
+      summary: 外部数据源列表（secret 恒脱敏）
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtSourceListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/ext-sources/{sourceId}/sync:
+    parameters:
+    - name: sourceId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - ext-source
+      summary: 手动触发一次同步（异步受理）
+      description: 'M14-CONTRACTS.md §2.3：异步受理返回 {accepted:true}，结果落在源与对象明细的
+        状态上。etag 未变 UNCHANGED、绑定文档在回收站 SKIPPED、对象消失 SKIPPED；单对象失败不中断
+        本源其余对象。'
+      responses:
+        '200':
+          description: 受理确认
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtSourceSyncAcceptedResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/ext-sources/{sourceId}/items:
+    parameters:
+    - name: sourceId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - ext-source
+      summary: 对象明细（逐对象同步结果可见）
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtSourceItemListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/ext-sources/{sourceId}:
+    parameters:
+    - name: sourceId
+      in: path
+      required: true
+      schema:
+        type: string
+    put:
+      tags:
+      - ext-source
+      summary: 编辑源（secret 传空=保留旧值）
+      description: 'M14-CONTRACTS.md §2.3：可改 name/endpoint/region/bucket/prefix/access_key/
+        secret_key(空=保留)/sync_enabled。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, endpoint, bucket, access_key]
+              properties:
+                name:
+                  type: string
+                  maxLength: 128
+                endpoint:
+                  type: string
+                  maxLength: 512
+                region:
+                  type: string
+                  maxLength: 64
+                bucket:
+                  type: string
+                  maxLength: 128
+                prefix:
+                  type: string
+                  maxLength: 512
+                access_key:
+                  type: string
+                  maxLength: 256
+                secret_key:
+                  type: string
+                  maxLength: 512
+                  description: 空或缺省=保留已存储的 secret
+                sync_enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: 更新后的源（secret 脱敏）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtSourceResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - ext-source
+      summary: 移除源（硬删源行与对象明细，不动文档）
+      description: 'M14-CONTRACTS.md §2.3：硬删源行 + items 行；它喂过的文档保留在知识库。'
+      responses:
+        '200':
+          description: 已移除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/ext-sources/{sourceId}/test:
+    parameters:
+    - name: sourceId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - ext-source
+      summary: 连通性测试（同步执行）
+      description: 'M14-CONTRACTS.md §2.3：同步探测连通性与凭证，返回 HealthStatus，不触碰任何对象。'
+      responses:
+        '200':
+          description: 探测结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtSourceTestResult'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/kb/{kbId}/graph/config:
@@ -3404,6 +3665,193 @@ components:
                 type: integer
               total:
                 type: integer
+    MetadataRule:
+      type: object
+      description: 'M14-CONTRACTS.md §3.1：一条配置化元数据抽取规则。key 须符合 ^[a-z][a-z0-9_]{1,31}$
+
+        且不得与保留键冲突；type=constant 固定值（value，截 256）；type=regex 取第一个捕获组/无
+
+        捕获组取整体（pattern ≤64，编译失败 INVALID_PARAM）；type=keyword_match 取命中子集
+
+        （keywords ≤50 词/每词 ≤32）。'
+      required:
+      - key
+      - type
+      properties:
+        key:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{1,31}$'
+        type:
+          type: string
+          enum:
+          - constant
+          - regex
+          - keyword_match
+        value:
+          type: string
+          nullable: true
+          maxLength: 256
+          description: constant 规则的固定值
+        pattern:
+          type: string
+          nullable: true
+          maxLength: 64
+          description: regex 规则的 Java 正则源
+        keywords:
+          type: array
+          nullable: true
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 32
+          description: keyword_match 规则的词表
+    ExtSource:
+      type: object
+      description: '外部数据源登记行（M14-CONTRACTS.md §2.3）。secret_key 恒返回掩码 ******，从不
+
+        下发真实值；登记与文档弱绑定，移除源不删文档。'
+      properties:
+        source_id:
+          type: string
+        kb_id:
+          type: string
+        source_type:
+          type: string
+          description: 连接器类型路由键，本期仅 s3
+        name:
+          type: string
+        endpoint:
+          type: string
+        region:
+          type: string
+          nullable: true
+        bucket:
+          type: string
+        prefix:
+          type: string
+          nullable: true
+        access_key:
+          type: string
+        secret_key:
+          type: string
+          description: 恒为掩码 ******，从不下发真实值
+        sync_enabled:
+          type: boolean
+        last_sync_status:
+          type: string
+          nullable: true
+          enum:
+          - SUCCESS
+          - PARTIAL
+          - FAILED
+          description: 首次同步前为 null
+        last_sync_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+          maxLength: 512
+        created_at:
+          type: string
+          format: date-time
+    ExtSourceItem:
+      type: object
+      description: 外部数据源逐对象同步结果行（M14-CONTRACTS.md §2.3）
+      properties:
+        object_key:
+          type: string
+        etag:
+          type: string
+          nullable: true
+        doc_id:
+          type: string
+          nullable: true
+          description: 首次成功入库前为 null
+        last_status:
+          type: string
+          nullable: true
+          enum:
+          - SUCCESS
+          - UNCHANGED
+          - SKIPPED
+          - FAILED
+        last_error:
+          type: string
+          nullable: true
+          maxLength: 512
+        last_sync_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    ExtSourceResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/ExtSource'
+    ExtSourceListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExtSource'
+              page:
+                type: integer
+              total:
+                type: integer
+    ExtSourceItemListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExtSourceItem'
+              page:
+                type: integer
+              total:
+                type: integer
+    ExtSourceTestResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              up:
+                type: boolean
+                description: 对象存储应答且 bucket 存在时 true
+              detail:
+                type: string
+                description: 探测详情
+    ExtSourceSyncAcceptedResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              accepted:
+                type: boolean
+                description: 异步受理恒为 true，结果看列表状态
     EmbeddingStatus:
       type: string
       enum:
@@ -3477,6 +3925,17 @@ components:
       properties:
         query:
           type: string
+        images:
+          type: array
+          nullable: true
+          maxItems: 3
+          description: '以图搜图（M14-CONTRACTS.md §7）：裸 base64（无 data: 前缀），≤3 张/单张 5MB/
+
+            总量 10MB（以服务端为权威，超限 INVALID_PARAM）；query 仍必填。多模态可用时直接嵌入多模态
+
+            空间检索，否则回落 VLM 转写。'
+          items:
+            type: string
         recall_top_k:
           type: integer
           default: 50
@@ -3505,6 +3964,27 @@ components:
           type: boolean
           nullable: true
           description: 默认 true（仅当 RERANK_MODEL 已配置生效），显式传 false 可关闭。
+        rerank_mode:
+          type: string
+          nullable: true
+          enum:
+          - semantic
+          - hybrid
+          description: 'M14-CONTRACTS.md §5：semantic（默认）=纯语义重排分排序；hybrid=语义重排分与
+
+            归一化 BM25 分线性加权决定排序。五层优先级照旧（请求 > KB > 部署默认
+
+            kb.retrieval.rerank-mode=semantic）。hybrid 只影响排序，不改变 score_threshold 的纯语义
+
+            分阈值语义（min-max 归一化分跨查询不可比，不入阈值）。'
+        rerank_w_semantic:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 1
+          description: 仅 rerank_mode=hybrid 时生效，默认 0.7；排序分 = w * rerankScore + (1-w) *
+            minmax(bm25Score)。
         rewrite_enabled:
           type: boolean
           default: false
@@ -3564,6 +4044,14 @@ components:
 
         实时别名路径，但那是历史数据形态而非故障，不记该标记，M6-CONTRACTS.md §0.4/§0.5）。
 
+        M14 新增（docs/M14-CONTRACTS.md §6.4）：mm_route_skipped（多模态开启但本次融合权重为 0，
+
+        多模态召回路被跳过）、mm_route_unavailable（多模态 provider 未配置或调用失败，其余召回路
+
+        照常应答）。rerank 混合模式（hybrid）复用既有 rerank_unavailable/rerank_timeout/rerank_error
+
+        降级码，不新增。
+
         '
       enum:
       - vector_route_unavailable
@@ -3578,6 +4066,8 @@ components:
       - snapshot_index_missing
       - graph_route_unavailable
       - image_understanding_unavailable
+      - mm_route_skipped
+      - mm_route_unavailable
     GraphSummary:
       type: object
       description: M7 图谱概览（GraphSummaryResponse）
@@ -3812,6 +4302,16 @@ components:
           type: string
           format: date-time
           nullable: true
+        custom:
+          type: object
+          nullable: true
+          additionalProperties:
+            type: string
+          description: 'M14-CONTRACTS.md §3.3：对管理员配置化元数据抽取键的等值过滤（AND；
+
+            keyword_match 键按“数组包含”匹配），key 须符合 ^[a-z][a-z0-9_]{1,31}$ 否则
+
+            INVALID_PARAM；映射到引擎 ext_ 前缀字段。'
     AppliedSearchParams:
       type: object
       description: 调试页顶部信息条：本次请求实际生效的改写/融合/阈值作用口径（M2-CONTRACTS.md §1.5）；
@@ -3856,14 +4356,23 @@ components:
           minimum: 0
     SplitStrategy:
       type: string
-      description: '切分策略（server SplitStrategy 枚举，**当前只有这两个成员**——需求文档描述的
-        六种切分方式仅落地这两种，parent_child 是正交的独立开关不属于本枚举）。
-        fixed_length=按 token 长度顺切；llm_semantic=对话模型只输出切割点、结果落库缓存，
-        **要求已配置对话模型**，否则 PUT index-config 返回 INVALID_PARAM。
-        未知取值一律 INVALID_PARAM（校验先于写入，失败不改动既有配置）。'
+      description: '切分策略。fixed_length=按 token 长度顺切（M1 默认）；llm_semantic=对话模型只输出
+
+        切割点、结果落库缓存，**要求已配置对话模型**；separator=按字面量/正则分隔符切段后贪心装包
+
+        （M14，配 split_separator/split_separator_is_regex）；heading=按 markdown 标题层级开新段
+
+        （M14，配 split_heading_level，全文无标题回落 fixed_length）；page=按解析产物分页边界切分
+
+        （M14，无 pages 的格式整文一页）。separator/heading/page 与 parent_child 互斥（INVALID_PARAM）；
+
+        超长段统一回落 fixed_length 二次切分。未知取值一律 INVALID_PARAM（校验先于写入）。'
       enum:
       - fixed_length
       - llm_semantic
+      - separator
+      - heading
+      - page
       default: fixed_length
     IndexConfig:
       type: object
@@ -3881,6 +4390,41 @@ components:
       properties:
         split_strategy:
           $ref: '#/components/schemas/SplitStrategy'
+        split_separator:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 64
+          description: 'M14 separator 策略分隔符（1-64 字符，默认 \n\n）；split_separator_is_regex=true
+
+            时作为 Java 正则，编译失败 INVALID_PARAM；其余策略忽略此字段。'
+        split_separator_is_regex:
+          type: boolean
+          default: false
+          description: split_separator 是否为正则（M14 separator 策略）。
+        split_heading_level:
+          type: integer
+          minimum: 1
+          maximum: 6
+          default: 2
+          description: 'M14 heading 策略的 markdown 标题层级（1-6，默认 2）；其余策略忽略此字段。'
+        metadata_rules:
+          type: array
+          nullable: true
+          maxItems: 10
+          description: 'M14-CONTRACTS.md §3.1：KB 级配置化元数据抽取规则（≤3 类共 ≤10 条），切分后逐
+
+            chunk 抽取入 metadata 并镜像引擎（ext_ 前缀）；计入 chunk 指纹，改规则 config_stale
+
+            重建后生效。'
+          items:
+            $ref: '#/components/schemas/MetadataRule'
+        multimodal_enabled:
+          type: boolean
+          default: false
+          description: 'M14-CONTRACTS.md §6.2：KB 级多模态整页索引开关，默认关。开启且多模态 provider 已
+
+            配置时，IMAGE chunk（含扫描页整页渲染）额外产多模态向量，检索新增第三召回路；计入指纹。'
         embedding_model:
           type: string
           nullable: true
@@ -4198,6 +4742,15 @@ components:
           type: string
           nullable: true
         vision_model:
+          type: string
+          nullable: true
+        multimodal_configured:
+          type: boolean
+          description: M14-CONTRACTS.md §6：多模态嵌入 provider（DashScope multimodal-embedding-v1）是否已配置；false 时管理台置灰 KB 级多模态整页索引开关
+        multimodal_provider:
+          type: string
+          nullable: true
+        multimodal_model:
           type: string
           nullable: true
     ModelStatusResult:

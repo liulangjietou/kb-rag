@@ -9,15 +9,19 @@ OpenAPI 接口契约、备份/预检脚本与总体文档。
 React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch 与 Qdrant（检索引擎）/
 MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 docker-compose 一键拉起中间件。**
 
-> 本仓库当前状态：**一期（M1-M7）与二期（M8-M9）已完成，核心能力增强（M10-M13）已完成**。
+> 本仓库当前状态：**一期（M1-M7）与二期（M8-M9）已完成，核心能力增强（M10-M13）
+> 与竞品能力对齐（M14）已完成**。
 > 一期交付上传解析→混合检索（向量+BM25+图路三路融合）→分片标注→评测闭环→应用发布→
 > 多知识库路由→索引快照回滚→GraphRAG 的完整链路；二期增强聊天记录导入
 > （TXT/HTML 格式、本地 OCR 兜底、重叠滑窗归并、映射档案维护界面，M8）与标注
 > 语义/图搜能力（M9）；核心能力增强补齐检索质量闭环（M10）、内容治理（M11）、
-> URL 导入与增量同步（M12）、Prometheus 业务指标（M13），见下文
-> [核心能力增强（M10-M13）](#核心能力增强m10-m13)。
+> URL 导入与增量同步（M12）、Prometheus 业务指标（M13）；M14 对齐竞品能力，补齐
+> 外部数据源连接器、配置化元数据抽取、切分策略扩展、Rerank 混合模式、视觉理解整页
+> 索引与以图搜图六项特性，见下文
+> [核心能力增强（M10-M13）](#核心能力增强m10-m13)与
+> [竞品能力对齐（M14）](#竞品能力对齐m14)。
 > 各里程碑契约见 [`docs/M1-CONTRACTS.md`](docs/M1-CONTRACTS.md) ~
-> [`docs/M13-CONTRACTS.md`](docs/M13-CONTRACTS.md)；系统整体架构与核心流程图见
+> [`docs/M14-CONTRACTS.md`](docs/M14-CONTRACTS.md)；系统整体架构与核心流程图见
 > [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 与 [`docs/FLOWS.md`](docs/FLOWS.md)。
 
 ## 目录
@@ -37,6 +41,7 @@ MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 dock
 - [Demo 数据集与聊天记录映射（M3）](#demo-数据集与聊天记录映射m3)
 - [聊天记录格式扩展与映射维护（M8）](#聊天记录格式扩展与映射维护m8)
 - [核心能力增强（M10-M13）](#核心能力增强m10-m13)
+- [竞品能力对齐（M14）](#竞品能力对齐m14)
 - [接口契约（OpenAPI）](#接口契约openapi)
 - [开源工程文档](#开源工程文档)
 
@@ -397,6 +402,28 @@ docker compose -f docker-compose.lite.yml --profile graph up -d
   `kb_websource_sync_total` 及 JVM/HTTP 基础指标；无新环境变量，该端点与 health 同口径
   暂无鉴权，生产由部署侧网络隔离
 
+## 竞品能力对齐（M14）
+
+六项特性均为纯新增能力，向后兼容既有端点；契约见 [`docs/M14-CONTRACTS.md`](docs/M14-CONTRACTS.md)：
+
+- **外部数据源连接器**：新增 `ext-source` 端点族（登记/列表/同步/条目/编辑/连通性测试/移除），
+  首个实现为 S3/OSS 兼容对象存储，登记后异步首同步并支持增量（hash 去重、四态条目结果）；
+  凭证 `secret_key` 恒以掩码返回、编辑留空即保留旧值。新增 `EXT_SOURCE_*` 相关变量
+- **配置化元数据抽取**：索引配置新增 `metadata_rules`（constant / regex / keyword_match 三类，
+  单库至多 10 条），抽取值随分片指纹参与陈旧判定；检索过滤新增 `custom` 等值过滤
+- **切分策略扩展**：`split_strategy` 由 `fixed_length` / `llm_semantic` 扩展至
+  `separator` / `heading` / `page`，配套 `split_separator` / `split_separator_is_regex` /
+  `split_heading_level` 条件字段
+- **Rerank 混合模式**：检索请求新增 `rerank_mode`（`semantic` / `hybrid`）与
+  `rerank_w_semantic`（0-1，仅 `hybrid` 生效），语义分与原始融合分线性加权
+- **视觉理解整页索引**：索引配置新增 `multimodal_enabled`，开启后整页走多模态向量
+  （DashScope multimodal-embedding-v1）；新增 `MULTIMODAL_*` 相关变量与
+  `mm_route_skipped` / `mm_route_unavailable` 降级码
+- **以图搜图入口**：检索请求新增 `images`（至多 3 张裸 base64），走多模态向量近邻检索
+
+以上六项新增约 12 个环境变量，详见 [`.env.example`](.env.example) 中 M14 分节与
+模型状态接口的 `multimodal_configured` 字段。
+
 ## 接口契约（OpenAPI）
 
 - [`docs/openapi/kb-server.yaml`](docs/openapi/kb-server.yaml)：kb-rag-server 管理台
@@ -436,6 +463,6 @@ python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb
 - [知识库需求文档（v1.14，唯一事实源）](docs/知识库需求文档.md)
 - [系统架构总览（ARCHITECTURE.md）](docs/ARCHITECTURE.md) /
   [核心流程图（FLOWS.md）](docs/FLOWS.md)
-- [M1](docs/M1-CONTRACTS.md) ~ [M13 开发契约](docs/M13-CONTRACTS.md)（按里程碑记录
+- [M1](docs/M1-CONTRACTS.md) ~ [M14 开发契约](docs/M14-CONTRACTS.md)（按里程碑记录
   实现细节与已接受偏离）
 - [OpenAPI 定义](docs/openapi/)

@@ -1,6 +1,7 @@
 package io.kbrag.app.retrieval;
 
 import io.kbrag.domain.entity.Chunk;
+import io.kbrag.domain.enums.RetrievalSource;
 import io.kbrag.domain.model.FusedChunk;
 import io.kbrag.domain.model.GraphChunkRelevance;
 import lombok.Getter;
@@ -30,6 +31,23 @@ public final class RetrievalCandidate {
     private Double rerankScore;
 
     /**
+     * Raw BM25 route score of this candidate, {@code null} when only the vector route recalled it, the
+     * M14 contract section 5.
+     *
+     * <p>Captured at construction from the fusion evidence so the hybrid rerank mode can blend it in
+     * without re-reading the route map: a pure vector hit has no keyword score and counts as zero in
+     * the blend rather than being dropped.
+     */
+    private final Double bm25Score;
+
+    /**
+     * Blended ordering score of the {@code hybrid} rerank mode, {@code null} unless that mode ran, the
+     * M14 contract section 5. Kept apart from {@link #rerankScore} because the threshold must still act
+     * on the pure semantic score while the ordering follows this blend.
+     */
+    private Double hybridScore;
+
+    /**
      * How the graph route reached this chunk, {@code null} when it did not, requirement section 4.9.
      *
      * <p>Kept next to the fusion evidence rather than folded into it: the fusion score is one number per
@@ -41,6 +59,7 @@ public final class RetrievalCandidate {
     public RetrievalCandidate(FusedChunk fused, Chunk chunk) {
         this.fused = fused;
         this.chunk = chunk;
+        this.bm25Score = fused == null ? null : fused.routeScore(RetrievalSource.BM25);
     }
 
     /**
@@ -62,6 +81,15 @@ public final class RetrievalCandidate {
     }
 
     /**
+     * Attaches the blended ordering score computed by the {@code hybrid} rerank mode.
+     *
+     * @param score blend of the semantic relevance and the normalised BM25 score
+     */
+    public void applyHybridScore(double score) {
+        this.hybridScore = score;
+    }
+
+    /**
      * Attaches the graph route evidence of this chunk.
      *
      * @param evidence relevance detail, {@code null} when the graph route did not reach this chunk
@@ -71,13 +99,16 @@ public final class RetrievalCandidate {
     }
 
     /**
-     * Score the final ordering is based on: the cross encoder score once it exists, the fusion score
-     * otherwise. Defining it here is what makes a rerank degradation a pure fallback rather than a
-     * different code path.
+     * Score the final ordering is based on: the hybrid blend once the hybrid mode produced it, the cross
+     * encoder score once it exists, the fusion score otherwise. Defining it here is what makes a rerank
+     * degradation and the hybrid blend pure ordering choices rather than different code paths.
      *
      * @return ordering score
      */
     public double orderingScore() {
+        if (hybridScore != null) {
+            return hybridScore;
+        }
         return rerankScore != null ? rerankScore : fused.getFusedScore();
     }
 

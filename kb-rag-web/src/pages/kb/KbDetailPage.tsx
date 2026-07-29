@@ -41,6 +41,7 @@ import { formatFileSize } from '../../utils/format';
 import { PROCESS_STATUS_META, metaOf } from '../../utils/statusMeta';
 import ChatImportWizard from './components/ChatImportWizard';
 import ChunkDrawer from './components/ChunkDrawer';
+import ExternalSourceTab from './components/ExternalSourceTab';
 import FeedbackTab from './components/FeedbackTab';
 import { RejectModal, ValidityModal } from './components/GovernanceModals';
 import GraphTab from './components/GraphTab';
@@ -536,6 +537,12 @@ export default function KbDetailPage() {
             key: 'webSources',
             label: '网页导入',
             children: kbId ? <WebSourcesTab kbId={kbId} onSynced={loadDocuments} /> : null,
+          },
+          // M14 contract section 2.3: S3/OSS compatible object store connector + per-object sync.
+          {
+            key: 'extSources',
+            label: '外部数据源',
+            children: kbId ? <ExternalSourceTab kbId={kbId} onSynced={loadDocuments} /> : null,
           },
         ]}
       />

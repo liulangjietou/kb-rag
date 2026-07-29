@@ -69,7 +69,29 @@ public enum DegradedReason {
      * requested" case to distinguish: attaching an image <em>is</em> the request, so a caller that gets no
      * image semantics into its query always has to be told.
      */
-    IMAGE_UNDERSTANDING_UNAVAILABLE("image_understanding_unavailable");
+    IMAGE_UNDERSTANDING_UNAVAILABLE("image_understanding_unavailable"),
+
+    /**
+     * The knowledge base has the multimodal route switched on but the {@code fusion_mode} is
+     * {@code weighted}, so the route did not run, the M14 contract section 6.3.
+     *
+     * <p>Reciprocal rank fusion is the only mode that can merge a route lacking a comparable absolute
+     * score, exactly the reason the graph route is refused under weighted fusion. The multimodal
+     * vector route shares that constraint, so it is skipped rather than folded in on an incompatible
+     * scale, and the caller is told which route it lost.
+     */
+    MM_ROUTE_SKIPPED("mm_route_skipped"),
+
+    /**
+     * The knowledge base has the multimodal route switched on but embedding the query into the
+     * multimodal space failed or timed out, so the call ran on the remaining routes, the M14 contract
+     * section 6.3.
+     *
+     * <p>Reported for a configured but unreachable multimodal provider only. A knowledge base whose
+     * switch is off never asked for the route and carries no marker, the same silence the vector route
+     * keeps in zero key mode.
+     */
+    MM_ROUTE_UNAVAILABLE("mm_route_unavailable");
 
     private final String code;
 
