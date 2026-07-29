@@ -1,8 +1,8 @@
 // Author: owlzhangfq@gmail.com
 import { useEffect, useState } from 'react';
-import { Alert, Button, Drawer, Form, InputNumber, Select, Space, Switch, Typography, message } from 'antd';
+import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, Switch, Typography, message } from 'antd';
 import { updateIndexConfig } from '../../../api/kb';
-import type { ChatAggregationConfig, CleanRules, IndexConfig, SplitStrategy } from '../../../api/types';
+import type { ChatAggregationConfig, CleanRules, IndexConfig, MetadataRule, SplitStrategy } from '../../../api/types';
 import { useModelStatus } from '../../../context/ModelStatusContext';
 import { LLM_SPLIT_REQUIRES_CHAT_MODEL, SPLIT_STRATEGY_META } from '../../../utils/statusMeta';
 import CleanRulesFields from './CleanRulesFields';
@@ -35,15 +35,42 @@ const DEFAULT_HIDE_PARENT_WITH_DISABLED_CHILD = false;
 const DEFAULT_INHERIT_DISABLE_ANNOTATION = true;
 // Server default when a knowledge base has never had a strategy written (KnowledgeBaseService).
 const DEFAULT_SPLIT_STRATEGY: SplitStrategy = 'fixed_length';
+// M14 contract section 4 splitter fallbacks: 0 lets each strategy pick its own default.
+const DEFAULT_SPLIT_HEADING_LEVEL = 0;
+// M14 contract section 3.1: the console mirrors the server MetadataRule.KEY_PATTERN so an illegal
+// key is caught before the PUT rather than coming back as INVALID_PARAM.
+const METADATA_KEY_PATTERN = /^[a-z][a-z0-9_]{1,31}$/;
+const MAX_METADATA_RULES = 10;
+
+/** Copy shown under the split-strategy picker, one line per strategy (M14 contract section 4). */
+function splitStrategyHint(strategy: SplitStrategy): string {
+  switch (strategy) {
+    case 'llm_semantic':
+      return '由对话模型只输出切割点（不复述正文），结果落库缓存；适合无结构长文，成本高于定长切分';
+    case 'separator':
+      return '按分隔符切块，适合有固定分隔标记的文档；可选按正则解析分隔符';
+    case 'heading':
+      return '按 Markdown 标题层级切块，适合层级清晰的结构化文档';
+    case 'page':
+      return '每个源文档页面独立成片，适合页面边界即语义边界的文档';
+    default:
+      return '按 token 长度顺序切分，配合下方重叠长度使用';
+  }
+}
 
 interface IndexConfigFormValues {
   split_strategy: SplitStrategy;
+  split_separator?: string;
+  split_separator_is_regex: boolean;
+  split_heading_level: number;
   chunk_max_tokens: number;
   chunk_overlap: number;
   parent_child_enabled: boolean;
   parent_max_tokens: number;
   child_max_tokens: number;
   child_overlap: number;
+  metadata_rules: MetadataRule[];
+  multimodal_enabled: boolean;
   clean_rules: CleanRules;
   parse_preview_required: boolean;
   chat_aggregation: ChatAggregationConfig;
@@ -63,12 +90,17 @@ interface IndexConfigDrawerProps {
 function toFormValues(config: IndexConfig | null): IndexConfigFormValues {
   return {
     split_strategy: config?.split_strategy ?? DEFAULT_SPLIT_STRATEGY,
+    split_separator: config?.split_separator ?? undefined,
+    split_separator_is_regex: config?.split_separator_is_regex ?? false,
+    split_heading_level: config?.split_heading_level ?? DEFAULT_SPLIT_HEADING_LEVEL,
     chunk_max_tokens: config?.chunk_max_tokens ?? DEFAULT_CHUNK_MAX_TOKENS,
     chunk_overlap: config?.chunk_overlap ?? DEFAULT_CHUNK_OVERLAP,
     parent_child_enabled: config?.parent_child.enabled ?? false,
     parent_max_tokens: config?.parent_child.parent_max_tokens ?? DEFAULT_PARENT_MAX_TOKENS,
     child_max_tokens: config?.parent_child.child_max_tokens ?? DEFAULT_CHILD_MAX_TOKENS,
     child_overlap: config?.parent_child.child_overlap ?? DEFAULT_CHILD_OVERLAP,
+    metadata_rules: config?.metadata_rules ?? [],
+    multimodal_enabled: config?.multimodal_enabled ?? false,
     clean_rules: config?.clean_rules ?? DEFAULT_CLEAN_RULES,
     parse_preview_required: config?.parse_preview_required ?? false,
     // Rebuilt field by field rather than passed through: a pre-M8 stored config has no
@@ -99,6 +131,9 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
   // letting the save round-trip into an INVALID_PARAM.
   const { modelStatus } = useModelStatus();
   const chatConfigured = modelStatus?.chat_configured ?? false;
+  // F5 (M14 contract section 6.2): the multimodal switch stores regardless, but without a provider
+  // indexing is skipped, so the console greys it out and says why rather than silently no-op.
+  const multimodalConfigured = modelStatus?.multimodal_configured ?? false;
 
   useEffect(() => {
     if (open) {
@@ -114,6 +149,11 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
         // The server replaces the whole index_config object from this body, so every key the kb
         // already has must be present here -- including the ones this drawer has no control for.
         split_strategy: values.split_strategy,
+        // M14 section 4: only meaningful to the matching strategy, ignored by the others, but sent
+        // every time so the server keeps a coherent record instead of a half-updated object.
+        split_separator: values.split_separator?.trim() || undefined,
+        split_separator_is_regex: values.split_separator_is_regex,
+        split_heading_level: values.split_heading_level,
         chunk_max_tokens: values.chunk_max_tokens,
         chunk_overlap: values.chunk_overlap,
         parent_child: {
@@ -122,6 +162,9 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
           child_max_tokens: values.child_max_tokens,
           child_overlap: values.child_overlap,
         },
+        // M14 section 3.1: an empty list clears every operator rule; sent whole so removals stick.
+        metadata_rules: values.metadata_rules ?? [],
+        multimodal_enabled: values.multimodal_enabled,
         clean_rules: values.clean_rules,
         parse_preview_required: values.parse_preview_required,
         chat_aggregation: values.chat_aggregation,
@@ -170,11 +213,7 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
           name="split_strategy"
           label="切分方式"
           rules={[{ required: true, message: '请选择切分策略' }]}
-          extra={
-            splitStrategy === 'llm_semantic'
-              ? '由对话模型只输出切割点（不复述正文），结果落库缓存；适合无结构长文，成本高于定长切分'
-              : '按 token 长度顺序切分，配合下方重叠长度使用'
-          }
+          extra={splitStrategyHint(splitStrategy)}
         >
           <Select
             options={(Object.keys(SPLIT_STRATEGY_META) as SplitStrategy[]).map((code) => ({
@@ -186,6 +225,39 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
         </Form.Item>
         {!chatConfigured && (
           <Alert type="warning" showIcon message={LLM_SPLIT_REQUIRES_CHAT_MODEL} style={{ marginBottom: 16 }} />
+        )}
+        {splitStrategy === 'separator' && (
+          <>
+            <Form.Item name="split_separator" label="分隔符" extra="留空使用默认分隔符（连续空行）">
+              <Input placeholder="例如：---、## 或自定义分隔符" allowClear />
+            </Form.Item>
+            <Form.Item
+              name="split_separator_is_regex"
+              label="分隔符按正则解析"
+              valuePropName="checked"
+              tooltip="开启后分隔符作为正则表达式匹配；关闭时按字面量匹配"
+            >
+              <Switch />
+            </Form.Item>
+          </>
+        )}
+        {splitStrategy === 'heading' && (
+          <Form.Item
+            name="split_heading_level"
+            label="标题层级"
+            extra="0 使用默认层级；按 Markdown # 号深度切分（1-6）"
+            rules={[{ required: true, message: '请输入标题层级' }]}
+          >
+            <InputNumber min={0} max={6} style={{ width: '100%' }} />
+          </Form.Item>
+        )}
+        {splitStrategy === 'page' && (
+          <Alert
+            type="info"
+            showIcon
+            message="按页切分：每个源文档页面独立成片，下方分段长度/重叠仅在单页过长时作为兑底上限"
+            style={{ marginBottom: 16 }}
+          />
         )}
 
         <Typography.Title level={5}>分段参数</Typography.Title>
@@ -234,6 +306,123 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
             </Form.Item>
           </>
         )}
+
+        <Typography.Title level={5}>元数据抽取</Typography.Title>
+        <Typography.Paragraph type="secondary">
+          在切片上戴固定值、正则捕获值或命中的关键词；抽取的元数据可用于检索时的结构过滤。
+          最多 {MAX_METADATA_RULES} 条；修改后已索引文档需重建才生效。
+        </Typography.Paragraph>
+        <Form.List name="metadata_rules">
+          {(fields, { add, remove }) => (
+            <>
+              {fields.map(({ key, name, ...restField }) => (
+                <Card
+                  key={key}
+                  size="small"
+                  style={{ marginBottom: 12 }}
+                  extra={
+                    <Button type="link" danger size="small" onClick={() => remove(name)}>
+                      删除
+                    </Button>
+                  }
+                >
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'key']}
+                    label="元数据键"
+                    rules={[
+                      { required: true, message: '请输入元数据键' },
+                      { pattern: METADATA_KEY_PATTERN, message: '小写字母开头，仅小写字母/数字/下划线，2-32 位' },
+                    ]}
+                  >
+                    <Input placeholder="例如：doc_type" allowClear />
+                  </Form.Item>
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'type']}
+                    label="规则类型"
+                    rules={[{ required: true, message: '请选择规则类型' }]}
+                  >
+                    <Select
+                      options={[
+                        { value: 'constant', label: '固定值' },
+                        { value: 'regex', label: '正则捕获' },
+                        { value: 'keyword_match', label: '关键词命中' },
+                      ]}
+                    />
+                  </Form.Item>
+                  <Form.Item noStyle shouldUpdate>
+                    {() => {
+                      const type = form.getFieldValue(['metadata_rules', name, 'type']) as string | undefined;
+                      if (type === 'constant') {
+                        return (
+                          <Form.Item
+                            {...restField}
+                            name={[name, 'value']}
+                            label="固定值"
+                            rules={[{ required: true, message: '请输入固定值' }]}
+                          >
+                            <Input placeholder="戴在每个切片上的固定值" allowClear />
+                          </Form.Item>
+                        );
+                      }
+                      if (type === 'regex') {
+                        return (
+                          <Form.Item
+                            {...restField}
+                            name={[name, 'pattern']}
+                            label="正则表达式"
+                            extra="捕获第一个分组；无分组时取整个匹配，最长 64 字符"
+                            rules={[{ required: true, message: '请输入正则表达式' }, { max: 64, message: '最多 64 个字符' }]}
+                          >
+                            <Input placeholder="例如：合同编号[：:]\s*(\w+)" allowClear />
+                          </Form.Item>
+                        );
+                      }
+                      if (type === 'keyword_match') {
+                        return (
+                          <Form.Item
+                            {...restField}
+                            name={[name, 'keywords']}
+                            label="关键词词表"
+                            extra="记录切片命中的词；回车分隔，最多 50 个，单词最长 32 字符"
+                            rules={[{ required: true, message: '请输入至少一个关键词' }]}
+                          >
+                            <Select mode="tags" tokenSeparators={[',', '\n']} placeholder="输入后回车添加" />
+                          </Form.Item>
+                        );
+                      }
+                      return null;
+                    }}
+                  </Form.Item>
+                </Card>
+              ))}
+              {fields.length < MAX_METADATA_RULES && (
+                <Button type="dashed" block onClick={() => add({ type: 'constant' })} style={{ marginBottom: 16 }}>
+                  添加元数据规则
+                </Button>
+              )}
+            </>
+          )}
+        </Form.List>
+
+        <Typography.Title level={5}>多模态整页索引</Typography.Title>
+        {!multimodalConfigured && (
+          <Alert
+            type="warning"
+            showIcon
+            message="多模态整页索引需已配置多模态向量模型，请先在系统设置中配置"
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        <Form.Item
+          name="multimodal_enabled"
+          label="启用多模态整页索引"
+          valuePropName="checked"
+          tooltip="开启后为含图切片额外生成多模态向量，检索新增一路以图搜图召回；未配置多模态模型时开关仍会保存，但索引跳过"
+        >
+          <Switch disabled={!multimodalConfigured} />
+        </Form.Item>
 
         <Typography.Title level={5}>清洗规则</Typography.Title>
         <CleanRulesFields form={form} namePath={['clean_rules']} />

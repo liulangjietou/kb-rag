@@ -2,6 +2,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式。
 
+## [未发布] - M14
+
+### 修复
+
+- **pdf 乱码页不再入库**（M3-CONTRACTS.md §2.1 乱码页判定）：内嵌子集字体缺失/损坏 ToUnicode CMap 的 pdf，`page.get_text()` 抽出的是错码位"字形汤"（中文变缅甸文/方块，数字与英文往往仍正常），文本长度达标故躲过扫描页阈值，垃圾文本被直接切分入库。现按可识别字符（ASCII/CJK/假名/中日标点等区段）占比判定：低于 `GARBLED_PAGE_VALID_CHAR_RATIO_PCT`（新环境变量，默认 50）即置空该页文本并复用扫描页路径（`scanned=true` + `page_render` 渲染交 OCR/VLM 兜底），同时在 `data.warnings[]` 记录一条说明，不失败整篇。
+- pytest 新增（`tests/test_parse_pdf_garbled.py`）：乱码判定正例、正常中英文与空输入的负例、乱码页端到端降级为 `page_render` 且文本置空并带 warning。
+
 ## [未发布] - M12
 
 ### 新增

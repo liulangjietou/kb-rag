@@ -17,6 +17,7 @@ import io.kbrag.domain.port.VectorStore;
 import io.kbrag.domain.service.VectorScoreNormalizer;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.collections4.MapUtils;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -425,6 +426,12 @@ public class QdrantVectorStore implements VectorStore {
             }
             conditions.add(Map.of("key", IndexFields.MSG_TIME, "range", range));
         }
+        if (MapUtils.isNotEmpty(metadata.getCustom())) {
+            // Equality per entry, AND across entries; a match on an array payload matches when any
+            // element equals, which is the "array contains" semantics of a keyword_match key.
+            metadata.getCustom().forEach((key, value) ->
+                    conditions.add(matchValue(IndexFields.EXT_PREFIX + key, value)));
+        }
     }
 
     private Map<String, Object> matchValue(String field, Object value) {
@@ -472,6 +479,11 @@ public class QdrantVectorStore implements VectorStore {
         payload.put(IndexFields.MSG_TIME, record.getMsgTime() == null ? 0L : record.getMsgTime());
         payload.put(IndexFields.CHUNK_SEQ, record.getChunkSeq() == null ? 0 : record.getChunkSeq());
         payload.put(IndexFields.CONTENT, truncate(record.getContent()));
+        if (MapUtils.isNotEmpty(record.getExtMetadata())) {
+            // Unindexed payload entries: Qdrant filters them by scanning, and the operator chosen key
+            // set is unknown at collection provisioning time, so no per key index is created.
+            payload.putAll(record.getExtMetadata());
+        }
         return payload;
     }
 

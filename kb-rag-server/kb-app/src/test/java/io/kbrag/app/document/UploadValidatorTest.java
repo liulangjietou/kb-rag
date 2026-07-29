@@ -44,6 +44,12 @@ class UploadValidatorTest {
     }
 
     @Test
+    void shouldAcceptSqlAsTextFormat() {
+        assertEquals("sql",
+                validator.validate("schema.sql", "SELECT 1;".getBytes(StandardCharsets.UTF_8)));
+    }
+
+    @Test
     void shouldRejectRenamedFile() {
         BizException e = assertThrows(BizException.class,
                 () -> validator.validate("payload.pdf", ZIP_HEADER));

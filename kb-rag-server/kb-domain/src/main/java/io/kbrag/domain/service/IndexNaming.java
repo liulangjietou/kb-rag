@@ -33,6 +33,9 @@ public class IndexNaming {
     /** Prefix of every physical index and alias. */
     private static final String NAME_PREFIX = "kb";
 
+    /** Engine independent marker of the multimodal index, the M14 contract section 6.2. */
+    private static final String MULTIMODAL_MARKER = "mm";
+
     /**
      * Builds the physical name of the vector index.
      *
@@ -134,6 +137,36 @@ public class IndexNaming {
      */
     public String alias(String kbId, VectorEngine engine) {
         return NAME_PREFIX + NAME_SEPARATOR + normalizeKbId(kbId) + NAME_SEPARATOR + engine.code();
+    }
+
+    /**
+     * Builds the alias of the multimodal index, the M14 contract section 6.2.
+     *
+     * <p>Engine independent on purpose: the multimodal vectors live in whichever engine the deployment
+     * uses for vectors - a Qdrant collection in full mode, an Elasticsearch dense_vector index in lite
+     * mode - but the retrieval side addresses them through one alias without caring which, exactly as
+     * it does for the text vector route.
+     *
+     * @param kbId knowledge base business id
+     * @return multimodal alias
+     */
+    public String multimodalAlias(String kbId) {
+        return NAME_PREFIX + NAME_SEPARATOR + normalizeKbId(kbId) + NAME_SEPARATOR + MULTIMODAL_MARKER;
+    }
+
+    /**
+     * Builds the physical name of the multimodal index, the M14 contract section 6.2.
+     *
+     * <p>Carries the multimodal marker in place of the snapshot segment so its name never collides with
+     * a text index of the same embedding segment, and keeps the embedding segment so a multimodal model
+     * switch produces a new physical name and forces a clean rebuild rather than mixing dimensions.
+     *
+     * @param kbId             knowledge base business id
+     * @param embeddingSegment abbreviated multimodal model segment
+     * @return physical multimodal index or collection name
+     */
+    public String multimodalPhysicalName(String kbId, String embeddingSegment) {
+        return physicalName(kbId, embeddingSegment, MULTIMODAL_MARKER);
     }
 
     /**

@@ -5,6 +5,7 @@ import lombok.Getter;
 import lombok.ToString;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Engine side projection of a chunk.
@@ -51,6 +52,13 @@ public class ChunkRecord {
 
     /** Chat message timestamp in epoch milliseconds. */
     private final Long msgTime;
+
+    /**
+     * Operator extracted metadata already carrying the engine side {@code ext_} prefix, the M14
+     * contract section 3.2; values are strings or string lists, may be empty, never {@code null}
+     * semantics enforced by the writer.
+     */
+    private final Map<String, Object> extMetadata;
 
     /** Zero based order inside the document version. */
     private final Integer chunkSeq;

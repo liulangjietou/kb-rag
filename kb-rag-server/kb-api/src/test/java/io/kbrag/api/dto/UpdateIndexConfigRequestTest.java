@@ -70,6 +70,26 @@ class UpdateIndexConfigRequestTest {
         assertEquals(5, config.chatAggregationOrDefaults().getWindowOverlap());
     }
 
+    @Test
+    void shouldSetTheMultimodalSwitchFromThePayload() {
+        KbIndexConfig config = multimodalRequest(true).toIndexConfig(new KbIndexConfig());
+
+        // The switch is stored whatever the provider state is: the build stage, not this gate, decides
+        // whether the vectors can be produced.
+        assertEquals(true, config.isMultimodalEnabled());
+    }
+
+    @Test
+    void shouldKeepTheStoredMultimodalSwitchWhenThePayloadCarriesNone() {
+        KbIndexConfig current = new KbIndexConfig();
+        current.setMultimodalEnabled(true);
+
+        // A save that never mentions the switch must not silently turn the capability off.
+        KbIndexConfig config = multimodalRequest(null).toIndexConfig(current);
+
+        assertEquals(true, config.isMultimodalEnabled());
+    }
+
     private ChatAggregationParams aggregation(int windowMinutes, int maxMessages, int windowOverlap) {
         ChatAggregationParams params = new ChatAggregationParams();
         params.setWindowMinutes(windowMinutes);
@@ -80,6 +100,11 @@ class UpdateIndexConfigRequestTest {
 
     private UpdateIndexConfigRequest request(ChatAggregationParams aggregation) {
         return new UpdateIndexConfigRequest("fixed_length", 600, 100, null, null, null,
-                aggregation, null, null, null);
+                aggregation, null, null, null, null, null, null, null, null);
+    }
+
+    private UpdateIndexConfigRequest multimodalRequest(Boolean multimodalEnabled) {
+        return new UpdateIndexConfigRequest("fixed_length", 600, 100, null, null, null,
+                null, null, null, null, null, null, null, multimodalEnabled, null);
     }
 }

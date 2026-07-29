@@ -6,7 +6,9 @@ import io.kbrag.app.alert.RetrievalDegradeMonitor;
 import io.kbrag.app.graph.GraphRetrievalService;
 import io.kbrag.app.graph.GraphRouteOutcome;
 import io.kbrag.app.index.EngineChunkCleaner;
+import io.kbrag.app.index.MultimodalIndexManager;
 import io.kbrag.app.kb.KnowledgeBaseService;
+import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
@@ -15,11 +17,13 @@ import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.DegradedReason;
 import io.kbrag.domain.enums.FusionMode;
+import io.kbrag.domain.enums.RerankMode;
 import io.kbrag.domain.enums.RetrievalSource;
 import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.model.FulltextQuery;
 import io.kbrag.domain.model.FusedChunk;
 import io.kbrag.domain.model.GraphChunkRelevance;
+import io.kbrag.domain.model.ImageInput;
 import io.kbrag.domain.model.KbIndexConfig;
 import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
@@ -28,6 +32,7 @@ import io.kbrag.domain.model.ScoredChunk;
 import io.kbrag.domain.model.VectorQuery;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.FulltextStore;
+import io.kbrag.domain.port.MultimodalEmbeddingProvider;
 import io.kbrag.domain.port.ObjectStorage;
 import io.kbrag.domain.port.VectorStore;
 import io.kbrag.domain.service.CrossKbRrfFusion;
@@ -37,6 +42,7 @@ import io.kbrag.domain.service.ParentTextRedactor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.collections4.MapUtils;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -150,6 +156,9 @@ public class RetrievalService {
 
     private static final int ENABLED = 1;
 
+    /** Below this spread the BM25 route is treated as constant scored in the hybrid blend. */
+    private static final double SCORE_SPREAD_EPSILON = 1e-9d;
+
     /** Index of the first declared knowledge base, whose settings complete an unset parameter. */
     private static final int PRIMARY = 0;
 
@@ -163,6 +172,9 @@ public class RetrievalService {
     private final CrossKbRrfFusion crossKbRrfFusion;
     private final KbQuotaAllocator kbQuotaAllocator;
     private final GraphRetrievalService graphRetrievalService;
+    private final MultimodalIndexManager multimodalIndexManager;
+    private final MultimodalEmbeddingProvider multimodalEmbeddingProvider;
+    private final ImageQueryService imageQueryService;
     private final RoutingService routingService;
     private final RewriteService rewriteService;
     private final RerankService rerankService;
@@ -214,7 +226,10 @@ public class RetrievalService {
                 properties.getRetrieval());
 
         List<String> degraded = new ArrayList<>();
-        RewriteOutcome rewrite = rewriteService.rewrite(command.getQuery(), command.getMessages(),
+        // F6 image dispatch, the single point that decides between the multimodal image route and the vision
+        // text fallback before any pipeline stage reads the question, the M14 contract section 7.
+        ImageDispatch imageDispatch = dispatchImages(command, targets, degraded);
+        RewriteOutcome rewrite = rewriteService.rewrite(imageDispatch.query(), command.getMessages(),
                 shouldRun(settings.isRewriteEnabled(), rewriteService.isAvailable(),
                         command.getRewriteEnabled(), primary.rewriteEnabled()));
         addMarker(degraded, rewrite.getDegradedReason());
@@ -263,11 +278,11 @@ public class RetrievalService {
             if (context == null) {
                 continue;
             }
-            KbRecall recall = recallWithinKb(target, effectiveQuery, queryVector, context,
-                    settings, command, bm25RouteRequested);
+            KbRecall recall = recallWithinKb(target, effectiveQuery, queryVector,
+                    imageDispatch.imageQueryVectors(), context, settings, command, bm25RouteRequested);
             chunkById.putAll(recall.chunkById());
             graphEvidence.putAll(recall.graphEvidence());
-            addMarker(degraded, recall.degradedReason());
+            recall.degradedReasons().forEach(reason -> addMarker(degraded, reason));
             if (!recall.ranked().isEmpty()) {
                 rankedByKb.put(target.kbId(), recall.ranked());
             }
@@ -289,6 +304,7 @@ public class RetrievalService {
         List<RetrievalCandidate> candidates = selectCandidates(merged, chunkById, parentChildEnabled,
                 settings, graphEvidence);
         applyRerank(effectiveQuery, candidates, settings, command, primary.retrievalConfig(), degraded);
+        applyHybridOrdering(candidates, settings);
 
         candidates.sort(Comparator.comparingDouble(RetrievalCandidate::orderingScore).reversed()
                 .thenComparing(RetrievalCandidate::chunkId));
@@ -356,6 +372,7 @@ public class RetrievalService {
      * @return in base ranking of the live candidates plus their fact source rows
      */
     private KbRecall recallWithinKb(KbTarget target, String query, float[] queryVector,
+                                    List<float[]> imageQueryVectors,
                                     RetrievalIndexContextResolver.IndexContext context,
                                     RetrievalSettings settings, RetrievalCommand command,
                                     boolean bm25RouteRequested) {
@@ -372,11 +389,17 @@ public class RetrievalService {
         if (!graph.getCandidates().isEmpty()) {
             routeResults.put(RetrievalSource.GRAPH, graph.getCandidates());
         }
+        MultimodalRouteOutcome multimodal = recallMultimodal(target, query, imageQueryVectors, filter,
+                context, settings);
+        if (!multimodal.getCandidates().isEmpty()) {
+            routeResults.put(RetrievalSource.MM, multimodal.getCandidates());
+        }
         List<FusedChunk> fused = fusionRouter.fuse(routeResults, settings.getFusion());
         Map<String, Chunk> chunkById = loadChunks(fused);
         List<FusedChunk> live = dropDisabled(
                 dropOrphans(kbId, fused, chunkById, !context.snapshotBound()), chunkById);
-        return new KbRecall(live, chunkById, graph.getEvidenceByChunk(), graph.getDegradedReason());
+        return new KbRecall(live, chunkById, graph.getEvidenceByChunk(),
+                degradedReasons(graph.getDegradedReason(), multimodal.getDegradedReason()));
     }
 
     /**
@@ -405,6 +428,218 @@ public class RetrievalService {
             return GraphRouteOutcome.skipped();
         }
         return graphRetrievalService.recall(query, filter, recallTopK);
+    }
+
+    /**
+     * Runs the multimodal route, the M14 contract section 6.3.
+     *
+     * <p><b>The route is switched off on the snapshot path, and that is not a degradation.</b> Exactly like
+     * the graph route, a released version answers out of a frozen snapshot the multimodal index holds no
+     * frozen copy of, so there is nothing snapshot shaped for it to search and running it would break the
+     * version isolation of requirement section 4.7.
+     *
+     * <p><b>Weighted fusion refuses the route and says so.</b> Weighted fusion blends normalised route
+     * scores, and a multimodal similarity is on a scale the text routes never see; there is no meaningful
+     * weight for it, so the route is skipped and the caller is told through {@code mm_route_skipped},
+     * mirroring the way the graph route is refused under weighted fusion.
+     *
+     * <p><b>A configured but unreachable provider degrades, it never fails the search.</b> Embedding the
+     * query into the multimodal space is the one model call this route makes; when it fails the marker
+     * {@code mm_route_unavailable} is reported and the remaining routes answer.
+     *
+     * @param target            knowledge base being searched
+     * @param query             query the other routes ran with
+     * @param imageQueryVectors images the caller attached, already embedded, empty for a text only call
+     * @param filter            the very predicate the engine side routes were filtered by
+     * @param context           indices and version visibility set this base is searched with
+     * @param settings          effective retrieval parameters, read for the fusion mode and the recall size
+     * @return multimodal route outcome, empty when the route was not asked to run
+     */
+    private MultimodalRouteOutcome recallMultimodal(KbTarget target, String query,
+                                                    List<float[]> imageQueryVectors, RetrievalFilter filter,
+                                                    RetrievalIndexContextResolver.IndexContext context,
+                                                    RetrievalSettings settings) {
+        if (context.snapshotBound()) {
+            return MultimodalRouteOutcome.skipped();
+        }
+        String alias = multimodalIndexManager.multimodalAlias(target.kbId(), target.indexConfig());
+        if (alias == null) {
+            return MultimodalRouteOutcome.skipped();
+        }
+        if (settings.getFusion().getMode() == FusionMode.WEIGHTED) {
+            log.info("multimodal route skipped under weighted fusion, kbId={}", target.kbId());
+            return MultimodalRouteOutcome.degraded(DegradedReason.MM_ROUTE_SKIPPED.code());
+        }
+        List<float[]> queryVectors;
+        if (CollectionUtils.isNotEmpty(imageQueryVectors)) {
+            // F6: the caller attached images and this base can search them, so the route embeds the pictures
+            // rather than the text - image to image and image to rendered page, the M14 contract section 7.
+            queryVectors = imageQueryVectors;
+        } else {
+            try {
+                queryVectors = List.of(multimodalEmbeddingProvider.embedTexts(List.of(query)).get(0));
+            } catch (Exception e) {
+                log.error("multimodal query embedding failed, errorCode={}, kbId={}",
+                        ErrorCode.UPSTREAM_MODEL_ERROR, target.kbId(), e);
+                return MultimodalRouteOutcome.degraded(DegradedReason.MM_ROUTE_UNAVAILABLE.code());
+            }
+        }
+        List<ScoredChunk> candidates = searchMultimodal(alias, queryVectors, filter, settings.getRecallTopK());
+        if (candidates.isEmpty()) {
+            return MultimodalRouteOutcome.skipped();
+        }
+        log.info("multimodal route finished, kbId={}, queries={}, candidates={}",
+                target.kbId(), queryVectors.size(), candidates.size());
+        return MultimodalRouteOutcome.of(candidates);
+    }
+
+    /**
+     * Searches the multimodal alias with every query vector and folds the hits into one ranking.
+     *
+     * <p>A text query issues one vector; an image query issues one per attached image. Overlapping hits are
+     * collapsed on the chunk id keeping the strongest similarity, so a chunk matched by two images is ranked
+     * once on its best score rather than counted twice, and the reciprocal rank fusion downstream sees a
+     * single ordered list exactly like the other routes.
+     *
+     * @param alias        multimodal alias to search
+     * @param queryVectors one or more query vectors
+     * @param filter       the very predicate the engine side routes were filtered by
+     * @param recallTopK   candidates the route contributes at most
+     * @return merged candidates ordered by descending similarity, tagged as the multimodal route
+     */
+    private List<ScoredChunk> searchMultimodal(String alias, List<float[]> queryVectors,
+                                               RetrievalFilter filter, int recallTopK) {
+        Map<String, Double> scoreByChunk = new LinkedHashMap<>();
+        for (float[] queryVector : queryVectors) {
+            List<ScoredChunk> hits = vectorStore.search(alias, VectorQuery.builder()
+                    .queryVector(queryVector).topK(recallTopK).filter(filter).build());
+            if (CollectionUtils.isEmpty(hits)) {
+                continue;
+            }
+            for (ScoredChunk hit : hits) {
+                scoreByChunk.merge(hit.getChunkId(), hit.getScore(), Math::max);
+            }
+        }
+        if (scoreByChunk.isEmpty()) {
+            return List.of();
+        }
+        List<ScoredChunk> candidates = new ArrayList<>(scoreByChunk.size());
+        for (Map.Entry<String, Double> entry : scoreByChunk.entrySet()) {
+            candidates.add(new ScoredChunk(entry.getKey(), entry.getValue(), RetrievalSource.MM));
+        }
+        candidates.sort(Comparator.comparingDouble(ScoredChunk::getScore).reversed()
+                .thenComparing(ScoredChunk::getChunkId));
+        return candidates.size() > recallTopK
+                ? new ArrayList<>(candidates.subList(0, recallTopK)) : candidates;
+    }
+
+    /**
+     * Decides what the attached images do, the single dispatch point of the M14 contract section 7.
+     *
+     * <p>Two outcomes, one of them per call. When the searched corpus can embed images - a multimodal
+     * provider is configured, at least one selected base has the multimodal switch on, the call is not a
+     * frozen release snapshot and a written query is present - the pictures are embedded and steer the
+     * multimodal route directly (image to image, image to rendered page). Otherwise they fall back to the
+     * vision transcription that folds their description into the query, exactly the path the open API used
+     * before this milestone, so a deployment without the multimodal capability keeps its image search.
+     *
+     * <p><b>A written query stays mandatory on the image route.</b> Pure image retrieval is out of scope for
+     * this milestone, so an image only call is never routed to the multimodal space; it takes the vision
+     * fallback, whose own gate rejects a call that has nothing at all to search for.
+     *
+     * <p><b>A release snapshot never takes the image route.</b> The multimodal index holds no frozen copy, so
+     * the per base route is off on the snapshot path anyway; sending images there would embed them for a
+     * route that cannot run, so a snapshot call transcribes them into its query instead.
+     *
+     * @param command call parameters, read for the images and the query
+     * @param targets knowledge bases the call will search
+     * @param degraded running degradation markers, appended in place
+     * @return the query the pipeline runs with and the image vectors the multimodal route embeds
+     */
+    private ImageDispatch dispatchImages(RetrievalCommand command, List<KbTarget> targets,
+                                         List<String> degraded) {
+        List<String> images = command.getImages();
+        if (multimodalUsableForImages(command, images, targets)) {
+            return new ImageDispatch(command.getQuery(), embedQueryImages(images, degraded));
+        }
+        ImageQueryService.ImageQueryOutcome outcome = imageQueryService.enrich(command.getQuery(), images);
+        outcome.degraded().forEach(reason -> addMarker(degraded, reason));
+        return new ImageDispatch(outcome.query(), List.of());
+    }
+
+    /**
+     * Tells whether the attached images can steer the multimodal route rather than the vision fallback.
+     *
+     * @param command call parameters, read for the query and the snapshot binding
+     * @param images  attached images
+     * @param targets knowledge bases the call will search
+     * @return {@code true} when the images are to be embedded into the multimodal space
+     */
+    private boolean multimodalUsableForImages(RetrievalCommand command, List<String> images,
+                                              List<KbTarget> targets) {
+        if (CollectionUtils.isEmpty(images) || !multimodalEmbeddingProvider.isConfigured()) {
+            return false;
+        }
+        if (command.getQuery() == null || command.getQuery().isBlank()) {
+            return false;
+        }
+        if (MapUtils.isNotEmpty(command.getIndexOverride())) {
+            return false;
+        }
+        return targets.stream().anyMatch(target ->
+                multimodalIndexManager.multimodalAlias(target.kbId(), target.indexConfig()) != null);
+    }
+
+    /**
+     * Embeds the attached images into the multimodal space, degrading rather than failing when the provider
+     * call itself breaks.
+     *
+     * <p>The count and size validation runs first and outside the try: an over sized or over counted image
+     * set is a caller error the pipeline rejects, not a degradation. A provider timeout or error, by
+     * contrast, leaves the written query and the other routes to answer, so it is reported through
+     * {@code mm_route_unavailable} and returns no vectors.
+     *
+     * @param images   attached images, already known to be present
+     * @param degraded running degradation markers, appended in place
+     * @return one vector per image, or empty when the provider call failed
+     */
+    private List<float[]> embedQueryImages(List<String> images, List<String> degraded) {
+        List<ImageInput> inputs = imageQueryService.decodeForEmbedding(images);
+        try {
+            return multimodalEmbeddingProvider.embedImages(inputs);
+        } catch (Exception e) {
+            log.error("query image embedding failed, errorCode={}, images={}",
+                    ErrorCode.UPSTREAM_MODEL_ERROR, inputs.size(), e);
+            addMarker(degraded, DegradedReason.MM_ROUTE_UNAVAILABLE.code());
+            return List.of();
+        }
+    }
+
+    /**
+     * What the image dispatch decided: the query every pipeline stage reads and the image vectors, if any,
+     * the multimodal route embeds instead of the text.
+     *
+     * @param query             query the pipeline runs with, enriched by the vision fallback when it ran
+     * @param imageQueryVectors embedded images for the multimodal route, empty on the fallback path
+     */
+    private record ImageDispatch(String query, List<float[]> imageQueryVectors) {
+    }
+
+    /**
+     * Collects the degradation markers of the optional per base routes, dropping the {@code null} of a
+     * route that ran or was never asked to.
+     *
+     * @param reasons per route markers, any of them {@code null}
+     * @return present markers, empty when no route degraded
+     */
+    private List<String> degradedReasons(String... reasons) {
+        List<String> present = new ArrayList<>(reasons.length);
+        for (String reason : reasons) {
+            if (reason != null) {
+                present.add(reason);
+            }
+        }
+        return present;
     }
 
     /**
@@ -527,13 +762,14 @@ public class RetrievalService {
     /**
      * What one knowledge base contributed to a call.
      *
-     * @param ranked         in base ranking of the candidates a fact source row still backs
-     * @param chunkById      fact source rows of this base's candidates
-     * @param graphEvidence  graph route detail per chunk id, empty when the route did not run
-     * @param degradedReason marker of a route this base asked for and could not run, {@code null} otherwise
+     * @param ranked          in base ranking of the candidates a fact source row still backs
+     * @param chunkById       fact source rows of this base's candidates
+     * @param graphEvidence   graph route detail per chunk id, empty when the route did not run
+     * @param degradedReasons markers of the optional routes this base asked for and could not run, empty
+     *                        when every route it wanted ran
      */
     private record KbRecall(List<FusedChunk> ranked, Map<String, Chunk> chunkById,
-                            Map<String, GraphChunkRelevance> graphEvidence, String degradedReason) {
+                            Map<String, GraphChunkRelevance> graphEvidence, List<String> degradedReasons) {
     }
 
     /**
@@ -651,6 +887,47 @@ public class RetrievalService {
         for (int i = 0; i < candidates.size(); i++) {
             candidates.get(i).applyRerankScore(outcome.getScores().get(i));
         }
+    }
+
+    /**
+     * Blends the semantic relevance with the normalised BM25 score to order a {@code hybrid} rerank, the
+     * M14 contract section 5.
+     *
+     * <p>Runs only when the mode is hybrid <em>and</em> the semantic rerank actually produced scores: a
+     * degraded or switched off rerank leaves nothing to blend, so the fusion order stands exactly as it
+     * does for the semantic mode. The BM25 score is min-max normalised inside this candidate set, which
+     * is why it can only feed the ordering and never the threshold - a value normalised per query is not
+     * comparable across queries. A candidate the vector route alone recalled has no BM25 score and
+     * counts as zero rather than being dropped.
+     *
+     * @param candidates rerank ordered candidates, mutated in place with the blended score
+     * @param settings   effective retrieval parameters carrying the mode and the semantic weight
+     */
+    private void applyHybridOrdering(List<RetrievalCandidate> candidates, RetrievalSettings settings) {
+        if (settings.getRerankMode() != RerankMode.HYBRID || candidates.isEmpty()
+                || candidates.get(0).getRerankScore() == null) {
+            return;
+        }
+        double min = Double.MAX_VALUE;
+        double max = -Double.MAX_VALUE;
+        for (RetrievalCandidate candidate : candidates) {
+            double bm25 = bm25OrZero(candidate);
+            min = Math.min(min, bm25);
+            max = Math.max(max, bm25);
+        }
+        double spread = max - min;
+        double wSemantic = settings.getRerankWSemantic();
+        for (RetrievalCandidate candidate : candidates) {
+            double normalized = spread <= SCORE_SPREAD_EPSILON
+                    ? 0.0d : (bm25OrZero(candidate) - min) / spread;
+            candidate.applyHybridScore(wSemantic * candidate.getRerankScore()
+                    + (1.0d - wSemantic) * normalized);
+        }
+        log.info("hybrid rerank ordering applied, wSemantic={}, candidates={}", wSemantic, candidates.size());
+    }
+
+    private double bm25OrZero(RetrievalCandidate candidate) {
+        return candidate.getBm25Score() == null ? 0.0d : candidate.getBm25Score();
     }
 
     /**

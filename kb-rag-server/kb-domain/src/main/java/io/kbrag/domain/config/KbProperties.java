@@ -48,6 +48,9 @@ public class KbProperties {
     /** Vision provider configuration, consumed by the image asset stage. */
     private Vision vision = new Vision();
 
+    /** Multimodal embedding provider configuration, the M14 contract section 6.1. */
+    private MultimodalEmbedding multimodalEmbedding = new MultimodalEmbedding();
+
     /** Image asset pipeline policy. */
     private Image image = new Image();
 
@@ -108,6 +111,9 @@ public class KbProperties {
     /** URL import policy: fetch limits and the scheduled sync pass, the M12 contract section 3.5. */
     private WebImport webImport = new WebImport();
 
+    /** External data source policy: scan limits and the scheduled sync pass, the M14 contract section 2.4. */
+    private ExtSource extSource = new ExtSource();
+
     /**
      * Content governance policy, the M11 contract section 2.3.
      */
@@ -157,6 +163,30 @@ public class KbProperties {
 
         /** Sources one scheduled pass re-fetches; fetching is slow outbound I/O, hence a count bound. */
         private int syncBatchSize = 50;
+    }
+
+    /**
+     * External data source policy, the M14 contract section 2.4.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class ExtSource {
+
+        /** Cron expression of the nightly incremental sync pass. */
+        private String syncCron = "0 0 3 * * *";
+
+        /** {@code false} disables the scheduled pass; manual sync stays available. */
+        private boolean syncEnabled = true;
+
+        /** Sources one scheduled pass scans; a scan lists and fetches many objects, hence a small bound. */
+        private int syncBatchSize = 10;
+
+        /** Objects one scan considers per source; beyond it the pass records PARTIAL and truncates. */
+        private int maxObjectsPerSource = 500;
+
+        /** Connect and read budget of one connector call. */
+        private int fetchTimeoutMs = 30000;
     }
 
     /**
@@ -441,6 +471,47 @@ public class KbProperties {
     }
 
     /**
+     * Multimodal embedding provider configuration, the M14 contract section 6.1.
+     *
+     * <p>A blank API key switches the whole multimodal capability off: the index pipeline stops
+     * producing image vectors and retrieval stops running the third route. The key defaults to the
+     * same DashScope credential the rest of the model family shares, so a deployment that already set
+     * {@code DASHSCOPE_API_KEY} gets multimodal indexing the moment a knowledge base turns the switch
+     * on, with no second credential to provision.
+     */
+    @Getter
+    @Setter
+    @ToString(exclude = "apiKey")
+    public static class MultimodalEmbedding {
+
+        /** Provider implementation name. */
+        private String provider = "dashscope";
+
+        /** Model name. */
+        private String model = "multimodal-embedding-v1";
+
+        /** Vector dimension, frozen into the multimodal index at creation time. */
+        private int dimension = 1024;
+
+        /** Credential, blank switches the whole multimodal capability off. */
+        private String apiKey = "";
+
+        /**
+         * Full URL of the native multimodal embedding endpoint. DashScope exposes it outside the
+         * OpenAI compatible surface, so unlike text embedding this is a complete URL rather than a
+         * base URL, the same shape the rerank endpoint takes.
+         */
+        private String url =
+                "https://dashscope.aliyuncs.com/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding";
+
+        /** Maximum items per provider request. */
+        private int batchSize = 8;
+
+        /** Request timeout in milliseconds. */
+        private int timeoutMs = 30000;
+    }
+
+    /**
      * Image asset pipeline policy.
      */
     @Getter
@@ -596,7 +667,7 @@ public class KbProperties {
 
         /** Accepted lower case extensions. */
         private List<String> allowedExtensions =
-                List.of("pdf", "docx", "txt", "md", "xlsx", "csv",
+                List.of("pdf", "docx", "txt", "md", "sql", "xlsx", "csv",
                         "png", "jpg", "jpeg", "webp", "bmp", "gif");
     }
 
@@ -722,6 +793,12 @@ public class KbProperties {
 
         /** Rerank default when a rerank model is configured. */
         private boolean rerankEnabled = true;
+
+        /** Default rerank ordering mode, {@code semantic} or {@code hybrid}, the M14 contract section 5. */
+        private String rerankMode = "semantic";
+
+        /** Default semantic weight of the {@code hybrid} rerank mode, within {@code [0,1]}. */
+        private double rerankWSemantic = 0.7d;
 
         /**
          * Upper bound of knowledge bases one application version may link, requirement section 4.7.

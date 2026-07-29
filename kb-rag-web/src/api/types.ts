@@ -50,15 +50,16 @@ export interface CurrentUser {
 // ---------------------------------------------------------------------------
 
 /**
- * index_config.split_strategy: the splitter the indexing pipeline routes to. Mirrors the server's
- * SplitStrategy enum, which currently has exactly these TWO members -- the requirements doc
- * describes six splitting strategies, but only fixed-length and LLM-semantic are implemented
- * (parent/child is orthogonal: it is its own switch, applied on top of whichever strategy runs).
+ * index_config.split_strategy: the splitter the indexing pipeline routes to (M14 contract
+ * section 4). Five strategies exist server-side, one per TextSplitter STRATEGY_CODE:
+ * `separator` cuts on a literal or regex block delimiter, `heading` cuts on a Markdown heading
+ * depth, `page` keeps one chunk per source page. Parent/child is orthogonal: it is its own
+ * switch, applied on top of whichever strategy runs.
  *
  * `llm_semantic` requires a configured chat model; saving it without one is rejected server-side
  * with INVALID_PARAM ("the LLM semantic split strategy requires a configured chat model").
  */
-export type SplitStrategy = 'fixed_length' | 'llm_semantic';
+export type SplitStrategy = 'fixed_length' | 'llm_semantic' | 'separator' | 'heading' | 'page';
 
 /** M2-CONTRACTS.md section 1.4: parent/child two-level chunking switch and lengths. */
 export interface ParentChildConfig {
@@ -123,6 +124,27 @@ export interface ChatAggregationConfig {
 }
 
 /**
+ * M14 contract section 3.1: one metadata_rules entry (server MetadataRule). `constant` stamps a
+ * fixed value on every chunk, `regex` captures the first group of a pattern out of the chunk text,
+ * `keyword_match` records which words of a vocabulary the chunk contains. key must match
+ * ^[a-z][a-z0-9_]{1,31}$; value belongs to `constant`, pattern to `regex`, keywords to
+ * `keyword_match` -- the other two stay absent per type.
+ */
+export type MetadataRuleType = 'constant' | 'regex' | 'keyword_match';
+
+/** One operator declared metadata extraction rule of index_config.metadata_rules. */
+export interface MetadataRule {
+  key: string;
+  type: MetadataRuleType;
+  /** `constant` only: the fixed value stamped on every chunk. */
+  value?: string;
+  /** `regex` only: pattern source, at most 64 chars server-side. */
+  pattern?: string;
+  /** `keyword_match` only: vocabulary, at most 50 words of at most 32 chars each. */
+  keywords?: string[];
+}
+
+/**
  * t_kb_knowledge_base.index_config JSON (M1-CONTRACTS.md section 2). Field names verified against
  * the server's KbIndexConfig (2026-07-27).
  */
@@ -133,6 +155,30 @@ export interface IndexConfig {
    * rejected with INVALID_PARAM rather than silently ignored.
    */
   split_strategy?: SplitStrategy;
+  /**
+   * M14 contract section 4: block delimiter of the `separator` strategy. null/absent lets the
+   * strategy fall back to its own default; ignored by every other strategy.
+   */
+  split_separator?: string;
+  /** M14 contract section 4: whether split_separator is a regular expression (`separator` strategy). */
+  split_separator_is_regex?: boolean;
+  /**
+   * M14 contract section 4: Markdown heading depth of the `heading` strategy. 0/absent lets the
+   * strategy fall back to its own default depth; ignored by every other strategy.
+   */
+  split_heading_level?: number;
+  /**
+   * M14 contract section 3.1: operator declared metadata extraction rules, at most 10. Empty/absent
+   * = current behaviour (no operator metadata stamped). Participates in the chunk fingerprint, so
+   * editing marks the affected documents config_stale.
+   */
+  metadata_rules?: MetadataRule[];
+  /**
+   * M14 contract section 6.2: turns on the multimodal vector route for this KB. Default false so
+   * shipping the feature changes nothing. Participates in the chunk fingerprint, so flipping marks
+   * the affected documents config_stale.
+   */
+  multimodal_enabled?: boolean;
   /** Embedding model the current index was built with; server-assigned, never sent back on a PUT. */
   embedding_model?: string;
   chunk_max_tokens: number;
@@ -335,6 +381,11 @@ export interface MetadataFilter {
   msg_time_from?: number;
   /** epoch millis, inclusive upper bound. */
   msg_time_to?: number;
+  /**
+   * M14 contract section 3.3: equality predicates on operator extracted metadata, keyed by the raw
+   * rule key (each key must match ^[a-z][a-z0-9_]{1,31}$, else the search is rejected INVALID_PARAM).
+   */
+  custom?: Record<string, string>;
 }
 
 /**
@@ -461,8 +512,21 @@ export interface RetrievalNode {
   preview_url: string | null;
 }
 
+/**
+ * M14 contract section 5: rerank ordering mode. `semantic` is the pre-M14 behaviour (order by the
+ * rerank model score alone); `hybrid` blends the rerank score with the fusion score by
+ * rerank_w_semantic. Default `semantic` when absent.
+ */
+export type RerankMode = 'semantic' | 'hybrid';
+
 export interface SearchRequest {
   query: string;
+  /**
+   * M14 contract section 7: base64 encoded images attached to the query for image-to-image /
+   * multimodal recall. Absent/empty = text-only search (pre-M14 behaviour). Bounded and validated
+   * server-side by the image gate; images that cannot be embedded are dropped with a degraded marker.
+   */
+  images?: string[];
   recall_top_k: number;
   top_n: number;
   /** 0.01-1.0, omit/null = no filtering (M2-CONTRACTS.md section 1.3). */
@@ -470,6 +534,13 @@ export interface SearchRequest {
   fusion?: FusionConfig;
   /** Default true when a rerank model is configured (M2-CONTRACTS.md section 1.5). */
   rerank_enabled?: boolean;
+  /** M14 contract section 5: rerank ordering mode, default `semantic`. */
+  rerank_mode?: RerankMode;
+  /**
+   * M14 contract section 5: semantic weight of the `hybrid` rerank mode, within [0,1] (the fusion
+   * weight is its complement). Only meaningful when rerank_mode = 'hybrid'.
+   */
+  rerank_w_semantic?: number;
   /** Default false (M2-CONTRACTS.md section 1.5). */
   rewrite_enabled?: boolean;
   messages?: ChatMessage[];
@@ -536,6 +607,15 @@ export interface ModelStatus {
   vision_configured: boolean;
   vision_provider: string | null;
   vision_model: string | null;
+  /**
+   * M14 contract section 6.2: whether a multimodal embedding provider is configured. When false the
+   * console greys out the KB-level "多模态整页索引" switch (the switch still stores, but indexing is
+   * skipped, the same zero-key tolerance the text vector route has). Optional so pre-M14 fixtures
+   * still type-check; the server always emits it.
+   */
+  multimodal_configured?: boolean;
+  multimodal_provider?: string | null;
+  multimodal_model?: string | null;
 }
 
 /** View model assembled from the flat ModelStatus fields, one per model capability. */
@@ -1901,4 +1981,110 @@ export interface RegisterWebSourceRequest {
   /** Defaults to true server-side when omitted. */
   sync_enabled?: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// External data source connector (M14 contract section 2.3): S3/OSS compatible
+// object store, scanned into the knowledge base as documents.
+// ---------------------------------------------------------------------------
+
+/**
+ * ExtSourceResponse.last_sync_status (M14 contract section 2.3): outcome of the last whole-source
+ * sync pass. PARTIAL means the scan ran but at least one object failed/was skipped; the per-object
+ * detail lives on the item rows. null before the first sync.
+ */
+export type ExtSourceSyncStatus = 'SUCCESS' | 'PARTIAL' | 'FAILED';
+
+/**
+ * ExtSourceItemResponse.last_status (M14 contract section 2.3): per-object outcome of the last
+ * sync visit. UNCHANGED (etag identical) and SKIPPED (bound document in the recycle bin) are
+ * deliberate non-writes, not failures. null before the first visit.
+ */
+export type ExtSourceItemStatus = 'SUCCESS' | 'UNCHANGED' | 'SKIPPED' | 'FAILED';
+
+/**
+ * t_kb_ext_source row (M14 contract section 2.3): one registered object-store source and the
+ * outcome of its last sync pass. secret_key is always the fixed mask on the way out; the update
+ * endpoint treats a blank secret as "keep the stored one" so this view round-trips through an edit
+ * form without destroying the credential. Binding is weak -- removing the source never touches the
+ * documents it fed.
+ */
+export interface ExtSource {
+  source_id: string;
+  kb_id: string;
+  /** Connector type routing key, `s3` in this milestone. */
+  source_type: string;
+  name: string;
+  endpoint: string;
+  region: string | null;
+  bucket: string;
+  prefix: string | null;
+  access_key: string;
+  /** Fixed mask ("******"), never the stored value. */
+  secret_key: string;
+  sync_enabled: boolean;
+  last_sync_status: ExtSourceSyncStatus | null;
+  last_sync_at: string | null;
+  last_error: string | null;
+  created_at: string;
+}
+
+/** t_kb_ext_source_item row (M14 contract section 2.3): per-object sync outcome of one source. */
+export interface ExtSourceItem {
+  object_key: string;
+  /** Change marker of the last ingested body; null before the first ingest. */
+  etag: string | null;
+  /** Document the object feeds; null until the first successful ingest. */
+  doc_id: string | null;
+  last_status: ExtSourceItemStatus | null;
+  last_error: string | null;
+  last_sync_at: string | null;
+  created_at: string;
+}
+
+/** POST /api/v1/kb/{kbId}/ext-sources request body (M14 contract section 2.3). */
+export interface RegisterExtSourceRequest {
+  /** Connector type routing key, `s3` in this milestone. */
+  source_type: string;
+  name: string;
+  endpoint: string;
+  region?: string;
+  bucket: string;
+  prefix?: string;
+  access_key: string;
+  secret_key: string;
+  /** Defaults to true server-side when omitted. */
+  sync_enabled?: boolean;
+}
+
+/**
+ * PUT /api/v1/ext-sources/{sourceId} request body (M14 contract section 2.3): edits connection
+ * details. No source_type -- the connector type is fixed at registration. A blank/absent secret_key
+ * keeps the stored one; sync_enabled absent keeps current.
+ */
+export interface UpdateExtSourceRequest {
+  name: string;
+  endpoint: string;
+  region?: string;
+  bucket: string;
+  prefix?: string;
+  access_key: string;
+  secret_key?: string;
+  sync_enabled?: boolean;
+}
+
+/**
+ * POST /api/v1/ext-sources/{sourceId}/sync response (M14 contract section 2.3): the scan runs off
+ * the request thread, so this only acknowledges acceptance -- the outcome lands on the source and
+ * item rows, watched by re-listing.
+ */
+export interface ExtSourceSyncAccepted {
+  accepted: boolean;
+}
+
+/** POST /api/v1/ext-sources/{sourceId}/test response (M14 contract section 2.3): connection probe. */
+export interface ExtSourceTestResult {
+  up: boolean;
+  detail: string;
+}
+
 

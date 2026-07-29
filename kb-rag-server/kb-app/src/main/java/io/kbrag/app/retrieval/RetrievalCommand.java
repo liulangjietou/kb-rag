@@ -27,6 +27,15 @@ public class RetrievalCommand {
     /** User query, mandatory. */
     private final String query;
 
+    /**
+     * Images attached to the query, base64 encoded, the M14 contract section 7.
+     *
+     * <p>Left for the retrieval service to dispatch: when the searched base can embed them they steer the
+     * multimodal route directly (image to image), otherwise they are transcribed into the query by the
+     * vision fallback. Either way the count and size are bounded by the one image validation gate.
+     */
+    private final List<String> images;
+
     /** Candidates recalled per route. */
     private final Integer recallTopK;
 
@@ -47,6 +56,12 @@ public class RetrievalCommand {
 
     /** Rerank switch. */
     private final Boolean rerankEnabled;
+
+    /** Rerank ordering mode literal, {@code null} keeps the resolved default, the M14 contract section 5. */
+    private final String rerankMode;
+
+    /** Semantic weight of the {@code hybrid} rerank mode, {@code null} keeps the resolved default. */
+    private final Double rerankWSemantic;
 
     /** Query rewrite switch. */
     private final Boolean rewriteEnabled;

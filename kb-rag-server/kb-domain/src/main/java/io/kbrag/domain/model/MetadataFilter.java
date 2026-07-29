@@ -4,8 +4,10 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.ToString;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.collections4.MapUtils;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Optional narrowing predicate supplied by the caller.
@@ -38,6 +40,13 @@ public class MetadataFilter {
     private final Long msgTimeTo;
 
     /**
+     * Equality predicates on operator extracted metadata, the M14 contract section 3.3, keyed by the
+     * raw rule key and combined with AND semantics. A {@code keyword_match} key matches when the
+     * stored array contains the value.
+     */
+    private final Map<String, String> custom;
+
+    /**
      * Tells whether this filter carries at least one predicate.
      *
      * @return {@code true} when the filter narrows the candidate set
@@ -47,7 +56,8 @@ public class MetadataFilter {
                 && isBlank(sessionId)
                 && isBlank(sender)
                 && msgTimeFrom == null
-                && msgTimeTo == null;
+                && msgTimeTo == null
+                && MapUtils.isEmpty(custom);
     }
 
     private boolean isBlank(String value) {

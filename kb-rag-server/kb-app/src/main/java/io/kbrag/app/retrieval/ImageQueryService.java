@@ -4,6 +4,7 @@ import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.enums.DegradedReason;
+import io.kbrag.domain.model.ImageInput;
 import io.kbrag.domain.port.VisionProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -109,6 +110,27 @@ public class ImageQueryService {
         log.info("image query enriched, images={}, queryLength={}, enrichedLength={}",
                 decoded.size(), text.length(), enriched.length());
         return new ImageQueryOutcome(enriched.toString(), List.of());
+    }
+
+    /**
+     * Validates the attached images and decodes them into labelled inputs the multimodal route can embed,
+     * the M14 contract section 7.
+     *
+     * <p>Reuses the exact count and size gate of {@link #enrich(String, List)}, so the image constraints
+     * live in one place whether the pictures are transcribed into the query or embedded into the multimodal
+     * space. The media type is derived from the bytes for the same reason the vision fallback derives it -
+     * the wire format is bare base64 and a mislabelled data URL is rejected by some gateways.
+     *
+     * @param images base64 encoded images as the caller sent them, must not be empty
+     * @return decoded inputs in the order they arrived
+     */
+    public List<ImageInput> decodeForEmbedding(List<String> images) {
+        List<byte[]> decoded = decodeAll(images);
+        List<ImageInput> inputs = new ArrayList<>(decoded.size());
+        for (byte[] content : decoded) {
+            inputs.add(new ImageInput(content, mediaTypeOf(content)));
+        }
+        return inputs;
     }
 
     /**

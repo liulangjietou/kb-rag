@@ -4,6 +4,7 @@ import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.model.ModelStatus;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.EmbeddingProvider;
+import io.kbrag.domain.port.MultimodalEmbeddingProvider;
 import io.kbrag.domain.port.RerankProvider;
 import io.kbrag.domain.port.VisionProvider;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ public class ModelStatusService {
     private final RerankProvider rerankProvider;
     private final ChatProvider chatProvider;
     private final VisionProvider visionProvider;
+    private final MultimodalEmbeddingProvider multimodalEmbeddingProvider;
     private final KbProperties properties;
 
     /**
@@ -50,6 +52,9 @@ public class ModelStatusService {
                 .visionConfigured(visionProvider.isConfigured())
                 .visionProvider(visionProvider.providerName())
                 .visionModel(visionProvider.model())
+                .multimodalConfigured(multimodalEmbeddingProvider.isConfigured())
+                .multimodalProvider(multimodalEmbeddingProvider.providerName())
+                .multimodalModel(multimodalEmbeddingProvider.model())
                 .build();
     }
 }

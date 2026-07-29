@@ -46,6 +46,9 @@ public class AsyncConfig {
     /** Bean name of the pool a streamed chat generation runs on. */
     public static final String CHAT_STREAM_EXECUTOR = "chatStreamTaskExecutor";
 
+    /** Bean name of the pool an external source scan runs on. */
+    public static final String EXT_SOURCE_EXECUTOR = "extSourceTaskExecutor";
+
     private static final int CORE_POOL_SIZE = 2;
     private static final int MAX_POOL_SIZE = 4;
     private static final int QUEUE_CAPACITY = 200;
@@ -89,6 +92,16 @@ public class AsyncConfig {
     private static final int CHAT_STREAM_MAX_POOL_SIZE = 16;
     private static final int CHAT_STREAM_QUEUE_CAPACITY = 0;
     private static final String CHAT_STREAM_THREAD_PREFIX = "kb-chat-stream-";
+
+    /**
+     * One scan lists and fetches many objects over slow outbound I/O, so the pool is small and the
+     * queue generous: a registration or a manual sync only hands over a task and returns, and a
+     * burst of triggers should wait in line rather than fan out into parallel bucket scans.
+     */
+    private static final int EXT_SOURCE_CORE_POOL_SIZE = 1;
+    private static final int EXT_SOURCE_MAX_POOL_SIZE = 2;
+    private static final int EXT_SOURCE_QUEUE_CAPACITY = 100;
+    private static final String EXT_SOURCE_THREAD_PREFIX = "kb-ext-source-";
 
     /**
      * Creates the indexing executor.
@@ -194,6 +207,23 @@ public class AsyncConfig {
         executor.setMaxPoolSize(CHAT_STREAM_MAX_POOL_SIZE);
         executor.setQueueCapacity(CHAT_STREAM_QUEUE_CAPACITY);
         executor.setThreadNamePrefix(CHAT_STREAM_THREAD_PREFIX);
+        executor.setTaskDecorator(requestIdPropagatingDecorator());
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * Creates the executor an external source scan runs on.
+     *
+     * @return executor used by the asynchronous ext source sync
+     */
+    @Bean(EXT_SOURCE_EXECUTOR)
+    public Executor extSourceTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(EXT_SOURCE_CORE_POOL_SIZE);
+        executor.setMaxPoolSize(EXT_SOURCE_MAX_POOL_SIZE);
+        executor.setQueueCapacity(EXT_SOURCE_QUEUE_CAPACITY);
+        executor.setThreadNamePrefix(EXT_SOURCE_THREAD_PREFIX);
         executor.setTaskDecorator(requestIdPropagatingDecorator());
         executor.initialize();
         return executor;

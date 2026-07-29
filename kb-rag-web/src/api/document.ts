@@ -12,6 +12,8 @@ import type {
 export interface ListDocumentsParams {
   process_status?: ProcessStatus;
   page?: number;
+  /** 页大小，缺省由服务端取 DEFAULT_PAGE_SIZE（20）。 */
+  size?: number;
 }
 
 export function listDocuments(kbId: string, params?: ListDocumentsParams): Promise<PageResult<KbDocument>> {

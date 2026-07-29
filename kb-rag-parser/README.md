@@ -52,6 +52,7 @@ python3 -m venv .venv
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `SCANNED_PAGE_TEXT_THRESHOLD` | `20` | pdf 页面文本层短于此长度即判定为扫描页 |
+| `GARBLED_PAGE_VALID_CHAR_RATIO_PCT` | `50` | pdf 页面文本层可识别字符（ASCII/CJK/假名/中日标点等）占比低于此百分比即判定为乱码页，降级走扫描页路径 |
 | `MAX_IMAGES_PER_DOC` | `100` | 单文档图片数量上限 |
 | `MAX_IMAGE_BYTES` | `10485760`（10MB） | 单张图片字节数上限 |
 | `OCR_ENGINE` | `none` | `none`\|`paddle`；`paddle` 但未装 `requirements-ocr.txt` 时启动 fast-fail（M8-CONTRACTS.md §0.4） |
@@ -98,9 +99,10 @@ python3 -m venv .venv
 ```
 
 - `pages[].scanned`：该页文本去空白后长度 < `SCANNED_PAGE_TEXT_THRESHOLD`（默认 20，环境变量可配）即为 `true`，此时该页按 150dpi 渲染为 PNG（`kind=page_render`）替代文本层；只有 pdf 页面可能为扫描页，其余格式恒为 `false`。
+- **乱码页降级**（pdf）：文本层长度达标但可识别字符占比 < `GARBLED_PAGE_VALID_CHAR_RATIO_PCT`（默认 50%）时，判定该页文本层不可用——常见于内嵌子集字体的 ToUnicode CMap 缺失/损坏，中文被抽成错码位的"字形汤"（数字/英文往往仍正常）。此时该页 `text` 置空、`scanned=true`、产出 `page_render` 图片交 OCR/VLM 兜底，并在 `warnings[]` 记录一条说明，乱码文本不会进入切分与索引。
 - `pages[].ocr_source`（M8-CONTRACTS.md §0.4）：扫描页被本服务 PaddleOCR 兜底成功识别出文本时为 `"paddle"`（此时 `pages[].text` 已回填为 OCR 结果），否则为 `null`（`OCR_ENGINE=none` 默认状态 / 非扫描页 / OCR 超时或失败按页跳过）。kb-rag-server 对带 `ocr_source` 的页不应再走自己的 VLM。
 - `images[].kind`：`embedded`（pdf/docx 内嵌图片）或 `page_render`（扫描页整页渲染）；图片的 VLM 文本代理生成仍属于 kb-rag-server 侧职责（§4.2），本服务默认不做任何模型调用，`ocr_source` 是唯一例外且默认关闭。
-- `warnings[]`：单文档图片数上限（默认 100，`MAX_IMAGES_PER_DOC`）或单图字节上限（默认 10MB，`MAX_IMAGE_BYTES`）超限时，该图被跳过并在此记录说明，不影响文档其余部分正常返回。
+- `warnings[]`：单文档图片数上限（默认 100，`MAX_IMAGES_PER_DOC`）或单图字节上限（默认 10MB，`MAX_IMAGE_BYTES`）超限时，该图被跳过并在此记录说明，不影响文档其余部分正常返回；pdf 乱码页降级也在此记录（见上）。
 
 ### `POST /api/v1/parse/chat`
 
@@ -153,7 +155,7 @@ html（M8-CONTRACTS.md §0.2，DOM 选择器）：
 
 | file_ext | 解析库 | 说明 |
 |---|---|---|
-| `pdf` | PyMuPDF (`pymupdf`/`fitz`) | 按页抽取文本层；无文本层的页面（扫描页）渲染为 PNG，默认交由 kb-rag-server 侧 VLM OCR（M3-CONTRACTS.md §0），`OCR_ENGINE=paddle` 时本服务自行用 PaddleOCR 兜底出文本（M8-CONTRACTS.md §0.4） |
+| `pdf` | PyMuPDF (`pymupdf`/`fitz`) | 按页抽取文本层；无文本层的页面（扫描页）或文本层为乱码的页面（ToUnicode CMap 损坏）渲染为 PNG，默认交由 kb-rag-server 侧 VLM OCR（M3-CONTRACTS.md §0），`OCR_ENGINE=paddle` 时本服务自行用 PaddleOCR 兜底出文本（M8-CONTRACTS.md §0.4） |
 | `docx` | python-docx | 按文档原始顺序抽取段落+表格+内嵌图片；docx 无可靠页码概念，整篇作为 `page_no=1` 返回 |
 | `txt` | 标准库 | 尽力探测编码（utf-8-sig/utf-8/gbk），原样返回 |
 | `md` | 标准库 | 原样透传，本身已是 markdown |
@@ -223,6 +225,7 @@ M1：
 M3（M3-CONTRACTS.md §2）：
 
 - 扫描页判定为 `true` 时，不再额外抽取该页的内嵌图片（整页已作为一张 `page_render` 图片产出，避免同一内容被计两次）。
+- 契约只定义了"无文本层"的扫描页判定；实测存在文本层长度达标但内容为错码位乱码的 pdf（内嵌子集字体缺失/损坏 ToUnicode CMap），故补充可识别字符占比判定（`GARBLED_PAGE_VALID_CHAR_RATIO_PCT`，默认 50%），命中即置空该页文本并复用扫描页渲染路径，同时写一条 `warnings[]`——否则错码位文本会被直接切分入库，产生整段不可检索的垃圾分片。M3-CONTRACTS.md §2.1 已同步该判定。
 - docx 内嵌图片的占位符位置：能从段落 XML 匹配到 `r:embed` 引用时按原文顺序在该段落后插入占位符；无法匹配到具体段落的图片（如表格单元格、页眉页脚内的图片）统一追加在文档末尾，仍计入 `images[]`，不会丢失。
 - `memotrace` 映射档案与 WeChat 数值 `msg_type` 编码依据公开约定编写，尚未用真实 MemoTrace 导出样例校准（契约本身也标注了这一点）；`content` 列是唯一的硬性 fast-fail 条件，其余字段缺失时优雅降级而非整篇失败。
 

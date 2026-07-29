@@ -4,6 +4,7 @@ import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ChatProviderFactory;
 import io.kbrag.domain.port.EmbeddingProvider;
+import io.kbrag.domain.port.MultimodalEmbeddingProvider;
 import io.kbrag.domain.port.RerankProvider;
 import io.kbrag.domain.port.VisionProvider;
 import io.kbrag.infrastructure.provider.UnconfiguredChatProvider;
@@ -12,6 +13,8 @@ import io.kbrag.infrastructure.provider.UnconfiguredVisionProvider;
 import io.kbrag.infrastructure.provider.chat.DashScopeChatProvider;
 import io.kbrag.infrastructure.provider.chat.ModelChatProviderFactory;
 import io.kbrag.infrastructure.provider.embedding.DashScopeEmbeddingProvider;
+import io.kbrag.infrastructure.provider.embedding.DashScopeMultimodalEmbeddingProvider;
+import io.kbrag.infrastructure.provider.embedding.NoopMultimodalEmbeddingProvider;
 import io.kbrag.infrastructure.provider.rerank.DashScopeRerankProvider;
 import io.kbrag.infrastructure.provider.embedding.UnconfiguredEmbeddingProvider;
 import io.kbrag.infrastructure.provider.vision.DashScopeVisionProvider;
@@ -50,6 +53,30 @@ public class ModelProviderConfig {
         log.info("embedding provider configured, provider={}, model={}, dimension={}",
                 config.getProvider(), config.getModel(), config.getDimension());
         return new DashScopeEmbeddingProvider(properties);
+    }
+
+    /**
+     * Selects the multimodal embedding provider implementation, the M14 contract section 6.1.
+     *
+     * <p>Configured independently from the text embedding credential: the multimodal capability drives
+     * a separate {@code _mm} index and a separate retrieval route, so a deployment can enable it on top
+     * of an existing text embedding without either one implying the other. A blank key yields the noop
+     * implementation, which makes the index pipeline skip the multimodal vectors and retrieval skip the
+     * third route.
+     *
+     * @param properties bound configuration
+     * @return configured provider, or the noop placeholder in zero key mode
+     */
+    @Bean
+    public MultimodalEmbeddingProvider multimodalEmbeddingProvider(KbProperties properties) {
+        KbProperties.MultimodalEmbedding config = properties.getMultimodalEmbedding();
+        if (config.getApiKey() == null || config.getApiKey().isBlank()) {
+            log.info("multimodal embedding provider not configured, multimodal route disabled");
+            return new NoopMultimodalEmbeddingProvider();
+        }
+        log.info("multimodal embedding provider configured, provider={}, model={}, dimension={}",
+                config.getProvider(), config.getModel(), config.getDimension());
+        return new DashScopeMultimodalEmbeddingProvider(properties);
     }
 
     /**

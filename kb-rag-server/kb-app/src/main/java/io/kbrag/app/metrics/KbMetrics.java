@@ -1,5 +1,6 @@
 package io.kbrag.app.metrics;
 
+import io.kbrag.domain.enums.ExtSourceSyncStatus;
 import io.kbrag.domain.enums.InsightSource;
 import io.kbrag.domain.enums.TaskType;
 import io.kbrag.domain.enums.WebSourceFetchStatus;
@@ -42,6 +43,9 @@ public class KbMetrics {
 
     /** Counter of one web source sync outcome, the M12 four state result. */
     static final String WEBSOURCE_SYNC = "kb.websource.sync";
+
+    /** Counter of one external source sync pass outcome, the M14 three state result. */
+    static final String EXTSOURCE_SYNC = "kb.extsource.sync";
 
     static final String TAG_SOURCE = "source";
     static final String TAG_ZERO_HIT = "zero_hit";
@@ -121,6 +125,21 @@ public class KbMetrics {
             return;
         }
         Counter.builder(WEBSOURCE_SYNC)
+                .tag(TAG_STATUS, lower(status.name()))
+                .register(registry)
+                .increment();
+    }
+
+    /**
+     * Records the outcome of one external source sync pass.
+     *
+     * @param status three state outcome written onto the source row
+     */
+    public void recordExtSourceSync(ExtSourceSyncStatus status) {
+        if (status == null) {
+            return;
+        }
+        Counter.builder(EXTSOURCE_SYNC)
                 .tag(TAG_STATUS, lower(status.name()))
                 .register(registry)
                 .increment();

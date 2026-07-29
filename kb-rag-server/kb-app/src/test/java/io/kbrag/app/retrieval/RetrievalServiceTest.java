@@ -6,6 +6,7 @@ import io.kbrag.app.graph.GraphRouteOutcome;
 import io.kbrag.app.index.ActiveVersionResolver;
 import io.kbrag.app.index.EngineChunkCleaner;
 import io.kbrag.app.index.IndexAliasManager;
+import io.kbrag.app.index.MultimodalIndexManager;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
@@ -31,8 +32,10 @@ import io.kbrag.domain.model.RetrievalFilter;
 import io.kbrag.domain.model.ScoredChunk;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.FulltextStore;
+import io.kbrag.domain.port.MultimodalEmbeddingProvider;
 import io.kbrag.domain.port.ObjectStorage;
 import io.kbrag.domain.port.VectorStore;
+import io.kbrag.domain.port.VisionProvider;
 import io.kbrag.domain.service.CrossKbRrfFusion;
 import io.kbrag.domain.service.FusionRouter;
 import io.kbrag.domain.service.KbQuotaAllocator;
@@ -100,6 +103,9 @@ class RetrievalServiceTest {
     private KbProperties properties;
     private RetrievalIndexContextResolver indexContextResolver;
     private GraphRetrievalService graphRetrievalService;
+    private MultimodalIndexManager multimodalIndexManager;
+    private MultimodalEmbeddingProvider multimodalEmbeddingProvider;
+    private VisionProvider visionProvider;
     private RetrievalService retrievalService;
 
     @BeforeEach
@@ -117,6 +123,9 @@ class RetrievalServiceTest {
         engineChunkCleaner = mock(EngineChunkCleaner.class);
         objectStorage = mock(ObjectStorage.class);
         graphRetrievalService = mock(GraphRetrievalService.class);
+        multimodalIndexManager = mock(MultimodalIndexManager.class);
+        multimodalEmbeddingProvider = mock(MultimodalEmbeddingProvider.class);
+        visionProvider = mock(VisionProvider.class);
         properties = new KbProperties();
 
         when(knowledgeBaseService.require(KB_ID)).thenReturn(knowledgeBase(false));
@@ -145,12 +154,88 @@ class RetrievalServiceTest {
         retrievalService = new RetrievalService(knowledgeBaseService, chunkMapper,
                 fulltextStore, vectorStore, embeddingProvider, indexContextResolver,
                 new FusionRouter(List.of(new RrfFusion(), new WeightedFusion())),
-                new CrossKbRrfFusion(), new KbQuotaAllocator(), graphRetrievalService, routingService,
+                new CrossKbRrfFusion(), new KbQuotaAllocator(), graphRetrievalService,
+                multimodalIndexManager, multimodalEmbeddingProvider,
+                new ImageQueryService(visionProvider, properties), routingService,
                 rewriteService, rerankService, new ScoreThresholdPolicy(), new ParentChildMerger(),
                 new NearDuplicateWindowMerger(),
                 new DisabledChildVisibility(chunkMapper), new ParentTextRedactor(),
                 engineChunkCleaner, objectStorage,
                 new RetrievalDegradeMonitor(properties), properties);
+    }
+
+    @Test
+    void shouldEmbedTheAttachedImagesAndSteerTheMultimodalRouteWhenTheBaseCanSearchThem() {
+        givenDualRoute();
+        String mmAlias = "kb_test_mm";
+        when(multimodalIndexManager.multimodalAlias(eq(KB_ID), any())).thenReturn(mmAlias);
+        when(multimodalEmbeddingProvider.isConfigured()).thenReturn(true);
+        when(multimodalEmbeddingProvider.embedImages(anyList()))
+                .thenReturn(List.of(new float[]{0.5f, 0.6f}));
+        when(vectorStore.search(eq(mmAlias), any()))
+                .thenReturn(List.of(new ScoredChunk("ck_img", 0.88d, RetrievalSource.MM)));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_1", "first chunk", null), chunk("ck_2", "second chunk", null),
+                chunk("ck_img", "image chunk", null)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().images(List.of(image())).build());
+
+        // The pictures were embedded and steered the multimodal route directly; the text embedding of the
+        // query was never asked for, so this is image to image rather than a transcription.
+        verify(multimodalEmbeddingProvider).embedImages(anyList());
+        verify(multimodalEmbeddingProvider, never()).embedTexts(anyList());
+        verify(vectorStore).search(eq(mmAlias), any());
+        verify(visionProvider, never()).describeImage(any(), anyString());
+        assertTrue(outcome.getNodes().stream().anyMatch(node -> "ck_img".equals(node.getChunkId())));
+        assertTrue(outcome.getDegraded().isEmpty());
+    }
+
+    @Test
+    void shouldFallBackToTheVisionTranscriptionWhenNoBaseCanSearchTheImages() {
+        givenDualRoute();
+        // No multimodal alias, so the corpus cannot embed images and the vision fallback transcribes them.
+        when(multimodalIndexManager.multimodalAlias(eq(KB_ID), any())).thenReturn(null);
+        when(multimodalEmbeddingProvider.isConfigured()).thenReturn(true);
+        when(visionProvider.isConfigured()).thenReturn(true);
+        when(visionProvider.describeImage(any(), anyString())).thenReturn("一张发票的照片");
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_1", "first chunk", null), chunk("ck_2", "second chunk", null)));
+
+        retrievalService.search(KB_ID, command().images(List.of(image())).build());
+
+        // The image text was folded into the query the pipeline ran with, and the multimodal embedding was
+        // never asked for the pictures.
+        verify(multimodalEmbeddingProvider, never()).embedImages(anyList());
+        ArgumentCaptor<String> rewritten = ArgumentCaptor.forClass(String.class);
+        verify(rewriteService).rewrite(rewritten.capture(), any(), eq(false));
+        assertTrue(rewritten.getValue().contains("一张发票的照片"));
+    }
+
+    @Test
+    void shouldRejectAnImageSetThatBreaksTheCountLimitBeforeEmbedding() {
+        givenDualRoute();
+        when(multimodalIndexManager.multimodalAlias(eq(KB_ID), any())).thenReturn("kb_test_mm");
+        when(multimodalEmbeddingProvider.isConfigured()).thenReturn(true);
+        List<String> tooMany = List.of(image(), image(), image(), image());
+
+        // The image count and size gate is the same single point the vision transcription reuses, so an over
+        // counted set is rejected before any embedding call whichever route it was headed for.
+        assertThrows(BizException.class,
+                () -> retrievalService.search(KB_ID, command().images(tooMany).build()));
+        verify(multimodalEmbeddingProvider, never()).embedImages(anyList());
+    }
+
+    @Test
+    void shouldRejectAnImageOnlyCallThatCarriesNoWrittenQuery() {
+        givenDualRoute();
+        when(multimodalIndexManager.multimodalAlias(eq(KB_ID), any())).thenReturn("kb_test_mm");
+        when(multimodalEmbeddingProvider.isConfigured()).thenReturn(true);
+
+        // A written query stays mandatory: a blank query is never routed to the multimodal space, it takes the
+        // vision fallback whose gate rejects a call with nothing at all to search for.
+        assertThrows(BizException.class,
+                () -> retrievalService.search(KB_ID, command().query("  ").images(List.of(image())).build()));
+        verify(multimodalEmbeddingProvider, never()).embedImages(anyList());
     }
 
     @Test
@@ -984,6 +1069,15 @@ class RetrievalServiceTest {
 
     private RetrievalCommand.RetrievalCommandBuilder command() {
         return RetrievalCommand.builder().query("knowledge").messages(List.of());
+    }
+
+    /**
+     * Base64 of a small arbitrary payload; the bytes never reach a real provider in these tests.
+     *
+     * @return base64 image payload
+     */
+    private String image() {
+        return java.util.Base64.getEncoder().encodeToString(new byte[]{1, 2, 3, 4});
     }
 
     private KnowledgeBase knowledgeBase(boolean parentChild) {

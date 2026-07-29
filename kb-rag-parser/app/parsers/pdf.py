@@ -22,6 +22,38 @@ logger = logging.getLogger(__name__)
 # page renders; kept as a constant to avoid repeating the literal.
 _PAGE_RENDER_MEDIA_TYPE = "image/png"
 
+# Unicode ranges whose characters count as "recognizable" when deciding
+# whether an extracted text layer is garbled (see _is_garbled_text).
+# Covers ASCII, general punctuation, CJK punctuation, kana, CJK
+# ideographs (base + extension A), and half/fullwidth forms.
+_RECOGNIZABLE_CHAR_RANGES: Tuple[Tuple[int, int], ...] = (
+    (0x0020, 0x007E),  # ASCII printable
+    (0x2000, 0x206F),  # general punctuation (dashes, quotes, ellipsis)
+    (0x3000, 0x303F),  # CJK symbols and punctuation
+    (0x3040, 0x30FF),  # hiragana + katakana
+    (0x3400, 0x4DBF),  # CJK unified ideographs extension A
+    (0x4E00, 0x9FFF),  # CJK unified ideographs
+    (0xFF00, 0xFFEF),  # halfwidth/fullwidth forms
+)
+
+
+def _is_garbled_text(text: str) -> bool:
+    """Heuristic for a broken text layer: a PDF whose embedded subset font
+    lacks a usable ToUnicode CMap extracts as wrong-codepoint "glyph soup"
+    (e.g. CJK content surfacing as Myanmar/box-drawing glyphs while ASCII
+    digits survive). Such a page has plenty of characters, so the
+    scanned-page length threshold never catches it; instead, the page is
+    declared garbled when the share of characters inside recognizable
+    Unicode ranges falls below GARBLED_PAGE_VALID_CHAR_RATIO_PCT."""
+    meaningful = [char for char in text if not char.isspace()]
+    if not meaningful:
+        return False
+    recognizable = sum(
+        1 for char in meaningful if any(low <= ord(char) <= high for low, high in _RECOGNIZABLE_CHAR_RANGES)
+    )
+    # Integer comparison of recognizable/len(meaningful) < pct/100.
+    return recognizable * 100 < config.GARBLED_PAGE_VALID_CHAR_RATIO_PCT * len(meaningful)
+
 
 class PdfParser(BaseParser):
     """Extracts per-page plain text, embedded images, and scanned-page
@@ -38,6 +70,11 @@ class PdfParser(BaseParser):
     A scanned page's embedded images are not separately extracted: the
     whole page is already captured as one page_render image, so extracting
     its raw embedded images too would just double-count the same content.
+
+    A page whose text layer extracts as garbled glyph soup (broken/missing
+    ToUnicode CMap, see _is_garbled_text) is downgraded to the same
+    scanned-page path: its unusable text is dropped, the page is rendered,
+    and a warning is recorded.
 
     M8 (M8-CONTRACTS.md §0.4) adds an optional local OCR fallback: when
     OCR_ENGINE=paddle is configured (and the optional paddleocr dependency
@@ -65,10 +102,26 @@ class PdfParser(BaseParser):
             collector = ImageAssetCollector()
             pages: List[PageContent] = []
             markdown_parts: List[str] = []
+            page_warnings: List[str] = []
             for page_index in range(document.page_count):
                 page = document.load_page(page_index)
                 text = page.get_text()
                 page_no = page_index + 1
+                if len(text.strip()) >= SCANNED_PAGE_TEXT_THRESHOLD and _is_garbled_text(text):
+                    # Wrong-codepoint glyph soup must never reach chunking/
+                    # indexing; blank it so this page is handled exactly
+                    # like a scanned one below (page_render + OCR/VLM
+                    # becomes its only text source).
+                    logger.info(
+                        "pdf page text garbled, falling back to page render, pageNo=%d, filename=%s",
+                        page_no,
+                        filename,
+                    )
+                    page_warnings.append(
+                        f"page {page_no} text layer is garbled (likely a missing/broken ToUnicode CMap in an "
+                        "embedded font); fell back to page render"
+                    )
+                    text = ""
                 scanned = len(text.strip()) < SCANNED_PAGE_TEXT_THRESHOLD
                 ocr_source: Optional[str] = None
 
@@ -90,7 +143,7 @@ class PdfParser(BaseParser):
                 markdown="\n\n".join(markdown_parts),
                 pages=pages,
                 images=collector.images,
-                warnings=collector.warnings,
+                warnings=collector.warnings + page_warnings,
             )
         except Exception as exc:
             logger.error(

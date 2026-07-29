@@ -24,9 +24,10 @@ import type { Dayjs } from 'dayjs';
 import { search } from '../../api/search';
 import { listKnowledgeBases } from '../../api/kb';
 import { submitRetrievalFeedback, type RetrievalVerdict } from '../../api/retrievalFeedback';
-import type { FusionMode, KnowledgeBase, MetadataFilter, SearchRequest, SearchResponse } from '../../api/types';
+import type { FusionMode, KnowledgeBase, MetadataFilter, RerankMode, SearchRequest, SearchResponse } from '../../api/types';
 import { useModelStatus } from '../../context/ModelStatusContext';
 import { GRAPH_FUSION_MUTEX_HINT, describeDegradedReason, describeThresholdApplied } from '../../utils/statusMeta';
+import ImagePicker, { toImagesPayload, type PickedImage } from '../../components/ImagePicker';
 import AppliedInfoBar from './components/AppliedInfoBar';
 import CollectToEvalModal from './components/CollectToEvalModal';
 import RetrievalNodeCard from './components/RetrievalNodeCard';
@@ -36,6 +37,8 @@ const DEFAULT_TOP_N = 5;
 const DEFAULT_RRF_K = 60;
 const DEFAULT_W_VEC = 0.5;
 const DEFAULT_SCORE_THRESHOLD = 0.5;
+// M14 contract section 5: rerank_w_semantic defaults to 0.7 (semantic-leaning) when hybrid is picked.
+const DEFAULT_RERANK_W_SEMANTIC = 0.7;
 
 interface SearchFormValues {
   kb_id: string;
@@ -50,6 +53,8 @@ interface SearchFormValues {
   rrf_k: number;
   // 重排
   rerank_enabled: boolean;
+  rerank_mode: RerankMode;
+  rerank_w_semantic: number;
   // 过滤
   threshold_enabled: boolean;
   score_threshold: number;
@@ -92,10 +97,14 @@ export default function SearchPage() {
   /** 好/坏 verdict per chunk_id for the current result set; cleared on every new search. */
   const [feedbackByChunkId, setFeedbackByChunkId] = useState<Record<string, RetrievalVerdict>>({});
   const [collectModalOpen, setCollectModalOpen] = useState(false);
+  // F6 image-query picks kept as data URLs for preview; stripped to bare base64 at submit time.
+  const [queryImages, setQueryImages] = useState<PickedImage[]>([]);
   const { modelStatus } = useModelStatus();
   const [form] = Form.useForm<SearchFormValues>();
   const fusionMode = Form.useWatch('fusion_mode', form) ?? 'rrf';
   const thresholdEnabled = Form.useWatch('threshold_enabled', form) ?? false;
+  const rerankEnabled = Form.useWatch('rerank_enabled', form) ?? false;
+  const rerankMode = Form.useWatch('rerank_mode', form) ?? 'semantic';
   const selectedKbId = Form.useWatch('kb_id', form);
 
   const rewriteAvailable = modelStatus?.chat_configured ?? false;
@@ -133,6 +142,13 @@ export default function SearchPage() {
         top_n: values.top_n,
         rewrite_enabled: rewriteAvailable ? values.rewrite_enabled : false,
         rerank_enabled: rerankAvailable ? values.rerank_enabled : false,
+        // F4 (M14 contract section 5): rerank_mode/w_semantic only bite when rerank actually runs, so
+        // they are omitted otherwise -- the request keeps its pre-M14 shape and defaults to semantic.
+        rerank_mode: rerankAvailable && values.rerank_enabled ? values.rerank_mode : undefined,
+        rerank_w_semantic:
+          rerankAvailable && values.rerank_enabled && values.rerank_mode === 'hybrid'
+            ? values.rerank_w_semantic
+            : undefined,
         score_threshold: values.threshold_enabled ? values.score_threshold : null,
         fusion: {
           mode: values.fusion_mode,
@@ -140,6 +156,8 @@ export default function SearchPage() {
           rrf_k: values.fusion_mode === 'rrf' ? values.rrf_k : undefined,
         },
         metadata_filter: buildMetadataFilter(values),
+        // F6 (M14 contract section 7): bare base64, no data: prefix; server is the size/count authority.
+        images: toImagesPayload(queryImages),
       };
       const res = await search(values.kb_id, payload);
       setResult(res);
@@ -195,6 +213,8 @@ export default function SearchPage() {
             w_vec: DEFAULT_W_VEC,
             rrf_k: DEFAULT_RRF_K,
             rerank_enabled: true,
+            rerank_mode: 'semantic',
+            rerank_w_semantic: DEFAULT_RERANK_W_SEMANTIC,
             threshold_enabled: false,
             score_threshold: DEFAULT_SCORE_THRESHOLD,
           }}
@@ -207,6 +227,12 @@ export default function SearchPage() {
           </Form.Item>
           <Form.Item name="query" label="检索内容" rules={[{ required: true, message: '请输入检索内容' }]}>
             <Input.TextArea placeholder="输入需要检索的问题或关键词" rows={3} />
+          </Form.Item>
+          <Form.Item
+            label="以图搜图（可选）"
+            tooltip="附带图片查询：知识库开启多模态时图片直接进入多模态空间检索，否则回落 VLM 转写为文本后检索；检索内容仍必填"
+          >
+            <ImagePicker value={queryImages} onChange={setQueryImages} />
           </Form.Item>
 
           <Collapse
@@ -280,7 +306,7 @@ export default function SearchPage() {
                 key: 'rerank',
                 label: '重排',
                 children: (
-                  <Space direction="vertical">
+                  <Space direction="vertical" style={{ width: '100%' }}>
                     <Form.Item
                       name="rerank_enabled"
                       label="启用重排序"
@@ -292,6 +318,37 @@ export default function SearchPage() {
                     </Form.Item>
                     {!rerankAvailable && (
                       <Typography.Text type="secondary">未配置重排模型（rerank），重排序不可用</Typography.Text>
+                    )}
+                    {rerankAvailable && rerankEnabled && (
+                      <>
+                        <Form.Item
+                          name="rerank_mode"
+                          label="重排模式"
+                          tooltip="hybrid 将语义重排分与归一化 BM25 分线性加权，仅影响排序；semantic 为纯语义重排"
+                        >
+                          <Radio.Group
+                            optionType="button"
+                            options={[
+                              { label: '语义（semantic）', value: 'semantic' },
+                              { label: '混合（hybrid）', value: 'hybrid' },
+                            ]}
+                          />
+                        </Form.Item>
+                        {rerankMode === 'hybrid' && (
+                          <>
+                            <Form.Item
+                              name="rerank_w_semantic"
+                              label="语义分权重 w_semantic（BM25 权重 = 1 - w_semantic）"
+                              tooltip="排序分 = w × 语义重排分 + (1 - w) × 归一化 BM25 分，min-max 在本次候选集内归一化"
+                            >
+                              <Slider min={0} max={1} step={0.01} marks={{ 0: '0', 0.7: '0.7', 1: '1' }} />
+                            </Form.Item>
+                            <Typography.Text type="secondary">
+                              阈值过滤仍作用于纯语义重排分，hybrid 只改变排序，不影响 score_threshold 的绝对语义
+                            </Typography.Text>
+                          </>
+                        )}
+                      </>
                     )}
                   </Space>
                 ),

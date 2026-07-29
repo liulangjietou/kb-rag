@@ -11,6 +11,8 @@ import type {
   DocumentVersionStatus,
   EmbeddingStatus,
   EvalMode,
+  ExtSourceItemStatus,
+  ExtSourceSyncStatus,
   FeedbackStatus,
   FeedbackVerdict,
   FusionMode,
@@ -99,13 +101,16 @@ export const FUSION_MODE_META: Record<FusionMode, { color: string; label: string
 export const GRAPH_FUSION_MUTEX_HINT = '开启图路的知识库库内融合强制为 RRF';
 
 /**
- * index_config.split_strategy picker meta. Only these two strategies exist server-side
- * (SplitStrategy enum); parent/child chunking is not one of them -- it is an orthogonal switch
- * layered on top of whichever strategy runs.
+ * index_config.split_strategy picker meta (M14 contract section 4). Five strategies exist
+ * server-side; parent/child chunking is NOT one of them -- it is an orthogonal switch layered on
+ * top of whichever strategy runs.
  */
 export const SPLIT_STRATEGY_META: Record<SplitStrategy, TagMeta> = {
   fixed_length: { color: 'default', label: '定长切分' },
   llm_semantic: { color: 'purple', label: 'LLM 语义切分' },
+  separator: { color: 'blue', label: '分隔符切分' },
+  heading: { color: 'geekblue', label: '标题层级切分' },
+  page: { color: 'cyan', label: '按页切分' },
 };
 
 /** Shown wherever 「LLM 语义切分」 has to be greyed out for want of a chat model. */
@@ -206,6 +211,27 @@ export const SEARCH_INSIGHT_SOURCE_META: Record<SearchInsightSource, TagMeta> = 
  * are deliberate non-writes, not failures, hence the neutral colors.
  */
 export const WEB_SOURCE_STATUS_META: Record<WebSourceFetchStatus, TagMeta> = {
+  SUCCESS: { color: 'success', label: '已入库' },
+  UNCHANGED: { color: 'default', label: '内容未变' },
+  SKIPPED: { color: 'warning', label: '已跳过' },
+  FAILED: { color: 'error', label: '失败' },
+};
+
+/**
+ * ExtSource.last_sync_status Tag meta (M14 contract section 2.3): outcome of the last whole-source
+ * sync pass. PARTIAL means the scan ran but some objects failed/were skipped (see the item rows).
+ */
+export const EXT_SOURCE_SYNC_STATUS_META: Record<ExtSourceSyncStatus, TagMeta> = {
+  SUCCESS: { color: 'success', label: '同步成功' },
+  PARTIAL: { color: 'warning', label: '部分成功' },
+  FAILED: { color: 'error', label: '同步失败' },
+};
+
+/**
+ * ExtSourceItem.last_status Tag meta (M14 contract section 2.3): per-object outcome. UNCHANGED
+ * (etag identical) and SKIPPED (bound document in the recycle bin) are deliberate non-writes.
+ */
+export const EXT_SOURCE_ITEM_STATUS_META: Record<ExtSourceItemStatus, TagMeta> = {
   SUCCESS: { color: 'success', label: '已入库' },
   UNCHANGED: { color: 'default', label: '内容未变' },
   SKIPPED: { color: 'warning', label: '已跳过' },
@@ -334,6 +360,17 @@ export const DEGRADED_REASON_LABELS: Record<string, string> = {
    * for every image -- all images are dropped and retrieval falls back to text-only on `query`.
    */
   image_understanding_unavailable: '图片理解不可用，已忽略图片仅文本检索',
+  /**
+   * M14 contract section 6.3: the kb has multimodal_enabled=true but fusion_mode is `weighted`;
+   * RRF is the only mode that can merge a route without a comparable absolute score, so the
+   * multimodal route is skipped rather than folded in on an incompatible scale.
+   */
+  mm_route_skipped: '多模态路检索在加权融合下不生效，已跳过该路',
+  /**
+   * M14 contract section 6.3: the kb has multimodal_enabled=true but embedding the query into the
+   * multimodal space failed/timed out -- that route is skipped, the other routes proceed.
+   */
+  mm_route_unavailable: '多模态检索不可用，已降级为其余路检索',
 };
 
 export function describeDegradedReason(reason: string): string {

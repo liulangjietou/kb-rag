@@ -2,6 +2,7 @@ package io.kbrag.app.retrieval;
 
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.enums.FusionMode;
+import io.kbrag.domain.enums.RerankMode;
 import io.kbrag.domain.model.FusionParams;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import lombok.Getter;
@@ -36,16 +37,25 @@ public final class RetrievalSettings {
     /** {@code true} when the rerank stage should run. */
     private final boolean rerankEnabled;
 
+    /** Resolved rerank ordering mode, the M14 contract section 5. */
+    private final RerankMode rerankMode;
+
+    /** Resolved semantic weight of the {@code hybrid} rerank mode, within {@code [0,1]}. */
+    private final double rerankWSemantic;
+
     /** {@code true} when the query rewrite stage should run. */
     private final boolean rewriteEnabled;
 
     private RetrievalSettings(int recallTopK, int topN, Double scoreThreshold, FusionParams fusion,
-                              boolean rerankEnabled, boolean rewriteEnabled) {
+                              boolean rerankEnabled, RerankMode rerankMode, double rerankWSemantic,
+                              boolean rewriteEnabled) {
         this.recallTopK = recallTopK;
         this.topN = topN;
         this.scoreThreshold = scoreThreshold;
         this.fusion = fusion;
         this.rerankEnabled = rerankEnabled;
+        this.rerankMode = rerankMode;
+        this.rerankWSemantic = rerankWSemantic;
         this.rewriteEnabled = rewriteEnabled;
     }
 
@@ -75,11 +85,15 @@ public final class RetrievalSettings {
 
         boolean rerank = firstNonNull(command.getRerankEnabled(),
                 firstNonNull(kb.getRerankEnabled(), retrievalDefaults.isRerankEnabled()));
+        RerankMode rerankMode = RerankMode.from(firstNonNull(command.getRerankMode(),
+                firstNonNull(kb.getRerankMode(), retrievalDefaults.getRerankMode())));
+        double rerankWSemantic = clampWeight(firstNonNull(command.getRerankWSemantic(),
+                firstNonNull(kb.getRerankWSemantic(), retrievalDefaults.getRerankWSemantic())));
         boolean rewrite = firstNonNull(command.getRewriteEnabled(),
                 firstNonNull(kb.getRewriteEnabled(), retrievalDefaults.isRewriteEnabled()));
 
         return new RetrievalSettings(recallTopK, topN, threshold,
-                FusionParams.of(mode, rrfK, wVec), rerank, rewrite);
+                FusionParams.of(mode, rrfK, wVec), rerank, rerankMode, rerankWSemantic, rewrite);
     }
 
     /**
@@ -95,6 +109,17 @@ public final class RetrievalSettings {
             return fallback;
         }
         return Math.min(requested, maximum);
+    }
+
+    /**
+     * Confines a semantic weight to {@code [0,1]} so a knowledge base column edited out of range cannot
+     * push the hybrid blend outside the unit interval the request annotations already guarantee.
+     *
+     * @param weight resolved weight from any configuration layer
+     * @return weight within {@code [0,1]}
+     */
+    private static double clampWeight(double weight) {
+        return Math.max(0.0d, Math.min(1.0d, weight));
     }
 
     private static <T> T firstNonNull(T preferred, T fallback) {
