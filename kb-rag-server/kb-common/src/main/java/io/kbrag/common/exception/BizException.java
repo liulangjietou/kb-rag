@@ -58,4 +58,14 @@ public class BizException extends RuntimeException {
     public static BizException unauthorized(String message) {
         return new BizException(ErrorCode.UNAUTHORIZED, message);
     }
+
+    /**
+     * Shortcut for authorisation failures of an already authenticated caller.
+     *
+     * @param message safe message
+     * @return exception mapped to {@link ErrorCode#FORBIDDEN}
+     */
+    public static BizException forbidden(String message) {
+        return new BizException(ErrorCode.FORBIDDEN, message);
+    }
 }

@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.ApiKeyCreatedResponse;
 import io.kbrag.api.dto.ApiKeyResponse;
 import io.kbrag.api.dto.CreateApiKeyRequest;
@@ -9,6 +10,7 @@ import io.kbrag.app.openapi.ApiKeyService;
 import io.kbrag.app.openapi.ApiRateLimiter;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.ApiKey;
 import io.kbrag.domain.enums.ApiKeyStatus;
 import jakarta.validation.Valid;
@@ -36,6 +38,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/v1/api-keys")
 @RequiredArgsConstructor
+@RequiresPermission(PermissionCodes.APIKEY_MANAGE)
 public class ApiKeyController {
 
     private final ApiKeyService apiKeyService;

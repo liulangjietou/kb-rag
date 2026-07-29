@@ -1,6 +1,7 @@
 package io.kbrag.api.config;
 
 import io.kbrag.api.filter.AuthInterceptor;
+import io.kbrag.api.filter.PermissionInterceptor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
@@ -26,6 +27,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
     private static final String INTERNAL_PATTERN = "/internal/**";
     private static final List<String> PUBLIC_PATHS = List.of(
             "/api/v1/auth/login",
+            // Tells the login page whether to offer the single sign-on tab. It has to be answerable before
+            // anybody is authenticated, and it discloses one boolean about the deployment's own wiring.
+            "/api/v1/auth/sso-available",
             "/actuator/**",
             // The open API has its own authentication chain (ApiKeyAuthFilter): an API key is not a console
             // session, and letting the console interceptor see these paths would reject every external call
@@ -42,6 +46,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
     private static final long CORS_MAX_AGE_SECONDS = 3600L;
 
     private final AuthInterceptor authInterceptor;
+    private final PermissionInterceptor permissionInterceptor;
 
     /**
      * Console origins allowed to call the management API.
@@ -58,6 +63,11 @@ public class WebMvcConfig implements WebMvcConfigurer {
         // The internal pattern is registered and then excluded rather than simply left out, so the
         // exemption is a visible decision in this list instead of an accident of the include pattern.
         registry.addInterceptor(authInterceptor)
+                .addPathPatterns(API_PATTERN, INTERNAL_PATTERN)
+                .excludePathPatterns(PUBLIC_PATHS);
+        // Order matters and is given by the registration order: the permission check reads the caller the
+        // authentication interceptor binds, so it has to come second and cover the same paths.
+        registry.addInterceptor(permissionInterceptor)
                 .addPathPatterns(API_PATTERN, INTERNAL_PATTERN)
                 .excludePathPatterns(PUBLIC_PATHS);
     }

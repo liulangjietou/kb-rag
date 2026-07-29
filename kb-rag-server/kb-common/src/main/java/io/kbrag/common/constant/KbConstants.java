@@ -76,6 +76,12 @@ public final class KbConstants {
     /** Business id prefix of a registered external data source row. */
     public static final String EXT_SOURCE_ID_PREFIX = "exts";
 
+    /** Business id prefix of a console user account. */
+    public static final String USER_ID_PREFIX = "usr";
+
+    /** Business id prefix of a role. */
+    public static final String ROLE_ID_PREFIX = "role";
+
     /**
      * Fixed prefix of every open API key plaintext, requirement section 4.8 "kb-sk-{prefix}{random}".
      *

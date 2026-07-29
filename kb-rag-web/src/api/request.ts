@@ -7,6 +7,15 @@ import type { ApiResult } from './types';
 // legitimately returns 401 and should just surface as a form error).
 const LOGIN_PATH = '/auth/login';
 
+// Probes the login page fires on its own initiative, before anybody asked for anything. A red toast
+// here would blame the visitor for a capability check they never requested; the caller degrades
+// gracefully instead.
+const SILENT_PATHS = ['/auth/sso-available'];
+
+function isSilent(url: string | undefined): boolean {
+  return SILENT_PATHS.some((path) => url?.includes(path) ?? false);
+}
+
 const client = axios.create({
   baseURL: '/api/v1',
   timeout: 30_000,
@@ -37,7 +46,9 @@ client.interceptors.response.use(
 
     const backendMessage = error.response?.data?.message || error.message || '网络请求失败';
     const suffix = requestId ? ` (request_id: ${requestId})` : '';
-    message.error(`${backendMessage}${suffix}`);
+    if (!isSilent(error.config?.url)) {
+      message.error(`${backendMessage}${suffix}`);
+    }
     return Promise.reject(error);
   },
 );
@@ -48,7 +59,9 @@ async function unwrap<T>(config: AxiosRequestConfig): Promise<T> {
   const body = response.data;
   if (body.code !== 'OK') {
     const suffix = body.request_id ? ` (request_id: ${body.request_id})` : '';
-    message.error(`${body.message}${suffix}`);
+    if (!isSilent(config.url)) {
+      message.error(`${body.message}${suffix}`);
+    }
     throw new Error(`${body.code}: ${body.message}`);
   }
   return body.data;

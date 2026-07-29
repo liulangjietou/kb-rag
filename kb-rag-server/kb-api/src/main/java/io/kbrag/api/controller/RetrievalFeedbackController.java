@@ -1,13 +1,17 @@
 package io.kbrag.api.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.ConvertFeedbackRequest;
 import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.RetrievalFeedbackRequest;
 import io.kbrag.api.dto.RetrievalFeedbackResponse;
+import io.kbrag.app.auth.AccessGuard;
+import io.kbrag.app.auth.KbScopeGuard;
 import io.kbrag.app.feedback.RetrievalFeedbackService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.RetrievalFeedback;
 import io.kbrag.domain.enums.FeedbackStatus;
 import io.kbrag.domain.enums.FeedbackVerdict;
@@ -27,6 +31,10 @@ import org.springframework.web.bind.annotation.RestController;
  * the behaviour is upgraded from "log and forget" to a persisted row the console can list, convert
  * into an evaluation case or dismiss.
  *
+ * <p>Submitting accepts either {@code search:debug} or {@code feedback:manage}, because the signal is
+ * produced on the debug page by whoever is tuning retrieval; triaging it afterwards is the narrower
+ * {@code feedback:manage} alone, since converting a signal writes an evaluation case.
+ *
  * @author owlzhangfq@gmail.com
  */
 @RestController
@@ -38,6 +46,7 @@ public class RetrievalFeedbackController {
     private static final int MAX_PAGE_SIZE = 200;
 
     private final RetrievalFeedbackService retrievalFeedbackService;
+    private final KbScopeGuard kbScopeGuard;
 
     /**
      * Records one feedback signal.
@@ -46,7 +55,9 @@ public class RetrievalFeedbackController {
      * @return persisted row, {@code status=NEW}
      */
     @PostMapping("/api/v1/retrieval-feedback")
+    @RequiresPermission({PermissionCodes.SEARCH_DEBUG, PermissionCodes.FEEDBACK_MANAGE})
     public Result<RetrievalFeedbackResponse> feedback(@Valid @RequestBody RetrievalFeedbackRequest request) {
+        AccessGuard.requireKbAccess(request.kbId());
         FeedbackVerdict verdict = FeedbackVerdict.from(request.verdict());
         if (verdict == null) {
             throw BizException.invalidParam("verdict 仅支持 GOOD 或 BAD");
@@ -67,12 +78,14 @@ public class RetrievalFeedbackController {
      * @return paged rows
      */
     @GetMapping("/api/v1/kb/{kbId}/retrieval-feedback")
+    @RequiresPermission(PermissionCodes.FEEDBACK_MANAGE)
     public Result<PageResponse<RetrievalFeedbackResponse>> list(
             @PathVariable String kbId,
             @RequestParam(required = false) String verdict,
             @RequestParam(required = false) String status,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
+        AccessGuard.requireKbAccess(kbId);
         IPage<RetrievalFeedback> paged = retrievalFeedbackService.list(kbId,
                 parseVerdict(verdict), parseStatus(status), normalizePage(page), normalizeSize(size));
         return Result.success(PageResponse.from(paged, RetrievalFeedbackResponse::from));
@@ -86,8 +99,13 @@ public class RetrievalFeedbackController {
      * @return the same row, {@code status=CONVERTED} with the case id filled in
      */
     @PostMapping("/api/v1/retrieval-feedback/{feedbackId}/convert")
+    @RequiresPermission(PermissionCodes.FEEDBACK_MANAGE)
     public Result<RetrievalFeedbackResponse> convert(@PathVariable String feedbackId,
                                                      @Valid @RequestBody ConvertFeedbackRequest request) {
+        // Both ends are checked: the signal's own knowledge base and the data set it is about to be
+        // written into, which may well belong to another one.
+        kbScopeGuard.requireFeedbackAccess(feedbackId);
+        kbScopeGuard.requireDatasetAccess(request.datasetId());
         return Result.success(RetrievalFeedbackResponse.from(
                 retrievalFeedbackService.convert(feedbackId, request.datasetId())));
     }
@@ -99,7 +117,9 @@ public class RetrievalFeedbackController {
      * @return the same row, {@code status=DISMISSED}
      */
     @PostMapping("/api/v1/retrieval-feedback/{feedbackId}/dismiss")
+    @RequiresPermission(PermissionCodes.FEEDBACK_MANAGE)
     public Result<RetrievalFeedbackResponse> dismiss(@PathVariable String feedbackId) {
+        kbScopeGuard.requireFeedbackAccess(feedbackId);
         return Result.success(RetrievalFeedbackResponse.from(
                 retrievalFeedbackService.dismiss(feedbackId)));
     }

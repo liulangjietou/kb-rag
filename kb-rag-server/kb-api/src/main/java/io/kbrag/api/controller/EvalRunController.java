@@ -1,15 +1,18 @@
 package io.kbrag.api.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.EvalRunCompareResponse;
 import io.kbrag.api.dto.EvalRunEstimateResponse;
 import io.kbrag.api.dto.EvalRunResponse;
 import io.kbrag.api.dto.EvalRunSubmitRequest;
 import io.kbrag.api.dto.EvalResultResponse;
 import io.kbrag.api.dto.PageResponse;
+import io.kbrag.app.auth.KbScopeGuard;
 import io.kbrag.app.eval.EvalRunService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.EvalResult;
 import io.kbrag.domain.entity.EvalRun;
 import jakarta.validation.Valid;
@@ -28,6 +31,10 @@ import java.util.List;
 /**
  * Evaluation run submission, report and comparison endpoints, requirement section 4.6.
  *
+ * <p>Submitting and estimating are granted by {@code eval:run} rather than by {@code eval:write}: a run
+ * spends model quota per case per configuration, so the account allowed to curate a data set is not
+ * automatically the one allowed to bill a full sweep of it.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
@@ -40,6 +47,7 @@ public class EvalRunController {
     private static final int MAX_PAGE_SIZE = 200;
 
     private final EvalRunService evalRunService;
+    private final KbScopeGuard kbScopeGuard;
 
     /**
      * Submits a configuration matrix, one run created per configuration.
@@ -49,8 +57,10 @@ public class EvalRunController {
      * @return created runs, in submission order
      */
     @PostMapping("/api/v1/eval-datasets/{datasetId}/runs")
+    @RequiresPermission(PermissionCodes.EVAL_RUN)
     public Result<List<EvalRunResponse>> submit(@PathVariable String datasetId,
                                                 @Valid @RequestBody EvalRunSubmitRequest request) {
+        kbScopeGuard.requireDatasetAccess(datasetId);
         List<EvalRun> runs = evalRunService.submit(datasetId, request.k(), request.toConfigs(),
                 request.judgeEnabled());
         return Result.success(runs.stream().map(EvalRunResponse::from).toList());
@@ -64,8 +74,10 @@ public class EvalRunController {
      * @return predicted call counts by capability
      */
     @PostMapping("/api/v1/eval-datasets/{datasetId}/runs/estimate")
+    @RequiresPermission(PermissionCodes.EVAL_RUN)
     public Result<EvalRunEstimateResponse> estimate(@PathVariable String datasetId,
                                                     @Valid @RequestBody EvalRunSubmitRequest request) {
+        kbScopeGuard.requireDatasetAccess(datasetId);
         return Result.success(EvalRunEstimateResponse.from(evalRunService.estimate(
                 datasetId, request.k(), request.toConfigs(), request.judgeEnabled())));
     }
@@ -79,10 +91,12 @@ public class EvalRunController {
      * @return paged runs
      */
     @GetMapping("/api/v1/eval-datasets/{datasetId}/runs")
+    @RequiresPermission(PermissionCodes.EVAL_READ)
     public Result<PageResponse<EvalRunResponse>> list(
             @PathVariable String datasetId,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
+        kbScopeGuard.requireDatasetAccess(datasetId);
         IPage<EvalRun> paged = evalRunService.listRuns(datasetId, normalizePage(page), normalizeSize(size));
         return Result.success(PageResponse.from(paged, EvalRunResponse::from));
     }
@@ -94,7 +108,9 @@ public class EvalRunController {
      * @return run detail including its metrics
      */
     @GetMapping("/api/v1/eval-runs/{runId}")
+    @RequiresPermission(PermissionCodes.EVAL_READ)
     public Result<EvalRunResponse> detail(@PathVariable String runId) {
+        kbScopeGuard.requireRunAccess(runId);
         return Result.success(EvalRunResponse.from(evalRunService.requireRun(runId)));
     }
 
@@ -108,11 +124,13 @@ public class EvalRunController {
      * @return paged results
      */
     @GetMapping("/api/v1/eval-runs/{runId}/results")
+    @RequiresPermission(PermissionCodes.EVAL_READ)
     public Result<PageResponse<EvalResultResponse>> results(
             @PathVariable String runId,
             @RequestParam(required = false) Boolean hit,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
+        kbScopeGuard.requireRunAccess(runId);
         IPage<EvalResult> paged = evalRunService.results(runId, hit, normalizePage(page), normalizeSize(size));
         return Result.success(PageResponse.from(paged, EvalResultResponse::from));
     }
@@ -124,12 +142,14 @@ public class EvalRunController {
      * @return comparison outcome, {@code comparable=false} with a reason when the corpus moved
      */
     @GetMapping("/api/v1/eval-runs/compare")
+    @RequiresPermission(PermissionCodes.EVAL_READ)
     public Result<EvalRunCompareResponse> compare(@RequestParam("run_ids") String runIds) {
         if (runIds == null || runIds.isBlank()) {
             throw BizException.invalidParam("run_ids must not be blank");
         }
         List<String> ids = Arrays.stream(runIds.split(",")).map(String::trim)
                 .filter(id -> !id.isEmpty()).toList();
+        ids.forEach(kbScopeGuard::requireRunAccess);
         return Result.success(EvalRunCompareResponse.from(evalRunService.compare(ids)));
     }
 

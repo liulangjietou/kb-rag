@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.AppResponse;
 import io.kbrag.api.dto.AppVersionConfigRequest;
 import io.kbrag.api.dto.AppVersionResponse;
@@ -13,6 +14,7 @@ import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.openapi.KnowledgeApiService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.App;
 import io.kbrag.domain.entity.AppVersion;
 import jakarta.validation.Valid;
@@ -35,6 +37,16 @@ import java.util.List;
 /**
  * Application management endpoints of the console, requirement section 4.7.
  *
+ * <p>An application is not owned by a knowledge base - its configuration names the bases it retrieves
+ * from - so authorisation here is the function level half only. The knowledge base level half is applied
+ * where the configuration is used, when a preview or a released call actually retrieves.
+ *
+ * <p>The preview accepts {@code app:read} or {@code search:debug}: it is how a configuration is judged
+ * before release, and the people who judge answers are not always the people who edit applications. Both
+ * preview transports check the caller against the knowledge bases the configuration names before handing
+ * the work over, because the streaming one leaves the request thread and takes the caller's identity with
+ * it no further.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
@@ -54,6 +66,7 @@ public class AppController {
      * @return created application
      */
     @PostMapping
+    @RequiresPermission(PermissionCodes.APP_WRITE)
     public Result<AppResponse> create(@Valid @RequestBody CreateAppRequest request) {
         App app = appService.create(request.name(), request.description());
         return Result.success(AppResponse.from(app, null));
@@ -65,6 +78,7 @@ public class AppController {
      * @return applications
      */
     @GetMapping
+    @RequiresPermission(PermissionCodes.APP_READ)
     public Result<List<AppResponse>> list() {
         List<AppResponse> items = appService.list().stream()
                 .map(app -> AppResponse.from(app, appVersionService.currentReleased(app.getAppId())))
@@ -79,6 +93,7 @@ public class AppController {
      * @return application
      */
     @GetMapping("/{appId}")
+    @RequiresPermission(PermissionCodes.APP_READ)
     public Result<AppResponse> detail(@PathVariable String appId) {
         App app = appService.require(appId);
         return Result.success(AppResponse.from(app, appVersionService.currentReleased(appId)));
@@ -92,6 +107,7 @@ public class AppController {
      * @return updated application
      */
     @PutMapping("/{appId}")
+    @RequiresPermission(PermissionCodes.APP_WRITE)
     public Result<AppResponse> update(@PathVariable String appId,
                                       @Valid @RequestBody UpdateAppRequest request) {
         App app = appService.update(appId, request.name(), request.description());
@@ -105,6 +121,7 @@ public class AppController {
      * @return empty success envelope
      */
     @DeleteMapping("/{appId}")
+    @RequiresPermission(PermissionCodes.APP_WRITE)
     public Result<Void> delete(@PathVariable String appId) {
         appService.delete(appId);
         return Result.success(null);
@@ -118,6 +135,7 @@ public class AppController {
      * @return created draft version
      */
     @PostMapping("/{appId}/versions")
+    @RequiresPermission(PermissionCodes.APP_WRITE)
     public Result<AppVersionResponse> createVersion(@PathVariable String appId,
                                                     @Valid @RequestBody AppVersionConfigRequest request) {
         appService.require(appId);
@@ -133,6 +151,7 @@ public class AppController {
      * @return versions
      */
     @GetMapping("/{appId}/versions")
+    @RequiresPermission(PermissionCodes.APP_READ)
     public Result<List<AppVersionResponse>> listVersions(@PathVariable String appId) {
         appService.require(appId);
         return Result.success(appVersionService.listByApp(appId).stream()
@@ -151,6 +170,7 @@ public class AppController {
      * @return generated answer with its references, or the event stream when {@code stream} is set
      */
     @PostMapping("/{appId}/chat-preview")
+    @RequiresPermission({PermissionCodes.APP_READ, PermissionCodes.SEARCH_DEBUG})
     public ResponseEntity<Result<KnowledgeChatResponse>> chatPreview(@PathVariable String appId,
                                                                      @Valid @RequestBody ChatPreviewRequest request) {
         // The streaming variant lives on its own mapping selected by the accept header: Spring picks the
@@ -161,6 +181,7 @@ public class AppController {
         if (request.isStream()) {
             throw BizException.invalidParam("stream=true requires the Accept: text/event-stream header");
         }
+        knowledgeApiService.requirePreviewKbAccess(appId, request.getAppVersionId());
         return ResponseEntity.ok(Result.success(KnowledgeChatResponse.from(knowledgeApiService.preview(
                 appId, request.getAppVersionId(), request.toCommand(), null))));
     }
@@ -176,8 +197,12 @@ public class AppController {
      * @return event stream of the generation
      */
     @PostMapping(value = "/{appId}/chat-preview", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @RequiresPermission({PermissionCodes.APP_READ, PermissionCodes.SEARCH_DEBUG})
     public SseEmitter chatPreviewStream(@PathVariable String appId,
                                         @Valid @RequestBody ChatPreviewRequest request) {
+        // Checked here and not inside the service: the generation runs on an executor that does not carry the
+        // authenticated user across, so this is the last thread on which the caller's scope is still known.
+        knowledgeApiService.requirePreviewKbAccess(appId, request.getAppVersionId());
         SseChatStreamListener listener = new SseChatStreamListener();
         knowledgeApiService.previewStreamAsync(appId, request.getAppVersionId(), request.toCommand(), listener);
         return listener.emitter();

@@ -208,6 +208,24 @@ public class BizIdGenerator {
         return generate(KbConstants.EXT_SOURCE_ID_PREFIX);
     }
 
+    /**
+     * Generates a console user id.
+     *
+     * @return prefixed identifier
+     */
+    public String userId() {
+        return generate(KbConstants.USER_ID_PREFIX);
+    }
+
+    /**
+     * Generates a role id.
+     *
+     * @return prefixed identifier
+     */
+    public String roleId() {
+        return generate(KbConstants.ROLE_ID_PREFIX);
+    }
+
     private String generate(String prefix) {
         String random = UUID.randomUUID().toString().replace("-", "").substring(0, RANDOM_LENGTH);
         return prefix + KbConstants.ID_SEPARATOR + random;

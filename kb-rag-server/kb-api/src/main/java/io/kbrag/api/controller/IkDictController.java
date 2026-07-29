@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.IkDictRequest;
 import io.kbrag.api.dto.IkDictResponse;
 import io.kbrag.api.dto.IkDictStatusRequest;
@@ -7,6 +8,7 @@ import io.kbrag.api.dto.PageResponse;
 import io.kbrag.app.dict.IkDictService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.enums.DictType;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/dict/ik")
 @RequiredArgsConstructor
+@RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
 public class IkDictController {
 
     private static final int DEFAULT_PAGE = 1;

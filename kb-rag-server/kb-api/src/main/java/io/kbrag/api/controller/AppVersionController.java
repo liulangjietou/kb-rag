@@ -1,11 +1,14 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.AppVersionResponse;
 import io.kbrag.api.dto.GateDatasetRequest;
 import io.kbrag.api.filter.AuthInterceptor;
 import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.appcenter.ReleaseGateService;
+import io.kbrag.app.auth.KbScopeGuard;
 import io.kbrag.common.api.Result;
+import io.kbrag.domain.constant.PermissionCodes;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +25,11 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Application version state machine endpoints of the console, requirement section 4.7.
  *
+ * <p>Editing a version is granted by {@code app:write} but releasing and rolling back are granted by the
+ * separate {@code app:release}: these two are the only calls that change what external callers get served,
+ * and a forced release additionally overrides a failing gate. Whoever prepares a configuration is
+ * therefore not automatically whoever puts it in front of users.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
@@ -32,6 +40,7 @@ public class AppVersionController {
 
     private final AppVersionService appVersionService;
     private final ReleaseGateService releaseGateService;
+    private final KbScopeGuard kbScopeGuard;
 
     /**
      * Loads one version with its gate outcome.
@@ -40,6 +49,7 @@ public class AppVersionController {
      * @return version
      */
     @GetMapping("/{appVersionId}")
+    @RequiresPermission(PermissionCodes.APP_READ)
     public Result<AppVersionResponse> detail(@PathVariable String appVersionId) {
         return Result.success(AppVersionResponse.from(appVersionService.require(appVersionId)));
     }
@@ -52,8 +62,14 @@ public class AppVersionController {
      * @return updated version
      */
     @PutMapping("/{appVersionId}/gate-dataset")
+    @RequiresPermission(PermissionCodes.APP_WRITE)
     public Result<AppVersionResponse> gateDataset(@PathVariable String appVersionId,
                                                  @Valid @RequestBody GateDatasetRequest request) {
+        // Binding reaches into an evaluation data set, so the caller has to be allowed the knowledge base
+        // that data set belongs to. Clearing names nothing and needs no such check.
+        if (request.datasetId() != null && !request.datasetId().isBlank()) {
+            kbScopeGuard.requireDatasetAccess(request.datasetId());
+        }
         return Result.success(AppVersionResponse.from(
                 appVersionService.setGateDataset(appVersionId, request.datasetId())));
     }
@@ -65,6 +81,7 @@ public class AppVersionController {
      * @return updated version
      */
     @PostMapping("/{appVersionId}/submit-test")
+    @RequiresPermission(PermissionCodes.APP_WRITE)
     public Result<AppVersionResponse> submitTest(@PathVariable String appVersionId) {
         return Result.success(AppVersionResponse.from(appVersionService.submitTest(appVersionId)));
     }
@@ -83,6 +100,7 @@ public class AppVersionController {
      * @return version state after this call
      */
     @PostMapping("/{appVersionId}/release")
+    @RequiresPermission(PermissionCodes.APP_RELEASE)
     public Result<AppVersionResponse> release(@PathVariable String appVersionId,
                                              @RequestParam(defaultValue = "false") boolean force,
                                              HttpServletRequest request) {
@@ -98,6 +116,7 @@ public class AppVersionController {
      * @return restored version
      */
     @PostMapping("/{appVersionId}/rollback")
+    @RequiresPermission(PermissionCodes.APP_RELEASE)
     public Result<AppVersionResponse> rollback(@PathVariable String appVersionId) {
         return Result.success(AppVersionResponse.from(appVersionService.rollback(appVersionId)));
     }

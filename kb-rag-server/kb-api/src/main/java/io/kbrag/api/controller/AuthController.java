@@ -4,12 +4,16 @@ import io.kbrag.api.dto.ChangePasswordRequest;
 import io.kbrag.api.dto.LoginRequest;
 import io.kbrag.api.dto.LoginResponse;
 import io.kbrag.api.dto.MeResponse;
+import io.kbrag.api.dto.SsoAvailabilityResponse;
 import io.kbrag.api.filter.AuthInterceptor;
+import io.kbrag.app.auth.AccessGuard;
 import io.kbrag.app.auth.AuthService;
 import io.kbrag.app.auth.LoginTicket;
 import io.kbrag.app.auth.TokenStore;
 import io.kbrag.common.api.Result;
+import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.AdminUser;
+import io.kbrag.domain.enums.LoginMode;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -45,8 +49,22 @@ public class AuthController {
      */
     @PostMapping("/login")
     public Result<LoginResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest servlet) {
-        LoginTicket ticket = authService.login(request.username(), request.password(), clientIp(servlet));
+        LoginTicket ticket = authService.login(request.username(), request.password(),
+                parseMode(request.mode()), clientIp(servlet));
         return Result.success(new LoginResponse(ticket.token(), ticket.mustChangePassword()));
+    }
+
+    /**
+     * Tells the login page whether the single sign-on tab is worth offering.
+     *
+     * <p>Unauthenticated on purpose: the page has to render before anybody has a session, and the answer
+     * is one boolean about how this deployment is wired, not about any account.
+     *
+     * @return availability of the directory entry point
+     */
+    @GetMapping("/sso-available")
+    public Result<SsoAvailabilityResponse> ssoAvailable() {
+        return Result.success(new SsoAvailabilityResponse(authService.singleSignOnAvailable()));
     }
 
     /**
@@ -64,7 +82,7 @@ public class AuthController {
     }
 
     /**
-     * Returns the authenticated account.
+     * Returns the authenticated account together with the permissions of the session.
      *
      * @param username authenticated user
      * @return account view
@@ -72,10 +90,7 @@ public class AuthController {
     @GetMapping("/me")
     public Result<MeResponse> me(@RequestAttribute(AuthInterceptor.ATTR_USERNAME) String username) {
         AdminUser user = authService.currentUser(username);
-        return Result.success(new MeResponse(
-                user.getUsername(),
-                user.mustChangePassword(),
-                user.getLastLoginAt() == null ? null : user.getLastLoginAt().toString()));
+        return Result.success(MeResponse.from(user, AccessGuard.currentUser()));
     }
 
     /**
@@ -102,5 +117,13 @@ public class AuthController {
             return forwarded.split(FORWARDED_SEPARATOR)[0].trim();
         }
         return servlet.getRemoteAddr();
+    }
+
+    private LoginMode parseMode(String mode) {
+        try {
+            return LoginMode.from(mode);
+        } catch (IllegalArgumentException e) {
+            throw BizException.invalidParam("mode 仅支持 LOCAL 或 SSO");
+        }
     }
 }

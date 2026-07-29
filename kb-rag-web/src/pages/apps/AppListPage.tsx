@@ -5,6 +5,8 @@ import { Button, Card, Col, Empty, Popconfirm, Row, Spin, Typography, message } 
 import { useNavigate } from 'react-router-dom';
 import { deleteApp, listApps } from '../../api/app';
 import type { KbApp } from '../../api/types';
+import { useAuth } from '../../auth/AuthContext';
+import { PERMISSIONS } from '../../auth/permissions';
 import CreateAppModal from './components/CreateAppModal';
 
 /** 应用中心顶级菜单落点：应用列表 + 新建（M4c-CONTRACTS.md section 4）. */
@@ -13,6 +15,9 @@ export default function AppListPage() {
   const [loading, setLoading] = useState(true);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const navigate = useNavigate();
+  const { can } = useAuth();
+  // app:read opens the list and the detail screens; creating or removing an application is app:write.
+  const canWrite = can(PERMISSIONS.APP_WRITE);
 
   const loadApps = useCallback(async () => {
     setLoading(true);
@@ -40,17 +45,25 @@ export default function AppListPage() {
         <Typography.Title level={4} style={{ margin: 0 }}>
           应用中心
         </Typography.Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
-          新建应用
-        </Button>
+        {canWrite && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+            新建应用
+          </Button>
+        )}
       </div>
 
       <Spin spinning={loading}>
         {!loading && apps.length === 0 ? (
-          <Empty description="还没有应用，点击右上角「新建应用」开始创建">
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
-              立即新建
-            </Button>
+          <Empty
+            description={
+              canWrite ? '还没有应用，点击右上角「新建应用」开始创建' : '还没有应用，如需创建请联系管理员'
+            }
+          >
+            {canWrite && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+                立即新建
+              </Button>
+            )}
           </Empty>
         ) : (
           <Row gutter={[16, 16]}>
@@ -64,21 +77,25 @@ export default function AppListPage() {
                     <span key="detail" onClick={() => navigate(`/apps/${app.app_id}`)}>
                       查看详情
                     </span>,
-                    <Popconfirm
-                      key="delete"
-                      title="确认删除该应用？"
-                      description="删除后其下全部版本与配置将一并清理，此操作不可恢复"
-                      okText="删除"
-                      okType="danger"
-                      cancelText="取消"
-                      onConfirm={(e) => {
-                        e?.stopPropagation();
-                        handleDelete(app.app_id);
-                      }}
-                      onCancel={(e) => e?.stopPropagation()}
-                    >
-                      <span onClick={(e) => e.stopPropagation()}>删除</span>
-                    </Popconfirm>,
+                    ...(canWrite
+                      ? [
+                          <Popconfirm
+                            key="delete"
+                            title="确认删除该应用？"
+                            description="删除后其下全部版本与配置将一并清理，此操作不可恢复"
+                            okText="删除"
+                            okType="danger"
+                            cancelText="取消"
+                            onConfirm={(e) => {
+                              e?.stopPropagation();
+                              handleDelete(app.app_id);
+                            }}
+                            onCancel={(e) => e?.stopPropagation()}
+                          >
+                            <span onClick={(e) => e.stopPropagation()}>删除</span>
+                          </Popconfirm>,
+                        ]
+                      : []),
                   ]}
                 >
                   <Typography.Paragraph ellipsis={{ rows: 2 }} type="secondary">

@@ -24,9 +24,17 @@ export interface PageResult<T> {
 // Auth
 // ---------------------------------------------------------------------------
 
+/**
+ * Which credential store verifies the login. `SSO` binds against the corporate directory, `LOCAL`
+ * against the password hash stored in t_kb_admin_user. Absent means LOCAL server-side; the login page
+ * sends it explicitly so the audit row records which door was used.
+ */
+export type LoginMode = 'LOCAL' | 'SSO';
+
 export interface LoginRequest {
   username: string;
   password: string;
+  mode?: LoginMode;
 }
 
 export interface LoginResponse {
@@ -34,15 +42,104 @@ export interface LoginResponse {
   must_change_password: boolean;
 }
 
+/** GET /auth/sso-available: whether this deployment has a directory configured at all. */
+export interface SsoAvailability {
+  sso_available: boolean;
+}
+
 export interface ChangePasswordRequest {
   old_password: string;
   new_password: string;
 }
 
+/** Where an account came from; LDAP accounts have no local password to rotate or reset. */
+export type UserSource = 'LOCAL' | 'LDAP';
+
+export type UserStatus = 'ENABLED' | 'DISABLED';
+
+/**
+ * GET /auth/me. Carries the flattened permission codes of the session so the console can hide what the
+ * caller cannot use. Hiding is presentation only -- every code is checked again server-side, so a stale
+ * or tampered copy of this payload buys nothing.
+ */
 export interface CurrentUser {
   username: string;
+  display_name: string | null;
+  source: UserSource | null;
   must_change_password: boolean;
   last_login_at: string | null;
+  roles: string[];
+  permissions: string[];
+  /** True when the account sees every knowledge base, present and future. */
+  kb_scope_all: boolean;
+  /** Knowledge bases in scope; meaningful only while kb_scope_all is false. */
+  kb_ids: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Users and roles (RBAC administration)
+// ---------------------------------------------------------------------------
+
+/** One row of GET /users. role_names is filled on the list, role_ids on the single-account read. */
+export interface UserSummary {
+  user_id: string;
+  username: string;
+  display_name: string | null;
+  email: string | null;
+  source: UserSource;
+  status: UserStatus;
+  must_change_password: boolean;
+  last_login_at: string | null;
+  created_at: string | null;
+  role_ids: string[] | null;
+  role_names: string[] | null;
+}
+
+export interface CreateUserRequest {
+  username: string;
+  display_name?: string;
+  email?: string;
+  password: string;
+  role_ids: string[];
+}
+
+export interface UpdateUserRequest {
+  display_name?: string;
+  email?: string;
+}
+
+/**
+ * A role and everything it grants: the function level permission codes plus the knowledge base data
+ * scope. kb_scope_all beats kb_ids -- when it is true the id list is not consulted at all.
+ */
+export interface RoleSummary {
+  role_id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  /** Built-in roles ship with the product; their code cannot be edited and they cannot be deleted. */
+  builtin: boolean;
+  kb_scope_all: boolean;
+  kb_ids: string[];
+  permission_codes: string[];
+}
+
+export interface SaveRoleRequest {
+  /** Ignored on update: a role's code is its stable identity in scripts and seeds. */
+  code?: string;
+  name: string;
+  description?: string;
+  kb_scope_all: boolean;
+  kb_ids: string[];
+  permission_codes: string[];
+}
+
+/** One entry of GET /roles/permissions, the catalogue the role editor renders grouped by module. */
+export interface PermissionCatalogueItem {
+  code: string;
+  name: string;
+  module: string;
+  module_name: string;
 }
 
 // ---------------------------------------------------------------------------

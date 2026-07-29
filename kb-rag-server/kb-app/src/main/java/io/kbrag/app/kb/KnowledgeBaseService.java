@@ -2,6 +2,8 @@ package io.kbrag.app.kb;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import io.kbrag.app.auth.AccessGuard;
+import io.kbrag.app.auth.RoleService;
 import io.kbrag.app.index.EngineChunkCleaner;
 import io.kbrag.app.index.IndexAliasManager;
 import io.kbrag.common.exception.BizException;
@@ -35,6 +37,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Knowledge base lifecycle and configuration.
@@ -72,6 +75,7 @@ public class KnowledgeBaseService {
     private final ChatProvider chatProvider;
     private final GraphFusionPolicy graphFusionPolicy;
     private final GraphStore graphStore;
+    private final RoleService roleService;
     private final KbProperties properties;
 
     /**
@@ -101,13 +105,29 @@ public class KnowledgeBaseService {
     }
 
     /**
-     * Lists every knowledge base, newest first.
+     * Lists the knowledge bases the caller may see, newest first.
      *
-     * @return knowledge bases
+     * <p>Trimmed here rather than in the controller because this listing feeds every knowledge base picker
+     * in the console. A caller whose roles name three bases must not be offered a fourth one in a dropdown
+     * only to be refused by {@link AccessGuard} after picking it.
+     *
+     * <p>A scope naming nothing yields an empty list, not every base: an operator who forgot to grant a
+     * scope should see a role that can do nothing, which is visible and fixable, rather than a role that
+     * quietly sees everything.
+     *
+     * @return knowledge bases inside the caller's data scope
      */
     public List<KnowledgeBase> list() {
-        return knowledgeBaseMapper.selectList(new LambdaQueryWrapper<KnowledgeBase>()
-                .orderByDesc(KnowledgeBase::getId));
+        LambdaQueryWrapper<KnowledgeBase> query = new LambdaQueryWrapper<KnowledgeBase>()
+                .orderByDesc(KnowledgeBase::getId);
+        if (!AccessGuard.unrestrictedKbScope()) {
+            Set<String> visible = AccessGuard.visibleKbIds();
+            if (visible.isEmpty()) {
+                return List.of();
+            }
+            query.in(KnowledgeBase::getKbId, visible);
+        }
+        return knowledgeBaseMapper.selectList(query);
     }
 
     /**
@@ -277,6 +297,9 @@ public class KnowledgeBaseService {
         // dropped their traceability edges; this clears whatever the graph still holds for the base - an
         // entity of a version the retention pass had already archived, for instance - in one predicate.
         graphStore.deleteKb(kbId);
+        // Role scopes name bases by business id, so a row surviving the deletion would keep a dead base in
+        // the role editor and, worse, would be re-created by the next save of that role.
+        roleService.detachKnowledgeBase(kbId);
         log.info("knowledge base deleted, kbId={}", kbId);
         // TODO(M4): schedule a CLEANUP task that drops the physical indices of this knowledge base.
     }

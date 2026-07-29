@@ -164,6 +164,19 @@ kb:
     max-failed-attempts: ${AUTH_MAX_FAILED_ATTEMPTS:5}
     lock-minutes: ${AUTH_LOCK_MINUTES:15}
     bootstrap-username: ${AUTH_BOOTSTRAP_USERNAME:admin}
+    ldap:
+      # Off by default: a deployment without a domain controller must still log in with local accounts,
+      # and the console only offers the single sign on tab when this says a directory exists.
+      enabled: ${AUTH_LDAP_ENABLED:false}
+      url: ${AUTH_LDAP_URL:}
+      # Appended to the typed login name to form the bind principal, e.g. @corp.example.com. Deployment
+      # knowledge, not something to make every person retype on every login.
+      domain-suffix: ${AUTH_LDAP_DOMAIN_SUFFIX:}
+      connect-timeout-ms: ${AUTH_LDAP_CONNECT_TIMEOUT_MS:3000}
+      read-timeout-ms: ${AUTH_LDAP_READ_TIMEOUT_MS:5000}
+      # Role a directory account is granted the first time it logs in. Read only on purpose: anything
+      # wider would hand write access to everyone who holds a domain account.
+      default-role-code: ${AUTH_LDAP_DEFAULT_ROLE_CODE:VIEWER}
   upload:
     max-file-size-mb: ${UPLOAD_MAX_FILE_SIZE_MB:100}
     allowed-extensions: ${UPLOAD_ALLOWED_EXTENSIONS:pdf,docx,txt,md,sql,xlsx,csv,html,png,jpg,jpeg,webp,bmp,gif}
