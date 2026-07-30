@@ -8,6 +8,7 @@ import type {
   DocumentBatchRequest,
   KnowledgeBase,
   RebuildRequest,
+  RebuildStatus,
   UpdateIndexConfigRequest,
 } from './types';
 
@@ -49,12 +50,21 @@ export function updateIndexConfig(
 
 /**
  * POST /api/v1/kb/{kbId}/rebuild (M2-CONTRACTS.md section 4). Body omitted/empty means
- * "all config_stale documents". Progress is not exposed via a dedicated task-status endpoint
- * anywhere in M1/M2-CONTRACTS.md, so the caller tracks completion by re-polling the existing
- * document list and watching config_stale flip back to false (see KbDetailPage).
+ * "all config_stale documents" —— 配置追平就该按整库来，传当前页的 doc_ids 会漏掉翻页外的
+ * 待重建文档。进度用 {@link getRebuildStatus} 轮询，不要在调用方记账。
  */
 export function rebuildKb(kbId: string, payload?: RebuildRequest): Promise<void> {
   return apiPost<void>(`/kb/${kbId}/rebuild`, payload);
+}
+
+/**
+ * GET /api/v1/kb/{kbId}/rebuild-status：整库的配置追平状态。
+ *
+ * 重建跑在服务端线程池里，比发起它的那个页面活得久：调用方离开详情页再回来、刷新、换个人打开，
+ * 都必须能看到同一份进度，所以状态只能问服务端，不能存在组件里。
+ */
+export function getRebuildStatus(kbId: string): Promise<RebuildStatus> {
+  return apiGet<RebuildStatus>(`/kb/${kbId}/rebuild-status`);
 }
 
 /**
