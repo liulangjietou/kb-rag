@@ -69,10 +69,11 @@ import WebSourcesTab from './components/WebSourcesTab';
 // state 里，操作员一离开详情页进度条就没了、完成提示再也不出现、按钮回到可点击态引来重复提交。
 const POLL_INTERVAL_MS = 3000;
 
-// 与 DocumentController 的 DEFAULT_PAGE_SIZE 对齐：首屏不传 size 时服务端就按 20 返回，
-// 前端跟着写 20 才不会出现"表格标了每页 10 条、实际拿回 20 条"的错位。
-const DEFAULT_DOC_PAGE_SIZE = 20;
-const DOC_PAGE_SIZE_OPTIONS = ['20', '50', '100'];
+// 前端始终在 loadDocuments 里显式带上 size，服务端不会回落到自己的默认值，所以这里的默认页大小
+// 可独立于 DocumentController 的 DEFAULT_PAGE_SIZE 设置；取 10 是控制台列表的默认观感，可选
+// 10/20/30/50 均在服务端 MAX_PAGE_SIZE(200) 之内。
+const DEFAULT_DOC_PAGE_SIZE = 10;
+const DOC_PAGE_SIZE_OPTIONS = ['10', '20', '30', '50'];
 
 export default function KbDetailPage() {
   const { kbId } = useParams<{ kbId: string }>();
