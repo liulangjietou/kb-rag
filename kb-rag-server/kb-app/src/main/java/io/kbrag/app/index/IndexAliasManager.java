@@ -4,9 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.kbrag.common.constant.KbConstants;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.IndexRegistry;
+import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.IndexRegistryStatus;
 import io.kbrag.domain.enums.VectorEngine;
 import io.kbrag.domain.mapper.IndexRegistryMapper;
+import io.kbrag.domain.mapper.KnowledgeBaseMapper;
 import io.kbrag.domain.model.ChunkRecord;
 import io.kbrag.domain.model.IndexSpec;
 import io.kbrag.domain.port.EmbeddingProvider;
@@ -44,6 +46,7 @@ public class IndexAliasManager {
     private final FulltextStore fulltextStore;
     private final VectorStore vectorStore;
     private final IndexRegistryMapper indexRegistryMapper;
+    private final KnowledgeBaseMapper knowledgeBaseMapper;
 
     /**
      * Resolves the write targets of a knowledge base for the current deployment shape.
@@ -58,8 +61,9 @@ public class IndexAliasManager {
                 ? indexNaming.embeddingSegment(embeddingProvider.model())
                 : KbConstants.EMBEDDING_SEGMENT_NONE;
 
-        String fulltextIndex = indexNaming.fulltextPhysicalName(kbId, engine, embeddingSegment);
-        String fulltextAlias = indexNaming.alias(kbId, VectorEngine.ES);
+        String tenantId = tenantOf(kbId);
+        String fulltextIndex = indexNaming.fulltextPhysicalName(tenantId, kbId, engine, embeddingSegment);
+        String fulltextAlias = indexNaming.alias(tenantId, kbId, VectorEngine.ES);
 
         List<IndexTarget> targets = new ArrayList<>(2);
         if (!embeddingConfigured) {
@@ -77,8 +81,8 @@ public class IndexAliasManager {
         targets.add(new IndexTarget(VectorEngine.ES, fulltextIndex, fulltextAlias,
                 KbConstants.EMBEDDING_SEGMENT_BM25, false, 0));
         targets.add(new IndexTarget(VectorEngine.QDRANT,
-                indexNaming.vectorPhysicalName(kbId, embeddingSegment),
-                indexNaming.alias(kbId, VectorEngine.QDRANT),
+                indexNaming.vectorPhysicalName(tenantId, kbId, embeddingSegment),
+                indexNaming.alias(tenantId, kbId, VectorEngine.QDRANT),
                 embeddingSegment,
                 true,
                 dimension));
@@ -92,7 +96,7 @@ public class IndexAliasManager {
      * @return Elasticsearch alias
      */
     public String fulltextAlias(String kbId) {
-        return indexNaming.alias(kbId, VectorEngine.ES);
+        return indexNaming.alias(tenantOf(kbId), kbId, VectorEngine.ES);
     }
 
     /**
@@ -105,7 +109,25 @@ public class IndexAliasManager {
         if (!embeddingProvider.isConfigured()) {
             return null;
         }
-        return indexNaming.alias(kbId, properties.getVector().resolved());
+        return indexNaming.alias(tenantOf(kbId), kbId, properties.getVector().resolved());
+    }
+
+    /**
+     * Owning tenant of a knowledge base, threaded into every name so a base outside the default
+     * tenant gets the tenant segment of the M16 naming scheme.
+     *
+     * <p>A base the fenced query cannot see - or a legacy id already deleted - yields {@code null},
+     * which the naming treats as the default tenant and therefore as the historical names.
+     *
+     * @param kbId knowledge base business id
+     * @return owning tenant business id, or {@code null} for the default tenant
+     */
+    private String tenantOf(String kbId) {
+        KnowledgeBase base = knowledgeBaseMapper.selectOne(new LambdaQueryWrapper<KnowledgeBase>()
+                .select(KnowledgeBase::getTenantId)
+                .eq(KnowledgeBase::getKbId, kbId)
+                .last("limit 1"));
+        return base == null ? null : base.getTenantId();
     }
 
     /**

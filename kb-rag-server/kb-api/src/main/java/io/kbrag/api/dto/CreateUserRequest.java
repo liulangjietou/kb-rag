@@ -18,6 +18,7 @@ import java.util.List;
  * @param email       contact address, optional
  * @param password    initial password
  * @param roleIds     roles granted right away, may be empty
+ * @param tenantId    owning tenant, only honoured for a caller holding {@code tenant:manage}
  *
  * @author owlzhangfq@gmail.com
  */
@@ -34,5 +35,8 @@ public record CreateUserRequest(
         @NotBlank(message = "must not be blank")
         @Size(min = 8, max = 64, message = "must be between 8 and 64 characters")
         String password,
-        @JsonProperty("role_ids") List<String> roleIds) {
+        @JsonProperty("role_ids") List<String> roleIds,
+        @JsonProperty("tenant_id")
+        @Size(max = 64, message = "must be at most 64 characters")
+        String tenantId) {
 }

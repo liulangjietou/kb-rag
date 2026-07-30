@@ -3,7 +3,9 @@
 // redirect read. Keeping it in one place is what makes "the menu shows exactly the screens this
 // account can open" true by construction instead of by two lists agreeing with each other.
 import {
+  ApartmentOutlined,
   AppstoreOutlined,
+  AuditOutlined,
   DatabaseOutlined,
   ExperimentOutlined,
   MessageOutlined,
@@ -45,6 +47,18 @@ export const NAV_ENTRIES: NavEntry[] = [
     icon: <SafetyCertificateOutlined />,
     label: '角色管理',
     anyOf: [PERMISSIONS.ROLE_MANAGE],
+  },
+  {
+    key: '/settings/tenants',
+    icon: <ApartmentOutlined />,
+    label: '租户管理',
+    anyOf: [PERMISSIONS.TENANT_MANAGE],
+  },
+  {
+    key: '/settings/operation-audits',
+    icon: <AuditOutlined />,
+    label: '操作审计',
+    anyOf: [PERMISSIONS.AUDIT_READ],
   },
   { key: '/settings', icon: <SettingOutlined />, label: '系统设置', anyOf: [PERMISSIONS.SYSTEM_CONFIG] },
 ];

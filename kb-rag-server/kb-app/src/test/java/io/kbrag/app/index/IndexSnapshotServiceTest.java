@@ -2,9 +2,11 @@ package io.kbrag.app.index;
 
 import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.domain.entity.IndexRegistry;
+import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.IndexRegistryStatus;
 import io.kbrag.domain.enums.VectorEngine;
 import io.kbrag.domain.mapper.IndexRegistryMapper;
+import io.kbrag.domain.mapper.KnowledgeBaseMapper;
 import io.kbrag.domain.model.AppIndexSnapshot;
 import io.kbrag.domain.port.FulltextStore;
 import io.kbrag.domain.port.VectorStore;
@@ -53,13 +55,15 @@ class IndexSnapshotServiceTest {
 
     @BeforeEach
     void setUp() {
-        MybatisLambdaCache.register(IndexRegistry.class);
+        MybatisLambdaCache.register(IndexRegistry.class, KnowledgeBase.class);
         indexAliasManager = mock(IndexAliasManager.class);
         fulltextStore = mock(FulltextStore.class);
         vectorStore = mock(VectorStore.class);
         indexRegistryMapper = mock(IndexRegistryMapper.class);
+        // The tenant lookup mock answers null, which the service reads as the default tenant, so
+        // every snapshot name asserted below keeps its pre-tenant shape.
         service = new IndexSnapshotService(indexAliasManager, new IndexNaming(), fulltextStore, vectorStore,
-                indexRegistryMapper);
+                indexRegistryMapper, mock(KnowledgeBaseMapper.class));
     }
 
     @Test

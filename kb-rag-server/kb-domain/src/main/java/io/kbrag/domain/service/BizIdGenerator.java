@@ -226,6 +226,24 @@ public class BizIdGenerator {
         return generate(KbConstants.ROLE_ID_PREFIX);
     }
 
+    /**
+     * Generates a tenant id.
+     *
+     * @return prefixed identifier
+     */
+    public String tenantId() {
+        return generate(KbConstants.TENANT_ID_PREFIX);
+    }
+
+    /**
+     * Generates an operation audit row id.
+     *
+     * @return prefixed identifier
+     */
+    public String operationAuditId() {
+        return generate(KbConstants.OPERATION_AUDIT_ID_PREFIX);
+    }
+
     private String generate(String prefix) {
         String random = UUID.randomUUID().toString().replace("-", "").substring(0, RANDOM_LENGTH);
         return prefix + KbConstants.ID_SEPARATOR + random;

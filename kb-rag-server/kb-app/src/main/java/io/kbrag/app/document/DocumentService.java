@@ -17,6 +17,7 @@ import io.kbrag.domain.enums.ProcessStatus;
 import io.kbrag.domain.enums.PublishStatus;
 import io.kbrag.domain.mapper.AnnotationMapper;
 import io.kbrag.domain.mapper.ChunkMapper;
+import io.kbrag.domain.mapper.DocAclMapper;
 import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.mapper.DocumentVersionMapper;
 import io.kbrag.domain.model.KbIndexConfig;
@@ -71,6 +72,7 @@ public class DocumentService {
     private final DocumentVersionMapper documentVersionMapper;
     private final ChunkMapper chunkMapper;
     private final AnnotationMapper annotationMapper;
+    private final DocAclMapper docAclMapper;
     private final ObjectStorage objectStorage;
     private final BizIdGenerator bizIdGenerator;
     private final UploadValidator uploadValidator;
@@ -414,6 +416,9 @@ public class DocumentService {
         // The audit trail goes with the document: an annotation of a document nobody can open is a review
         // item that can never be closed.
         annotationMapper.delete(new LambdaQueryWrapper<Annotation>().eq(Annotation::getDocId, docId));
+        // Document level grants make no sense without the document; a physical delete, since the grant
+        // table is rebuilt from scratch on every rebind anyway.
+        docAclMapper.deleteByDocumentId(docId);
         documentMapper.deleteById(document.getId());
         log.info("document deleted, docId={}, kbId={}", docId, document.getKbId());
     }

@@ -19,14 +19,19 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -40,6 +45,9 @@ import static org.mockito.Mockito.when;
  * three the asset is still stored, the status records what happened, and nothing is thrown at the pipeline.
  * A scanned page is the same case one level up: the page has no text layer, so a skipped vision call means the
  * rest of the document has to carry on without it.
+ *
+ * <p>The parallel describe stage is covered by what it must not break rather than by a stopwatch: rows land
+ * in reading order however the calls interleave, and a storage failure still reaches the pipeline unwrapped.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -249,6 +257,89 @@ class ImageAssetServiceTest {
         verify(visionProvider).describeImage(any(), anyString());
     }
 
+    @Test
+    void shouldIssueTheVisionCallsOfOneDocumentAtTheSameTime() throws Exception {
+        int images = 4;
+        properties.getImage().setDescribeConcurrency(images);
+        // Every call blocks until all of them have arrived, so this only completes if they overlap. Serial
+        // calls would time out on the latch instead, which is the regression this test exists to catch.
+        CountDownLatch arrived = new CountDownLatch(images);
+        when(visionProvider.isConfigured()).thenReturn(true);
+        when(visionProvider.describeImage(any(), anyString())).thenAnswer(invocation -> {
+            arrived.countDown();
+            assertTrue(arrived.await(5, TimeUnit.SECONDS), "vision calls were issued one after another");
+            return "a diagram";
+        });
+
+        List<ImageAsset> assets = service.materialize(document("pdf"), version(),
+                parsed(image("img_1", 1, "EMBEDDED"), image("img_2", 2, "EMBEDDED"),
+                        image("img_3", 3, "EMBEDDED"), image("img_4", 4, "EMBEDDED")),
+                new ArrayList<>());
+
+        assertEquals(images, assets.size());
+        assertTrue(assets.stream().allMatch(asset -> asset.getStatus() == ImageAssetStatus.DONE));
+    }
+
+    @Test
+    void shouldInsertTheRowsInReadingOrderWhateverOrderTheCallsFinishIn() {
+        properties.getImage().setDescribeConcurrency(4);
+        when(visionProvider.isConfigured()).thenReturn(true);
+        // The last image answers first and the first one last: the row order must come from the document,
+        // not from the provider, because findByVersion orders by the primary key and the placeholder
+        // resolver reads that back as the order the images appear in the markdown.
+        when(visionProvider.describeImage(any(), anyString())).thenAnswer(invocation -> {
+            byte[] content = invocation.getArgument(0);
+            Thread.sleep(60L / content[0]);
+            return "image " + content[0];
+        });
+        List<String> inserted = new CopyOnWriteArrayList<>();
+        when(imageAssetMapper.insert(any(ImageAsset.class))).thenAnswer(invocation -> {
+            inserted.add(invocation.<ImageAsset>getArgument(0).getSourceImageId());
+            return 1;
+        });
+
+        List<ImageAsset> assets = service.materialize(document("pdf"), version(),
+                parsed(ordered("img_1", 1), ordered("img_2", 2), ordered("img_3", 3)),
+                new ArrayList<>());
+
+        assertEquals(List.of("img_1", "img_2", "img_3"), inserted);
+        assertEquals(List.of("img_1", "img_2", "img_3"),
+                assets.stream().map(ImageAsset::getSourceImageId).toList());
+    }
+
+    @Test
+    void shouldReportAStorageFailureUnwrapped() {
+        properties.getImage().setDescribeConcurrency(4);
+        doThrow(new IllegalStateException("bucket unreachable"))
+                .when(objectStorage).put(anyString(), any(), anyLong(), anyString());
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class,
+                () -> service.materialize(document("pdf"), version(),
+                        parsed(image("img_1", 1, "EMBEDDED"), image("img_2", 2, "EMBEDDED")),
+                        new ArrayList<>()));
+
+        // Not a CompletionException: the pipeline records the reason it recorded before the calls became
+        // parallel, and nothing is inserted for a version whose images never reached storage.
+        assertEquals("bucket unreachable", failure.getMessage());
+        verify(imageAssetMapper, never()).insert(any(ImageAsset.class));
+    }
+
+    @Test
+    void shouldFallBackToSerialCallsWhenConcurrencyIsMisconfigured() {
+        properties.getImage().setDescribeConcurrency(0);
+        when(visionProvider.isConfigured()).thenReturn(true);
+        when(visionProvider.describeImage(any(), anyString())).thenReturn("a diagram");
+
+        List<ImageAsset> assets = service.materialize(document("pdf"), version(),
+                parsed(image("img_1", 1, "EMBEDDED"), image("img_2", 2, "EMBEDDED")),
+                new ArrayList<>());
+
+        // A zero or negative setting is clamped rather than refused: it must degrade to the pre-change
+        // behaviour, never to a document that stores no image at all.
+        assertEquals(2, assets.size());
+        verify(visionProvider, times(2)).describeImage(any(), anyString());
+    }
+
     private ImageAsset captureAsset() {
         ArgumentCaptor<ImageAsset> captor = ArgumentCaptor.forClass(ImageAsset.class);
         verify(imageAssetMapper).insert(captor.capture());
@@ -286,6 +377,24 @@ class ImageAssetServiceTest {
                 .kind(kind)
                 .mediaType("image/png")
                 .content(new byte[]{1, 2, 3, 4})
+                .build();
+    }
+
+    /**
+     * An image whose first content byte identifies it, so a stubbed vision call can answer per image and
+     * stagger its own latency.
+     *
+     * @param imageId source image identifier
+     * @param order   position in reading order, starting at one
+     * @return parser supplied image
+     */
+    private ParsedDocument.ParsedImage ordered(String imageId, int order) {
+        return ParsedDocument.ParsedImage.builder()
+                .imageId(imageId)
+                .pageNo(order)
+                .kind("EMBEDDED")
+                .mediaType("image/png")
+                .content(new byte[]{(byte) order})
                 .build();
     }
 

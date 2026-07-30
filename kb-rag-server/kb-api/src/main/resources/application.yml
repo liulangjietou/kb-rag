@@ -136,6 +136,10 @@ kb:
     standalone-extensions: ${IMAGE_STANDALONE_EXTENSIONS:png,jpg,jpeg,webp,bmp,gif}
     max-per-document: ${MAX_IMAGES_PER_DOC:100}
     max-image-size-mb: ${MAX_IMAGE_SIZE_MB:10}
+    # Vision calls in flight per document. One image is one round trip of up to vision.timeout-ms, so
+    # serial calls made a fully illustrated document occupy a pipeline slot for half an hour. Bounded by
+    # the provider rate limit, not by the machine: a throttled call becomes a failed proxy, not a retry.
+    describe-concurrency: ${IMAGE_DESCRIBE_CONCURRENCY:8}
   chat-import:
     default-mapping-profile: ${CHAT_MAPPING_PROFILE:memotrace}
     upload-token-ttl-minutes: ${CHAT_UPLOAD_TOKEN_TTL_MINUTES:30}
@@ -177,6 +181,41 @@ kb:
       # Role a directory account is granted the first time it logs in. Read only on purpose: anything
       # wider would hand write access to everyone who holds a domain account.
       default-role-code: ${AUTH_LDAP_DEFAULT_ROLE_CODE:VIEWER}
+      group-sync:
+        # When on, every single sign on login re-derives roles from directory groups; synchronised
+        # grants are replaced wholesale while manually granted roles stay untouched.
+        enabled: ${AUTH_LDAP_GROUP_SYNC_ENABLED:false}
+        # Entries groupDn=ROLE_CODE separated by semicolons; DNs compared ignoring case and whitespace.
+        role-mappings: ${AUTH_LDAP_GROUP_ROLE_MAPPINGS:}
+    oidc:
+      # The three browser redirect protocols are independent switches; the login page renders a
+      # button per provider that is both enabled and fully configured.
+      enabled: ${AUTH_OIDC_ENABLED:false}
+      # Every endpoint is taken from {issuer}/.well-known/openid-configuration.
+      issuer: ${AUTH_OIDC_ISSUER:}
+      client-id: ${AUTH_OIDC_CLIENT_ID:}
+      client-secret: ${AUTH_OIDC_CLIENT_SECRET:}
+      scopes: ${AUTH_OIDC_SCOPES:openid profile email}
+    saml:
+      enabled: ${AUTH_SAML_ENABLED:false}
+      idp-entity-id: ${AUTH_SAML_IDP_ENTITY_ID:}
+      idp-sso-url: ${AUTH_SAML_IDP_SSO_URL:}
+      # PEM certificate of the IdP, the single trust anchor of every assertion signature.
+      idp-certificate: ${AUTH_SAML_IDP_CERTIFICATE:}
+      sp-entity-id: ${AUTH_SAML_SP_ENTITY_ID:kb-rag}
+    cas:
+      enabled: ${AUTH_CAS_ENABLED:false}
+      # Base URL such as https://cas.corp.example.com/cas; validation goes to /p3/serviceValidate.
+      server-url: ${AUTH_CAS_SERVER_URL:}
+    sso:
+      # Console address the browser is redirected back to after a successful callback. Left blank,
+      # every redirect protocol counts as unconfigured even when enabled.
+      web-base-url: ${AUTH_SSO_WEB_BASE_URL:}
+  audit:
+    # Days an operation audit row stays queryable, aligned with the M6 API audit retention.
+    operation-retention-days: ${AUDIT_OPERATION_RETENTION_DAYS:180}
+    cleanup-batch-size: ${AUDIT_OPERATION_CLEANUP_BATCH_SIZE:5000}
+    cleanup-cron: ${AUDIT_OPERATION_CLEANUP_CRON:0 50 3 * * *}
   upload:
     max-file-size-mb: ${UPLOAD_MAX_FILE_SIZE_MB:100}
     allowed-extensions: ${UPLOAD_ALLOWED_EXTENSIONS:pdf,docx,txt,md,sql,xlsx,csv,html,png,jpg,jpeg,webp,bmp,gif}
@@ -241,10 +280,11 @@ kb:
     # Relationship hops a matched entity is expanded by; the relevance of a hit decays as 1/(1+hops).
     max-hops: ${GRAPH_MAX_HOPS:2}
     entity-match-limit: ${GRAPH_ENTITY_MATCH_LIMIT:10}
-    # One model call carries exactly one chunk; the batch is how many of those are submitted together,
-    # and the concurrency is how many run at a time inside a batch.
-    extract-batch-size: ${GRAPH_EXTRACT_BATCH_SIZE:10}
-    extract-concurrency: ${GRAPH_EXTRACT_CONCURRENCY:2}
+    # One model call carries exactly one chunk; the concurrency is how many of those are in flight inside
+    # one extraction task, and it is what decides how long a run takes. Graph writes are serialised on a
+    # single writer thread regardless, so raising this trades no correctness - only the provider's rate
+    # limit bounds it, multiplied by however many extraction tasks the indexing pool runs at once.
+    extract-concurrency: ${GRAPH_EXTRACT_CONCURRENCY:8}
     # Budget of one extraction answer. Deliberately not kb.chat.max-tokens: that one sizes a single line
     # query rewrite, and running out mid JSON makes the parser reject an answer that was in fact fine.
     extract-max-tokens: ${GRAPH_EXTRACT_MAX_TOKENS:2048}

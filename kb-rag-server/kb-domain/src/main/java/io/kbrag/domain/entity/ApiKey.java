@@ -34,6 +34,10 @@ public class ApiKey extends BaseEntity {
     @TableField("key_id")
     private String keyId;
 
+    /** Owning tenant business id, defaulted to the built in tenant by the V17 migration. */
+    @TableField("tenant_id")
+    private String tenantId;
+
     /** Display name of the caller this key was issued to. */
     @TableField("name")
     private String name;

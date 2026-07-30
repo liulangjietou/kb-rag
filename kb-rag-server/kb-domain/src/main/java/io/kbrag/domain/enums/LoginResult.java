@@ -22,6 +22,9 @@ public enum LoginResult {
     /** Credentials were correct but an operator suspended the account. */
     ACCOUNT_DISABLED,
 
+    /** Credentials were correct but the tenant of the account is disabled. */
+    TENANT_DISABLED,
+
     /** Directory rejected the bind: wrong domain password, or the domain account itself is locked. */
     DIRECTORY_REJECTED,
 

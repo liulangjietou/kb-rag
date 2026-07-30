@@ -28,6 +28,10 @@ public class App extends BaseEntity {
     @TableField("app_id")
     private String appId;
 
+    /** Owning tenant business id, defaulted to the built in tenant by the V17 migration. */
+    @TableField("tenant_id")
+    private String tenantId;
+
     /** Display name. */
     @TableField("name")
     private String name;

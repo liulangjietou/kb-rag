@@ -28,6 +28,8 @@
 - **乱码页判定**（后补，与代码一致）：文本层长度达标但可识别字符（ASCII/CJK/假名/中日标点等区段）占比 < `GARBLED_PAGE_VALID_CHAR_RATIO_PCT`%（默认 50，可环境变量覆盖）——典型为内嵌子集字体 ToUnicode CMap 缺失/损坏导致的错码位"字形汤"——该页降级走扫描页路径：乱码文本**置空不入库**，产出 `page_render` 图片交 OCR/VLM 兜底，并在 `data.warnings[]` 记录一条说明
 - 占位符格式固定 `[[IMAGE:{image_id}]]`，一行独占，便于 server 精确替换
 - 图片上限保护：单文档图片数上限（默认 100，`MAX_IMAGES_PER_DOC`）、单图字节上限（默认 10MB），超限跳过并在响应 `data.warnings[]` 中说明（不失败整篇）
+- **内嵌图片按对象去重**（后补，与代码一致）：pdf 的同一图片对象（xref）被多页绘制时，只产出**一条** `images[]` 记录与**一个**占位符，位置取其首次出现页，`page_no` 记该页。页眉页脚 logo 正是这种"一个对象画在每一页"的形态，按出现位置计数会让 247 页文档报出 493 张图——每张都要 base64 进响应、每张都要 server 逐个调 VLM 描述，且撑满图片上限后刷出几百条 warning。去重不算降级，不写 warnings。这也维持了"markdown 中占位符 id 唯一"这一 server 回填所依赖的不变量：同一 id 出现在 247 页会把该图的描述文本插进 247 处，污染每个分片
+- **超上限的扫描页不再渲染**（后补，与代码一致）：图片数已达上限且未配本地 OCR（`OCR_ENGINE=none`）时，该页跳过渲染——渲出的 PNG 无人可读（不进 `images[]`，也不产出文本）。`OCR_ENGINE=paddle` 时仍渲染，上限约束的是响应携带的图片数，不是本服务读取页面的能力
 
 ### 2.2 聊天记录解析（新端点）
 `POST /api/v1/parse/chat`：multipart `file` + form `file_ext`(csv|xlsx) + 可选 form `mapping_profile`(默认 `memotrace`)
@@ -56,7 +58,7 @@
 
 ### 3.2 图片资产管线（索引管线内新增阶段，位于 parse 之后、clean 之前）
 1. parser 返回的每张图片 → MinIO `kb/{kbId}/doc/{docId}/{versionId}/images/{image_id}.{ext}`，登记 `t_kb_image_asset`
-2. 逐图调 VisionProvider 生成文本代理（描述 + OCR 文本），落 `t_kb_image_asset.text_proxy`
+2. 调 VisionProvider 生成文本代理（描述 + OCR 文本），落 `t_kb_image_asset.text_proxy`；同一文档的多张图片**并发**调用（`IMAGE_DESCRIBE_CONCURRENCY`，默认 8），但资产行仍按图片在 markdown 中出现的顺序落库——详见 §7.6
 3. **文本代理插回原位**：把 markdown 中 `[[IMAGE:img_1]]` 替换为 `\n[图片内容] {text_proxy}\n`（占位符消失，图片语义参与后续统一切分——需求 §4.2 内嵌图片归属条款）
 4. 切分后，包含图片代理文本的 chunk 其 `metadata.image_urls` 记录对应图片的 object key 列表；`chunk_type` 仍为 `text`（内嵌图片不单独成片）
 5. **独立上传的图片文件**（文件本身即 png/jpg）：整篇只有一张图，文本代理前置拼接文件名作为上下文，单独成片且 `chunk_type=image`、`metadata.image_urls=[该图]`
@@ -168,3 +170,13 @@
 - `t_kb_image_asset` 的 `SKIPPED/FAILED` 行是补跑清单，但尚无补跑端点（配 Key 后重描述图片）
 - 知识库删除未清理 `t_kb_image_asset` 行与 MinIO 图片对象（随 M4 CLEANUP 任务处理）
 - `memotrace` 列名映射仍待真实导出样例校准
+
+### 7.6 图片描述并发化（后补，与代码一致）
+
+§3.2 第 2 步原为逐图串行调用。一次调用的墙上时间是 `VISION_TIMEOUT_MS`（默认 20s）量级，图片撑满上限（100 张）的文档会独占一个索引管线槽位半小时以上——一份插图报告就能把整条索引队列堵住。现按 `IMAGE_DESCRIBE_CONCURRENCY`（`kb.image.describe-concurrency`，默认 8）并发发起，100 张的最坏耗时从约 33 分钟降到约 4 分钟。
+
+- 并发的只有两个网络动作：图片写 MinIO 与 VisionProvider 调用。**资产行仍在调用线程按阅读顺序串行 insert**——`findByVersion` 按主键升序返回，占位符回填把这个顺序读作「图片在 markdown 中出现的顺序」，并发 insert 会让自增 id 顺序随模型响应快慢漂移，代理文本插到别的图片位置上
+- 并发度取 `min(配置值, 本文档图片数)`；配置值 ≤ 1 时退化为串行且不建线程池。线程池按文档创建、用完即 shutdown
+- 上界由模型服务方的限流决定，不是本机 CPU（全程等待远端）。被限流的调用按 §3.2 第 6 条记 `status=FAILED` 且**不重试**，所以并发度开过头是拿文本丢失换延迟，默认 8 是留了余量的取值
+- 单图失败语义不变（记 `SKIPPED|FAILED`、不失败整篇）；MinIO 写失败仍原样上抛终止该文档，异常从 `CompletionException` 解包后再抛，任务的 `fail_reason` 文本与串行时期一致
+- **`MAX_IMAGES_PER_DOC` 刻意未随之调大**：该变量由 parser 与 server 共用，调大同时放大解析响应体（每张图 base64 内联在 `images[]` 里），扫描件场景单张就有几百 KB

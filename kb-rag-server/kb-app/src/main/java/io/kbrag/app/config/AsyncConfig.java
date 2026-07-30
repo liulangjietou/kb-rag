@@ -19,6 +19,10 @@ import java.util.concurrent.Executor;
  * model calls that a caller is already waiting on with a hard timeout, so queueing them would only
  * turn a fast degradation into a slow one, and the pool is sized to absorb concurrency instead.
  *
+ * <p>The pools are split by how long a task holds its thread, not by which module submitted it. That is
+ * why the graph extraction has its own: it is the one task measured in hours, and sharing the indexing
+ * pool made every upload queue behind it.
+ *
  * <p>The task decorator carries the request id into the worker thread so an upload or a search can be
  * traced end to end in the logs.
  *
@@ -48,6 +52,9 @@ public class AsyncConfig {
 
     /** Bean name of the pool an external source scan runs on. */
     public static final String EXT_SOURCE_EXECUTOR = "extSourceTaskExecutor";
+
+    /** Bean name of the pool a knowledge graph extraction runs on. */
+    public static final String GRAPH_EXECUTOR = "graphTaskExecutor";
 
     private static final int CORE_POOL_SIZE = 2;
     private static final int MAX_POOL_SIZE = 4;
@@ -102,6 +109,18 @@ public class AsyncConfig {
     private static final int EXT_SOURCE_MAX_POOL_SIZE = 2;
     private static final int EXT_SOURCE_QUEUE_CAPACITY = 100;
     private static final String EXT_SOURCE_THREAD_PREFIX = "kb-ext-source-";
+
+    /**
+     * A graph extraction of a large corpus occupies its thread for hours, so it cannot share the
+     * indexing pool: two of them would hold half of it and an upload would sit in the queue behind work
+     * that finishes some time tomorrow. The size is small because each task fans its model calls out
+     * internally by {@code kb.graph.extract-concurrency} - this bounds how many corpora are extracted at
+     * once, and the product of the two is what the model provider sees.
+     */
+    private static final int GRAPH_CORE_POOL_SIZE = 1;
+    private static final int GRAPH_MAX_POOL_SIZE = 2;
+    private static final int GRAPH_QUEUE_CAPACITY = 50;
+    private static final String GRAPH_THREAD_PREFIX = "kb-graph-task-";
 
     /**
      * Creates the indexing executor.
@@ -224,6 +243,23 @@ public class AsyncConfig {
         executor.setMaxPoolSize(EXT_SOURCE_MAX_POOL_SIZE);
         executor.setQueueCapacity(EXT_SOURCE_QUEUE_CAPACITY);
         executor.setThreadNamePrefix(EXT_SOURCE_THREAD_PREFIX);
+        executor.setTaskDecorator(requestIdPropagatingDecorator());
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * Creates the executor a knowledge graph extraction runs on.
+     *
+     * @return executor used by the graph extraction task
+     */
+    @Bean(GRAPH_EXECUTOR)
+    public Executor graphTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(GRAPH_CORE_POOL_SIZE);
+        executor.setMaxPoolSize(GRAPH_MAX_POOL_SIZE);
+        executor.setQueueCapacity(GRAPH_QUEUE_CAPACITY);
+        executor.setThreadNamePrefix(GRAPH_THREAD_PREFIX);
         executor.setTaskDecorator(requestIdPropagatingDecorator());
         executor.initialize();
         return executor;

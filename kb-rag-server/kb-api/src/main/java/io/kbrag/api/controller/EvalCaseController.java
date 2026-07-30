@@ -1,6 +1,7 @@
 package io.kbrag.api.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.EvalCaseRequest;
 import io.kbrag.api.dto.EvalCaseResponse;
@@ -58,6 +59,8 @@ public class EvalCaseController {
      */
     @PostMapping("/api/v1/eval-datasets/{datasetId}/cases")
     @RequiresPermission(PermissionCodes.EVAL_WRITE)
+    @AuditedOperation(module = "EVAL", action = "CREATE", targetType = "EVAL_CASE",
+            targetId = "#result.data.caseId")
     public Result<EvalCaseResponse> create(@PathVariable String datasetId,
                                            @Valid @RequestBody EvalCaseRequest request) {
         kbScopeGuard.requireDatasetAccess(datasetId);
@@ -96,6 +99,8 @@ public class EvalCaseController {
      */
     @PostMapping("/api/v1/eval-datasets/{datasetId}/cases/from-retrieval")
     @RequiresPermission(PermissionCodes.EVAL_WRITE)
+    @AuditedOperation(module = "EVAL", action = "COLLECT", targetType = "EVAL_CASE",
+            targetId = "#result.data.caseId")
     public Result<EvalCaseResponse> collectFromRetrieval(@PathVariable String datasetId,
                                                          @Valid @RequestBody FromRetrievalRequest request) {
         kbScopeGuard.requireDatasetAccess(datasetId);
@@ -129,6 +134,7 @@ public class EvalCaseController {
      */
     @PutMapping("/api/v1/eval-cases/{caseId}")
     @RequiresPermission(PermissionCodes.EVAL_WRITE)
+    @AuditedOperation(module = "EVAL", action = "UPDATE", targetType = "EVAL_CASE", targetId = "#caseId")
     public Result<EvalCaseResponse> update(@PathVariable String caseId,
                                            @Valid @RequestBody EvalCaseRequest request) {
         kbScopeGuard.requireCaseAccess(caseId);
@@ -143,6 +149,7 @@ public class EvalCaseController {
      */
     @DeleteMapping("/api/v1/eval-cases/{caseId}")
     @RequiresPermission(PermissionCodes.EVAL_WRITE)
+    @AuditedOperation(module = "EVAL", action = "DELETE", targetType = "EVAL_CASE", targetId = "#caseId")
     public Result<Void> delete(@PathVariable String caseId) {
         kbScopeGuard.requireCaseAccess(caseId);
         evalDatasetService.deleteCase(caseId);
@@ -158,6 +165,7 @@ public class EvalCaseController {
      */
     @PostMapping("/api/v1/eval-cases/{caseId}/recheck")
     @RequiresPermission(PermissionCodes.EVAL_WRITE)
+    @AuditedOperation(module = "EVAL", action = "RECHECK", targetType = "EVAL_CASE", targetId = "#caseId")
     public Result<EvalCaseResponse> recheck(@PathVariable String caseId,
                                             @Valid @RequestBody EvalRecheckRequest request) {
         kbScopeGuard.requireCaseAccess(caseId);

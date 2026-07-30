@@ -14,6 +14,7 @@
 7. **降级语义**：库开启图路但 Neo4j 不可达/未配置 → 该路跳过、其余两路正常，degraded += `graph_route_unavailable`（需求文档 §4.8 degraded 枚举 v1.13 同 PR 增补；OpenAPI 同步 11 值）。
 8. **分数明细**：RetrievalNode.metadata 增图路明细（`graph_score`、`graph_hops`、`graph_entities`——命中的实体名列表，上限 5 个）；调试页据此展示关联度分与跳数。
 9. **配置键**（application.yml 接环境占位符）：`NEO4J_URI=`（空=禁用）、`NEO4J_USER=neo4j`、`NEO4J_PASSWORD=`、`GRAPH_MAX_HOPS=2`、`GRAPH_ENTITY_MATCH_LIMIT=10`、`GRAPH_EXTRACT_BATCH_SIZE=10`（每次 LLM 调用携带的分片数=1，批指任务内并发提交批量，实现自定申报）、`GRAPH_EXTRACT_CONCURRENCY=2`。
+   > **M16 起已变**：抽取改为无栅栏流水线，`GRAPH_EXTRACT_BATCH_SIZE` 移除，`GRAPH_EXTRACT_CONCURRENCY` 默认值改为 8。本条保留 M7 当时的事实，现行口径见 M16-CONTRACTS.md §4.3。
 10. **管理 API**：`PUT /api/v1/kb/{kbId}/graph/config`（开关）、`POST /api/v1/kb/{kbId}/graph/extract`（手动触发全量重抽）、`GET /api/v1/kb/{kbId}/graph/summary`（实体数/关系数/覆盖分片数/最近任务状态）、`GET /api/v1/kb/{kbId}/graph/entities?query=&page=`（实体列表带来源分片数）、`GET /api/v1/kb/{kbId}/graph/entities/{entityName}/chunks`（下钻来源分片，复用 RetrievalNode 结构或简化行，报告申报）。
 
 ## 1. kb-rag-server（opus）

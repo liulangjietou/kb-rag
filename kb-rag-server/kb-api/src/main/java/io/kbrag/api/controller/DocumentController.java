@@ -1,26 +1,34 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.ChunkResponse;
 import io.kbrag.api.dto.DocumentPreviewResponse;
 import io.kbrag.api.dto.DocumentResponse;
+import io.kbrag.api.dto.DocumentVisibilityResponse;
 import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.ReparseRequest;
+import io.kbrag.api.dto.UpdateDocumentVisibilityRequest;
 import io.kbrag.app.auth.AccessGuard;
 import io.kbrag.app.auth.KbScopeGuard;
+import io.kbrag.app.document.DocumentAclService;
 import io.kbrag.app.document.DocumentPreviewService;
 import io.kbrag.app.document.DocumentService;
 import io.kbrag.app.governance.DocumentGovernanceService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.constant.PermissionCodes;
+import io.kbrag.domain.enums.DocVisibility;
 import io.kbrag.domain.enums.ProcessStatus;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -52,6 +60,7 @@ public class DocumentController {
     private final DocumentService documentService;
     private final DocumentPreviewService documentPreviewService;
     private final DocumentGovernanceService documentGovernanceService;
+    private final DocumentAclService documentAclService;
     private final KbScopeGuard kbScopeGuard;
 
     /**
@@ -63,6 +72,8 @@ public class DocumentController {
      */
     @PostMapping("/api/v1/kb/{kbId}/documents")
     @RequiresPermission(PermissionCodes.DOC_WRITE)
+    @AuditedOperation(module = "DOCUMENT", action = "UPLOAD", targetType = "DOCUMENT",
+            targetId = "#result.data.docId")
     public Result<DocumentResponse> upload(@PathVariable String kbId,
                                            @RequestParam("file") MultipartFile file) {
         AccessGuard.requireKbAccess(kbId);
@@ -115,7 +126,7 @@ public class DocumentController {
             @PathVariable String docId,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbScopeGuard.requireDocumentContentAccess(docId);
         return Result.success(PageResponse.from(
                 documentService.chunks(docId, normalizePage(page), normalizeSize(size)),
                 ChunkResponse::from));
@@ -129,6 +140,7 @@ public class DocumentController {
      */
     @PostMapping("/api/v1/documents/{docId}/reindex")
     @RequiresPermission(PermissionCodes.DOC_WRITE)
+    @AuditedOperation(module = "DOCUMENT", action = "REINDEX", targetType = "DOCUMENT", targetId = "#docId")
     public Result<Map<String, String>> reindex(@PathVariable String docId) {
         kbScopeGuard.requireDocumentAccess(docId);
         return Result.success(Map.of(FIELD_VERSION_ID, documentService.reindex(docId)));
@@ -143,7 +155,7 @@ public class DocumentController {
     @GetMapping("/api/v1/documents/{docId}/preview")
     @RequiresPermission(PermissionCodes.KB_READ)
     public Result<DocumentPreviewResponse> preview(@PathVariable String docId) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbScopeGuard.requireDocumentContentAccess(docId);
         return Result.success(DocumentPreviewResponse.from(documentPreviewService.preview(docId)));
     }
 
@@ -155,6 +167,7 @@ public class DocumentController {
      */
     @PostMapping("/api/v1/documents/{docId}/confirm")
     @RequiresPermission(PermissionCodes.DOC_WRITE)
+    @AuditedOperation(module = "DOCUMENT", action = "CONFIRM", targetType = "DOCUMENT", targetId = "#docId")
     public Result<Map<String, String>> confirm(@PathVariable String docId) {
         kbScopeGuard.requireDocumentAccess(docId);
         return Result.success(Map.of(FIELD_VERSION_ID, documentPreviewService.confirm(docId)));
@@ -169,6 +182,7 @@ public class DocumentController {
      */
     @PostMapping("/api/v1/documents/{docId}/reparse")
     @RequiresPermission(PermissionCodes.DOC_WRITE)
+    @AuditedOperation(module = "DOCUMENT", action = "REPARSE", targetType = "DOCUMENT", targetId = "#docId")
     public Result<DocumentPreviewResponse> reparse(@PathVariable String docId,
                                                   @RequestBody(required = false) ReparseRequest request) {
         kbScopeGuard.requireDocumentAccess(docId);
@@ -188,10 +202,66 @@ public class DocumentController {
      */
     @DeleteMapping("/api/v1/documents/{docId}")
     @RequiresPermission(PermissionCodes.DOC_WRITE)
+    @AuditedOperation(module = "DOCUMENT", action = "DELETE", targetType = "DOCUMENT", targetId = "#docId")
     public Result<Void> delete(@PathVariable String docId) {
         kbScopeGuard.requireDocumentAccess(docId);
         documentGovernanceService.trash(docId);
         return Result.success(null);
+    }
+
+    /**
+     * Current visibility of a document together with the granted roles.
+     *
+     * @param kbId  owning knowledge base business id
+     * @param docId document business id
+     * @return visibility and granted role ids
+     */
+    @GetMapping("/api/v1/kb/{kbId}/documents/{docId}/visibility")
+    @RequiresPermission(PermissionCodes.DOC_REVIEW)
+    public Result<DocumentVisibilityResponse> visibility(@PathVariable String kbId,
+                                                         @PathVariable String docId) {
+        AccessGuard.requireKbAccess(kbId);
+        return Result.success(DocumentVisibilityResponse.from(
+                documentAclService.visibility(kbId, docId)));
+    }
+
+    /**
+     * Replaces the visibility of a document and its complete grant set.
+     *
+     * <p>Guarded by {@code doc:review} like the review verdicts: deciding who may read a document is
+     * an editorial clearance decision, not a content edit.
+     *
+     * @param kbId    owning knowledge base business id
+     * @param docId   document business id
+     * @param request new visibility and its grants
+     * @return empty success envelope
+     */
+    @PutMapping("/api/v1/kb/{kbId}/documents/{docId}/visibility")
+    @RequiresPermission(PermissionCodes.DOC_REVIEW)
+    @AuditedOperation(module = "DOCUMENT", action = "UPDATE_VISIBILITY", targetType = "DOCUMENT",
+            targetId = "#docId")
+    public Result<Void> updateVisibility(@PathVariable String kbId, @PathVariable String docId,
+                                         @Valid @RequestBody UpdateDocumentVisibilityRequest request) {
+        AccessGuard.requireKbAccess(kbId);
+        DocVisibility visibility = parseVisibility(request.visibility());
+        // Same shape rule as the M15 kb_scope_all pair: a state that ignores its companion list must
+        // receive it empty, or the operator meant something the call will not do.
+        if (visibility == DocVisibility.INHERIT && CollectionUtils.isNotEmpty(request.roleIds())) {
+            throw BizException.invalidParam("visibility 为 INHERIT 时 role_ids 必须为空");
+        }
+        if (visibility == DocVisibility.RESTRICTED && CollectionUtils.isEmpty(request.roleIds())) {
+            throw BizException.invalidParam("visibility 为 RESTRICTED 时 role_ids 不能为空");
+        }
+        documentAclService.updateVisibility(kbId, docId, visibility, request.roleIds());
+        return Result.success(null);
+    }
+
+    private DocVisibility parseVisibility(String value) {
+        try {
+            return DocVisibility.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw BizException.invalidParam("visibility 仅支持 INHERIT 或 RESTRICTED");
+        }
     }
 
     private ProcessStatus parseStatus(String value) {

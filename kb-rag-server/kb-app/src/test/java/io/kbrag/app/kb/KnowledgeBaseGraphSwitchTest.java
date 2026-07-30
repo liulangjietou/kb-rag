@@ -1,7 +1,9 @@
 package io.kbrag.app.kb;
 
+import io.kbrag.app.auth.RoleService;
 import io.kbrag.app.index.EngineChunkCleaner;
 import io.kbrag.app.index.IndexAliasManager;
+import io.kbrag.app.index.IndexCleanupService;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
@@ -53,9 +55,9 @@ class KnowledgeBaseGraphSwitchTest {
         graphStore = mock(GraphStore.class);
         service = new KnowledgeBaseService(knowledgeBaseMapper, mock(DocumentMapper.class),
                 mock(DocumentVersionMapper.class), mock(ChunkMapper.class), mock(BizIdGenerator.class),
-                mock(IndexAliasManager.class), mock(EngineChunkCleaner.class),
+                mock(IndexAliasManager.class), mock(EngineChunkCleaner.class), mock(IndexCleanupService.class),
                 mock(VersionFingerprintFactory.class), mock(VisionProvider.class), mock(ChatProvider.class),
-                new GraphFusionPolicy(), graphStore, new KbProperties());
+                new GraphFusionPolicy(), graphStore, mock(RoleService.class), new KbProperties());
     }
 
     @Test

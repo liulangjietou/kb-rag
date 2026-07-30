@@ -8,6 +8,49 @@
 
 ### Added
 
+- **企业化：多租户 / 文档级数据权限 / LDAP 组同步 / SSO 三协议 / 操作审计（M16）**：新增 `docs/M16-CONTRACTS.md`
+  （开发契约，含租户模型与索引命名租户段、文档 ACL 判定点、三协议 SSO 行为与升级说明）；
+  `.env.example` 新增「企业化（M16）」分节：`AUTH_LDAP_GROUP_SYNC_ENABLED`（默认 false）/
+  `AUTH_LDAP_GROUP_ROLE_MAPPINGS`（`组DN=角色CODE` 逗号分隔）、`AUTH_OIDC_ENABLED` /
+  `AUTH_OIDC_ISSUER` / `AUTH_OIDC_CLIENT_ID` / `AUTH_OIDC_CLIENT_SECRET` / `AUTH_OIDC_SCOPES`、
+  `AUTH_SAML_ENABLED` / `AUTH_SAML_IDP_ENTITY_ID` / `AUTH_SAML_IDP_SSO_URL` /
+  `AUTH_SAML_IDP_CERTIFICATE` / `AUTH_SAML_SP_ENTITY_ID`（默认 `kb-rag`）、`AUTH_CAS_ENABLED` /
+  `AUTH_CAS_SERVER_URL`、`AUTH_SSO_WEB_BASE_URL`（SSO 回调落地的控制台地址，开任一协议必填）、
+  `AUDIT_OPERATION_RETENTION_DAYS`（默认 180）——全部缺省即升级前行为。**升级提示**：Flyway
+  `V17__tenant_doc_acl_audit.sql` 把存量用户 / 角色 / 知识库 / API Key / 评测集 / 应用全部划入
+  内置默认租户（存量索引命名不变，零迁移）；删除知识库从本版起会一并删掉 ES/Qdrant 物理索引
+  （此前只删数据行留索引壳）；文档设为 RESTRICTED 后无授权的 API Key 检索结果会相应变少；
+  开放反馈端点开始校验 request_id 的应用归属，只用自己检索返回的 request_id 提交反馈不受影响。
+- OpenAPI 升至 `0.16.0-m16`：新增 `/api/v1/auth/sso/providers` 与 OIDC/SAML/CAS 六个登录回调端点
+  （全部免认证，302 + URL fragment 交付）、`/api/v1/tenants` 租户管理五端点、`/api/v1/users/{userId}/tenant`
+  移户、`/api/v1/kb/{kbId}/documents/{docId}/visibility` 文档可见性读写、`/api/v1/operation-audits`
+  操作审计列表与详情、`/api/v1/knowledge/feedback` 开放反馈（API Key 鉴权）；`ConsoleUser` 补
+  `tenant_id`、`source` 枚举扩 OIDC/SAML/CAS、`RetrievalFeedback` 补 `channel` / `end_user_id`、
+  `Document` 补 `restricted`，新增租户 / 可见性 / 审计 / 反馈相关 schema 18 个。
+- 需求文档升至 v1.18：收口 M14/M15/M16 交付记载，权限延后清单销账（多租户 / 文档级权限 /
+  组同步 / 操作审计均已交付），与主仓 `docs/` 副本逐字一致。
+- **图片阶段吞吐优化（回补进 `docs/M3-CONTRACTS.md` §2.1/§7.6）**：①parser 对 pdf 内嵌图片按图片
+  对象（xref）去重——页眉页脚 logo 这类「一个对象画在每一页」的图按出现位置计数，会让
+  247 页文档报出 493 张图、刷出几百条 warning，实测一份 2.7MB 国标省市区 pdf 的 `images[]`
+  从 100 降到 3、响应体 base64 从 1.7MB 降到 0.03MB、解析耗时 1.59s → 0.77s；图片数已达上限
+  且 `OCR_ENGINE=none` 时扫描页不再白渲染（渲出的 PNG 无人可读），220 页扫描件 29.34s → 13.54s；
+  ②server 侧图片描述改为并发，`.env.example` 新增 `IMAGE_DESCRIBE_CONCURRENCY`（默认 8）——
+  一张图一次 VLM 往返（`VISION_TIMEOUT_MS` 量级），串行时撑满上限的文档占着索引槽位半小时，
+  100 张的最坏耗时从约 33 分钟降到约 4 分钟；并发度上界看模型服务方限流而不是本机 CPU（被限
+  流的调用记 FAILED 且不重试）。两项均不改变对外行为：占位符回填仍按阅读顺序，单图失败仍不
+  失败整篇。`MAX_IMAGES_PER_DOC` 刻意未调大（parser 与 server 共用，调大同时放大解析响应体）
+- **知识图谱抽取吞吐优化（回补进 `docs/M16-CONTRACTS.md` §4.3）**：一万分片的库开启 GraphRAG 后
+  "重新抽取"以小时计。根因是分批栅栏——每批等齐最慢的那次 LLM 调用才提交下一批，而 LLM 延迟
+  长尾极重，线程池大半时间在批尾空转。改为无栅栏流水线（全部分片一次排队，谁空闲谁接下一个），
+  并把一次抽取拆成"N 路并发调模型 + 单写入者串行落图"两段：图 schema 用复合索引而非唯一约束，
+  并发 MERGE 同名实体会打架，原先"并发只能是 2"正是拿正确性换速度；拆开后模型调用只受限流约束，
+  同一个库的图写入反而比原先更严格。`.env.example` **移除 `GRAPH_EXTRACT_BATCH_SIZE`**（它描述的
+  机制已不存在；存量 `.env` 里留着不报错也不生效），`GRAPH_EXTRACT_CONCURRENCY` 默认 2 → 8。
+  抽取任务同时移到独立线程池（core 1 / max 2）——它是全系统唯一以小时计的任务，此前与文档解析
+  共用 core 2 / max 4 的索引池，两个全量抽取就能让文档上传排在一个明天才结束的活后面。
+  **模型侧峰值并发 = 2 × `GRAPH_EXTRACT_CONCURRENCY`**（默认 16），限流额度紧的部署把后者调小即可，
+  正确性不依赖它。
+
 - **权限体系：功能权限 + 知识库数据权限 + 单点登录（M15）**：新增 `docs/M15-CONTRACTS.md`（开发契约，
   含 6 张表的数据模型、18 个权限码与 5 个内置角色矩阵、两层授权的执行点、单点登录行为与升级说明）；
   `.env.example` 新增权限/SSO 分节：`AUTH_LDAP_ENABLED`（默认 false，不配就是升级前的行为）、

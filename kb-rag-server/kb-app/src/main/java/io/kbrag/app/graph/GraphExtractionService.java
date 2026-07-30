@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -40,10 +41,17 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <p><b>The unit of extraction is one chunk and one model call.</b> Batching several chunks into one
  * prompt would make a single malformed answer poison every chunk in it, and the output validation is
- * per chunk precisely so a bad answer costs one passage. What the configured batch size buys is
- * throughput: chunks are submitted in batches to a small pool so a base of ten thousand passages is not
- * ten thousand sequential round trips, while the concurrency stays low enough not to starve the
- * provider's rate limit or the indexing pool.
+ * per chunk precisely so a bad answer costs one passage.
+ *
+ * <p><b>Throughput comes from a two stage pipeline, not from batching.</b> Every chunk is submitted at
+ * once and flows through the model call - wide, since it is seconds of socket waiting with no shared
+ * state - and then through a single writer thread that owns the graph merges. Two properties fall out of
+ * that split. The extraction pool stays saturated: nothing waits for a slow neighbour, which is what the
+ * earlier "submit a batch, join the batch, submit the next" shape spent most of its wall clock doing,
+ * since one model call in a batch of ten routinely takes several times the median. And the merges of one
+ * knowledge base stay serialised, which is the safety the graph schema needs - it carries composite
+ * indexes rather than uniqueness constraints - so raising the extraction concurrency no longer trades
+ * correctness for speed. The remaining bound on concurrency is the provider's rate limit alone.
  *
  * <p><b>The chunk text is untrusted input</b> (requirement section 4.4, injection protection ①): it is
  * wrapped in a fixed delimiter and the system instruction declares that anything instruction shaped
@@ -91,9 +99,9 @@ public class GraphExtractionService {
     private static final int PROGRESS_DONE = 100;
     private static final int PERCENT = 100;
     private static final int FAIL_REASON_MAX_LENGTH = 1024;
-    private static final String THREAD_PREFIX = "kb-graph-";
+    private static final String EXTRACT_THREAD_PREFIX = "kb-graph-";
+    private static final String WRITER_THREAD_PREFIX = "kb-graph-writer-";
     private static final int MIN_CONCURRENCY = 1;
-    private static final int MIN_BATCH_SIZE = 1;
     private static final int ENABLED = 1;
 
     private final KnowledgeBaseService knowledgeBaseService;
@@ -153,7 +161,7 @@ public class GraphExtractionService {
      * @param kbId knowledge base business id
      * @param task task row already marked as running
      */
-    @Async(AsyncConfig.INDEX_EXECUTOR)
+    @Async(AsyncConfig.GRAPH_EXECUTOR)
     public void runFullExtraction(String kbId, KbTask task) {
         try {
             requireChatModel();
@@ -177,14 +185,17 @@ public class GraphExtractionService {
      * Reacts to a document version becoming the active one, requirement section 4.9 "a version switch
      * cascades the invalidation of the entities and relations it superseded".
      *
-     * <p>Silent when the base does not use the graph: this runs inside the indexing pipeline's follow up
-     * block, on every activation of every deployment, and a base that never enabled the graph must not
-     * pay a single query for it.
+     * <p>Silent when the base does not use the graph: this runs on every activation of every deployment,
+     * and a base that never enabled the graph must not pay a single query for it.
+     *
+     * <p>Handed to the graph pool rather than the indexing one that called it: the re-extraction of a
+     * large version outlives the activation that triggered it by a wide margin, and leaving it on the
+     * indexing pool would make the next upload wait for it.
      *
      * @param document document whose version was switched
      * @param version  version that just became active
      */
-    @Async(AsyncConfig.INDEX_EXECUTOR)
+    @Async(AsyncConfig.GRAPH_EXECUTOR)
     public void onVersionActivated(Document document, DocumentVersion version) {
         String kbId = document.getKbId();
         if (!graphStore.isEnabled() || !knowledgeBaseService.graphEnabled(kbId)) {
@@ -226,57 +237,124 @@ public class GraphExtractionService {
         }
         AtomicInteger skipped = new AtomicInteger();
         AtomicInteger done = new AtomicInteger();
-        KbProperties.Graph config = properties.getGraph();
-        int batchSize = Math.max(MIN_BATCH_SIZE, config.getExtractBatchSize());
-        ExecutorService executor = Executors.newFixedThreadPool(
-                Math.max(MIN_CONCURRENCY, config.getExtractConcurrency()),
-                runnable -> new Thread(runnable, THREAD_PREFIX + kbId));
+        AtomicInteger reported = new AtomicInteger();
+        int concurrency = Math.max(MIN_CONCURRENCY, properties.getGraph().getExtractConcurrency());
+        ExecutorService extractors = Executors.newFixedThreadPool(
+                concurrency, threadFactory(EXTRACT_THREAD_PREFIX, kbId));
+        ExecutorService writer = Executors.newSingleThreadExecutor(
+                threadFactory(WRITER_THREAD_PREFIX, kbId));
         try {
-            for (int start = 0; start < chunks.size(); start += batchSize) {
-                List<Chunk> batch = chunks.subList(start, Math.min(chunks.size(), start + batchSize));
-                List<CompletableFuture<Void>> futures = new ArrayList<>(batch.size());
-                for (Chunk chunk : batch) {
-                    futures.add(CompletableFuture.runAsync(
-                            () -> extractOne(kbId, chunk, skipped), executor));
-                }
-                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-                updateProgress(task, done.addAndGet(batch.size()) * PERCENT / chunks.size());
+            List<CompletableFuture<Void>> futures = new ArrayList<>(chunks.size());
+            for (Chunk chunk : chunks) {
+                futures.add(CompletableFuture
+                        .supplyAsync(() -> extractOne(kbId, chunk, skipped), extractors)
+                        .thenAcceptAsync(this::upsertOne, writer)
+                        .exceptionally(error -> {
+                            // One passage the provider refused must not end a run over a whole corpus; the
+                            // count is what makes the loss visible, and a retry is a new extraction rather
+                            // than a hidden loop here. The single handler of both stages: whether the model
+                            // call or the graph write failed, this chunk contributed nothing.
+                            skipped.incrementAndGet();
+                            log.error("graph extraction of one chunk failed, errorCode={}, kbId={}, "
+                                            + "chunkId={}",
+                                    ErrorCode.UPSTREAM_MODEL_ERROR, kbId, chunk.getChunkId(), error);
+                            return null;
+                        })
+                        .thenRun(() -> reportProgress(task, done.incrementAndGet(), chunks.size(),
+                                reported)));
             }
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         } finally {
-            executor.shutdown();
+            extractors.shutdown();
+            writer.shutdown();
         }
         completeTask(task, skipped.get());
-        log.info("graph extraction finished, kbId={}, chunks={}, skipped={}",
-                kbId, chunks.size(), skipped.get());
+        log.info("graph extraction finished, kbId={}, chunks={}, skipped={}, concurrency={}",
+                kbId, chunks.size(), skipped.get(), concurrency);
     }
 
     /**
-     * Extracts one chunk, counting a rejected or failed answer instead of propagating it.
+     * Names the worker threads of one extraction so a stalled run is readable in a thread dump.
+     *
+     * @param prefix pool role prefix
+     * @param kbId   knowledge base the pool serves
+     * @return thread factory numbering the threads of one pool
+     */
+    private ThreadFactory threadFactory(String prefix, String kbId) {
+        AtomicInteger sequence = new AtomicInteger();
+        return runnable -> new Thread(runnable, prefix + kbId + "-" + sequence.incrementAndGet());
+    }
+
+    /**
+     * Turns one chunk into its extraction, {@code null} when it contributed nothing.
+     *
+     * <p>Runs on the extraction pool, which is where the whole cost of a run sits: the model call is
+     * seconds of waiting on a socket and holds no shared state, so it is the stage worth running wide.
+     * Exceptions propagate to the single handler of the chain rather than being caught here.
      *
      * @param kbId    knowledge base business id
      * @param chunk   chunk being extracted
      * @param skipped counter of the chunks that contributed nothing
+     * @return extraction to write, or {@code null} for a rejected or empty answer
      */
-    private void extractOne(String kbId, Chunk chunk, AtomicInteger skipped) {
-        try {
-            String answer = chatProvider.complete(SYSTEM_PROMPT, userPrompt(chunk.getContent()));
-            GraphExtractionParser.Result result = extractionParser.parse(answer);
-            if (result == null) {
-                skipped.incrementAndGet();
-                return;
-            }
-            if (result.isEmpty()) {
-                return;
-            }
-            graphStore.upsert(new GraphExtraction(kbId, chunk.getChunkId(),
-                    chunk.getDocumentVersionId(), result.entities(), result.relations()));
-        } catch (Exception e) {
-            // One passage the provider refused must not end a run over a whole corpus; the count is what
-            // makes the loss visible, and a retry is a new extraction rather than a hidden loop here.
+    private GraphExtraction extractOne(String kbId, Chunk chunk, AtomicInteger skipped) {
+        String answer = chatProvider.complete(SYSTEM_PROMPT, userPrompt(chunk.getContent()));
+        GraphExtractionParser.Result result = extractionParser.parse(answer);
+        if (result == null) {
             skipped.incrementAndGet();
-            log.error("graph extraction of one chunk failed, errorCode={}, kbId={}, chunkId={}",
-                    ErrorCode.UPSTREAM_MODEL_ERROR, kbId, chunk.getChunkId(), e);
+            return null;
         }
+        if (result.isEmpty()) {
+            return null;
+        }
+        return new GraphExtraction(kbId, chunk.getChunkId(), chunk.getDocumentVersionId(),
+                result.entities(), result.relations());
+    }
+
+    /**
+     * Writes one extraction into the graph, on the single writer thread of the run.
+     *
+     * <p><b>Serialised on purpose, and it is what allows the extraction to be wide.</b> The graph schema
+     * carries composite indexes rather than uniqueness constraints - see {@code Neo4jGraphStore} for why -
+     * so two threads merging the same entity name of the same knowledge base race, and the old design
+     * bought safety by keeping the whole run nearly sequential. Splitting the stages buys both: the model
+     * calls fan out, while the merges of one knowledge base still happen one at a time. The write is
+     * milliseconds against seconds of model latency, so one writer is nowhere near the bottleneck.
+     *
+     * @param extraction extraction of one chunk, {@code null} when the chunk contributed nothing
+     */
+    private void upsertOne(GraphExtraction extraction) {
+        if (extraction == null) {
+            return;
+        }
+        graphStore.upsert(extraction);
+    }
+
+    /**
+     * Publishes the progress of a run, at most once per percentage point.
+     *
+     * <p>Throttled because the pipeline reports per finished chunk: a corpus of ten thousand passages
+     * would otherwise be ten thousand updates of a column the console reads as a whole number. The
+     * thread that actually advanced the percentage is the one that writes, which is what the atomic
+     * accumulate decides without a lock.
+     *
+     * <p>Written through a column update rather than {@code updateById}: the task row carries an
+     * optimistic lock version, and concurrent full row writes of a shared entity would start failing
+     * against each other - silently, since a task update has nobody to report a conflict to.
+     *
+     * @param task      running task
+     * @param completed chunks finished so far
+     * @param total     chunks of the run
+     * @param reported  highest percentage already published
+     */
+    private void reportProgress(KbTask task, int completed, int total, AtomicInteger reported) {
+        int progress = Math.min(completed * PERCENT / total, PROGRESS_DONE);
+        if (progress <= reported.getAndAccumulate(progress, Math::max)) {
+            return;
+        }
+        kbTaskMapper.update(null, new LambdaUpdateWrapper<KbTask>()
+                .set(KbTask::getProgress, progress)
+                .eq(KbTask::getTaskId, task.getTaskId()));
     }
 
     /**
@@ -388,11 +466,6 @@ public class GraphExtractionService {
                 .set(KbTask::getRetryCount, task.getRetryCount())
                 .eq(KbTask::getTaskId, task.getTaskId()));
         return task;
-    }
-
-    private void updateProgress(KbTask task, int progress) {
-        task.setProgress(Math.min(progress, PROGRESS_DONE));
-        kbTaskMapper.updateById(task);
     }
 
     private void completeTask(KbTask task, int skipped) {

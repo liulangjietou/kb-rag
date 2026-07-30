@@ -117,6 +117,7 @@ public class SearchInsightService {
             row.setZeroHit(resultCount == 0);
             row.setDegraded(degraded);
             row.setRequestId(record.getRequestId());
+            row.setAppId(record.getAppId());
             searchInsightMapper.insert(row);
             rows.add(row);
         }
@@ -281,6 +282,9 @@ public class SearchInsightService {
 
         /** Correlation id of the call. */
         private final String requestId;
+
+        /** Application the open API call named, {@code null} from the console debug search. */
+        private final String appId;
     }
 
     /**

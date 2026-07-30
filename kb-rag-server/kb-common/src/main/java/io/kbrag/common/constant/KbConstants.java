@@ -82,6 +82,12 @@ public final class KbConstants {
     /** Business id prefix of a role. */
     public static final String ROLE_ID_PREFIX = "role";
 
+    /** Business id prefix of a tenant. */
+    public static final String TENANT_ID_PREFIX = "tnt";
+
+    /** Business id prefix of an operation audit row. */
+    public static final String OPERATION_AUDIT_ID_PREFIX = "opa";
+
     /**
      * Fixed prefix of every open API key plaintext, requirement section 4.8 "kb-sk-{prefix}{random}".
      *

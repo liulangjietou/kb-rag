@@ -177,8 +177,25 @@ info:
 
     详见 M15-CONTRACTS.md §3。
 
+
+    M16（企业化）新增：①多租户——`/api/v1/tenants` 租户管理（无 DELETE，停用即退役）与
+
+    `PUT /api/v1/users/{userId}/tenant` 移户，`ConsoleUser`/`CreateUserRequest` 增 `tenant_id`；
+
+    ②文档级数据权限——`/api/v1/kb/{kbId}/documents/{docId}/visibility` GET/PUT（INHERIT/RESTRICTED），
+
+    `Document` 增 `restricted` 只读标记；③SSO 三协议——`/api/v1/auth/sso/providers` 与
+
+    OIDC/SAML/CAS 各自的 login/回调端点（全部免认证，回调以 302 + URL fragment 交付会话令牌），
+
+    `source` 枚举扩展 OIDC/SAML/CAS；④开放 API 反馈——`POST /api/v1/knowledge/feedback`（API Key
+
+    鉴权），`RetrievalFeedback` 增 `channel`/`end_user_id`，反馈列表增 channel 筛选；⑤操作审计——
+
+    `/api/v1/operation-audits` 查询端点。全部纯新增（详见 M16-CONTRACTS.md）。
+
     '
-  version: 0.15.0-m15
+  version: 0.16.0-m16
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -190,6 +207,10 @@ tags:
   description: 登录（本地口令/单点登录）、改密、当前用户
 - name: rbac
   description: 权限体系：用户与角色管理、权限目录（M15，docs/M15-CONTRACTS.md §3）
+- name: tenant
+  description: 多租户管理：租户 CRUD 与移户，仅默认租户超管可达（M16，docs/M16-CONTRACTS.md §3.1）
+- name: operation-audit
+  description: 操作审计「谁」维度：管理台写操作留痕查询（M16，docs/M16-CONTRACTS.md §3.7）
 - name: knowledge-base
   description: 知识库管理
 - name: document
@@ -306,6 +327,117 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SsoAvailabilityResult'
+  /api/v1/auth/sso/providers:
+    get:
+      tags:
+      - auth
+      summary: 可用的浏览器重定向 SSO 协议（M16）
+      description: 免认证；登录页据此渲染协议按钮。某协议为 true 需同时满足 enabled、必填项非空
+        与 kb.auth.sso.web-base-url 已配置（回调不知道把令牌送去哪里就不算就绪）。
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SsoProvidersResult'
+  /api/v1/auth/oidc/login:
+    get:
+      tags:
+      - auth
+      summary: 发起 OIDC 登录（302 到 IdP 授权端点，M16）
+      description: 免认证；签发一次性 state（10 分钟过期）后 302 到发现文档中的授权端点。协议未启用时 400。
+      security: []
+      responses:
+        '302':
+          description: 重定向到身份提供方
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/auth/oidc/callback:
+    get:
+      tags:
+      - auth
+      summary: OIDC 回调（M16）
+      description: '免认证；验 state → code 换 token → 验 id_token（JWKS 验签 + iss/aud/exp）→ JIT
+        建号（落默认租户）→ 302 到 {web-base-url}/login#sso_token={token}；失败同样 302，以
+        #sso_error={中文原因} 交付——令牌与错误都走 fragment，不进服务器日志与 Referer。'
+      security: []
+      parameters:
+      - name: code
+        in: query
+        required: false
+        schema: {type: string}
+      - name: state
+        in: query
+        required: false
+        schema: {type: string}
+      responses:
+        '302':
+          description: 重定向回控制台登录页，结果在 URL fragment
+  /api/v1/auth/saml/login:
+    get:
+      tags:
+      - auth
+      summary: 发起 SAML 登录（SP-initiated，302 到 IdP SSO URL，M16）
+      description: 免认证；携 deflate+base64 的 AuthnRequest 与一次性 RelayState。协议未启用时 400。
+      security: []
+      responses:
+        '302':
+          description: 重定向到身份提供方
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/auth/saml/acs:
+    post:
+      tags:
+      - auth
+      summary: SAML 断言消费端点（IdP POST 回来的 Response，M16）
+      description: 免认证；验 RelayState → 验 Response 签名（配置的 IdP 证书）→ 验
+        NotOnOrAfter/Audience/InResponseTo → 取 NameID 统一落地；结果同样以 302 + fragment 交付。
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                SAMLResponse:
+                  type: string
+                  description: base64 编码的 SAML Response（字段名由 SAML POST binding 固定）
+                RelayState:
+                  type: string
+      responses:
+        '302':
+          description: 重定向回控制台登录页，结果在 URL fragment
+  /api/v1/auth/cas/login:
+    get:
+      tags:
+      - auth
+      summary: 发起 CAS 登录（302 到 {server-url}/login，M16）
+      description: 免认证；无自建 state——CAS ticket 本身一次性且绑定 service URL。协议未启用时 400。
+      security: []
+      responses:
+        '302':
+          description: 重定向到 CAS 服务器
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/auth/cas/callback:
+    get:
+      tags:
+      - auth
+      summary: CAS 回调（M16）
+      description: 免认证；持 ticket 服务端 GET {server-url}/p3/serviceValidate → 解析 cas:user 统一落地；
+        结果以 302 + fragment 交付。
+      security: []
+      parameters:
+      - name: ticket
+        in: query
+        required: false
+        schema: {type: string}
+      responses:
+        '302':
+          description: 重定向回控制台登录页，结果在 URL fragment
   /api/v1/users:
     get:
       tags:
@@ -322,7 +454,7 @@ paths:
         schema: {type: string, enum: [ENABLED, DISABLED]}
       - name: source
         in: query
-        schema: {type: string, enum: [LOCAL, LDAP]}
+        schema: {type: string, enum: [LOCAL, LDAP, OIDC, SAML, CAS]}
       - name: page
         in: query
         schema: {type: integer, default: 1}
@@ -475,6 +607,37 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '403':
           $ref: '#/components/responses/PermissionDenied'
+  /api/v1/users/{userId}/tenant:
+    put:
+      tags:
+      - tenant
+      summary: 移户（TENANT_MANAGE，M16）
+      description: 把账号划入另一租户：清空其全部角色绑定并吊销会话——角色是租户内资源，跨户携带必然悬空。
+        仅默认租户超管可达（tenant:manage）。
+      parameters:
+      - name: userId
+        in: path
+        required: true
+        schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoveUserTenantRequest'
+      responses:
+        '200':
+          description: 已移户
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/users/{userId}/reset-password:
     parameters:
     - name: userId
@@ -613,6 +776,120 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '403':
           $ref: '#/components/responses/PermissionDenied'
+  /api/v1/tenants:
+    get:
+      tags:
+      - tenant
+      summary: 租户列表（TENANT_MANAGE，M16）
+      description: 内置默认租户排首。类级 tenant:manage 守卫，种子只授默认租户超管——这是控制台唯一的跨租户视角。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantListResult'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+    post:
+      tags:
+      - tenant
+      summary: 新建租户（TENANT_MANAGE，M16）
+      description: 自动为新租户复制五个内置角色（否则首个账号无角色可授）；首账号由默认租户超管在用户管理页创建。
+        code 建后不可改。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveTenantRequest'
+      responses:
+        '200':
+          description: 已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/tenants/{tenantId}:
+    parameters:
+    - name: tenantId
+      in: path
+      required: true
+      schema: {type: string}
+    get:
+      tags:
+      - tenant
+      summary: 租户详情（TENANT_MANAGE，M16）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResult'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - tenant
+      summary: 租户改名（TENANT_MANAGE，M16）
+      description: 仅 name 可改；request 中的 code 被忽略。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveTenantRequest'
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/tenants/{tenantId}/status:
+    put:
+      tags:
+      - tenant
+      summary: 启用/停用租户（TENANT_MANAGE，M16）
+      description: 无 DELETE 端点——租户下挂着索引、文件与审计，退役语义是先停用后人工清算。停用后该租户
+        全部账号登录被拒，存量会话下一次请求 401。DEFAULT 租户不可停用。
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTenantStatusRequest'
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/source-mappings:
     get:
       tags: [source-mapping]
@@ -942,6 +1219,50 @@ paths:
                 $ref: '#/components/schemas/EmptyResult'
         '400':
           $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/documents/{docId}/visibility:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - $ref: '#/components/parameters/DocId'
+    get:
+      tags:
+      - document
+      summary: 文档可见性与授权角色（DOC_REVIEW，M16）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentVisibilityResult'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - document
+      summary: 改文档可见性（DOC_REVIEW，M16）
+      description: 权限码用 doc:review 不用 doc:write——改可见性是治理动作不是编辑动作。INHERIT 时
+        role_ids 必须为空数组，RESTRICTED 时非空；改绑先删后插，变更即生效于检索（无缓存层）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDocumentVisibilityRequest'
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/documents/{docId}/reindex:
@@ -2584,6 +2905,15 @@ paths:
         required: false
         schema:
           $ref: '#/components/schemas/FeedbackStatus'
+      - name: channel
+        in: query
+        required: false
+        description: 来源渠道筛选（M16）：CONSOLE=控制台标注，OPEN_API=开放接口终端用户反馈
+        schema:
+          type: string
+          enum:
+          - CONSOLE
+          - OPEN_API
       - name: page
         in: query
         required: false
@@ -3389,6 +3719,80 @@ paths:
                 $ref: '#/components/schemas/ApiAuditStatsResult'
         '400':
           $ref: '#/components/responses/InvalidParam'
+  /api/v1/operation-audits:
+    get:
+      tags:
+      - operation-audit
+      summary: 操作审计列表（AUDIT_READ，M16）
+      description: 倒序分页；查询钉死在调用者自己的租户。只读设计：审计行由写端点背后的切面唯一写入，
+        能编辑自己留痕的 API 就不是审计。
+      parameters:
+      - name: module
+        in: query
+        required: false
+        schema: {type: string}
+        description: 模块筛选，如 KB/DOCUMENT/USER/ROLE/TENANT
+      - name: username
+        in: query
+        required: false
+        schema: {type: string}
+        description: 操作人登录名筛选
+      - name: target_id
+        in: query
+        required: false
+        schema: {type: string}
+        description: 目标业务 id 筛选
+      - name: from
+        in: query
+        required: false
+        schema: {type: string, format: date-time}
+        description: 操作时间下界（ISO，如 2026-07-26T00:00:00）
+      - name: to
+        in: query
+        required: false
+        schema: {type: string, format: date-time}
+        description: 操作时间上界（ISO）
+      - name: page
+        in: query
+        required: false
+        schema: {type: integer, minimum: 1, default: 1}
+      - name: size
+        in: query
+        required: false
+        schema: {type: integer, minimum: 1, maximum: 200, default: 20}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAuditPageResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/operation-audits/{auditId}:
+    get:
+      tags:
+      - operation-audit
+      summary: 操作审计详情（AUDIT_READ，M16）
+      description: 另一租户的行一律 404——确认某审计 id 存在于别处本身就是泄露。
+      parameters:
+      - name: auditId
+        in: path
+        required: true
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationAuditResult'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/knowledge/search:
     post:
       tags:
@@ -3485,6 +3889,46 @@ paths:
           $ref: '#/components/responses/RateLimited'
         '502':
           $ref: '#/components/responses/UpstreamModelError'
+  /api/v1/knowledge/feedback:
+    post:
+      tags:
+      - open-api
+      summary: 对外终端用户反馈（API Key 鉴权，M16）
+      description: '鉴权与限流同两个调用端点（独立过滤器链）。request_id 取自 search/chat 响应，
+        服务端据它反查检索留痕补齐 kb_id 与 query（查不到 → 400「request_id 无效或已过期」——
+        匿名反馈无法转评测用例）；落库 channel=OPEN_API，comment 截断 512 落 note，end_user_id
+        为调用方自报的终端用户标识（不做真实性背书）。控制台反馈列表可按 channel 筛选、可转评测用例。
+
+        归属校验：request_id 是链路关联 id 而非凭据（它走 X-Request-Id 头进来、调用方可自选），
+
+        所以服务端还要校验那次检索的应用在本 Key 的授权范围内——不在则 403 APP_ACCESS_DENIED，
+
+        控制台调试检索的 request_id（无应用维度）一律按「无效或已过期」拒绝。chunk_id 必须属于
+
+        该次检索的知识库，跨库 → 400；分片已删除仍接受，只是不回填 doc_id。'
+      security:
+      - ApiKeyBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KnowledgeFeedbackRequest'
+      responses:
+        '200':
+          description: 已落库
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeFeedbackResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/InvalidApiKey'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
 components:
   securitySchemes:
     bearerAuth:
@@ -3492,7 +3936,9 @@ components:
       scheme: bearer
       description: '自定义 Header：Authorization: Bearer <token>。服务端 token 表/内存缓存维护，
 
-        有效期 24h；除 /api/v1/auth/login、/api/v1/auth/sso-available 与 /actuator/** 外全部拦截。
+        有效期 24h；除 /api/v1/auth/login、/api/v1/auth/sso-available、/api/v1/auth/sso/**（含
+
+        oidc/saml/cas 的 login 与回调）与 /actuator/** 外全部拦截。
 
         M15 起认证之后还有一道功能权限拦截：命中 @RequiresPermission 且主体不持有其中任一权限码时返回 403 FORBIDDEN。
 
@@ -3767,6 +4213,9 @@ components:
           enum:
           - LOCAL
           - LDAP
+          - OIDC
+          - SAML
+          - CAS
         must_change_password:
           type: boolean
         last_login_at:
@@ -3817,6 +4266,9 @@ components:
       properties:
         user_id:
           type: string
+        tenant_id:
+          type: string
+          description: 所属租户业务 id（M16），默认租户超管的移户列读这个字段
         username:
           type: string
         display_name:
@@ -3830,6 +4282,9 @@ components:
           enum:
           - LOCAL
           - LDAP
+          - OIDC
+          - SAML
+          - CAS
         status:
           type: string
           enum:
@@ -3912,6 +4367,11 @@ components:
           nullable: true
           items:
             type: string
+        tenant_id:
+          type: string
+          nullable: true
+          description: 目标租户（M16）；仅持 tenant:manage 者可传，缺省落调用者自己的租户——
+            新租户的首个账号就是这样建出来的
     UpdateUserRequest:
       type: object
       description: 可改字段只有这两个；username 故意缺席
@@ -3953,6 +4413,232 @@ components:
           format: password
           minLength: 8
           maxLength: 64
+    MoveUserTenantRequest:
+      type: object
+      required:
+      - tenant_id
+      properties:
+        tenant_id:
+          type: string
+          description: 目标租户业务 id
+    Tenant:
+      type: object
+      description: 租户行（M16-CONTRACTS.md §1.2）；code/builtin 建后不可改
+      properties:
+        tenant_id:
+          type: string
+          description: 业务 id，tnt_ 前缀；默认租户恒为 tnt_default0000000
+        code:
+          type: string
+          description: 租户编码，全局唯一
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+          - ENABLED
+          - DISABLED
+        builtin:
+          type: boolean
+          description: 内置默认租户标记；true 的行不可停用
+        created_at:
+          type: string
+          format: date-time
+    TenantResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/Tenant'
+    TenantListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/Tenant'
+    SaveTenantRequest:
+      type: object
+      required:
+      - code
+      - name
+      properties:
+        code:
+          type: string
+          maxLength: 64
+          pattern: ^[A-Za-z0-9_-]+$
+          description: 仅建租户时生效；改名请求中被忽略
+        name:
+          type: string
+          maxLength: 64
+    UpdateTenantStatusRequest:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - ENABLED
+          - DISABLED
+    SsoProviders:
+      type: object
+      description: 三协议各自的就绪态：enabled 且必填项非空且 web-base-url 已配置
+      properties:
+        oidc:
+          type: boolean
+        saml:
+          type: boolean
+        cas:
+          type: boolean
+    SsoProvidersResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/SsoProviders'
+    DocumentVisibility:
+      type: object
+      description: 文档可见性视图；INHERIT 时 role_ids 恒为空数组
+      properties:
+        visibility:
+          type: string
+          enum:
+          - INHERIT
+          - RESTRICTED
+          description: INHERIT=继承库可见性（默认）；RESTRICTED=仅授权角色可读内容
+        role_ids:
+          type: array
+          items:
+            type: string
+    DocumentVisibilityResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/DocumentVisibility'
+    UpdateDocumentVisibilityRequest:
+      type: object
+      required:
+      - visibility
+      properties:
+        visibility:
+          type: string
+          enum:
+          - INHERIT
+          - RESTRICTED
+        role_ids:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: INHERIT 时必须为空，RESTRICTED 时非空；完整集合而非增删差异
+    KnowledgeFeedbackRequest:
+      type: object
+      required:
+      - request_id
+      - chunk_id
+      - verdict
+      properties:
+        request_id:
+          type: string
+          description: 'search/chat 响应的全链路请求 id，服务端据它反查检索留痕。必须是本 Key
+            授权范围内的应用发起的那次检索——它是关联 id 不是凭据，服务端另行校验归属'
+        chunk_id:
+          type: string
+          description: 必须属于该次检索的知识库；跨库 → 400
+        verdict:
+          type: string
+          enum:
+          - GOOD
+          - BAD
+        comment:
+          type: string
+          nullable: true
+          description: 超 512 字截断落 note
+        end_user_id:
+          type: string
+          nullable: true
+          description: 调用方自报的终端用户标识，不做真实性背书
+    KnowledgeFeedback:
+      type: object
+      properties:
+        feedback_id:
+          type: string
+    KnowledgeFeedbackResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/KnowledgeFeedback'
+    OperationAudit:
+      type: object
+      description: t_kb_operation_audit 行；detail 只含处理器与目标 id 摘要，绝不含请求体原文
+      properties:
+        audit_id:
+          type: string
+        user_id:
+          type: string
+        username:
+          type: string
+        module:
+          type: string
+          description: 如 KB/DOCUMENT/USER/ROLE/TENANT/APIKEY/SYSTEM
+        action:
+          type: string
+          description: 如 CREATE/UPDATE/DELETE/UPDATE_STATUS/MOVE_TENANT
+        target_type:
+          type: string
+        target_id:
+          type: string
+          nullable: true
+          description: 目标业务 id；表达式解析失败时降级为 null，行仍在
+        detail:
+          type: string
+          nullable: true
+          description: JSON 摘要（handler + target_id）
+        client_ip:
+          type: string
+          nullable: true
+        request_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    OperationAuditResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/OperationAudit'
+    OperationAuditPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationAudit'
+        page:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+    OperationAuditPageResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/OperationAuditPage'
     Role:
       type: object
       description: 角色行，含权限集合与数据范围（M15-CONTRACTS.md §1.4）
@@ -4201,6 +4887,10 @@ components:
           format: date-time
           nullable: true
           description: 进入回收站的时刻；不在回收站时为 null（文档列表不含回收站文档）
+        restricted:
+          type: boolean
+          description: 文档级数据权限只读标记（M16）：true 表示内容仅授权角色可读。列表不藏行——
+            行人人可见，内容读取（详情/切片/原文/预览）对无授权者 403
         created_at:
           type: string
           format: date-time
@@ -5811,6 +6501,16 @@ components:
         note:
           type: string
           nullable: true
+        channel:
+          type: string
+          enum:
+          - CONSOLE
+          - OPEN_API
+          description: 来源渠道（M16）：控制台标注 / 开放接口终端用户反馈；存量行与缺省均为 CONSOLE
+        end_user_id:
+          type: string
+          nullable: true
+          description: 开放接口调用方自报的终端用户标识（M16），不做真实性背书；CONSOLE 渠道恒空
         created_at:
           type: string
           format: date-time

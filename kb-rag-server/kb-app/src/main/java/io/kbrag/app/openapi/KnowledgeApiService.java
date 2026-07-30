@@ -599,6 +599,9 @@ public class KnowledgeApiService {
                 .topScore(CollectionUtils.isEmpty(nodes) ? null : nodes.get(0).getScore())
                 .degraded(result.getDegraded())
                 .requestId(RequestIdHolder.get())
+                // Who made the call, so the feedback endpoint can refuse a verdict on someone else's
+                // retrieval; the request id alone is caller supplied and proves nothing.
+                .appId(command.getAppId())
                 .build());
     }
 

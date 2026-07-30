@@ -30,6 +30,13 @@ public class WebMvcConfig implements WebMvcConfigurer {
             // Tells the login page whether to offer the single sign-on tab. It has to be answerable before
             // anybody is authenticated, and it discloses one boolean about the deployment's own wiring.
             "/api/v1/auth/sso-available",
+            // The browser redirect single sign on flows exist so a person without a session can get
+            // one; each is protected by its own one-time state or server validated ticket instead.
+            // See SsoController for the full reasoning.
+            "/api/v1/auth/sso/providers",
+            "/api/v1/auth/oidc/**",
+            "/api/v1/auth/saml/**",
+            "/api/v1/auth/cas/**",
             "/actuator/**",
             // The open API has its own authentication chain (ApiKeyAuthFilter): an API key is not a console
             // session, and letting the console interceptor see these paths would reject every external call

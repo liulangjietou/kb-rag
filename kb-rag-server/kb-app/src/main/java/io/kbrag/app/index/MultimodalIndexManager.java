@@ -10,9 +10,11 @@ import io.kbrag.domain.constant.ChunkMetadataKeys;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.ImageAsset;
 import io.kbrag.domain.entity.IndexRegistry;
+import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.IndexRegistryStatus;
 import io.kbrag.domain.enums.VectorEngine;
 import io.kbrag.domain.mapper.IndexRegistryMapper;
+import io.kbrag.domain.mapper.KnowledgeBaseMapper;
 import io.kbrag.domain.model.ImageInput;
 import io.kbrag.domain.model.IndexSpec;
 import io.kbrag.domain.model.KbIndexConfig;
@@ -67,6 +69,7 @@ public class MultimodalIndexManager {
     private final FulltextStore fulltextStore;
     private final VectorStore vectorStore;
     private final IndexRegistryMapper indexRegistryMapper;
+    private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final ObjectStorage objectStorage;
     private final ImageAssetService imageAssetService;
     private final ChunkIndexWriter chunkIndexWriter;
@@ -130,7 +133,7 @@ public class MultimodalIndexManager {
         if (config == null || !config.isMultimodalEnabled() || !multimodalEmbeddingProvider.isConfigured()) {
             return null;
         }
-        return indexNaming.multimodalAlias(kbId);
+        return indexNaming.multimodalAlias(tenantOf(kbId), kbId);
     }
 
     /**
@@ -162,8 +165,9 @@ public class MultimodalIndexManager {
     private IndexTarget ensureIndex(String kbId) {
         VectorEngine engine = properties.getVector().resolved();
         String embeddingSegment = indexNaming.embeddingSegment(multimodalEmbeddingProvider.model());
-        String physicalName = indexNaming.multimodalPhysicalName(kbId, embeddingSegment);
-        String alias = indexNaming.multimodalAlias(kbId);
+        String tenantId = tenantOf(kbId);
+        String physicalName = indexNaming.multimodalPhysicalName(tenantId, kbId, embeddingSegment);
+        String alias = indexNaming.multimodalAlias(tenantId, kbId);
         int dimension = multimodalEmbeddingProvider.dimension();
         IndexSpec spec = IndexSpec.builder()
                 .physicalIndexName(physicalName)
@@ -178,6 +182,22 @@ public class MultimodalIndexManager {
         }
         register(kbId, engine, physicalName, alias, embeddingSegment);
         return new IndexTarget(engine, physicalName, alias, embeddingSegment, true, dimension);
+    }
+
+    /**
+     * Owning tenant of a knowledge base, same lookup as {@link IndexAliasManager}: a base outside the
+     * default tenant gets the tenant segment of the M16 naming scheme, a missing row falls back to the
+     * default tenant and therefore to the historical names.
+     *
+     * @param kbId knowledge base business id
+     * @return owning tenant business id, or {@code null} for the default tenant
+     */
+    private String tenantOf(String kbId) {
+        KnowledgeBase base = knowledgeBaseMapper.selectOne(new LambdaQueryWrapper<KnowledgeBase>()
+                .select(KnowledgeBase::getTenantId)
+                .eq(KnowledgeBase::getKbId, kbId)
+                .last("limit 1"));
+        return base == null ? null : base.getTenantId();
     }
 
     private void register(String kbId, VectorEngine engine, String physicalName, String alias,

@@ -102,6 +102,9 @@ public class KbProperties {
     /** Search insight policy: recording switch and retention, the M10 contract section 2.3. */
     private Insight insight = new Insight();
 
+    /** Operation audit policy: retention of the "who did what" trail, the M16 contract section 7. */
+    private Audit audit = new Audit();
+
     /** Application release policy: index snapshot timeout and retention. */
     private App app = new App();
 
@@ -528,6 +531,19 @@ public class KbProperties {
 
         /** Maximum size of one image in megabytes, larger ones are skipped. */
         private int maxImageSizeMb = 10;
+
+        /**
+         * Vision calls in flight while the images of one document are described.
+         *
+         * <p>One image is one round trip bounded by {@code kb.vision.timeout-ms}, so this is the wall
+         * clock divisor of the image stage: a document at {@code maxPerDocument} took the ceiling times
+         * that timeout when the calls were serial.
+         *
+         * <p>Raise it against the provider's rate limit rather than against the machine: the work is
+         * entirely waiting on a remote model, and a throttled call is recorded as a failed proxy instead
+         * of being retried, so overshooting trades latency for missing text.
+         */
+        private int describeConcurrency = 8;
     }
 
     /**
@@ -656,6 +672,18 @@ public class KbProperties {
         /** Corporate directory single sign on. */
         private Ldap ldap = new Ldap();
 
+        /** OpenID Connect single sign on, the M16 contract section 3.3. */
+        private Oidc oidc = new Oidc();
+
+        /** SAML 2.0 single sign on, the M16 contract section 3.3. */
+        private Saml saml = new Saml();
+
+        /** CAS single sign on, the M16 contract section 3.3. */
+        private Cas cas = new Cas();
+
+        /** Settings shared by every browser redirect based protocol. */
+        private Sso sso = new Sso();
+
         /**
          * Corporate directory single sign on.
          *
@@ -694,8 +722,127 @@ public class KbProperties {
              * <p>Read only on purpose. The alternative, no role at all, means a person who authenticated
              * successfully lands on an empty console and files a ticket; the alternative in the other
              * direction hands write access to anyone with a domain account.
+             *
+             * <p>Ignored while group synchronisation is enabled: groups are then the source of truth,
+             * and a default pushed into the manually granted set could never be revoked by the sync.
              */
             private String defaultRoleCode = "VIEWER";
+
+            /** Directory group to console role synchronisation, the M16 contract section 6. */
+            private GroupSync groupSync = new GroupSync();
+
+            /**
+             * Directory group to console role synchronisation.
+             *
+             * <p>Off by default. Switching it on changes who owns the role set of a single sign on
+             * account: every login replaces the synchronised grants with what the mapping derives from
+             * the directory groups, while manually granted roles stay untouched.
+             */
+            @Getter
+            @Setter
+            @ToString
+            public static class GroupSync {
+
+                /** Whether every single sign on login re-derives roles from directory groups. */
+                private boolean enabled = false;
+
+                /**
+                 * Mapping entries {@code groupDn=ROLE_CODE} separated by semicolons.
+                 *
+                 * <p>A single string rather than a structured list so the whole mapping fits one
+                 * environment variable; distinguished names are compared ignoring case and whitespace.
+                 */
+                private String roleMappings;
+            }
+        }
+
+        /**
+         * OpenID Connect relying party settings.
+         *
+         * <p>Only the issuer is asked for; every endpoint is taken from the discovery document at
+         * {@code {issuer}/.well-known/openid-configuration} - hand-configured endpoints drift from
+         * what the IdP actually serves, and the discovery document is the IdP's own statement.
+         */
+        @Getter
+        @Setter
+        @ToString
+        public static class Oidc {
+
+            /** Whether the OIDC login button is offered. */
+            private boolean enabled = false;
+
+            /** Issuer URL, the base of the discovery document. */
+            private String issuer;
+
+            /** Client identifier registered at the IdP. */
+            private String clientId;
+
+            /** Client secret registered at the IdP. */
+            private String clientSecret;
+
+            /** Requested scopes; {@code openid} is what makes the response an OIDC one. */
+            private String scopes = "openid profile email";
+        }
+
+        /**
+         * SAML 2.0 service provider settings.
+         *
+         * <p>The IdP certificate is pasted as PEM straight into configuration rather than pulled from
+         * a metadata URL: the certificate is the single trust anchor of every assertion, and a
+         * metadata fetcher is one more remote dependency whose availability and authenticity would
+         * then need their own handling.
+         */
+        @Getter
+        @Setter
+        @ToString
+        public static class Saml {
+
+            /** Whether the SAML login button is offered. */
+            private boolean enabled = false;
+
+            /** Entity id of the identity provider. */
+            private String idpEntityId;
+
+            /** Single sign on URL of the identity provider, target of the AuthnRequest redirect. */
+            private String idpSsoUrl;
+
+            /** X.509 signing certificate of the identity provider, PEM. */
+            private String idpCertificate;
+
+            /** Entity id this deployment presents as service provider. */
+            private String spEntityId = "kb-rag";
+        }
+
+        /**
+         * CAS client settings.
+         */
+        @Getter
+        @Setter
+        @ToString
+        public static class Cas {
+
+            /** Whether the CAS login button is offered. */
+            private boolean enabled = false;
+
+            /** Base URL of the CAS server, for example {@code https://cas.corp.example.com/cas}. */
+            private String serverUrl;
+        }
+
+        /**
+         * Settings shared by the redirect based single sign on protocols.
+         */
+        @Getter
+        @Setter
+        @ToString
+        public static class Sso {
+
+            /**
+             * Base URL of the console the browser is sent back to after a successful callback.
+             *
+             * <p>Left blank, every protocol counts as unconfigured even when enabled: a callback that
+             * cannot say where to deliver the token has nowhere safe to send the browser.
+             */
+            private String webBaseUrl;
         }
     }
 
@@ -944,11 +1091,15 @@ public class KbProperties {
         /** Entities the full text index match of one query keeps, highest scoring first. */
         private int entityMatchLimit = 10;
 
-        /** Chunks submitted to the extraction executor per batch. */
-        private int extractBatchSize = 10;
-
-        /** Chunks extracted concurrently inside one extraction task. */
-        private int extractConcurrency = 2;
+        /**
+         * Model calls in flight inside one extraction task.
+         *
+         * <p>模型调用是抽取的全部成本，且没有共享状态，所以这个值直接决定一次抽取要跑多久：一万个分片
+         * 按每次 3 秒算，并发 2 是四个多小时，并发 8 是一小时出头。图写入已经被收到单写入者线程上串行
+         * 执行（见 {@code GraphExtractionService}），并发不再影响 MERGE 的正确性，唯一的约束是模型侧
+         * 的限流 —— 同时进行的抽取任务数又受索引池上限约束，所以模型侧的峰值并发是两者之积。
+         */
+        private int extractConcurrency = 8;
 
         /**
          * Generation budget of one extraction call.
@@ -1093,5 +1244,26 @@ public class KbProperties {
 
         /** Cron expression of the daily cleanup pass. */
         private String cleanupCron = "0 45 3 * * *";
+    }
+
+    /**
+     * Operation audit policy, the M16 contract section 7.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Audit {
+
+        /** Days an operation audit row stays before the cleanup removes it, aligned with the API audit. */
+        private int operationRetentionDays = 180;
+
+        /**
+         * Rows one cleanup batch deletes. Bounded so a retention pass never holds a long transaction
+         * over a table the request path keeps inserting into.
+         */
+        private int cleanupBatchSize = 5000;
+
+        /** Cron expression of the daily cleanup pass. */
+        private String cleanupCron = "0 50 3 * * *";
     }
 }

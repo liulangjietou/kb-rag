@@ -7,7 +7,7 @@ import {
   dismissRetrievalFeedback,
   listRetrievalFeedback,
 } from '../../../api/retrievalFeedback';
-import type { EvalDataset, FeedbackStatus, FeedbackVerdict, RetrievalFeedbackEntry } from '../../../api/types';
+import type { EvalDataset, FeedbackChannel, FeedbackStatus, FeedbackVerdict, RetrievalFeedbackEntry } from '../../../api/types';
 import { FEEDBACK_STATUS_META, FEEDBACK_VERDICT_META, metaOf } from '../../../utils/statusMeta';
 
 interface FeedbackTabProps {
@@ -24,6 +24,12 @@ interface ConvertFormValues {
 
 const PAGE_SIZE = 20;
 
+// M16: feedback now arrives from two doors -- the console debug page and the open API.
+const FEEDBACK_CHANNEL_META: Record<FeedbackChannel, { label: string; color: string }> = {
+  CONSOLE: { label: '控制台', color: 'blue' },
+  OPEN_API: { label: '开放API', color: 'purple' },
+};
+
 /**
  * 反馈管理 tab of the KB detail page (M10-CONTRACTS.md section 3): lists the persisted good/bad
  * verdicts the debug page submitted, with a convert-to-eval-case action for GOOD rows (dataset
@@ -37,6 +43,7 @@ export default function FeedbackTab({ kbId }: FeedbackTabProps) {
   const [loading, setLoading] = useState(false);
   const [verdictFilter, setVerdictFilter] = useState<FeedbackVerdict | undefined>();
   const [statusFilter, setStatusFilter] = useState<FeedbackStatus | undefined>();
+  const [channelFilter, setChannelFilter] = useState<FeedbackChannel | undefined>();
   // Row being converted; doubles as the modal's open flag.
   const [converting, setConverting] = useState<RetrievalFeedbackEntry | null>(null);
   const [datasets, setDatasets] = useState<EvalDataset[]>([]);
@@ -45,12 +52,18 @@ export default function FeedbackTab({ kbId }: FeedbackTabProps) {
   const [form] = Form.useForm<ConvertFormValues>();
   const targetMode = Form.useWatch('target_mode', form) ?? 'existing';
 
-  const load = useCallback(async (targetPage: number, verdict?: FeedbackVerdict, status?: FeedbackStatus) => {
+  const load = useCallback(async (
+    targetPage: number,
+    verdict?: FeedbackVerdict,
+    status?: FeedbackStatus,
+    channel?: FeedbackChannel,
+  ) => {
     setLoading(true);
     try {
       const result = await listRetrievalFeedback(kbId, {
         verdict,
         status,
+        channel,
         page: targetPage,
         size: PAGE_SIZE,
       });
@@ -63,8 +76,8 @@ export default function FeedbackTab({ kbId }: FeedbackTabProps) {
   }, [kbId]);
 
   useEffect(() => {
-    load(1, verdictFilter, statusFilter);
-  }, [load, verdictFilter, statusFilter]);
+    load(1, verdictFilter, statusFilter, channelFilter);
+  }, [load, verdictFilter, statusFilter, channelFilter]);
 
   const openConvert = (row: RetrievalFeedbackEntry) => {
     setConverting(row);
@@ -91,7 +104,7 @@ export default function FeedbackTab({ kbId }: FeedbackTabProps) {
       message.success('已转入评测集（case source=FEEDBACK）');
       setConverting(null);
       form.resetFields();
-      load(page, verdictFilter, statusFilter);
+      load(page, verdictFilter, statusFilter, channelFilter);
     } finally {
       setSubmitting(false);
     }
@@ -100,7 +113,7 @@ export default function FeedbackTab({ kbId }: FeedbackTabProps) {
   const handleDismiss = async (row: RetrievalFeedbackEntry) => {
     await dismissRetrievalFeedback(row.feedback_id);
     message.success('已忽略该反馈');
-    load(page, verdictFilter, statusFilter);
+    load(page, verdictFilter, statusFilter, channelFilter);
   };
 
   return (
@@ -129,7 +142,18 @@ export default function FeedbackTab({ kbId }: FeedbackTabProps) {
             { label: '已忽略', value: 'DISMISSED' },
           ]}
         />
-        <Button onClick={() => load(page, verdictFilter, statusFilter)}>刷新</Button>
+        <Select
+          allowClear
+          placeholder="渠道筛选"
+          style={{ width: 140 }}
+          value={channelFilter}
+          onChange={(value) => setChannelFilter(value)}
+          options={[
+            { label: '控制台', value: 'CONSOLE' },
+            { label: '开放API', value: 'OPEN_API' },
+          ]}
+        />
+        <Button onClick={() => load(page, verdictFilter, statusFilter, channelFilter)}>刷新</Button>
       </Space>
 
       <Table<RetrievalFeedbackEntry>
@@ -142,7 +166,7 @@ export default function FeedbackTab({ kbId }: FeedbackTabProps) {
           total,
           showSizeChanger: false,
           showTotal: (t) => `共 ${t} 条`,
-          onChange: (nextPage) => load(nextPage, verdictFilter, statusFilter),
+          onChange: (nextPage) => load(nextPage, verdictFilter, statusFilter, channelFilter),
         }}
         columns={[
           {
@@ -173,6 +197,22 @@ export default function FeedbackTab({ kbId }: FeedbackTabProps) {
               const tag = <Tag color={meta.color}>{meta.label}</Tag>;
               return record.converted_case_id ? (
                 <Tooltip title={`case: ${record.converted_case_id}`}>{tag}</Tooltip>
+              ) : (
+                tag
+              );
+            },
+          },
+          {
+            title: '渠道',
+            dataIndex: 'channel',
+            width: 110,
+            render: (channel: FeedbackChannel, record) => {
+              const meta = FEEDBACK_CHANNEL_META[channel] ?? { label: channel, color: 'default' };
+              const tag = <Tag color={meta.color}>{meta.label}</Tag>;
+              // Open-API rows carry the caller-supplied end-user id, worth surfacing when tracing
+              // a complaint back to whoever raised it.
+              return record.end_user_id ? (
+                <Tooltip title={`终端用户：${record.end_user_id}`}>{tag}</Tooltip>
               ) : (
                 tag
               );

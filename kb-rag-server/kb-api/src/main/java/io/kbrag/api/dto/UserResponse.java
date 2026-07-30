@@ -9,6 +9,7 @@ import java.util.List;
  * Console user row. Neither the password hash nor its absence is exposed.
  *
  * @param userId             user business id
+ * @param tenantId           owning tenant business id (M16), what the move-tenant console column reads
  * @param username           login name
  * @param displayName        display label
  * @param email              contact address
@@ -24,6 +25,7 @@ import java.util.List;
  */
 public record UserResponse(
         @JsonProperty("user_id") String userId,
+        @JsonProperty("tenant_id") String tenantId,
         String username,
         @JsonProperty("display_name") String displayName,
         String email,
@@ -46,6 +48,7 @@ public record UserResponse(
     public static UserResponse from(AdminUser user, List<String> roleIds, List<String> roleNames) {
         return new UserResponse(
                 user.getUserId(),
+                user.getTenantId(),
                 user.getUsername(),
                 user.getDisplayName(),
                 user.getEmail(),

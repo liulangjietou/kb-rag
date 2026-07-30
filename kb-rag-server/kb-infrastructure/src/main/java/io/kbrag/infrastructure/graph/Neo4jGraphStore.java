@@ -41,8 +41,11 @@ import java.util.Map;
  *
  * <p><b>Schema uses plain composite indexes, not uniqueness constraints.</b> A constraint would make the
  * merges race free, but composite constraint support differs between editions and a schema statement
- * that fails on a community server would leave the whole capability unusable. The extraction concurrency
- * is small and bounded by configuration, so an indexed {@code MERGE} is the right trade here.
+ * that fails on a community server would leave the whole capability unusable. What keeps an indexed
+ * {@code MERGE} safe instead is the caller: {@code GraphExtractionService} funnels the writes of one
+ * knowledge base through a single writer thread, so no two transactions merge the same
+ * {@code (kb_id, name)} pair concurrently. Two knowledge bases writing at once never collide - the pair
+ * differs by {@code kb_id} - which is why that serialisation is per run rather than global.
  *
  * <p><b>Match scores are normalised against the best match of the same result set</b>, as the port
  * requires: a Lucene score has no upper bound, and the relevance formula the debug page displays has to

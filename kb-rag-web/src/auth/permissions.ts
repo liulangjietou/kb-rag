@@ -26,6 +26,7 @@ export const PERMISSIONS = {
   SYSTEM_CONFIG: 'system:config',
   USER_MANAGE: 'user:manage',
   ROLE_MANAGE: 'role:manage',
+  TENANT_MANAGE: 'tenant:manage',
 } as const;
 
 export type PermissionCode = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

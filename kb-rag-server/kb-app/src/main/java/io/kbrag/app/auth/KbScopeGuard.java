@@ -2,8 +2,10 @@ package io.kbrag.app.auth;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.Annotation;
 import io.kbrag.domain.entity.Chunk;
+import io.kbrag.domain.entity.DocAcl;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.EvalCase;
 import io.kbrag.domain.entity.EvalDataset;
@@ -11,8 +13,10 @@ import io.kbrag.domain.entity.EvalRun;
 import io.kbrag.domain.entity.ExtSource;
 import io.kbrag.domain.entity.RetrievalFeedback;
 import io.kbrag.domain.entity.WebSource;
+import io.kbrag.domain.enums.DocVisibility;
 import io.kbrag.domain.mapper.AnnotationMapper;
 import io.kbrag.domain.mapper.ChunkMapper;
+import io.kbrag.domain.mapper.DocAclMapper;
 import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.mapper.EvalCaseMapper;
 import io.kbrag.domain.mapper.EvalDatasetMapper;
@@ -20,8 +24,13 @@ import io.kbrag.domain.mapper.EvalRunMapper;
 import io.kbrag.domain.mapper.ExtSourceMapper;
 import io.kbrag.domain.mapper.RetrievalFeedbackMapper;
 import io.kbrag.domain.mapper.WebSourceMapper;
+import io.kbrag.domain.model.UserPrincipal;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.stereotype.Component;
+
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Data scope checks for resources addressed by their own id rather than by a knowledge base id.
@@ -54,6 +63,7 @@ public class KbScopeGuard {
     private final ExtSourceMapper extSourceMapper;
     private final WebSourceMapper webSourceMapper;
     private final RetrievalFeedbackMapper retrievalFeedbackMapper;
+    private final DocAclMapper docAclMapper;
 
     /**
      * Asserts the knowledge base owning a document is inside the caller's scope.
@@ -69,6 +79,50 @@ public class KbScopeGuard {
                 .eq(Document::getDocId, docId)
                 .last("limit 1"));
         requireOwner(document == null ? null : document.getKbId(), "document", docId);
+    }
+
+    /**
+     * Asserts the caller may read the <em>content</em> of a document: the scope check of
+     * {@link #requireDocumentAccess(String)} plus the document level ACL (M16 contract section 5).
+     *
+     * <p>Deliberately <b>not</b> short circuited by {@link AccessGuard#unrestrictedKbScope()}:
+     * {@code kb_scope_all} answers "which bases", never "which rows inside one". The single bypass is
+     * the {@code doc:review} permission - whoever can change a clearance cannot be hidden from the
+     * content it protects. A caller with no console principal, the API key path, holds no roles and is
+     * therefore refused every restricted document.
+     *
+     * @param docId document business id
+     */
+    public void requireDocumentContentAccess(String docId) {
+        Document document = documentMapper.selectOne(new LambdaQueryWrapper<Document>()
+                .select(Document::getKbId, Document::getVisibility)
+                .eq(Document::getDocId, docId)
+                .last("limit 1"));
+        if (document == null) {
+            throw BizException.notFound("document not found: " + docId);
+        }
+        if (!AccessGuard.unrestrictedKbScope()) {
+            AccessGuard.requireKbAccess(document.getKbId());
+        }
+        if (document.getVisibility() != DocVisibility.RESTRICTED) {
+            return;
+        }
+        UserPrincipal principal = AccessGuard.currentUserOrNull();
+        if (principal != null && principal.hasPermission(PermissionCodes.DOC_REVIEW)) {
+            return;
+        }
+        if (principal == null || CollectionUtils.isEmpty(principal.roleIds())) {
+            throw BizException.forbidden("document is restricted: " + docId);
+        }
+        Set<String> granted = docAclMapper.selectList(new LambdaQueryWrapper<DocAcl>()
+                        .select(DocAcl::getRoleId)
+                        .eq(DocAcl::getDocumentId, docId))
+                .stream()
+                .map(DocAcl::getRoleId)
+                .collect(Collectors.toSet());
+        if (principal.roleIds().stream().noneMatch(granted::contains)) {
+            throw BizException.forbidden("document is restricted: " + docId);
+        }
     }
 
     /**

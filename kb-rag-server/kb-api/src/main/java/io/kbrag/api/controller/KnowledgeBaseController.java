@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.ChatImportConfirmRequest;
 import io.kbrag.api.dto.ChatImportPreviewResponse;
@@ -72,6 +73,8 @@ public class KnowledgeBaseController {
      */
     @PostMapping
     @RequiresPermission(PermissionCodes.KB_WRITE)
+    @AuditedOperation(module = "KB", action = "CREATE", targetType = "KNOWLEDGE_BASE",
+            targetId = "#result.data.kbId")
     public Result<KnowledgeBaseResponse> create(@Valid @RequestBody CreateKnowledgeBaseRequest request) {
         KnowledgeBase created = knowledgeBaseService.create(request.name(), request.description());
         return Result.success(toResponse(created));
@@ -114,6 +117,8 @@ public class KnowledgeBaseController {
      */
     @PutMapping("/{kbId}/index-config")
     @RequiresPermission(PermissionCodes.KB_WRITE)
+    @AuditedOperation(module = "KB", action = "UPDATE_INDEX_CONFIG", targetType = "KNOWLEDGE_BASE",
+            targetId = "#kbId")
     public Result<Map<String, Object>> updateIndexConfig(@PathVariable String kbId,
                                                          @Valid @RequestBody UpdateIndexConfigRequest request) {
         AccessGuard.requireKbAccess(kbId);
@@ -136,6 +141,7 @@ public class KnowledgeBaseController {
      */
     @PostMapping("/{kbId}/rebuild")
     @RequiresPermission(PermissionCodes.KB_WRITE)
+    @AuditedOperation(module = "KB", action = "REBUILD", targetType = "KNOWLEDGE_BASE", targetId = "#kbId")
     public Result<Map<String, Object>> rebuild(@PathVariable String kbId,
                                                @RequestBody(required = false) RebuildRequest request) {
         AccessGuard.requireKbAccess(kbId);
@@ -152,6 +158,8 @@ public class KnowledgeBaseController {
      */
     @PostMapping("/{kbId}/documents/confirm")
     @RequiresPermission(PermissionCodes.DOC_WRITE)
+    @AuditedOperation(module = "KB", action = "CONFIRM_DOCUMENTS", targetType = "KNOWLEDGE_BASE",
+            targetId = "#kbId")
     public Result<Map<String, Object>> confirmDocuments(
             @PathVariable String kbId,
             @RequestBody(required = false) ConfirmDocumentsRequest request) {
@@ -198,6 +206,7 @@ public class KnowledgeBaseController {
      */
     @PostMapping("/{kbId}/chat-imports/confirm")
     @RequiresPermission(PermissionCodes.DOC_WRITE)
+    @AuditedOperation(module = "KB", action = "CHAT_IMPORT", targetType = "KNOWLEDGE_BASE", targetId = "#kbId")
     public Result<Map<String, Object>> confirmChatImport(
             @PathVariable String kbId,
             @Valid @RequestBody ChatImportConfirmRequest request) {
@@ -215,6 +224,8 @@ public class KnowledgeBaseController {
      */
     @PutMapping("/{kbId}/governance")
     @RequiresPermission(PermissionCodes.KB_WRITE)
+    @AuditedOperation(module = "KB", action = "UPDATE_GOVERNANCE", targetType = "KNOWLEDGE_BASE",
+            targetId = "#kbId")
     public Result<KnowledgeBaseResponse> updateGovernance(@PathVariable String kbId,
                                                           @Valid @RequestBody UpdateKbGovernanceRequest request) {
         AccessGuard.requireKbAccess(kbId);
@@ -230,6 +241,7 @@ public class KnowledgeBaseController {
      */
     @DeleteMapping("/{kbId}")
     @RequiresPermission(PermissionCodes.KB_DELETE)
+    @AuditedOperation(module = "KB", action = "DELETE", targetType = "KNOWLEDGE_BASE", targetId = "#kbId")
     public Result<Void> delete(@PathVariable String kbId) {
         AccessGuard.requireKbAccess(kbId);
         knowledgeBaseService.delete(kbId);

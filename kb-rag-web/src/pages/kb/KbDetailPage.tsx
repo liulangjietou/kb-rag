@@ -37,6 +37,8 @@ import {
 import { confirmKbDocuments, getKnowledgeBase, rebuildKb, updateKbGovernance } from '../../api/kb';
 import { PUBLISH_STATUS_META } from '../../api/types';
 import type { KbDocument, KnowledgeBase } from '../../api/types';
+import { useAuth } from '../../auth/AuthContext';
+import { PERMISSIONS } from '../../auth/permissions';
 import { formatFileSize } from '../../utils/format';
 import { PROCESS_STATUS_META, metaOf } from '../../utils/statusMeta';
 import ChatImportWizard from './components/ChatImportWizard';
@@ -50,6 +52,7 @@ import InsightTab from './components/InsightTab';
 import ParsePreviewDrawer from './components/ParsePreviewDrawer';
 import TrashTab from './components/TrashTab';
 import VersionDrawer from './components/VersionDrawer';
+import VisibilityDrawer from './components/VisibilityDrawer';
 import WebSourcesTab from './components/WebSourcesTab';
 
 // Document list is polled every 3s while this page stays mounted, per M1-CONTRACTS.md section 7.
@@ -66,6 +69,9 @@ const DOC_PAGE_SIZE_OPTIONS = ['20', '50', '100'];
 export default function KbDetailPage() {
   const { kbId } = useParams<{ kbId: string }>();
   const navigate = useNavigate();
+  const { can } = useAuth();
+  // M16: the visibility editor writes through a doc:review endpoint, so only reviewers get it.
+  const canDocReview = can(PERMISSIONS.DOC_REVIEW);
   const [kb, setKb] = useState<KnowledgeBase | null>(null);
   const [documents, setDocuments] = useState<KbDocument[]>([]);
   const [docPage, setDocPage] = useState(1);
@@ -86,6 +92,8 @@ export default function KbDetailPage() {
   // M11 governance: rows the validity/reject modals are pointing at, and the KB-level switch.
   const [validityDoc, setValidityDoc] = useState<KbDocument | null>(null);
   const [rejectDoc, setRejectDoc] = useState<KbDocument | null>(null);
+  // M16 document visibility: the row the drawer is editing.
+  const [visibilityDoc, setVisibilityDoc] = useState<KbDocument | null>(null);
   const [governanceSaving, setGovernanceSaving] = useState(false);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -407,7 +415,22 @@ export default function KbDetailPage() {
                     getCheckboxProps: (record) => ({ disabled: record.process_status !== 'PENDING_CONFIRM' }),
                   }}
                   columns={[
-                    { title: '文件名', dataIndex: 'file_name' },
+                    {
+                      title: '文件名',
+                      dataIndex: 'file_name',
+                      render: (name: string, record: KbDocument) => (
+                        <Space size={4}>
+                          <Typography.Text>{name}</Typography.Text>
+                          {record.restricted && (
+                            // M16: restriction hides content, not the row -- the tag says why a
+                            // reader may still be told "无权查看" when opening it.
+                            <Tooltip title="仅限授权角色查看内容与命中检索">
+                              <Tag color="orange">受限</Tag>
+                            </Tooltip>
+                          )}
+                        </Space>
+                      ),
+                    },
                     { title: '类型', dataIndex: 'file_ext', width: 80 },
                     {
                       title: '大小',
@@ -512,6 +535,11 @@ export default function KbDetailPage() {
                           <Button size="small" type="link" onClick={() => setValidityDoc(record)}>
                             有效期
                           </Button>
+                          {canDocReview && (
+                            <Button size="small" type="link" onClick={() => setVisibilityDoc(record)}>
+                              可见性
+                            </Button>
+                          )}
                           <Popconfirm
                             title="确认重建该文档的解析与索引？"
                             okText="重建"
@@ -602,6 +630,15 @@ export default function KbDetailPage() {
       <ValidityModal doc={validityDoc} onClose={() => setValidityDoc(null)} onSaved={loadDocuments} />
 
       <RejectModal doc={rejectDoc} onClose={() => setRejectDoc(null)} onRejected={loadDocuments} />
+
+      {kbId && (
+        <VisibilityDrawer
+          kbId={kbId}
+          doc={visibilityDoc}
+          onClose={() => setVisibilityDoc(null)}
+          onSaved={loadDocuments}
+        />
+      )}
 
       {kbId && (
         <ChatImportWizard

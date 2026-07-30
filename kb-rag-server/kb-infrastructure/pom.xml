@@ -44,5 +44,12 @@
             <groupId>org.neo4j.driver</groupId>
             <artifactId>neo4j-java-driver</artifactId>
         </dependency>
+        <!-- JWKS signature verification of OIDC id_tokens only. A pure library with no transitive
+             dependencies, version pinned in the parent to the release Spring Security 6.3 uses; the
+             full OAuth2 client stack would drag in a framework for one signed token check per login. -->
+        <dependency>
+            <groupId>com.nimbusds</groupId>
+            <artifactId>nimbus-jose-jwt</artifactId>
+        </dependency>
     </dependencies>
 </project>

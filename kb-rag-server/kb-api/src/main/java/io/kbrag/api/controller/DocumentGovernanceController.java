@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.DocumentResponse;
 import io.kbrag.api.dto.PageResponse;
@@ -58,6 +59,8 @@ public class DocumentGovernanceController {
      */
     @PostMapping("/api/v1/documents/{docId}/submit-review")
     @RequiresPermission(PermissionCodes.DOC_WRITE)
+    @AuditedOperation(module = "GOVERNANCE", action = "SUBMIT_REVIEW", targetType = "DOCUMENT",
+            targetId = "#docId")
     public Result<DocumentResponse> submitReview(@PathVariable String docId) {
         kbScopeGuard.requireDocumentAccess(docId);
         return Result.success(DocumentResponse.from(documentGovernanceService.submitReview(docId)));
@@ -71,6 +74,7 @@ public class DocumentGovernanceController {
      */
     @PostMapping("/api/v1/documents/{docId}/approve")
     @RequiresPermission(PermissionCodes.DOC_REVIEW)
+    @AuditedOperation(module = "GOVERNANCE", action = "APPROVE", targetType = "DOCUMENT", targetId = "#docId")
     public Result<DocumentResponse> approve(@PathVariable String docId) {
         kbScopeGuard.requireDocumentAccess(docId);
         return Result.success(DocumentResponse.from(documentGovernanceService.approve(docId)));
@@ -85,6 +89,7 @@ public class DocumentGovernanceController {
      */
     @PostMapping("/api/v1/documents/{docId}/reject")
     @RequiresPermission(PermissionCodes.DOC_REVIEW)
+    @AuditedOperation(module = "GOVERNANCE", action = "REJECT", targetType = "DOCUMENT", targetId = "#docId")
     public Result<DocumentResponse> reject(@PathVariable String docId,
                                            @Valid @RequestBody RejectDocumentRequest request) {
         kbScopeGuard.requireDocumentAccess(docId);
@@ -101,6 +106,8 @@ public class DocumentGovernanceController {
      */
     @PutMapping("/api/v1/documents/{docId}/validity")
     @RequiresPermission(PermissionCodes.DOC_REVIEW)
+    @AuditedOperation(module = "GOVERNANCE", action = "UPDATE_VALIDITY", targetType = "DOCUMENT",
+            targetId = "#docId")
     public Result<DocumentResponse> updateValidity(@PathVariable String docId,
                                                    @RequestBody UpdateValidityRequest request) {
         kbScopeGuard.requireDocumentAccess(docId);
@@ -137,6 +144,7 @@ public class DocumentGovernanceController {
      */
     @PostMapping("/api/v1/documents/{docId}/restore")
     @RequiresPermission(PermissionCodes.DOC_REVIEW)
+    @AuditedOperation(module = "GOVERNANCE", action = "RESTORE", targetType = "DOCUMENT", targetId = "#docId")
     public Result<DocumentResponse> restore(@PathVariable String docId) {
         kbScopeGuard.requireDocumentAccess(docId);
         return Result.success(DocumentResponse.from(documentGovernanceService.restore(docId)));
@@ -150,6 +158,7 @@ public class DocumentGovernanceController {
      */
     @DeleteMapping("/api/v1/documents/{docId}/purge")
     @RequiresPermission(PermissionCodes.DOC_REVIEW)
+    @AuditedOperation(module = "GOVERNANCE", action = "PURGE", targetType = "DOCUMENT", targetId = "#docId")
     public Result<Void> purge(@PathVariable String docId) {
         kbScopeGuard.requireDocumentAccess(docId);
         documentGovernanceService.purge(docId);

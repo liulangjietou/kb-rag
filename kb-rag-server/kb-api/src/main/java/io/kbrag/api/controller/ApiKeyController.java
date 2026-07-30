@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.ApiKeyCreatedResponse;
 import io.kbrag.api.dto.ApiKeyResponse;
@@ -51,6 +52,8 @@ public class ApiKeyController {
      * @return created key plus its plaintext
      */
     @PostMapping
+    @AuditedOperation(module = "API_KEY", action = "CREATE", targetType = "API_KEY",
+            targetId = "#result.data.key.keyId")
     public Result<ApiKeyCreatedResponse> create(@Valid @RequestBody CreateApiKeyRequest request) {
         ApiKeyService.IssuedKey issued = apiKeyService.create(request.name(), request.qpsLimit(),
                 request.appScope());
@@ -80,6 +83,7 @@ public class ApiKeyController {
      * @return updated key
      */
     @PutMapping("/{keyId}/status")
+    @AuditedOperation(module = "API_KEY", action = "UPDATE_STATUS", targetType = "API_KEY", targetId = "#keyId")
     public Result<ApiKeyResponse> updateStatus(@PathVariable String keyId,
                                               @Valid @RequestBody UpdateApiKeyStatusRequest request) {
         ApiKey key = apiKeyService.updateStatus(keyId, parseStatus(request.status()));
@@ -95,6 +99,7 @@ public class ApiKeyController {
      * @return updated key
      */
     @PutMapping("/{keyId}/scope")
+    @AuditedOperation(module = "API_KEY", action = "UPDATE_SCOPE", targetType = "API_KEY", targetId = "#keyId")
     public Result<ApiKeyResponse> updateScope(@PathVariable String keyId,
                                              @Valid @RequestBody UpdateApiKeyScopeRequest request) {
         ApiKey key = apiKeyService.updateScope(keyId, request.appScope());
@@ -108,6 +113,7 @@ public class ApiKeyController {
      * @return updated key plus its new plaintext
      */
     @PostMapping("/{keyId}/rotate")
+    @AuditedOperation(module = "API_KEY", action = "ROTATE", targetType = "API_KEY", targetId = "#keyId")
     public Result<ApiKeyCreatedResponse> rotate(@PathVariable String keyId) {
         ApiKeyService.IssuedKey issued = apiKeyService.rotate(keyId);
         apiRateLimiter.forget(keyId);
@@ -121,6 +127,7 @@ public class ApiKeyController {
      * @return empty success envelope
      */
     @DeleteMapping("/{keyId}")
+    @AuditedOperation(module = "API_KEY", action = "DELETE", targetType = "API_KEY", targetId = "#keyId")
     public Result<Void> delete(@PathVariable String keyId) {
         apiKeyService.delete(keyId);
         apiRateLimiter.forget(keyId);

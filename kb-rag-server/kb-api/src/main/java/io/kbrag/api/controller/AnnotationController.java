@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.AnnotationMigrationResponse;
 import io.kbrag.api.dto.MigrateAnnotationRequest;
@@ -43,6 +44,8 @@ public class AnnotationController {
      */
     @PostMapping("/{annotationId}/migrate")
     @RequiresPermission(PermissionCodes.DOC_WRITE)
+    @AuditedOperation(module = "ANNOTATION", action = "MIGRATE", targetType = "ANNOTATION",
+            targetId = "#annotationId")
     public Result<AnnotationMigrationResponse> migrate(@PathVariable String annotationId,
                                                        @Valid @RequestBody MigrateAnnotationRequest request) {
         kbScopeGuard.requireAnnotationAccess(annotationId);

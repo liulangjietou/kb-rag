@@ -1,6 +1,7 @@
 package io.kbrag.api.controller;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.EvalRunCompareResponse;
 import io.kbrag.api.dto.EvalRunEstimateResponse;
@@ -58,6 +59,8 @@ public class EvalRunController {
      */
     @PostMapping("/api/v1/eval-datasets/{datasetId}/runs")
     @RequiresPermission(PermissionCodes.EVAL_RUN)
+    @AuditedOperation(module = "EVAL", action = "SUBMIT_RUN", targetType = "EVAL_DATASET",
+            targetId = "#datasetId")
     public Result<List<EvalRunResponse>> submit(@PathVariable String datasetId,
                                                 @Valid @RequestBody EvalRunSubmitRequest request) {
         kbScopeGuard.requireDatasetAccess(datasetId);

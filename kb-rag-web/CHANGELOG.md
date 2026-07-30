@@ -6,6 +6,14 @@
 
 ### Added
 
+**M16 · 企业化：多租户 / 文档级权限 / SSO 三协议 / 操作审计**（`docs/M16-CONTRACTS.md`）
+- 登录页单点登录扩展：按 `GET /auth/sso/providers` 渲染 OIDC / SAML / CAS 三个跳转按钮（整页重定向到后端免认证入口）；回调落地页解析 URL fragment（`#sso_token` 入会话、`#sso_error` 展示中文失败原因），解析后立即清理 fragment 避免令牌留在地址栏历史。
+- 新增「租户管理」页（`pages/settings/TenantManagePage.tsx`，仅 `tenant:manage` 可见）：租户列表（内置标签 / 状态）、新建（code + 名称，code 建后不可改）、改名、启用停用（停用二次确认，提示该租户全部账号将无法登录）；无删除入口（后端就没有该端点）。
+- 用户管理页租户维度：列表展示所属租户列，新建账号可选租户，新增「移户」操作（提示仅移动账号本身——其创建的知识库仍留在原租户；后端会清空其角色并吊销会话，需重新登录后在新租户内重新授角色）；来源标签新增 OIDC / SAML / CAS 三种。
+- 文档可见性抽屉（`pages/kb/components/VisibilityDrawer.tsx`，`doc:review` 可见）：文档列表行操作入口，INHERIT / RESTRICTED 单选 + 受限时的授权角色多选；列表增受限标记列。
+- 新增「操作审计」页（`pages/settings/OperationAuditPage.tsx`，仅 `audit:read` 可见）：倒序分页列表（模块 / 操作人 / 目标 id / 时间窗筛选）与详情抽屉（detail JSON 展示）；纯只读，无任何写操作入口。
+- 反馈管理 Tab 增渠道筛选（控制台 / 开放接口）与渠道、终端用户标识列，开放渠道反馈同样可转评测集。
+
 **M15 · 权限体系与单点登录**（`docs/M15-CONTRACTS.md`）
 - 登录页双方式：「账号密码」与「单点登录」两个 Tab，后者根据 `GET /auth/sso-available` 决定是否渲染——未接入目录的部署看到的仍是原来那个单表单登录页。
 - `AuthContext` 携带权限码、角色与可见库范围（来自 `/auth/me`），导航菜单与路由按权限收口：菜单隐藏未授权入口，直接贴地址进未授权页面渲染原地 403（不跳登录页）。

@@ -9,6 +9,7 @@ import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.PublishStatus;
 import io.kbrag.domain.mapper.AnnotationMapper;
 import io.kbrag.domain.mapper.ChunkMapper;
+import io.kbrag.domain.mapper.DocAclMapper;
 import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.mapper.DocumentVersionMapper;
 import io.kbrag.domain.port.EmbeddingProvider;
@@ -61,7 +62,8 @@ class DocumentServiceTest {
         UploadValidator uploadValidator = mock(UploadValidator.class);
         BizIdGenerator bizIdGenerator = mock(BizIdGenerator.class);
         service = new DocumentService(documentMapper, documentVersionMapper,
-                mock(ChunkMapper.class), mock(AnnotationMapper.class), mock(ObjectStorage.class),
+                mock(ChunkMapper.class), mock(AnnotationMapper.class), mock(DocAclMapper.class),
+                mock(ObjectStorage.class),
                 bizIdGenerator, uploadValidator, knowledgeBaseService,
                 mock(IndexPipelineService.class), versionPlanner,
                 mock(VersionFingerprintFactory.class), mock(EmbeddingProvider.class),

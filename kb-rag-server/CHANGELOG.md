@@ -7,6 +7,28 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 新增（M16）
+
+- `[schema]` Flyway `V17__tenant_doc_acl_audit.sql`：新增 `t_kb_tenant`（内置默认租户 `tnt_default0000000` 随迁移种子化，不可停用）、`t_kb_doc_acl`（受限文档→授权角色绑定）、`t_kb_operation_audit`（操作审计，含 `username` 冗余列——账号删了记录还得可读）；6 张根聚合表（用户 / 角色 / 知识库 / API Key / 评测集 / 应用）增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户，升级零迁移），从属资源经根资源归属租户，刻意不给四十张表全加列；`t_kb_role` 的 `code` 唯一范围从全局收缩为租户内（`uk_tenant_code`）；`t_kb_document` 增 `visibility`（INHERIT/RESTRICTED）、`t_kb_user_role` 增 `granted_by`（MANUAL/LDAP_SYNC）、`t_kb_retrieval_feedback` 增 `channel` / `end_user_id`；新增权限码 `tenant:manage`（仅授超级管理员）
+- 完整多租户隔离：登录后主体携带 `tenant_id`，根聚合的列表 / 详情 / 写入全部按租户行过滤，跨租户的业务 id 一律 404（确认资源存在于别处本身就是泄露）；username 保持全局唯一——登录页不问租户，会话与既有审计都以 username 为键；建租户自动复制五个内置角色，但**剔除平台级权限码**——`tenant:manage` 既能建停租户又让用户表与角色表不拼租户条件，照抄给每个租户的 SUPER_ADMIN 等于每个租户管理员都能接管平台。权限码目录全租户共用，子租户在角色编辑页看得见这个码，所以授予入口 `RoleService.replacePermissions` 统一拒绝非默认租户持有它（复制时是剔除而非报错——否则建租户会整个失败）
+- 租户物理索引命名隔离：默认租户之外的知识库物理索引带租户段（`kb_{租户段}_{kbId}_...`，`IndexNaming` 单点派生），默认租户沿用历史命名——存量部署的索引一个都不用动
+- 租户管理端点 `/api/v1/tenants` 5 个（列表 / 详情 / 创建 / 改名 / 启停，`tenant:manage`）：code 建后不可改（索引命名的租户段由它派生），默认租户不可停用，**刻意无 DELETE**——租户名下有索引、文件与审计行，退役 = 先停用再人工清理；用户移户 `PUT /api/v1/users/{userId}/tenant`，建号可带 `tenant_id` 指定归属
+- 文档级数据权限：`GET|PUT /api/v1/kb/{kbId}/documents/{docId}/visibility`（`doc:review`），`RESTRICTED` 文档仅 ACL 命中角色可读内容，检索侧（控制台 + 开放 API + 评测）统一裁剪，列表仍可见条目但内容不可读；INHERIT 时 `role_ids` 必空、RESTRICTED 时必非空，形状校验收在 Controller
+- LDAP 组同步反授角色：`AUTH_LDAP_GROUP_SYNC_ENABLED` 打开后目录账号每次登录按 `AUTH_LDAP_GROUP_ROLE_MAPPINGS`（`组DN=角色CODE` 逗号分隔）全量替换其 `LDAP_SYNC` 来源的角色，**MANUAL 手工授予的角色永不触碰**——管理员手工授的角色被夜里一次登录悄悄撤掉，是排查不出来的那类事故
+- 单点登录三协议（浏览器重定向流，全部免认证入口）：`GET /api/v1/auth/sso/providers`（登录页据此渲染按钮）+ OIDC（`/oidc/login`、`/oidc/callback`，授权码模式）+ SAML 2.0（`/saml/login`、`POST /saml/acs`，自实现 Response 签名验证，不引入 Spring Security SAML）+ CAS（`/cas/login`、`/cas/callback`，ticket 服务端二次校验）；回调统一 302 到 `{web-base-url}/login#sso_token=...`——fragment 不出浏览器，会话令牌不落任何一层访问日志；失败同样走 fragment 带中文原因。三协议账号来源三种新值（`source` ∈ OIDC/SAML/CAS），与 LDAP/LOCAL 同一条入口纪律：来源不符直接拒绝
+- 开放 API 终端用户反馈：`POST /api/v1/knowledge/feedback`（API Key 鉴权、同链路限流），按 `request_id` 反查检索留痕补齐 kb_id 与 query（查不到 → 400，匿名反馈无法转评测用例）；落库 `channel=OPEN_API`，控制台反馈列表增 `channel` 筛选，开放渠道反馈同样可转评测用例。反馈归属由洞察行新增的 `app_id` 列校验：`request_id` 走 `X-Request-Id` 头进来、调用方可自选，只验"这个 id 存在"等于让任何合法 Key 拿到别人的 request_id 就能给无权访问的库写反馈，因此复用 API Key 已有的那道应用范围校验；跨库 `chunk_id` 同样拒绝（那次检索只可能返回本库分片），而分片**已删除**仍接受、只是不落 `doc_id`——删除不是越权信号
+- 操作审计：`@AuditedOperation` 注解 + 切面异步落 `t_kb_operation_audit`，覆盖管理台全部写端点，记录谁（user_id/username/client_ip）在什么时候对什么（module/action/target）做了什么（detail 只存业务 id 与摘要，**绝不存请求体原文**——口令与文档内容都从写端点过）；查询端点 `GET /api/v1/operation-audits`（分页 + module/username/target_id/时间窗筛选）与 `/{auditId}` 详情（`audit:read`），只读设计——能编辑自己留痕的 API 就不是审计；保留期到期分批清理（默认 180 天）
+- 新增环境变量 `AUTH_LDAP_GROUP_SYNC_ENABLED` / `AUTH_LDAP_GROUP_ROLE_MAPPINGS`、`AUTH_OIDC_ENABLED` / `AUTH_OIDC_ISSUER` / `AUTH_OIDC_CLIENT_ID` / `AUTH_OIDC_CLIENT_SECRET` / `AUTH_OIDC_SCOPES`、`AUTH_SAML_ENABLED` / `AUTH_SAML_IDP_ENTITY_ID` / `AUTH_SAML_IDP_SSO_URL` / `AUTH_SAML_IDP_CERTIFICATE` / `AUTH_SAML_SP_ENTITY_ID`、`AUTH_CAS_ENABLED` / `AUTH_CAS_SERVER_URL`、`AUTH_SSO_WEB_BASE_URL`、`AUDIT_OPERATION_RETENTION_DAYS` / `AUDIT_OPERATION_CLEANUP_BATCH_SIZE` / `AUDIT_OPERATION_CLEANUP_CRON`
+
+### 变更（M16）
+
+- **删除知识库补齐物理索引清理（醒目提示）**：此前删库只删 MySQL 行与引擎内文档，ES/Qdrant 的物理索引壳留在引擎里（M4 遗留 TODO）。现在删库把物理索引标记后交给 CLEANUP 任务在事务提交后删除——引擎删除不可逆，绝不能发生在还可能回滚的事务里。依赖旧行为（删库后索引壳仍在）的运维脚本需调整
+- SUPER_ADMIN 提权收敛提醒：M15 升级把存量账号全部提为 `SUPER_ADMIN` 并把「按最小权限重新分配」留作运维义务，现在每次启动**逐租户**检查启用状态的持有者，多于 1 人时 error 日志点名并带 `tenant_id`——只提醒、不自动降级（自动降级总会在某个部署里选错幸存者），且每次启动都提醒而非一次性标记（重启不该吞掉仍然存在的超额权限）。逐租户而非取一行：本期把角色 code 的唯一范围收缩到租户内后，`SUPER_ADMIN` 在每个租户各有一行，只看一行等于对其余租户的超权账号全程失明
+- **开放 API 检索结果可能变少（醒目提示）**：文档被设为 `RESTRICTED` 后，API Key 无对应角色授权时该文档的分片从开放检索结果中裁剪。升级本身零影响（存量文档全部 INHERIT），但管理员开始使用文档级权限后对外调用方会感知结果收窄
+- LDAP 登录语义微调：组同步开启后，目录账号的角色以「目录组映射 + 手工授予」的并集为准，`AUTH_LDAP_DEFAULT_ROLE_CODE` 仅在首登且组同步未命中任何映射时兜底
+- **知识图谱抽取吞吐改造（醒目提示：默认并发从 2 提到 8）**：一万分片的库开启 GraphRAG 后"重新抽取"以小时计，根因是分批栅栏——每批 `allOf().join()` 等齐才提交下一批，而 LLM 延迟长尾极重，池子大半时间在批尾空转。现改为流水线：全部分片一次性排队，谁空闲谁接下一个，没有栅栏。并发默认值从 2 提到 8 的前提是把一次抽取拆成两段——**N 路并发调模型 + 单写入者线程串行落图**：图 schema 用复合索引而非唯一约束（唯一约束在社区版/企业版行为不一致），并发 MERGE 同名实体会打架，原来"并发只能是 2"正是拿正确性换速度；拆开后模型调用只受限流约束，而同一个库的 MERGE 反而比原先（两线程同时写）更严格。不做攒批写入——一批失败会连坐整批分片，违背"一个坏答案只损失一个 passage"，且图写入从来不是瓶颈。配套：进度上报按整数百分点节流并改为按列 update（`KbTask` 带乐观锁，多线程整行写会互相顶掉且失败是静默的）；抽取任务移到独立线程池 `graphTaskExecutor`（core 1 / max 2）——它是全系统唯一以小时计的任务，此前与文档解析共用 core 2 / max 4 的索引池，两个全量抽取就能让上传排在一个明天才结束的活后面。**移除 `GRAPH_EXTRACT_BATCH_SIZE`**（它描述的机制已不存在，存量 `.env` 留着不报错也不生效）；模型侧峰值并发 = 2 × `GRAPH_EXTRACT_CONCURRENCY`，限流额度紧的部署把后者调回小值即可，正确性不依赖它
+- **图片描述阶段并发化**（M3-CONTRACTS.md §7.6）：同一文档的多张图片改为按 `IMAGE_DESCRIBE_CONCURRENCY`（新增，默认 8）并发调 VLM。此前逐张串行，单次往返是 `VISION_TIMEOUT_MS`（20s）量级，图片撑满上限（100 张）的文档会独占索引管线槽位半小时以上，100 张的最坏耗时从约 33 分钟降到约 4 分钟。**资产行仍按阅读顺序串行落库**——`findByVersion` 按主键升序返回，占位符回填把它读作图片在 markdown 中的出现顺序，并发 insert 会把代理文本插到别的图片位置上；并发的只有写对象存储与 VLM 两个网络动作。单图失败不失败整篇的语义与对象存储写失败的 `fail_reason` 文本均与串行时期一致
+
 ### 新增（M15）
 
 - `[schema]` Flyway `V16__rbac.sql`：`t_kb_admin_user` 增 `user_id` / `display_name` / `email` / `source` / `status`，`password_hash` 改为可空（目录账号没有本地口令）；新增 `t_kb_role`（角色，ID 前缀 `role`）、`t_kb_permission`（权限目录）、`t_kb_user_role`、`t_kb_role_permission`、`t_kb_role_kb`（角色→知识库数据范围）。内置 5 角色 `SUPER_ADMIN` / `KB_ADMIN` / `EDITOR` / `REVIEWER` / `VIEWER` 与 18 个权限码随迁移落库

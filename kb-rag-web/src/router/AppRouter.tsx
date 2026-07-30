@@ -15,8 +15,10 @@ import EvalCenterPage from '../pages/eval/EvalCenterPage';
 import KbDetailPage from '../pages/kb/KbDetailPage';
 import KbListPage from '../pages/kb/KbListPage';
 import SearchPage from '../pages/search/SearchPage';
+import OperationAuditPage from '../pages/settings/OperationAuditPage';
 import RoleManagePage from '../pages/settings/RoleManagePage';
 import SettingsPage from '../pages/settings/SettingsPage';
+import TenantManagePage from '../pages/settings/TenantManagePage';
 import UserManagePage from '../pages/settings/UserManagePage';
 
 /** Wraps the authenticated app shell with the model-status fetch (needs a valid token). */
@@ -73,6 +75,12 @@ export default function AppRouter() {
             </Route>
             <Route element={<RequirePermission anyOf={[PERMISSIONS.ROLE_MANAGE]} />}>
               <Route path="/roles" element={<RoleManagePage />} />
+            </Route>
+            <Route element={<RequirePermission anyOf={[PERMISSIONS.TENANT_MANAGE]} />}>
+              <Route path="/settings/tenants" element={<TenantManagePage />} />
+            </Route>
+            <Route element={<RequirePermission anyOf={[PERMISSIONS.AUDIT_READ]} />}>
+              <Route path="/settings/operation-audits" element={<OperationAuditPage />} />
             </Route>
             <Route element={<RequirePermission anyOf={[PERMISSIONS.SYSTEM_CONFIG]} />}>
               <Route path="/settings" element={<SettingsPage />} />

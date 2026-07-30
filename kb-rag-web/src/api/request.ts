@@ -10,7 +10,7 @@ const LOGIN_PATH = '/auth/login';
 // Probes the login page fires on its own initiative, before anybody asked for anything. A red toast
 // here would blame the visitor for a capability check they never requested; the caller degrades
 // gracefully instead.
-const SILENT_PATHS = ['/auth/sso-available'];
+const SILENT_PATHS = ['/auth/sso-available', '/auth/sso/providers'];
 
 function isSilent(url: string | undefined): boolean {
   return SILENT_PATHS.some((path) => url?.includes(path) ?? false);

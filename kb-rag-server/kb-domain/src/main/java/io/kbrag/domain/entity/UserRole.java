@@ -2,6 +2,7 @@ package io.kbrag.domain.entity;
 
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import io.kbrag.domain.enums.RoleGrantSource;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
@@ -30,4 +31,8 @@ public class UserRole extends BaseEntity {
     /** Role business id. */
     @TableField("role_id")
     private String roleId;
+
+    /** Who granted the binding; synchronisation only ever replaces its own rows. */
+    @TableField("granted_by")
+    private RoleGrantSource grantedBy;
 }

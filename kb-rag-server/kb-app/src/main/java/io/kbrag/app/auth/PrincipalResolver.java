@@ -6,11 +6,13 @@ import io.kbrag.domain.entity.AdminUser;
 import io.kbrag.domain.entity.Role;
 import io.kbrag.domain.entity.RoleKbScope;
 import io.kbrag.domain.entity.RolePermission;
+import io.kbrag.domain.entity.Tenant;
 import io.kbrag.domain.entity.UserRole;
 import io.kbrag.domain.mapper.AdminUserMapper;
 import io.kbrag.domain.mapper.RoleKbScopeMapper;
 import io.kbrag.domain.mapper.RoleMapper;
 import io.kbrag.domain.mapper.RolePermissionMapper;
+import io.kbrag.domain.mapper.TenantMapper;
 import io.kbrag.domain.mapper.UserRoleMapper;
 import io.kbrag.domain.model.UserPrincipal;
 import lombok.RequiredArgsConstructor;
@@ -49,6 +51,7 @@ public class PrincipalResolver {
     private final RoleMapper roleMapper;
     private final RolePermissionMapper rolePermissionMapper;
     private final RoleKbScopeMapper roleKbScopeMapper;
+    private final TenantMapper tenantMapper;
 
     /** login name -> flattened permissions. */
     private final Map<String, UserPrincipal> cache = new ConcurrentHashMap<>();
@@ -96,6 +99,14 @@ public class PrincipalResolver {
         if (!user.enabled()) {
             throw BizException.unauthorized("account disabled");
         }
+        // Same argument one level up: disabling a tenant must cut every session of the tenant on its
+        // next request, not when the individual tokens expire.
+        Tenant tenant = tenantMapper.selectOne(new LambdaQueryWrapper<Tenant>()
+                .eq(Tenant::getTenantId, user.getTenantId())
+                .last("limit 1"));
+        if (tenant != null && !tenant.enabled()) {
+            throw BizException.unauthorized("tenant disabled");
+        }
 
         List<UserRole> bindings = userRoleMapper.selectList(new LambdaQueryWrapper<UserRole>()
                 .eq(UserRole::getUserId, user.getUserId()));
@@ -105,8 +116,8 @@ public class PrincipalResolver {
         if (roleIds.isEmpty()) {
             // Authenticated and granted nothing. The console renders an empty navigation rather than an
             // error, because "ask an administrator for a role" is the accurate message here.
-            return new UserPrincipal(user.getUserId(), user.getUsername(), displayName(user),
-                    user.getSource(), Set.of(), Set.of(), false, Set.of());
+            return new UserPrincipal(user.getUserId(), user.getTenantId(), user.getUsername(),
+                    displayName(user), user.getSource(), Set.of(), Set.of(), Set.of(), false, Set.of());
         }
 
         List<Role> roles = roleMapper.selectList(new LambdaQueryWrapper<Role>()
@@ -137,8 +148,8 @@ public class PrincipalResolver {
                     .collect(Collectors.toCollection(LinkedHashSet::new));
         }
 
-        return new UserPrincipal(user.getUserId(), user.getUsername(), displayName(user),
-                user.getSource(), roleCodes, permissions, kbScopeAll, kbIds);
+        return new UserPrincipal(user.getUserId(), user.getTenantId(), user.getUsername(),
+                displayName(user), user.getSource(), roleCodes, liveRoleIds, permissions, kbScopeAll, kbIds);
     }
 
     private String displayName(AdminUser user) {

@@ -44,6 +44,15 @@ export function assignUserRoles(userId: string, roleIds: string[]): Promise<void
 }
 
 /**
+ * Moves an account to another tenant (M16-CONTRACTS.md section 3). The move re-homes the account
+ * only -- the knowledge bases it created stay where they are, which is why the confirm dialog
+ * spells that out before the operator commits.
+ */
+export function moveUserTenant(userId: string, tenantId: string): Promise<void> {
+  return apiPut<void>(`/users/${userId}/tenant`, { tenant_id: tenantId });
+}
+
+/**
  * Resets a local password. The account is forced to rotate it at its next login, so the value typed
  * here is a handover secret rather than a password the operator picks on somebody's behalf.
  */

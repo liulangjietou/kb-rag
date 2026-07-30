@@ -1,6 +1,7 @@
 package io.kbrag.domain.service;
 
 import io.kbrag.common.constant.KbConstants;
+import io.kbrag.domain.constant.BuiltinTenants;
 import io.kbrag.domain.enums.VectorEngine;
 import org.junit.jupiter.api.Test;
 
@@ -86,5 +87,36 @@ class IndexNamingTest {
     void shouldBuildAliasPerEngine() {
         assertEquals("kb_" + KB_SUFFIX + "_es", naming.alias(KB_ID, VectorEngine.ES));
         assertEquals("kb_" + KB_SUFFIX + "_qdrant", naming.alias(KB_ID, VectorEngine.QDRANT));
+    }
+
+    @Test
+    void shouldInjectTheTenantSegmentOutsideTheDefaultTenant() {
+        // M16: a base of another tenant carries its tenant right in the name, prefix stripped and
+        // lower cased the same way the kbId segment is.
+        assertEquals("kb_acme01_" + KB_SUFFIX + "_tev4_v1",
+                naming.vectorPhysicalName("tnt_Acme01", KB_ID, "tev4"));
+        assertEquals("kb_acme01_" + KB_SUFFIX + "_es",
+                naming.alias("tnt_Acme01", KB_ID, VectorEngine.ES));
+        assertEquals("kb_acme01_" + KB_SUFFIX + "_tev4_s2",
+                naming.snapshotPhysicalName("tnt_Acme01", KB_ID, "tev4", 2));
+    }
+
+    @Test
+    void shouldKeepTheDefaultTenantNamesByteIdentical() {
+        // The compatibility red line: an upgraded deployment keeps every alias it has, so the
+        // default tenant and the tenantless legacy overloads must produce the same bytes.
+        assertEquals(naming.vectorPhysicalName(KB_ID, "tev4"),
+                naming.vectorPhysicalName(BuiltinTenants.DEFAULT_TENANT_ID, KB_ID, "tev4"));
+        assertEquals(naming.alias(KB_ID, VectorEngine.ES),
+                naming.alias(null, KB_ID, VectorEngine.ES));
+        assertEquals(naming.fulltextPhysicalName(KB_ID, VectorEngine.QDRANT, "tev4"),
+                naming.fulltextPhysicalName("", KB_ID, VectorEngine.QDRANT, "tev4"));
+    }
+
+    @Test
+    void shouldNormalizeTheTenantSegment() {
+        // A tenant id without the business prefix is taken as is, lower cased for engine legality.
+        assertEquals("kb_ops_" + KB_SUFFIX + "_tev4_v1",
+                naming.vectorPhysicalName("OPS", KB_ID, "tev4"));
     }
 }

@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.IkDictRequest;
 import io.kbrag.api.dto.IkDictResponse;
@@ -69,6 +70,8 @@ public class IkDictController {
      * @return created entry
      */
     @PostMapping
+    @AuditedOperation(module = "DICT", action = "CREATE", targetType = "DICT_WORD",
+            targetId = "#result.data.word")
     public Result<IkDictResponse> create(@Valid @RequestBody IkDictRequest request) {
         return Result.success(IkDictResponse.from(
                 ikDictService.create(request.word(), request.resolvedType(), request.remark())));
@@ -82,6 +85,7 @@ public class IkDictController {
      * @return updated entry
      */
     @PutMapping("/{word}")
+    @AuditedOperation(module = "DICT", action = "UPDATE_STATUS", targetType = "DICT_WORD", targetId = "#word")
     public Result<IkDictResponse> updateStatus(@PathVariable String word,
                                                @Valid @RequestBody IkDictStatusRequest request) {
         return Result.success(IkDictResponse.from(
@@ -95,6 +99,7 @@ public class IkDictController {
      * @return empty success envelope
      */
     @DeleteMapping("/{word}")
+    @AuditedOperation(module = "DICT", action = "DELETE", targetType = "DICT_WORD", targetId = "#word")
     public Result<Void> delete(@PathVariable String word) {
         ikDictService.delete(word);
         return Result.success(null);

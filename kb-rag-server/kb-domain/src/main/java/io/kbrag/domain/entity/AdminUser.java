@@ -36,6 +36,10 @@ public class AdminUser extends BaseEntity {
     @TableField("user_id")
     private String userId;
 
+    /** Owning tenant business id, defaulted to the built in tenant by the V17 migration. */
+    @TableField("tenant_id")
+    private String tenantId;
+
     /** Login name, unique. For a directory account this is the domain login name without the suffix. */
     @TableField("username")
     private String username;
@@ -87,11 +91,14 @@ public class AdminUser extends BaseEntity {
     }
 
     /**
-     * Tells whether the password of this account is verified by the directory rather than locally.
+     * Tells whether the identity of this account is verified externally rather than by a local hash.
      *
-     * @return {@code true} for a single sign-on account
+     * <p>True for every source except {@code LOCAL}: directory and single sign on accounts alike have
+     * no local password to compare, rotate or reset.
+     *
+     * @return {@code true} for an externally verified account
      */
     public boolean directoryAccount() {
-        return source == UserSource.LDAP;
+        return source != null && source != UserSource.LOCAL;
     }
 }
