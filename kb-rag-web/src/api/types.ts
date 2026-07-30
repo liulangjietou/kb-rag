@@ -349,6 +349,12 @@ export interface CreateKbRequest {
   description?: string;
 }
 
+/** PUT /api/v1/kb/{kbId} request body: rename and re-describe, nothing else. */
+export interface UpdateKbRequest {
+  name: string;
+  description?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Document / chunk
 // ---------------------------------------------------------------------------

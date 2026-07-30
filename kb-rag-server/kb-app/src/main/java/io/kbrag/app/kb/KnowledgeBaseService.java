@@ -107,6 +107,32 @@ public class KnowledgeBaseService {
     }
 
     /**
+     * Renames a knowledge base and updates its description.
+     *
+     * <p>Only the display fields change: the index configuration, the fingerprint and the physical
+     * indices are untouched, so a rename never marks a document stale or costs a rebuild.
+     *
+     * @param kbId        business id
+     * @param name        new display name
+     * @param description new free text description
+     * @return updated aggregate
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public KnowledgeBase update(String kbId, String name, String description) {
+        KnowledgeBase knowledgeBase = require(kbId);
+        if (knowledgeBaseMapper.exists(new LambdaQueryWrapper<KnowledgeBase>()
+                .eq(KnowledgeBase::getName, name)
+                .ne(KnowledgeBase::getKbId, kbId))) {
+            throw BizException.invalidParam("knowledge base name already exists");
+        }
+        knowledgeBase.setName(name);
+        knowledgeBase.setDescription(description);
+        knowledgeBaseMapper.updateById(knowledgeBase);
+        log.info("knowledge base updated, kbId={}, name={}", kbId, name);
+        return knowledgeBase;
+    }
+
+    /**
      * Lists the knowledge bases the caller may see, newest first.
      *
      * <p>Trimmed here rather than in the controller because this listing feeds every knowledge base picker

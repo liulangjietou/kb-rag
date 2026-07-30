@@ -12,6 +12,7 @@ import io.kbrag.api.dto.RebuildRequest;
 import io.kbrag.api.dto.RebuildStatusResponse;
 import io.kbrag.api.dto.UpdateIndexConfigRequest;
 import io.kbrag.api.dto.UpdateKbGovernanceRequest;
+import io.kbrag.api.dto.UpdateKnowledgeBaseRequest;
 import io.kbrag.app.auth.AccessGuard;
 import io.kbrag.app.chat.ChatImportService;
 import io.kbrag.app.document.DocumentPreviewService;
@@ -84,6 +85,23 @@ public class KnowledgeBaseController {
     public Result<KnowledgeBaseResponse> create(@Valid @RequestBody CreateKnowledgeBaseRequest request) {
         KnowledgeBase created = knowledgeBaseService.create(request.name(), request.description());
         return Result.success(toResponse(created));
+    }
+
+    /**
+     * Renames a knowledge base and updates its description.
+     *
+     * @param kbId    business identifier
+     * @param request update payload
+     * @return updated knowledge base
+     */
+    @PutMapping("/{kbId}")
+    @RequiresPermission(PermissionCodes.KB_WRITE)
+    @AuditedOperation(module = "KB", action = "UPDATE", targetType = "KNOWLEDGE_BASE", targetId = "#kbId")
+    public Result<KnowledgeBaseResponse> update(@PathVariable String kbId,
+                                                @Valid @RequestBody UpdateKnowledgeBaseRequest request) {
+        AccessGuard.requireKbAccess(kbId);
+        KnowledgeBase updated = knowledgeBaseService.update(kbId, request.name(), request.description());
+        return Result.success(toResponse(updated));
     }
 
     /**

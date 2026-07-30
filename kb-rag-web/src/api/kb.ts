@@ -10,6 +10,7 @@ import type {
   RebuildRequest,
   RebuildStatus,
   UpdateIndexConfigRequest,
+  UpdateKbRequest,
 } from './types';
 
 export function listKnowledgeBases(): Promise<KnowledgeBase[]> {
@@ -22,6 +23,11 @@ export function getKnowledgeBase(kbId: string): Promise<KnowledgeBase> {
 
 export function createKnowledgeBase(payload: CreateKbRequest): Promise<KnowledgeBase> {
   return apiPost<KnowledgeBase>('/kb', payload);
+}
+
+/** PUT /api/v1/kb/{kbId}: renames the base and updates its description, nothing else. */
+export function updateKnowledgeBase(kbId: string, payload: UpdateKbRequest): Promise<KnowledgeBase> {
+  return apiPut<KnowledgeBase>(`/kb/${kbId}`, payload);
 }
 
 export function deleteKnowledgeBase(kbId: string): Promise<void> {
