@@ -6,6 +6,7 @@ import io.kbrag.api.dto.ChatImportConfirmRequest;
 import io.kbrag.api.dto.ChatImportPreviewResponse;
 import io.kbrag.api.dto.ConfirmDocumentsRequest;
 import io.kbrag.api.dto.CreateKnowledgeBaseRequest;
+import io.kbrag.api.dto.DocumentBatchRequest;
 import io.kbrag.api.dto.KnowledgeBaseResponse;
 import io.kbrag.api.dto.RebuildRequest;
 import io.kbrag.api.dto.UpdateIndexConfigRequest;
@@ -13,6 +14,7 @@ import io.kbrag.api.dto.UpdateKbGovernanceRequest;
 import io.kbrag.app.auth.AccessGuard;
 import io.kbrag.app.chat.ChatImportService;
 import io.kbrag.app.document.DocumentPreviewService;
+import io.kbrag.app.document.DocumentService;
 import io.kbrag.app.governance.DocumentGovernanceService;
 import io.kbrag.app.index.RebuildService;
 import io.kbrag.app.kb.KnowledgeBaseService;
@@ -58,9 +60,12 @@ public class KnowledgeBaseController {
     private static final String FIELD_QUEUED_DOC_IDS = "queued_doc_ids";
     private static final String FIELD_CONFIRMED_DOC_IDS = "confirmed_doc_ids";
     private static final String FIELD_IMPORTED_DOC_IDS = "imported_doc_ids";
+    private static final String FIELD_DELETED_DOC_IDS = "deleted_doc_ids";
+    private static final String FIELD_REINDEXED_DOC_IDS = "reindexed_doc_ids";
 
     private final KnowledgeBaseService knowledgeBaseService;
     private final RebuildService rebuildService;
+    private final DocumentService documentService;
     private final DocumentPreviewService documentPreviewService;
     private final ChatImportService chatImportService;
     private final DocumentGovernanceService documentGovernanceService;
@@ -167,6 +172,50 @@ public class KnowledgeBaseController {
         List<String> confirmed = documentPreviewService.confirmAll(kbId,
                 request == null ? null : request.docIds());
         return Result.success(Map.of(FIELD_CONFIRMED_DOC_IDS, confirmed));
+    }
+
+    /**
+     * Moves the selected documents into the recycle bin.
+     *
+     * <p>作用域一次校验、审计一条记录，这是它相对于前端循环调用单篇删除的全部意义。列表里混进
+     * 别的知识库的文档会让整批被拒；已经在回收站里的文档则被跳过，响应如实返回真正被删掉的那些。
+     *
+     * @param kbId    business identifier
+     * @param request documents to delete
+     * @return documents that moved into the recycle bin
+     */
+    @PostMapping("/{kbId}/documents/batch-delete")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
+    @AuditedOperation(module = "KB", action = "BATCH_DELETE_DOCUMENTS", targetType = "KNOWLEDGE_BASE",
+            targetId = "#kbId")
+    public Result<Map<String, Object>> batchDeleteDocuments(
+            @PathVariable String kbId,
+            @Valid @RequestBody DocumentBatchRequest request) {
+        AccessGuard.requireKbAccess(kbId);
+        List<String> deleted = documentGovernanceService.trashAll(kbId, request.docIds());
+        return Result.success(Map.of(FIELD_DELETED_DOC_IDS, deleted));
+    }
+
+    /**
+     * Re-runs the pipeline of the selected documents, exactly as the per row rebuild does.
+     *
+     * <p>与 {@link #rebuild(String, RebuildRequest)} 是两件事：那个按当前配置重建、复用已有的解析
+     * 产物，用于配置变更后的追平；这个完整重跑解析与索引，是控制台每行那个"重建"按钮的批量版。
+     *
+     * @param kbId    business identifier
+     * @param request documents to rerun
+     * @return documents whose pipeline was resubmitted
+     */
+    @PostMapping("/{kbId}/documents/batch-reindex")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
+    @AuditedOperation(module = "KB", action = "BATCH_REINDEX_DOCUMENTS", targetType = "KNOWLEDGE_BASE",
+            targetId = "#kbId")
+    public Result<Map<String, Object>> batchReindexDocuments(
+            @PathVariable String kbId,
+            @Valid @RequestBody DocumentBatchRequest request) {
+        AccessGuard.requireKbAccess(kbId);
+        List<String> submitted = documentService.reindexAll(kbId, request.docIds());
+        return Result.success(Map.of(FIELD_REINDEXED_DOC_IDS, submitted));
     }
 
     /**

@@ -34,7 +34,14 @@ import {
   submitDocumentReview,
   uploadDocument,
 } from '../../api/document';
-import { confirmKbDocuments, getKnowledgeBase, rebuildKb, updateKbGovernance } from '../../api/kb';
+import {
+  batchDeleteDocuments,
+  batchReindexDocuments,
+  confirmKbDocuments,
+  getKnowledgeBase,
+  rebuildKb,
+  updateKbGovernance,
+} from '../../api/kb';
 import { PUBLISH_STATUS_META } from '../../api/types';
 import type { KbDocument, KnowledgeBase } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
@@ -86,8 +93,11 @@ export default function KbDetailPage() {
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildTargetIds, setRebuildTargetIds] = useState<string[]>([]);
   const [rebuildInitialCount, setRebuildInitialCount] = useState(0);
-  const [selectedPendingIds, setSelectedPendingIds] = useState<string[]>([]);
+  // 表格只有一套勾选：批量删除、批量重建作用于全部勾选项，批量确认取其中还在等确认的那部分。
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [batchConfirming, setBatchConfirming] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [batchReindexing, setBatchReindexing] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   // M11 governance: rows the validity/reject modals are pointing at, and the KB-level switch.
   const [validityDoc, setValidityDoc] = useState<KbDocument | null>(null);
@@ -175,11 +185,21 @@ export default function KbDetailPage() {
     }
   }, [rebuilding, rebuildTargetIds, remainingRebuildCount]);
 
-  // Selection can only ever reference documents still pending confirmation; drop stale ids once
-  // a document leaves that state (e.g. confirmed from the preview drawer directly).
+  // 勾选项里"还在等预览确认"的那部分：批量确认只该作用于它们，而删除与重建作用于全部勾选项。
+  const selectedPendingConfirmIds = useMemo(
+    () => selectedDocIds.filter((id) => pendingConfirmDocs.some((doc) => doc.doc_id === id)),
+    [selectedDocIds, pendingConfirmDocs],
+  );
+
+  // 3 秒轮询会整页换掉 documents（别人删了、处理完了），勾选里指向已经不在列表上的文档必须跟着
+  // 掉——这套勾选驱动的是删除，带上一个用户已经看不见的目标是危险的。引用不变时返回原数组，
+  // 否则每轮轮询都会生成新数组，把整张表白白重渲染一遍。
   useEffect(() => {
-    setSelectedPendingIds((prev) => prev.filter((id) => pendingConfirmDocs.some((doc) => doc.doc_id === id)));
-  }, [pendingConfirmDocs]);
+    setSelectedDocIds((prev) => {
+      const next = prev.filter((id) => documents.some((doc) => doc.doc_id === id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [documents]);
 
   const handleReindex = async (docId: string) => {
     await reindexDocument(docId);
@@ -262,13 +282,59 @@ export default function KbDetailPage() {
     if (!kbId || pendingConfirmDocs.length === 0) return;
     setBatchConfirming(true);
     try {
-      const docIds = selectedPendingIds.length > 0 ? selectedPendingIds : undefined;
+      const docIds = selectedPendingConfirmIds.length > 0 ? selectedPendingConfirmIds : undefined;
       await confirmKbDocuments(kbId, docIds ? { doc_ids: docIds } : undefined);
       message.success('已确认入库');
-      setSelectedPendingIds([]);
+      setSelectedDocIds([]);
       loadDocuments();
     } finally {
       setBatchConfirming(false);
+    }
+  };
+
+  /**
+   * 批量移入回收站。服务端会跳过勾选后又被别人删掉的文档，所以提示按"实际删掉了几篇"来写，
+   * 而不是照搬勾选数——否则用户会以为删了 5 篇，实际只动了 3 篇。
+   */
+  const handleBatchDelete = async () => {
+    if (!kbId || selectedDocIds.length === 0) return;
+    setBatchDeleting(true);
+    try {
+      const { deleted_doc_ids: deletedIds } = await batchDeleteDocuments(kbId, selectedDocIds);
+      const skipped = selectedDocIds.length - deletedIds.length;
+      message.success(
+        skipped > 0
+          ? `已将 ${deletedIds.length} 个文档移入回收站，${skipped} 个已在回收站中，已跳过`
+          : `已将 ${deletedIds.length} 个文档移入回收站`,
+      );
+      // 关掉还指向已删文档的抽屉，与单篇删除保持同样的收尾
+      const deleted = new Set(deletedIds);
+      setChunkDoc((prev) => (prev && deleted.has(prev.doc_id) ? null : prev));
+      setPreviewDoc((prev) => (prev && deleted.has(prev.doc_id) ? null : prev));
+      setVersionDocId((prev) => (prev && deleted.has(prev) ? null : prev));
+      setSelectedDocIds([]);
+      loadDocuments();
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
+
+  /** 批量重建：与每行的「重建」按钮同一语义（完整重跑解析与索引），只是一次提交一批。 */
+  const handleBatchReindex = async () => {
+    if (!kbId || selectedDocIds.length === 0) return;
+    setBatchReindexing(true);
+    try {
+      const { reindexed_doc_ids: submittedIds } = await batchReindexDocuments(kbId, selectedDocIds);
+      const skipped = selectedDocIds.length - submittedIds.length;
+      message.success(
+        skipped > 0
+          ? `已提交 ${submittedIds.length} 个重建任务，${skipped} 个还没有可重建的版本，已跳过`
+          : `已提交 ${submittedIds.length} 个重建任务`,
+      );
+      setSelectedDocIds([]);
+      loadDocuments();
+    } finally {
+      setBatchReindexing(false);
     }
   };
 
@@ -379,7 +445,8 @@ export default function KbDetailPage() {
                         loading={batchConfirming}
                         onClick={handleBatchConfirm}
                       >
-                        批量确认{selectedPendingIds.length > 0 ? `（${selectedPendingIds.length}）` : '（全部）'}
+                        批量确认
+                        {selectedPendingConfirmIds.length > 0 ? `（${selectedPendingConfirmIds.length}）` : '（全部）'}
                       </Button>
                     }
                     style={{ marginBottom: 16 }}
@@ -396,6 +463,52 @@ export default function KbDetailPage() {
                   </p>
                 </Upload.Dragger>
 
+                {selectedDocIds.length > 0 && (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message={`已选中 ${selectedDocIds.length} 个文档`}
+                    description="批量操作只作用于当前页勾选的文档；表头复选框可全选本页，其下拉菜单提供反选与清空"
+                    action={
+                      <Space>
+                        <Popconfirm
+                          title={`确认重建选中的 ${selectedDocIds.length} 个文档？`}
+                          description="将重新解析、切分并写入索引，耗时随文档大小增长"
+                          okText="重建"
+                          cancelText="取消"
+                          onConfirm={handleBatchReindex}
+                        >
+                          <Button size="small" icon={<ReloadOutlined />} loading={batchReindexing}>
+                            批量重建
+                          </Button>
+                        </Popconfirm>
+                        <Popconfirm
+                          title={`将选中的 ${selectedDocIds.length} 个文档移入回收站？`}
+                          description={
+                            <>
+                              文档将移入回收站并立即从检索中下线；
+                              <br />
+                              可在「回收站」标签页随时还原，超过保留期后自动清除。
+                            </>
+                          }
+                          okText="移入回收站"
+                          okButtonProps={{ danger: true }}
+                          cancelText="取消"
+                          onConfirm={handleBatchDelete}
+                        >
+                          <Button size="small" danger icon={<DeleteOutlined />} loading={batchDeleting}>
+                            批量删除
+                          </Button>
+                        </Popconfirm>
+                        <Button size="small" type="link" onClick={() => setSelectedDocIds([])}>
+                          取消选择
+                        </Button>
+                      </Space>
+                    }
+                    style={{ marginBottom: 16 }}
+                  />
+                )}
+
                 <Table<KbDocument>
                   rowKey="doc_id"
                   loading={loading}
@@ -407,12 +520,17 @@ export default function KbDetailPage() {
                     showSizeChanger: true,
                     pageSizeOptions: DOC_PAGE_SIZE_OPTIONS,
                     showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 个文档`,
-                    onChange: (page, size) => loadDocuments(page, size),
+                    // 翻页即清空勾选：勾选驱动的是删除，"已选 30 个"里混进翻走后看不见的文档太危险
+                    onChange: (page, size) => {
+                      setSelectedDocIds([]);
+                      loadDocuments(page, size);
+                    },
                   }}
                   rowSelection={{
-                    selectedRowKeys: selectedPendingIds,
-                    onChange: (keys) => setSelectedPendingIds(keys as string[]),
-                    getCheckboxProps: (record) => ({ disabled: record.process_status !== 'PENDING_CONFIRM' }),
+                    selectedRowKeys: selectedDocIds,
+                    onChange: (keys) => setSelectedDocIds(keys as string[]),
+                    // 全选 / 反选 / 清空，作用范围与表头复选框一致：当前页
+                    selections: [Table.SELECTION_ALL, Table.SELECTION_INVERT, Table.SELECTION_NONE],
                   }}
                   columns={[
                     {

@@ -24,6 +24,9 @@ public class Document extends BaseEntity {
 
     private static final long serialVersionUID = 1L;
 
+    /** Value of {@code trashed} inside the recycle bin. */
+    private static final int TRASHED = 1;
+
     /** Business identifier exposed through the API. */
     @TableField("doc_id")
     private String docId;
@@ -97,4 +100,17 @@ public class Document extends BaseEntity {
      */
     @TableField("source_key")
     private String sourceKey;
+
+    /**
+     * 是否已被移入回收站。
+     *
+     * <p>放在实体上而不是各个 service 里各写一份：这个判断同时被治理、批量删除、外部数据源与网页
+     * 同步用到，它是"文档处于什么状态"的领域知识，不是某个服务的私事。M11 之前的历史行该列为
+     * {@code null}，一律视为不在回收站。
+     *
+     * @return true 表示文档在回收站中
+     */
+    public boolean inTrash() {
+        return trashed != null && trashed == TRASHED;
+    }
 }

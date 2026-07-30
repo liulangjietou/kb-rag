@@ -813,6 +813,24 @@ export interface ConfirmDocumentsRequest {
   doc_ids?: string[];
 }
 
+/**
+ * POST /api/v1/kb/{kbId}/documents/batch-delete | batch-reindex 请求体。
+ * doc_ids 必填：这两个操作由列表勾选驱动，服务端不会把空列表当成"整库"。
+ */
+export interface DocumentBatchRequest {
+  doc_ids: string[];
+}
+
+/** POST /api/v1/kb/{kbId}/documents/batch-delete 响应：真正移入回收站的文档，已在回收站的会被跳过。 */
+export interface BatchDeleteDocumentsResult {
+  deleted_doc_ids: string[];
+}
+
+/** POST /api/v1/kb/{kbId}/documents/batch-reindex 响应：真正提交重建的文档，无版本的会被跳过。 */
+export interface BatchReindexDocumentsResult {
+  reindexed_doc_ids: string[];
+}
+
 // ---------------------------------------------------------------------------
 // Source mapping (M8-CONTRACTS.md section 0.7): t_kb_source_mapping CRUD -- backs both the
 // system-settings "导入映射" tab and the chat-import wizard's mapping-profile picker below.

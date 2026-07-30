@@ -1,7 +1,7 @@
 package io.kbrag.app.index;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import io.kbrag.common.exception.BizException;
+import io.kbrag.app.document.DocumentService;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.mapper.DocumentMapper;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +38,7 @@ public class RebuildService {
     private static final int STALE = 1;
 
     private final DocumentMapper documentMapper;
+    private final DocumentService documentService;
     private final IndexPipelineService indexPipelineService;
 
     /**
@@ -64,16 +65,11 @@ public class RebuildService {
     }
 
     private List<Document> resolveTargets(String kbId, List<String> docIds) {
-        LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>().eq(Document::getKbId, kbId);
-        if (CollectionUtils.isEmpty(docIds)) {
-            wrapper.eq(Document::getConfigStale, STALE);
-        } else {
-            wrapper.in(Document::getDocId, docIds);
+        if (CollectionUtils.isNotEmpty(docIds)) {
+            return documentService.requireAllInKb(kbId, docIds);
         }
-        List<Document> documents = documentMapper.selectList(wrapper);
-        if (CollectionUtils.isNotEmpty(docIds) && documents.size() != docIds.size()) {
-            throw BizException.notFound("some documents do not belong to this knowledge base");
-        }
-        return documents;
+        return documentMapper.selectList(new LambdaQueryWrapper<Document>()
+                .eq(Document::getKbId, kbId)
+                .eq(Document::getConfigStale, STALE));
     }
 }
