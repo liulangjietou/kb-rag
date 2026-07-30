@@ -61,9 +61,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ExtSourceService {
 
-    /** Value of {@code trashed} inside the recycle bin. */
-    private static final int TRASHED = 1;
-
     /** {@code sync_enabled} value that includes a source in the scheduled pass. */
     private static final int SYNC_ON = 1;
 
@@ -355,7 +352,7 @@ public class ExtSourceService {
                 return true;
             }
             Document bound = findBoundDocument(item);
-            if (bound != null && inTrash(bound)) {
+            if (bound != null && bound.inTrash()) {
                 // Writing a version into a trashed document would silently resurrect content the
                 // operator chose to remove; the object waits until they restore or purge it.
                 recordItem(item, ExtSourceItemStatus.SKIPPED, "绑定的文档在回收站中，本次同步已跳过");
@@ -452,10 +449,6 @@ public class ExtSourceService {
         }
         return documentMapper.selectOne(new LambdaQueryWrapper<Document>()
                 .eq(Document::getDocId, item.getDocId()));
-    }
-
-    private boolean inTrash(Document document) {
-        return document.getTrashed() != null && document.getTrashed() == TRASHED;
     }
 
     private ExtSourceConfig configOf(ExtSource source) {

@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -153,14 +154,51 @@ public class DocumentGovernanceService {
      */
     public void trash(String docId) {
         Document document = documentService.require(docId);
-        if (inTrash(document)) {
+        if (document.inTrash()) {
             throw BizException.invalidParam("文档已在回收站中");
         }
+        markTrashed(document);
+        activeVersionResolver.invalidate(document.getKbId());
+        log.info("document trashed, docId={}, kbId={}", docId, document.getKbId());
+    }
+
+    /**
+     * Moves a batch of documents into the recycle bin.
+     *
+     * <p>与单篇 {@link #trash(String)} 只差两点：归属校验一次做完——列表里混进别的知识库的文档
+     * 意味着越权，整批直接拒绝；而已经在回收站里的文档是跳过而不是让整批失败——控制台的勾选与
+     * 提交之间隔着 3 秒轮询，"其中一篇刚被别人删掉了"是正常并发，不是错误。
+     *
+     * @param kbId   knowledge base business id
+     * @param docIds documents to trash
+     * @return documents that actually moved into the recycle bin
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public List<String> trashAll(String kbId, List<String> docIds) {
+        List<Document> targets = documentService.requireAllInKb(kbId, docIds);
+        List<String> trashed = new ArrayList<>(targets.size());
+        for (Document document : targets) {
+            if (document.inTrash()) {
+                log.info("skip trashing a document already in the recycle bin, docId={}", document.getDocId());
+                continue;
+            }
+            markTrashed(document);
+            trashed.add(document.getDocId());
+        }
+        activeVersionResolver.invalidate(kbId);
+        log.info("batch trash done, kbId={}, requested={}, trashed={}", kbId, docIds.size(), trashed.size());
+        return trashed;
+    }
+
+    /**
+     * Flips the recycle bin columns of one document.
+     *
+     * @param document document row
+     */
+    private void markTrashed(Document document) {
         document.setTrashed(TRASHED);
         document.setTrashedAt(LocalDateTime.now());
         documentMapper.updateById(document);
-        activeVersionResolver.invalidate(document.getKbId());
-        log.info("document trashed, docId={}, kbId={}", docId, document.getKbId());
     }
 
     /**
@@ -306,7 +344,7 @@ public class DocumentGovernanceService {
 
     private Document requireOutsideTrash(String docId) {
         Document document = documentService.require(docId);
-        if (inTrash(document)) {
+        if (document.inTrash()) {
             throw BizException.invalidParam("文档在回收站中，请先恢复后再操作");
         }
         return document;
@@ -314,14 +352,10 @@ public class DocumentGovernanceService {
 
     private Document requireInTrash(String docId) {
         Document document = documentService.require(docId);
-        if (!inTrash(document)) {
+        if (!document.inTrash()) {
             throw BizException.invalidParam("文档不在回收站中");
         }
         return document;
-    }
-
-    private boolean inTrash(Document document) {
-        return document.getTrashed() != null && document.getTrashed() == TRASHED;
     }
 
     /**

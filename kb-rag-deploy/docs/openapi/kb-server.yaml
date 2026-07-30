@@ -1221,6 +1221,76 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/documents/batch-delete:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - document
+      summary: 批量将文档移入回收站
+      description: '控制台文档列表勾选后的批量删除。`doc_ids` 必填——重建与确认缺省成全量是安全的，
+
+        批量删除缺省成"整库"则是会造成损失的默认值。列表中混入不属于该知识库的文档时整批
+
+        拒绝（404），越权不被部分执行；已在回收站中的文档被跳过而非让整批失败（勾选与列表
+
+        轮询之间被并发删除是常态），响应回真正移入回收站的 doc_id。语义与单篇
+
+        `DELETE /api/v1/documents/{docId}` 一致：可逆，保留期内可在回收站还原。
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentBatchRequest'
+      responses:
+        '200':
+          description: 已处理，返回真正移入回收站的文档 id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchDeleteDocumentsResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/documents/batch-reindex:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    post:
+      tags:
+      - document
+      summary: 批量重建文档（完整重跑解析与索引）
+      description: '控制台文档列表勾选后的批量重建，等同每行「重建」按钮的批量版，语义与单篇
+
+        `POST /api/v1/documents/{docId}/reindex` 一致：完整重跑 pipeline（重新解析 → 切分 → 索引）。
+
+        **与 `POST /api/v1/kb/{kbId}/rebuild` 是两件事**：那个按当前索引配置重建、复用 MinIO 里
+
+        已有的解析产物，用于配置变更后的追平。`doc_ids` 必填；混入不属于该知识库的文档整批拒绝；
+
+        在回收站中的、以及尚无任何版本可重建的文档被跳过，响应回真正提交重建的 doc_id。异步受理。
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentBatchRequest'
+      responses:
+        '200':
+          description: 已受理，返回真正提交重建的文档 id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchReindexDocumentsResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/kb/{kbId}/documents/{docId}/visibility:
     parameters:
     - $ref: '#/components/parameters/KbId'
@@ -5886,6 +5956,47 @@ components:
           nullable: true
           items:
             type: string
+    DocumentBatchRequest:
+      type: object
+      description: 批量删除 / 批量重建的作用域。doc_ids 必填且非空，服务端不会把空列表当成"整库"
+      required:
+      - doc_ids
+      properties:
+        doc_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+    BatchDeleteDocuments:
+      type: object
+      description: 真正移入回收站的文档；已在回收站中的被跳过，因此可能少于请求的 doc_ids
+      properties:
+        deleted_doc_ids:
+          type: array
+          items:
+            type: string
+    BatchDeleteDocumentsResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/BatchDeleteDocuments'
+    BatchReindexDocuments:
+      type: object
+      description: 真正提交重建的文档；在回收站中或尚无版本的被跳过，因此可能少于请求的 doc_ids
+      properties:
+        reindexed_doc_ids:
+          type: array
+          items:
+            type: string
+    BatchReindexDocumentsResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/BatchReindexDocuments'
     PreviewImage:
       type: object
       description: M3-CONTRACTS.md §3.4：预览产物中的图片，preview_url 为限时预签名 URL

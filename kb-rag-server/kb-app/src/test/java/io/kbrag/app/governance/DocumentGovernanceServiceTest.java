@@ -214,6 +214,50 @@ class DocumentGovernanceServiceTest {
     }
 
     @Test
+    void shouldTrashASelectionInOneGo() {
+        Document first = document(PublishStatus.PUBLISHED);
+        Document second = document(PublishStatus.PUBLISHED);
+        second.setDocId(OTHER_DOC_ID);
+        List<String> docIds = List.of(DOC_ID, OTHER_DOC_ID);
+        when(documentService.requireAllInKb(KB_ID, docIds)).thenReturn(List.of(first, second));
+
+        List<String> trashed = service.trashAll(KB_ID, docIds);
+
+        assertEquals(docIds, trashed);
+        assertEquals(1, first.getTrashed());
+        assertEquals(1, second.getTrashed());
+        // 缓存失效整批只做一次：治理的生效点是可见集合，不是单行
+        verify(activeVersionResolver, times(1)).invalidate(KB_ID);
+    }
+
+    @Test
+    void shouldSkipAlreadyTrashedRowsInsteadOfFailingTheWholeBatch() {
+        Document alive = document(PublishStatus.PUBLISHED);
+        Document gone = document(PublishStatus.PUBLISHED);
+        gone.setDocId(OTHER_DOC_ID);
+        gone.setTrashed(1);
+        List<String> docIds = List.of(DOC_ID, OTHER_DOC_ID);
+        when(documentService.requireAllInKb(KB_ID, docIds)).thenReturn(List.of(alive, gone));
+
+        List<String> trashed = service.trashAll(KB_ID, docIds);
+
+        // 勾选与提交之间隔着列表轮询，"其中一篇刚被别人删了"是并发而不是错误
+        assertEquals(List.of(DOC_ID), trashed);
+        verify(documentMapper, times(1)).updateById(any(Document.class));
+    }
+
+    @Test
+    void shouldRefuseAWholeBatchThatReachesOutsideTheKnowledgeBase() {
+        List<String> docIds = List.of(DOC_ID, OTHER_DOC_ID);
+        when(documentService.requireAllInKb(KB_ID, docIds))
+                .thenThrow(BizException.notFound("some documents do not belong to this knowledge base"));
+
+        // 越权不该被部分执行：一个 id 越界，整批拒绝，一行都不能落
+        assertThrows(BizException.class, () -> service.trashAll(KB_ID, docIds));
+        verify(documentMapper, never()).updateById(any(Document.class));
+    }
+
+    @Test
     void shouldRestoreATrashedDocument() {
         Document document = given(document(PublishStatus.PUBLISHED));
         document.setTrashed(1);

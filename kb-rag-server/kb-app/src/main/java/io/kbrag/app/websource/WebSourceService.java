@@ -50,9 +50,6 @@ import java.util.Locale;
 @RequiredArgsConstructor
 public class WebSourceService {
 
-    /** Value of {@code trashed} inside the recycle bin. */
-    private static final int TRASHED = 1;
-
     /** {@code sync_enabled} value that includes a source in the scheduled pass. */
     private static final int SYNC_ON = 1;
 
@@ -232,7 +229,7 @@ public class WebSourceService {
                 return;
             }
             Document bound = findBoundDocument(source);
-            if (bound != null && inTrash(bound)) {
+            if (bound != null && bound.inTrash()) {
                 // Writing a version into a trashed document would silently resurrect content the
                 // operator chose to remove; the page waits until they restore or purge it.
                 record(source, WebSourceFetchStatus.SKIPPED, "绑定的文档在回收站中，本次同步已跳过");
@@ -283,10 +280,6 @@ public class WebSourceService {
         }
         return documentMapper.selectOne(new LambdaQueryWrapper<Document>()
                 .eq(Document::getDocId, source.getDocId()));
-    }
-
-    private boolean inTrash(Document document) {
-        return document.getTrashed() != null && document.getTrashed() == TRASHED;
     }
 
     /**

@@ -397,6 +397,65 @@ public class DocumentService {
     }
 
     /**
+     * Re-runs the pipeline for a batch of documents, exactly as {@link #reindex(String)} does one by one.
+     *
+     * <p>批量与单篇的语义必须一致，否则控制台上同名的两个入口会做两件事。差别只在边界处理：归属
+     * 校验一次做完，而回收站里的文档、以及一次成功构建都还没有过的文档被跳过而不是让整批失败
+     * ——批量操作的正确行为是"能做的都做掉，并如实报告做了哪些"。
+     *
+     * @param kbId   knowledge base business id
+     * @param docIds documents to rerun
+     * @return documents whose pipeline was actually resubmitted
+     */
+    public List<String> reindexAll(String kbId, List<String> docIds) {
+        List<Document> targets = requireAllInKb(kbId, docIds);
+        List<String> submitted = new ArrayList<>(targets.size());
+        for (Document document : targets) {
+            if (document.inTrash()) {
+                log.info("skip reindex of a document in the recycle bin, docId={}", document.getDocId());
+                continue;
+            }
+            String versionId = document.getCurrentVersionId() != null
+                    ? document.getCurrentVersionId()
+                    : latestVersionIdOrNull(document.getDocId());
+            if (versionId == null) {
+                log.info("skip reindex of a document without any version, docId={}", document.getDocId());
+                continue;
+            }
+            indexPipelineService.submit(versionId);
+            submitted.add(document.getDocId());
+        }
+        log.info("batch reindex submitted, kbId={}, requested={}, submitted={}",
+                kbId, docIds.size(), submitted.size());
+        return submitted;
+    }
+
+    /**
+     * Loads documents by business id and asserts every one of them belongs to the given knowledge base.
+     *
+     * <p>批量操作的作用域校验只此一处：一个 id 查不到、或者查到了但挂在别的知识库下，都是同一件事
+     * ——调用方声明的作用域与事实不符，此时整批拒绝而不是"能做的先做掉"，因为越权不该被部分执行。
+     *
+     * @param kbId   knowledge base business id
+     * @param docIds documents to load, must not be empty
+     * @return document rows, in no particular order
+     */
+    public List<Document> requireAllInKb(String kbId, List<String> docIds) {
+        if (CollectionUtils.isEmpty(docIds)) {
+            throw BizException.invalidParam("doc_ids is required");
+        }
+        // 先去重再比对数量：重复的 id 只会查回一行，不去重会把"传了两遍同一篇"误判成"有文档不属于该库"
+        List<String> distinctIds = docIds.stream().distinct().toList();
+        List<Document> documents = documentMapper.selectList(new LambdaQueryWrapper<Document>()
+                .eq(Document::getKbId, kbId)
+                .in(Document::getDocId, distinctIds));
+        if (documents.size() != distinctIds.size()) {
+            throw BizException.notFound("some documents do not belong to this knowledge base");
+        }
+        return documents;
+    }
+
+    /**
      * Soft deletes a document together with its versions, chunks and annotations, and clears the search
      * engines.
      *
@@ -440,14 +499,28 @@ public class DocumentService {
     }
 
     private String latestVersionId(String docId) {
+        String versionId = latestVersionIdOrNull(docId);
+        if (versionId == null) {
+            throw BizException.notFound("document has no version");
+        }
+        return versionId;
+    }
+
+    /**
+     * Latest version of a document, {@code null} when it never produced one.
+     *
+     * <p>批量入口需要的是"没有版本就跳过"，而不是让一篇没建成的文档中断整批，所以取版本这件事
+     * 分成会抛和不会抛两个出口，判空的地方只有这一处。
+     *
+     * @param docId document business id
+     * @return latest version business id, or {@code null}
+     */
+    private String latestVersionIdOrNull(String docId) {
         DocumentVersion version = documentVersionMapper.selectOne(new LambdaQueryWrapper<DocumentVersion>()
                 .eq(DocumentVersion::getDocId, docId)
                 .orderByDesc(DocumentVersion::getId)
                 .last("limit 1"));
-        if (version == null) {
-            throw BizException.notFound("document has no version");
-        }
-        return version.getVersionId();
+        return version == null ? null : version.getVersionId();
     }
 
     /**

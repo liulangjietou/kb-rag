@@ -1,8 +1,11 @@
 // Author: owlzhangfq@gmail.com
 import { apiDelete, apiGet, apiPost, apiPut } from './request';
 import type {
+  BatchDeleteDocumentsResult,
+  BatchReindexDocumentsResult,
   ConfirmDocumentsRequest,
   CreateKbRequest,
+  DocumentBatchRequest,
   KnowledgeBase,
   RebuildRequest,
   UpdateIndexConfigRequest,
@@ -61,6 +64,28 @@ export function rebuildKb(kbId: string, payload?: RebuildRequest): Promise<void>
  */
 export function confirmKbDocuments(kbId: string, payload?: ConfirmDocumentsRequest): Promise<void> {
   return apiPost<void>(`/kb/${kbId}/documents/confirm`, payload);
+}
+
+/**
+ * POST /api/v1/kb/{kbId}/documents/batch-delete：把勾选的文档整批移入回收站。
+ *
+ * 与循环调用单篇 DELETE 的差别在服务端：作用域一次校验、审计一条记录；勾选中途被别人删掉的文档
+ * 会被跳过而不是让整批失败，所以返回的是真正删掉的那些，调用方据此提示而不是照搬勾选数。
+ */
+export function batchDeleteDocuments(kbId: string, docIds: string[]): Promise<BatchDeleteDocumentsResult> {
+  const payload: DocumentBatchRequest = { doc_ids: docIds };
+  return apiPost<BatchDeleteDocumentsResult>(`/kb/${kbId}/documents/batch-delete`, payload);
+}
+
+/**
+ * POST /api/v1/kb/{kbId}/documents/batch-reindex：把勾选的文档整批重跑解析与索引。
+ *
+ * 注意与 {@link rebuildKb} 的区别：那个按当前索引配置重建、用于配置变更后的追平；这个等同表格里
+ * 每行的「重建」按钮，完整重跑一遍 pipeline。
+ */
+export function batchReindexDocuments(kbId: string, docIds: string[]): Promise<BatchReindexDocumentsResult> {
+  const payload: DocumentBatchRequest = { doc_ids: docIds };
+  return apiPost<BatchReindexDocumentsResult>(`/kb/${kbId}/documents/batch-reindex`, payload);
 }
 
 /**
