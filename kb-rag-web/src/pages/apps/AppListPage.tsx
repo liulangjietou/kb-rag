@@ -8,12 +8,14 @@ import type { KbApp } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
 import CreateAppModal from './components/CreateAppModal';
+import EditAppModal from './components/EditAppModal';
 
 /** 应用中心顶级菜单落点：应用列表 + 新建（M4c-CONTRACTS.md section 4）. */
 export default function AppListPage() {
   const [apps, setApps] = useState<KbApp[]>([]);
   const [loading, setLoading] = useState(true);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [editingApp, setEditingApp] = useState<KbApp | null>(null);
   const navigate = useNavigate();
   const { can } = useAuth();
   // app:read opens the list and the detail screens; creating or removing an application is app:write.
@@ -79,6 +81,15 @@ export default function AppListPage() {
                     </span>,
                     ...(canWrite
                       ? [
+                          <span
+                            key="edit"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingApp(app);
+                            }}
+                          >
+                            编辑
+                          </span>,
                           <Popconfirm
                             key="delete"
                             title="确认删除该应用？"
@@ -114,6 +125,15 @@ export default function AppListPage() {
         onCreated={(app) => {
           setCreateModalOpen(false);
           navigate(`/apps/${app.app_id}`);
+        }}
+      />
+
+      <EditAppModal
+        app={editingApp}
+        onClose={() => setEditingApp(null)}
+        onUpdated={() => {
+          setEditingApp(null);
+          loadApps();
         }}
       />
     </div>

@@ -9,6 +9,7 @@
 
 ### 新增
 
+- 应用重命名：控制台应用中心卡片新增「编辑」入口（仅 `app:write` 可见），复用既有 `PUT /api/v1/apps/{appId}`（`app:write`，审计 `APP/UPDATE`）更新 name 与 description，新名称与其他应用重名时拒绝（排除自身，仅改描述不改名不受此限）
 - 知识库重命名：`PUT /api/v1/kb/{kbId}`（`kb:write`）更新 name 与 description，新名称与其他知识库重名时拒绝（排除自身，仅改描述不改名不受此限）；只动展示字段——索引配置与指纹不变，改名不会使任何文档 config_stale，也不触发重建；审计落 `KB/UPDATE`。控制台知识库卡片新增「编辑」入口（仅 `kb:write` 可见）
 
 ### 新增（M16）
