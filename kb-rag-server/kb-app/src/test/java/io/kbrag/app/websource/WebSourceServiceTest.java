@@ -31,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -87,10 +88,10 @@ class WebSourceServiceTest {
     @Test
     void shouldRegisterAndRunTheFirstFetchThroughTheUploadChain() {
         when(webSourceMapper.selectCount(any())).thenReturn(0L);
-        when(webPageFetcher.fetch(URL)).thenReturn(page());
+        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenReturn(page());
         when(documentService.upload(eq(KB_ID), anyString(), eq(BODY))).thenReturn(outcome("doc_1"));
 
-        WebSource source = service.register(KB_ID, URL, true);
+        WebSource source = service.register(KB_ID, URL, true, false);
 
         verify(webSourceMapper).insert(source);
         assertEquals(WebSourceFetchStatus.SUCCESS, source.getLastFetchStatus());
@@ -108,7 +109,7 @@ class WebSourceServiceTest {
     void shouldRejectADuplicateUrlWithinTheSameKnowledgeBase() {
         when(webSourceMapper.selectCount(any())).thenReturn(1L);
 
-        assertThrows(BizException.class, () -> service.register(KB_ID, URL, true));
+        assertThrows(BizException.class, () -> service.register(KB_ID, URL, true, false));
         verify(webSourceMapper, never()).insert(any(WebSource.class));
     }
 
@@ -117,9 +118,9 @@ class WebSourceServiceTest {
         // The operator registered the page, not the luck of this minute: the row must survive and
         // carry the failure for them to read.
         when(webSourceMapper.selectCount(any())).thenReturn(0L);
-        when(webPageFetcher.fetch(URL)).thenThrow(new IllegalStateException("connection refused"));
+        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenThrow(new IllegalStateException("connection refused"));
 
-        WebSource source = assertDoesNotThrow(() -> service.register(KB_ID, URL, true));
+        WebSource source = assertDoesNotThrow(() -> service.register(KB_ID, URL, true, false));
 
         verify(webSourceMapper).insert(source);
         assertEquals(WebSourceFetchStatus.FAILED, source.getLastFetchStatus());
@@ -131,7 +132,7 @@ class WebSourceServiceTest {
     void shouldWriteNothingWhenThePageIsUnchanged() {
         WebSource source = boundSource();
         source.setLastContentHash(HashUtil.sha256Hex(BODY));
-        when(webPageFetcher.fetch(URL)).thenReturn(page());
+        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenReturn(page());
 
         service.sync(source);
 
@@ -145,7 +146,7 @@ class WebSourceServiceTest {
     void shouldSkipWhileTheBoundDocumentSitsInTheTrash() {
         // Feeding a version into a trashed document would silently resurrect removed content.
         WebSource source = boundSource();
-        when(webPageFetcher.fetch(URL)).thenReturn(page());
+        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenReturn(page());
         when(documentMapper.selectOne(any())).thenReturn(trashedDocument());
 
         service.sync(source);
@@ -160,7 +161,7 @@ class WebSourceServiceTest {
         // The purge broke the binding; the next sync recreates the document under the same stable
         // file name and the registration follows it.
         WebSource source = boundSource();
-        when(webPageFetcher.fetch(URL)).thenReturn(page());
+        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenReturn(page());
         when(documentMapper.selectOne(any())).thenReturn(null);
         when(documentService.upload(KB_ID, source.getFileName(), BODY)).thenReturn(outcome("doc_new"));
 
@@ -174,7 +175,7 @@ class WebSourceServiceTest {
     @Test
     void shouldRecordAFailureTruncatedAndNeverRethrow() {
         WebSource source = boundSource();
-        when(webPageFetcher.fetch(URL)).thenThrow(new IllegalStateException("x".repeat(600)));
+        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenThrow(new IllegalStateException("x".repeat(600)));
 
         assertDoesNotThrow(() -> service.sync(source));
 
@@ -201,8 +202,8 @@ class WebSourceServiceTest {
         healthy.setSourceId("ws_2");
         healthy.setUrl(URL + "/second");
         when(webSourceMapper.selectList(any())).thenReturn(List.of(failing, healthy));
-        when(webPageFetcher.fetch(URL)).thenThrow(new IllegalStateException("down"));
-        when(webPageFetcher.fetch(URL + "/second")).thenReturn(page());
+        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenThrow(new IllegalStateException("down"));
+        when(webPageFetcher.fetch(eq(URL + "/second"), anyBoolean())).thenReturn(page());
         when(documentMapper.selectOne(any())).thenReturn(null);
         when(documentService.upload(any(), any(), any())).thenReturn(outcome("doc_2"));
 
@@ -246,6 +247,21 @@ class WebSourceServiceTest {
                 URI.create("https://example.com/" + "a/".repeat(300)), urlHash, "html");
         assertEquals(200, longName.length());
         assertTrue(longName.endsWith("-" + urlHash.substring(0, 8) + ".html"));
+    }
+
+    @Test
+    void shouldPassTheRenderFlagOfTheSourceToTheFetcher() {
+        // The per-source render_js switch, the M17 contract: a source registered to render must reach
+        // the fetcher with true, and the dispatcher decides from there whether a browser runs.
+        WebSource source = boundSource();
+        source.setRenderJs(1);
+        source.setLastContentHash(HashUtil.sha256Hex(BODY));
+        when(webPageFetcher.fetch(eq(URL), eq(true))).thenReturn(page());
+
+        service.sync(source);
+
+        assertEquals(WebSourceFetchStatus.UNCHANGED, source.getLastFetchStatus());
+        verify(webPageFetcher).fetch(URL, true);
     }
 
     private WebSource boundSource() {

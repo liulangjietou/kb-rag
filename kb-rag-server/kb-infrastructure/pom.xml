@@ -51,5 +51,12 @@
             <groupId>com.nimbusds</groupId>
             <artifactId>nimbus-jose-jwt</artifactId>
         </dependency>
+        <!-- Headless Chromium fetcher of M17 JS rendering. Version pinned in the parent; the Chromium
+             binary is not bundled in the jar and is installed into the image at build time (see the
+             Dockerfile), so a deployment without it simply fails a render_js source rather than the app. -->
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+        </dependency>
     </dependencies>
 </project>

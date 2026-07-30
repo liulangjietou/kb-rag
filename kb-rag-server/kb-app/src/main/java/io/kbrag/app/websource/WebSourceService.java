@@ -56,6 +56,12 @@ public class WebSourceService {
     /** {@code sync_enabled} value that excludes a source from the scheduled pass. */
     private static final int SYNC_OFF = 0;
 
+    /** {@code render_js} value that fetches a source through the headless browser, the M17 contract. */
+    private static final int RENDER_ON = 1;
+
+    /** {@code render_js} value that keeps a source on the static fetch. */
+    private static final int RENDER_OFF = 0;
+
     /** Column limit of {@code last_error}; longer causes are truncated, not lost to an SQL error. */
     private static final int MAX_ERROR_LENGTH = 512;
 
@@ -84,9 +90,10 @@ public class WebSourceService {
      * @param kbId        knowledge base business id
      * @param url         page address, validated against the SSRF guard
      * @param syncEnabled whether the scheduled pass should include this source
+     * @param renderJs    whether this source is fetched through the headless browser, the M17 switch
      * @return registration row including the outcome of the first fetch
      */
-    public WebSource register(String kbId, String url, boolean syncEnabled) {
+    public WebSource register(String kbId, String url, boolean syncEnabled, boolean renderJs) {
         knowledgeBaseService.require(kbId);
         String normalized = urlGuard.validate(url).toString();
         String urlHash = HashUtil.sha256Hex(normalized);
@@ -102,8 +109,10 @@ public class WebSourceService {
         source.setUrl(normalized);
         source.setUrlHash(urlHash);
         source.setSyncEnabled(syncEnabled ? SYNC_ON : SYNC_OFF);
+        source.setRenderJs(renderJs ? RENDER_ON : RENDER_OFF);
         webSourceMapper.insert(source);
-        log.info("web source registered, sourceId={}, kbId={}, url={}", source.getSourceId(), kbId, normalized);
+        log.info("web source registered, sourceId={}, kbId={}, url={}, renderJs={}",
+                source.getSourceId(), kbId, normalized, renderJs);
         sync(source);
         return source;
     }
@@ -135,17 +144,26 @@ public class WebSourceService {
     }
 
     /**
-     * Flips the scheduled-sync switch of one source.
+     * Applies the mutable switches of a registration, the M17 contract section 3.3. Both are
+     * optional and only the non-null ones are written, so the console's two toggles - scheduled sync
+     * and JS rendering - share one endpoint. Flipping a switch never triggers a fetch.
      *
-     * @param sourceId registration business id
-     * @param enabled  {@code true} includes the source in the scheduled pass
+     * @param sourceId    registration business id
+     * @param syncEnabled new scheduled-sync value, {@code null} leaves it unchanged
+     * @param renderJs    new JS-render value, {@code null} leaves it unchanged
      * @return updated registration row
      */
-    public WebSource updateSyncEnabled(String sourceId, boolean enabled) {
+    public WebSource updateSettings(String sourceId, Boolean syncEnabled, Boolean renderJs) {
         WebSource source = require(sourceId);
-        source.setSyncEnabled(enabled ? SYNC_ON : SYNC_OFF);
+        if (syncEnabled != null) {
+            source.setSyncEnabled(syncEnabled ? SYNC_ON : SYNC_OFF);
+        }
+        if (renderJs != null) {
+            source.setRenderJs(renderJs ? RENDER_ON : RENDER_OFF);
+        }
         webSourceMapper.updateById(source);
-        log.info("web source sync switch updated, sourceId={}, enabled={}", sourceId, enabled);
+        log.info("web source settings updated, sourceId={}, syncEnabled={}, renderJs={}",
+                sourceId, syncEnabled, renderJs);
         return source;
     }
 
@@ -222,7 +240,8 @@ public class WebSourceService {
         source.setLastFetchAt(LocalDateTime.now());
         try {
             URI uri = urlGuard.validate(source.getUrl());
-            WebPageFetcher.FetchedPage page = webPageFetcher.fetch(uri.toString());
+            boolean renderJs = source.getRenderJs() != null && source.getRenderJs() == RENDER_ON;
+            WebPageFetcher.FetchedPage page = webPageFetcher.fetch(uri.toString(), renderJs);
             String contentHash = HashUtil.sha256Hex(page.body());
             if (contentHash.equals(source.getLastContentHash())) {
                 record(source, WebSourceFetchStatus.UNCHANGED, null);

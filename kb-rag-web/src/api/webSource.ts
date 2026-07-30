@@ -1,6 +1,11 @@
 // Author: owlzhangfq@gmail.com
 import { apiDelete, apiGet, apiPost, apiPut } from './request';
-import type { PageResult, RegisterWebSourceRequest, WebSourceEntry } from './types';
+import type {
+  PageResult,
+  RegisterWebSourceRequest,
+  UpdateWebSourceRequest,
+  WebSourceEntry,
+} from './types';
 
 /**
  * POST /api/v1/kb/{kbId}/web-sources (M12-CONTRACTS.md section 3.4): registers a page URL and
@@ -25,9 +30,12 @@ export function syncWebSource(sourceId: string): Promise<WebSourceEntry> {
   return apiPost<WebSourceEntry>(`/web-sources/${sourceId}/sync`);
 }
 
-/** PUT /api/v1/web-sources/{sourceId} (M12-CONTRACTS.md section 3.4): flips the scheduled-sync switch. */
-export function updateWebSource(sourceId: string, syncEnabled: boolean): Promise<WebSourceEntry> {
-  return apiPut<WebSourceEntry>(`/web-sources/${sourceId}`, { sync_enabled: syncEnabled });
+/**
+ * PUT /api/v1/web-sources/{sourceId} (M17-CONTRACTS.md section 3.3): applies the mutable switches
+ * -- scheduled sync and JS rendering. Only the present fields change; an absent one is left as is.
+ */
+export function updateWebSource(sourceId: string, payload: UpdateWebSourceRequest): Promise<WebSourceEntry> {
+  return apiPut<WebSourceEntry>(`/web-sources/${sourceId}`, payload);
 }
 
 /**

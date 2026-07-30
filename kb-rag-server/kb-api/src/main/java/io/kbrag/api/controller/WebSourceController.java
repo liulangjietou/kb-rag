@@ -55,8 +55,9 @@ public class WebSourceController {
                                               @Valid @RequestBody RegisterWebSourceRequest request) {
         AccessGuard.requireKbAccess(kbId);
         boolean syncEnabled = request.syncEnabled() == null || request.syncEnabled();
+        boolean renderJs = request.renderJs() != null && request.renderJs();
         return Result.success(WebSourceResponse.from(
-                webSourceService.register(kbId, request.url().trim(), syncEnabled)));
+                webSourceService.register(kbId, request.url().trim(), syncEnabled, renderJs)));
     }
 
     /**
@@ -93,10 +94,11 @@ public class WebSourceController {
     }
 
     /**
-     * Flips the scheduled-sync switch of one source.
+     * Applies the mutable switches of one source: scheduled sync and JS rendering, the M17 contract
+     * section 3.3. Each is optional and only the present ones are changed.
      *
      * @param sourceId registration business id
-     * @param request  new switch value
+     * @param request  new switch values, either one may be absent
      * @return updated registration
      */
     @PutMapping("/api/v1/web-sources/{sourceId}")
@@ -105,7 +107,7 @@ public class WebSourceController {
                                             @Valid @RequestBody UpdateWebSourceRequest request) {
         kbScopeGuard.requireWebSourceAccess(sourceId);
         return Result.success(WebSourceResponse.from(
-                webSourceService.updateSyncEnabled(sourceId, request.syncEnabled())));
+                webSourceService.updateSettings(sourceId, request.syncEnabled(), request.renderJs())));
     }
 
     /**

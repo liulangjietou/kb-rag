@@ -2128,6 +2128,8 @@ export interface WebSourceEntry {
   doc_id: string | null;
   file_name: string | null;
   sync_enabled: boolean;
+  /** M17-CONTRACTS.md section 1: fetch this source through a headless browser and store the rendered DOM. */
+  render_js: boolean;
   last_fetch_status: WebSourceFetchStatus | null;
   last_fetch_at: string | null;
   last_error: string | null;
@@ -2139,6 +2141,17 @@ export interface RegisterWebSourceRequest {
   url: string;
   /** Defaults to true server-side when omitted. */
   sync_enabled?: boolean;
+  /** M17: JS rendering, defaults to false server-side when omitted. */
+  render_js?: boolean;
+}
+
+/**
+ * PUT /api/v1/web-sources/{sourceId} request body (M17-CONTRACTS.md section 3.3): the mutable
+ * switches of a registration. Both are optional; only the present ones are applied.
+ */
+export interface UpdateWebSourceRequest {
+  sync_enabled?: boolean;
+  render_js?: boolean;
 }
 
 // ---------------------------------------------------------------------------

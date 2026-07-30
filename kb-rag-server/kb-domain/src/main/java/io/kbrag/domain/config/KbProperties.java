@@ -169,6 +169,43 @@ public class KbProperties {
 
         /** Sources one scheduled pass re-fetches; fetching is slow outbound I/O, hence a count bound. */
         private int syncBatchSize = 50;
+
+        /**
+         * {@code true} lets the SSRF guard admit loopback and private-network addresses.
+         *
+         * <p>Off by default and meant to stay off in production: the guard is what keeps "index this
+         * page" from becoming "read the cloud metadata endpoint". The switch exists for development
+         * and intranet deployments whose sources legitimately live on private addresses.
+         */
+        private boolean allowInternalAddress = false;
+
+        /** Headless-browser rendering policy, the M17 contract section 3.5. */
+        private Render render = new Render();
+
+        /**
+         * JS rendering policy of URL import, the M17 contract section 3.5.
+         *
+         * <p>{@link #enabled} is the master switch: with it off every {@code render_js} source falls
+         * back to the static fetch, so a deployment without Chromium can hold the flag off and never
+         * risk a browser launch. The browser is launched lazily on the first render regardless.
+         */
+        @Getter
+        @Setter
+        @ToString
+        public static class Render {
+
+            /** {@code false} ignores every per-source {@code render_js} and fetches statically instead. */
+            private boolean enabled = true;
+
+            /** Navigation plus wait-until budget of one rendered page; higher than the static timeout as rendering is slower. */
+            private int timeoutMs = 20000;
+
+            /** Pages rendered at once; a browser context is heavy, so the default is deliberately small. */
+            private int maxConcurrency = 2;
+
+            /** Playwright waitUntil strategy: load, domcontentloaded or networkidle. */
+            private String waitUntil = "networkidle";
+        }
     }
 
     /**

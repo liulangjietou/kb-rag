@@ -6,6 +6,11 @@
 
 ### Added
 
+**M17 · 网页导入 JS 渲染抓取**（`docs/M17-CONTRACTS.md`）
+- 网页导入 Tab 登记表单新增「JS 渲染」 Switch（默认关，`render_js` 随 register 传入），带说明——开启后用无头浏览器渲染再抓取，适用于内容靠脚本加载的页面（如 Javadoc 框架页），更慢更耗资源。
+- 来源列表新增「JS 渲染」列：行内 Switch 直接走 `PUT /web-sources/{id}`（传 `render_js`），与「定时同步」Switch 同交互模式；`updateWebSource` 由单传 `sync_enabled` 扩展为传 `UpdateWebSourceRequest`（`sync_enabled` / `render_js` 两可选字段，只改传入的那个）。
+- `types.ts`：`WebSourceEntry` 增 `render_js: boolean`，`RegisterWebSourceRequest` 增可选 `render_js`，新增 `UpdateWebSourceRequest` 接口。
+
 **M16 · 企业化：多租户 / 文档级权限 / SSO 三协议 / 操作审计**（`docs/M16-CONTRACTS.md`）
 - 登录页单点登录扩展：按 `GET /auth/sso/providers` 渲染 OIDC / SAML / CAS 三个跳转按钮（整页重定向到后端免认证入口）；回调落地页解析 URL fragment（`#sso_token` 入会话、`#sso_error` 展示中文失败原因），解析后立即清理 fragment 避免令牌留在地址栏历史。
 - 新增「租户管理」页（`pages/settings/TenantManagePage.tsx`，仅 `tenant:manage` 可见）：租户列表（内置标签 / 状态）、新建（code + 名称，code 建后不可改）、改名、启用停用（停用二次确认，提示该租户全部账号将无法登录）；无删除入口（后端就没有该端点）。

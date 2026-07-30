@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
  * @param docId           document the fetches feed, {@code null} until the first successful fetch
  * @param fileName        derived file name the document carries, {@code null} until the first fetch
  * @param syncEnabled     whether the scheduled pass includes this source
+ * @param renderJs        whether this source is fetched through the headless browser, the M17 switch
  * @param lastFetchStatus outcome of the last sync attempt, {@code null} before the first one
  * @param lastFetchAt     ISO instant of the last sync attempt
  * @param lastError       why the last sync failed or was skipped, {@code null} on success
@@ -28,12 +29,14 @@ public record WebSourceResponse(
         @JsonProperty("doc_id") String docId,
         @JsonProperty("file_name") String fileName,
         @JsonProperty("sync_enabled") boolean syncEnabled,
+        @JsonProperty("render_js") boolean renderJs,
         @JsonProperty("last_fetch_status") String lastFetchStatus,
         @JsonProperty("last_fetch_at") String lastFetchAt,
         @JsonProperty("last_error") String lastError,
         @JsonProperty("created_at") String createdAt) {
 
     private static final int SYNC_ON = 1;
+    private static final int RENDER_ON = 1;
 
     /**
      * Maps an entity onto its view.
@@ -49,6 +52,7 @@ public record WebSourceResponse(
                 entity.getDocId(),
                 entity.getFileName(),
                 entity.getSyncEnabled() != null && entity.getSyncEnabled() == SYNC_ON,
+                entity.getRenderJs() != null && entity.getRenderJs() == RENDER_ON,
                 entity.getLastFetchStatus() == null ? null : entity.getLastFetchStatus().name(),
                 iso(entity.getLastFetchAt()),
                 entity.getLastError(),

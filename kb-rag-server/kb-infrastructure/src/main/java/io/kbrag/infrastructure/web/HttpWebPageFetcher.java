@@ -31,6 +31,10 @@ import java.util.Optional;
  * <p>The body is read in bounded chunks against the size cap rather than trusting Content-Length:
  * a chunked response carries no length at all, and a hostile one may understate it.
  *
+ * <p>This is the static half of the M17 fetcher pair: it ignores {@code renderJs} and always fetches
+ * the server HTML. {@link WebPageFetcherDispatcher} routes render_js sources to the browser instead,
+ * so this class is never asked to render.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
@@ -68,7 +72,9 @@ public class HttpWebPageFetcher implements WebPageFetcher {
     }
 
     @Override
-    public FetchedPage fetch(String url) {
+    public FetchedPage fetch(String url, boolean renderJs) {
+        // renderJs is handled by the dispatcher, which never routes a render_js source here; the
+        // static path fetches the server HTML as is regardless of the flag.
         String current = url;
         int maxRedirects = Math.max(0, properties.getWebImport().getMaxRedirects());
         for (int hop = 0; hop <= maxRedirects; hop++) {

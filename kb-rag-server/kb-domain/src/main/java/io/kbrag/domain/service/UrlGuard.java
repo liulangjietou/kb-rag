@@ -1,6 +1,7 @@
 package io.kbrag.domain.service;
 
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.config.KbProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -22,6 +23,9 @@ import java.util.Set;
  * days old and DNS may have moved), which is why validation lives in a stateless domain service
  * both kb-app and the kb-infrastructure fetcher can share.
  *
+ * <p>{@code kb.web-import.allow-internal-address} disarms only the internal-address rejection, for
+ * development and intranet deployments; the scheme, credential and host checks always stand.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
@@ -29,6 +33,12 @@ import java.util.Set;
 public class UrlGuard {
 
     private static final Set<String> ALLOWED_SCHEMES = Set.of("http", "https");
+
+    private final KbProperties properties;
+
+    public UrlGuard(KbProperties properties) {
+        this.properties = properties;
+    }
 
     /**
      * Validates one outbound URL, rejecting anything that could reach an internal address.
@@ -56,6 +66,13 @@ public class UrlGuard {
         }
         for (InetAddress address : resolve(host)) {
             if (isInternal(address)) {
+                if (properties.getWebImport().isAllowInternalAddress()) {
+                    // Explicitly disarmed by configuration; log every admission so an audit can see
+                    // exactly which internal addresses were fetched under the relaxed policy.
+                    log.info("internal address admitted by allow-internal-address switch, host={}, address={}",
+                            host, address.getHostAddress());
+                    continue;
+                }
                 log.info("url rejected by ssrf guard, host={}, address={}", host, address.getHostAddress());
                 throw BizException.invalidParam("该地址指向内网或本机，禁止抓取");
             }
