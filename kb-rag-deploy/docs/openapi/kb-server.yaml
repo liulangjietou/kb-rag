@@ -195,7 +195,7 @@ info:
     `/api/v1/operation-audits` 查询端点。全部纯新增（详见 M16-CONTRACTS.md）。
 
     '
-  version: 0.16.0-m16
+  version: 0.17.0-m17
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -1719,6 +1719,10 @@ paths:
                   type: boolean
                   default: true
                   description: 缺省开启定时同步
+                render_js:
+                  type: boolean
+                  default: false
+                  description: 'M17-CONTRACTS.md §3.3：置 true 时该源抓取走无头浏览器渲染 JS 后取 DOM 入库，缺省 false 静态抓取。开启需镜像内置 Chromium 且渲染总闸开。'
       responses:
         '200':
           description: 登记行（含首次抓取结果）
@@ -1792,17 +1796,21 @@ paths:
     put:
       tags:
       - web-source
-      summary: 开关定时同步
+      summary: 更新登记开关（定时同步 / JS 渲染，均可选）
+      description: 'M17-CONTRACTS.md §3.3：登记的可变开关——定时同步与 JS 渲染。两字段均可选，只更新传入的那个，翻开关不触发抓取。'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [sync_enabled]
               properties:
                 sync_enabled:
                   type: boolean
+                  description: 缺省不改动
+                render_js:
+                  type: boolean
+                  description: 'M17：JS 渲染开关，缺省不改动'
       responses:
         '200':
           description: 更新后的登记行
@@ -5061,6 +5069,9 @@ components:
           description: 由 URL 派生的稳定文件名（host-path摘要-urlHash前8位.后缀），重抓同名加版本
         sync_enabled:
           type: boolean
+        render_js:
+          type: boolean
+          description: 'M17-CONTRACTS.md §1：true 表示该源抓取走无头浏览器 JS 渲染，默认 false 静态抓取'
         last_fetch_status:
           allOf:
           - $ref: '#/components/schemas/WebSourceFetchStatus'

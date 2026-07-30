@@ -45,7 +45,7 @@ class HttpWebPageFetcherTest {
         server.start();
         properties = new KbProperties();
         properties.getWebImport().setMaxPageSizeMb(1);
-        UrlGuard recordingGuard = new UrlGuard() {
+        UrlGuard recordingGuard = new UrlGuard(properties) {
             @Override
             public URI validate(String url) {
                 validatedUrls.add(url);
@@ -64,7 +64,7 @@ class HttpWebPageFetcherTest {
     void shouldMapTheContentTypeOntoTheUploadExtension() {
         respond("/plain", 200, "text/plain; charset=utf-8", "hello".getBytes(StandardCharsets.UTF_8));
 
-        WebPageFetcher.FetchedPage page = fetcher.fetch(url("/plain"));
+        WebPageFetcher.FetchedPage page = fetcher.fetch(url("/plain"), false);
 
         assertThat(page.extension()).isEqualTo("txt");
         assertThat(page.body()).isEqualTo("hello".getBytes(StandardCharsets.UTF_8));
@@ -74,7 +74,7 @@ class HttpWebPageFetcherTest {
     void shouldDefaultToHtmlWhenTheResponseCarriesNoContentType() {
         respond("/bare", 200, null, "<html></html>".getBytes(StandardCharsets.UTF_8));
 
-        assertThat(fetcher.fetch(url("/bare")).extension()).isEqualTo("html");
+        assertThat(fetcher.fetch(url("/bare"), false).extension()).isEqualTo("html");
     }
 
     @Test
@@ -82,7 +82,7 @@ class HttpWebPageFetcherTest {
         // A PDF behind a URL belongs to the file upload path, where the magic number checks live.
         respond("/pdf", 200, "application/pdf", new byte[]{0x25, 0x50});
 
-        assertThatThrownBy(() -> fetcher.fetch(url("/pdf")))
+        assertThatThrownBy(() -> fetcher.fetch(url("/pdf"), false))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("application/pdf");
     }
@@ -92,7 +92,7 @@ class HttpWebPageFetcherTest {
         redirect("/a", "/b");
         respond("/b", 200, "text/html", "final".getBytes(StandardCharsets.UTF_8));
 
-        WebPageFetcher.FetchedPage page = fetcher.fetch(url("/a"));
+        WebPageFetcher.FetchedPage page = fetcher.fetch(url("/a"), false);
 
         assertThat(page.body()).isEqualTo("final".getBytes(StandardCharsets.UTF_8));
         // Both the original URL and the redirect target went through the guard: this is the whole
@@ -104,7 +104,7 @@ class HttpWebPageFetcherTest {
     void shouldStopAfterTooManyRedirects() {
         redirect("/loop", "/loop");
 
-        assertThatThrownBy(() -> fetcher.fetch(url("/loop")))
+        assertThatThrownBy(() -> fetcher.fetch(url("/loop"), false))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("重定向");
     }
@@ -115,7 +115,7 @@ class HttpWebPageFetcherTest {
         Arrays.fill(oversized, (byte) 'x');
         respond("/big", 200, "text/html", oversized);
 
-        assertThatThrownBy(() -> fetcher.fetch(url("/big")))
+        assertThatThrownBy(() -> fetcher.fetch(url("/big"), false))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("MB");
     }
@@ -124,7 +124,7 @@ class HttpWebPageFetcherTest {
     void shouldFailOnANonSuccessStatus() {
         respond("/gone", 404, "text/html", "not here".getBytes(StandardCharsets.UTF_8));
 
-        assertThatThrownBy(() -> fetcher.fetch(url("/gone")))
+        assertThatThrownBy(() -> fetcher.fetch(url("/gone"), false))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("404");
     }

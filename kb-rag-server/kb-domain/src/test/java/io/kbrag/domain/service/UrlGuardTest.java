@@ -1,6 +1,7 @@
 package io.kbrag.domain.service;
 
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.config.KbProperties;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -21,7 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  */
 class UrlGuardTest {
 
-    private final UrlGuard guard = new UrlGuard();
+    private final KbProperties properties = new KbProperties();
+    private final UrlGuard guard = new UrlGuard(properties);
 
     @Test
     void shouldAcceptAPublicHttpUrl() {
@@ -71,5 +73,15 @@ class UrlGuardTest {
             "http://0.0.0.0/"})
     void shouldRejectEveryInternalAddress(String url) {
         assertThrows(BizException.class, () -> guard.validate(url));
+    }
+
+    @Test
+    void shouldAdmitAnInternalAddressWhenTheSwitchDisarmsTheGuard() {
+        // The development escape hatch: with the switch on, loopback is admitted - while a smuggled
+        // credential is still refused, because the switch disarms only the address rejection.
+        properties.getWebImport().setAllowInternalAddress(true);
+
+        assertEquals("127.0.0.1", guard.validate("http://127.0.0.1/page").getHost());
+        assertThrows(BizException.class, () -> guard.validate("http://admin:secret@127.0.0.1/"));
     }
 }

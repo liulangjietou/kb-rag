@@ -374,6 +374,18 @@ kb:
     sync-enabled: ${WEB_IMPORT_SYNC_ENABLED:true}
     # Sources per scheduled pass; fetches are slow network calls, so a pass drains a bounded slice.
     sync-batch-size: ${WEB_IMPORT_SYNC_BATCH_SIZE:50}
+    # DANGER: true admits loopback/private addresses through the SSRF guard. Development and intranet
+    # deployments only - keep false wherever an untrusted user can register a source.
+    allow-internal-address: ${WEB_IMPORT_ALLOW_INTERNAL_ADDRESS:false}
+    render:
+      # Master switch for JS rendering; off on an image without Chromium so render_js sources fall back.
+      enabled: ${WEB_IMPORT_RENDER_ENABLED:true}
+      # Budget of one render, permit wait and navigation alike; a slow page fails rather than hangs.
+      timeout-ms: ${WEB_IMPORT_RENDER_TIMEOUT_MS:30000}
+      # Concurrent renders; a browser context holds hundreds of MB, so the fan-out is bounded.
+      max-concurrency: ${WEB_IMPORT_RENDER_MAX_CONCURRENCY:2}
+      # When a navigation is considered done: load, domcontentloaded or networkidle.
+      wait-until: ${WEB_IMPORT_RENDER_WAIT_UNTIL:load}
   ext-source:
     sync-cron: ${EXT_SOURCE_SYNC_CRON:0 0 3 * * *}
     sync-enabled: ${EXT_SOURCE_SYNC_ENABLED:true}

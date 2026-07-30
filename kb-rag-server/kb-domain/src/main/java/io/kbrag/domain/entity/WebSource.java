@@ -55,6 +55,10 @@ public class WebSource extends BaseEntity {
     @TableField("sync_enabled")
     private Integer syncEnabled;
 
+    /** {@code 1} fetches this source through the headless browser and stores the rendered DOM, the M17 contract section 1. */
+    @TableField("render_js")
+    private Integer renderJs;
+
     /** SHA-256 of the last fetched body, the unchanged check of an incremental sync. */
     @TableField("last_content_hash")
     private String lastContentHash;

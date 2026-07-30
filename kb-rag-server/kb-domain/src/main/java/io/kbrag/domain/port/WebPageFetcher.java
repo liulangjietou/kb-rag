@@ -14,10 +14,12 @@ public interface WebPageFetcher {
     /**
      * Fetches one page, following a bounded number of redirects with SSRF re-validation per hop.
      *
-     * @param url address to fetch, already validated once by the caller
+     * @param url      address to fetch, already validated once by the caller
+     * @param renderJs {@code true} renders the page in a headless browser and returns the rendered
+     *                 DOM; {@code false} fetches the server HTML as is (the M12 behaviour)
      * @return page body and the file extension its content type maps to
      */
-    FetchedPage fetch(String url);
+    FetchedPage fetch(String url, boolean renderJs);
 
     /**
      * One fetched page.

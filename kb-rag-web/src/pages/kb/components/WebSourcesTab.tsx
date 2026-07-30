@@ -53,7 +53,7 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
   const [registering, setRegistering] = useState(false);
   // source_id of the row whose sync/toggle/remove request is in flight, to scope the spinners.
   const [actingId, setActingId] = useState<string | null>(null);
-  const [form] = Form.useForm<{ url: string }>();
+  const [form] = Form.useForm<{ url: string; render_js?: boolean }>();
 
   const load = useCallback(async (targetPage: number) => {
     setLoading(true);
@@ -71,10 +71,13 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
     load(1);
   }, [load]);
 
-  const handleRegister = async (values: { url: string }) => {
+  const handleRegister = async (values: { url: string; render_js?: boolean }) => {
     setRegistering(true);
     try {
-      const entry = await registerWebSource(kbId, { url: values.url.trim() });
+      const entry = await registerWebSource(kbId, {
+        url: values.url.trim(),
+        render_js: values.render_js ?? false,
+      });
       reportOutcome(entry);
       form.resetFields();
       load(1);
@@ -103,8 +106,19 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
   const handleToggle = async (row: WebSourceEntry, enabled: boolean) => {
     setActingId(row.source_id);
     try {
-      await updateWebSource(row.source_id, enabled);
+      await updateWebSource(row.source_id, { sync_enabled: enabled });
       message.success(enabled ? '已开启定时同步' : '已关闭定时同步');
+      load(page);
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  const handleToggleRender = async (row: WebSourceEntry, enabled: boolean) => {
+    setActingId(row.source_id);
+    try {
+      await updateWebSource(row.source_id, { render_js: enabled });
+      message.success(enabled ? '已开启 JS 渲染抓取' : '已关闭 JS 渲染抓取');
       load(page);
     } finally {
       setActingId(null);
@@ -139,6 +153,16 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
           ]}
         >
           <Input placeholder="https://example.com/docs/guide" allowClear />
+        </Form.Item>
+        <Form.Item
+          name="render_js"
+          valuePropName="checked"
+          label="JS 渲染"
+          tooltip="开启后走无头浏览器渲染 JS 再入库，适用于正文由脚本生成的页面；抓取更慢"
+        >
+          {/* The Switch must be the direct child: Form.Item injects checked/onChange into it,
+              and wrapping it in a Space would leave the value out of the form. */}
+          <Switch size="small" />
         </Form.Item>
         <Form.Item>
           <Button type="primary" htmlType="submit" loading={registering}>
@@ -196,6 +220,19 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
                 checked={record.sync_enabled}
                 loading={actingId === record.source_id}
                 onChange={(checked) => handleToggle(record, checked)}
+              />
+            ),
+          },
+          {
+            title: 'JS 渲染',
+            dataIndex: 'render_js',
+            width: 100,
+            render: (_, record) => (
+              <Switch
+                size="small"
+                checked={record.render_js}
+                loading={actingId === record.source_id}
+                onChange={(checked) => handleToggleRender(record, checked)}
               />
             ),
           },

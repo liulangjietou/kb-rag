@@ -11,6 +11,21 @@
 
 - 应用重命名：控制台应用中心卡片新增「编辑」入口（仅 `app:write` 可见），复用既有 `PUT /api/v1/apps/{appId}`（`app:write`，审计 `APP/UPDATE`）更新 name 与 description，新名称与其他应用重名时拒绝（排除自身，仅改描述不改名不受此限）
 - 知识库重命名：`PUT /api/v1/kb/{kbId}`（`kb:write`）更新 name 与 description，新名称与其他知识库重名时拒绝（排除自身，仅改描述不改名不受此限）；只动展示字段——索引配置与指纹不变，改名不会使任何文档 config_stale，也不触发重建；审计落 `KB/UPDATE`。控制台知识库卡片新增「编辑」入口（仅 `kb:write` 可见）
+- 启动 banner 换成 KB-RAG：新增 `kb-api/src/main/resources/banner.txt` 顶掉 Spring Boot 默认图形，`KB` 两字母成一组、`RAG` 三字母各留一格、两组间双空格，靠间距读出分组因而不需要连字符（宽 41 列）；附 `${spring-boot.version}` 与构建版本 `${application.version:dev}`——jar 启动读 MANIFEST 显示实际版本，IDE 直跑没有 MANIFEST 时落到 `dev`，不留空洞。纯资源文件，不涉及任何代码与配置开关（`application.yml` 里那个 `banner: false` 是 MyBatis-Plus 的 logo 开关，与此无关）
+
+### 新增（M17）
+
+- `[schema]` Flyway `V18__web_source_render_js.sql`：`t_kb_web_source` 增 `render_js TINYINT NOT NULL DEFAULT 0`（加在 `sync_enabled` 之后，语义相邻），置 1 时该源抓取走无头浏览器 JS 渲染、默认 0 静态抓取；不新增索引（不参与查询过滤，仅随行读出），存量源升级后行为零变化（继续静态抓取）
+- 网页源可选 JS 渲染抓取（**按源开关、默认关**）：server 内嵌 Playwright-Java（Chromium headless），在 `WebPageFetcher` 端口后新增渲染实现，按开关路由后取渲染后 DOM 入库——解决 Oracle Javadoc 一类 frameset/SPA 页静态抓取拿不到正文的问题。渲染产物仍是一段 `text/html` 字节，**继续收敛到 M12 既有链路**（DocumentService.upload → HtmlParser → 版本机制/治理/索引），不新增任何入库旁路，`content_hash` 未变→不建新版本的判重语义天然继承
+- `WebPageFetcher` 端口签名扩展 `fetch(String url, boolean renderJs)`（唯一调用点 WebSourceService，直接改签名不留重载）；新增 `WebPageFetcherDispatcher`（`@Primary`）按 `renderJs && render.enabled` 路由到静态实现（`HttpWebPageFetcher`）或渲染实现（`PlaywrightWebPageFetcher`），总闸关闭时降级静态抓取兜底
+- `PlaywrightWebPageFetcher`：单个 Chromium `Browser` **懒启动**（首次真正渲染时才拉起，`@PreDestroy` 关闭），`Semaphore` 按 `max-concurrency` 限流、`timeout-ms` 内取不到令牌即 FAILED；单次渲染新建 context（禁下载、设 UA、设导航超时）→ `navigate(url, waitUntil)` → `page.content()` → UTF-8 字节，同受 `max-page-size-mb` 上限约束，finally 释放令牌与 context。浏览器启动失败抛 BizException 收成该源 FAILED，**绝不拖垮应用启动或静态抓取链路**
+- 渲染路径 SSRF 防线（本期重中之重）：对渲染 context 注册 `context.route("**/*")` 路由拦截，浏览器加载的**每个子请求**（img/xhr/fetch/iframe/css 及导航重定向）逐个过既有 `UrlGuard`，命中内网/回环/链路本地/元数据地址即 `abort` 并记错误码日志（不抛，个别子资源被拦不中断整页渲染），放行则 `resume`——与静态抓取「主 URL + 逐跳过 UrlGuard」形成闭合防线
+- `WebSourceService`：`register(kbId, url, syncEnabled, renderJs)` 落登记行写入 `renderJs`；`sync` 唯一改动是按 `render_js` 传参给 fetcher（其余 hash 判重/trash skip/rebind/四态/不重抛完全不变）；`updateSettings(sourceId, syncEnabled, renderJs)` 两开关均可空、只改传入项，翻开关不触发抓取；服务层用常量 `RENDER_ON=1`/`RENDER_OFF=0`，不裸用魔法值
+- 端点与 DTO（既有 URL 与响应结构不变）：`POST /api/v1/kb/{kbId}/web-sources` 的 `RegisterWebSourceRequest` 增可选 `render_js`（缺省 false）；`PUT /api/v1/web-sources/{sourceId}` 的 `UpdateWebSourceRequest` 去掉 `sync_enabled` 的 `@NotNull`、增可选 `render_js`（两字段均可空）；`WebSourceResponse` 增 `render_js`（按 `RENDER_ON` 映射）；权限沿用（register/sync/update 仍 `doc:write`，list 仍 `kb:read`，渲染不新增权限）
+- 指标复用既有 `kb_websource_sync_total` 四态计数（M13），不新增指标——是否渲染属抓取内部实现，不进额外维度
+- 新增配置键 `kb.web-import.render.{enabled/timeout-ms/max-concurrency/wait-until}`（环境变量 `WEB_IMPORT_RENDER_ENABLED`/`WEB_IMPORT_RENDER_TIMEOUT_MS`/`WEB_IMPORT_RENDER_MAX_CONCURRENCY`/`WEB_IMPORT_RENDER_WAIT_UNTIL`），`enabled` 为总闸——关闸则忽略所有 `render_js=1` 并降级静态抓取（记 UNCHANGED/SUCCESS 同旧逻辑，不 FAILED）；复用既有 `max-page-size-mb`，不新增体积键
+- 新增配置键 `kb.web-import.allow-internal-address`（环境变量 `WEB_IMPORT_ALLOW_INTERNAL_ADDRESS`，默认 false）：**危险开关**，置 true 时 `UrlGuard` 放行回环/内网地址（scheme/凭据/主机名校验照常，每次放行打 INFO 日志留痕），仅供开发联调与纯内网部署抓取内网页面使用；生产环境任何不可信用户能登记网页源时必须保持 false
+- 新增依赖 `com.microsoft.playwright:playwright`（父 pom `dependencyManagement` 显式锁版本、kb-infrastructure 引入）；Chromium 二进制不走运行时自动下载，改镜像构建期安装（详见 kb-rag-deploy）
 
 ### 新增（M16）
 
