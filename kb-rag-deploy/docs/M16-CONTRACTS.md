@@ -164,6 +164,24 @@
 
 **⑤ 抽取任务独立线程池**（`GRAPH_EXECUTOR`，core 1 / max 2 / queue 50）。原来 `runFullExtraction` 与 `onVersionActivated` 挂在 `INDEX_EXECUTOR`（core 2 / max 4）上，而它们是全系统唯一以小时计的任务：两个全量抽取就能占住索引池一半到全部，文档上传排在后面等一个明天才结束的活。池子按"线程被占多久"分，不按模块分。模型侧峰值并发 = 池大小 × `extract-concurrency`（2 × 8 = 16），两个旋钮的乘积，运维据此对齐限流额度。
 
+### 4.4 文档索引吞吐改造（任务处理效率）
+
+与 §4.3 同一个诉求，落在文件解析这条链路上。三处，从内到外：
+
+**① 嵌入批次串行 → 并发**。`ChunkEmbedder` 原按 provider 批大小（`EMBEDDING_BATCH_SIZE`，默认 10）切批，但**批次之间串行**：500 个分片就是 50 次网络往返，每次半秒到两秒，光嵌入这一段就要半分钟到两分钟。批次之间没有任何依赖，纯粹是等 socket。改为并发跑，新增 `EMBEDDING_CONCURRENCY`（默认 4）。
+
+并发上限做成**共享线程池而非每次调用新建**：这个值的意义是"嵌入服务同时收到几个请求"，几个文档同时索引时若各自开池，总并发就失控了。队列满时用 `CallerRunsPolicy` —— 提交者（索引线程）自己跑一批，形成背压，不丢批次（丢一批就是丢一批向量）。单批次直接跑不进池：注解修改路径一次只嵌一个分片，调度它比直接跑更贵。
+
+失败语义不变：一批失败即整次调用失败，上层把版本标 FAILED —— 半个版本嵌完不能当成索引成功。但**必须把 `CompletionException` 解包还原原始异常**：`IndexPipelineService` 按 `BizException` 的错误码区分 `PARSE_FAILED` 与 `INDEX_FAILED`，包一层会丢掉这个分支，还会把 `java.util.concurrent.CompletionException:` 写进运维可见的 `fail_reason`。
+
+**② 嵌入状态逐行落库 → 按批一条语句**。原实现每个分片一次 `updateById`，500 个分片就是 500 条 UPDATE。同一批次里状态是同一个值（DONE），一条 `UPDATE ... WHERE chunk_id IN (...)` 就够，500 条降到 50 条。同时从"整行写"改为"按列写"：`Chunk` 继承 `BaseEntity` 带 `@Version`，并发批次整行写会互相顶掉乐观锁版本号，而这里没有地方上报冲突。内存里的对象仍照旧 `setEmbeddingStatus`，调用方拿着同一批对象继续往下走。
+
+**③ `INDEX_EXECUTOR` 的 `max` 是死配置**。原配置 `core=2 / max=4 / queue=200`。`ThreadPoolTaskExecutor` 只在队列**满**之后才扩到 max，而队列有 200 深 —— 实际稳态并发恒为 **2**，`max=4` 永远不可达，批量上传 50 个文件是两个两个处理的。改为 `core=max=4`，让写下来的数字就是真实并发。取 4 而非机器核数：这个线程一生都在等 parser 服务、嵌入服务与引擎，本机 CPU 上只有切分那一小段。
+
+**两级并发相乘**：索引池决定几个文档同时在跑（4），文档内部嵌入批次再并发（全局 4）。嵌入池是全局上限，所以 4 个文档同时索引时它们**共享**这 4 路，不会把限流打穿 —— 单文档会比独占时慢，但总吞吐不降。填 `EMBEDDING_CONCURRENCY=1` 即恢复改造前的串行行为。
+
+**没做的**：解析阶段本身（在 parser 服务侧，server 只是等 HTTP 响应）；索引写入的攒批（`ChunkIndexWriter` 已走引擎 bulk）；`INDEX_EXECUTOR` 未超过 4 —— 再往上要看部署机的实际 CPU 与 parser 服务的并发能力，无实测依据的调参是猜。
+
 ## 5. F4：文档级数据权限的执行点
 
 ### 5.1 写路径
@@ -226,6 +244,7 @@
 4. 开放 API 检索结果可能变少：RESTRICTED 文档被滤出。发布前评估存量文档是否需要收窄密级（默认没有任何文档是 RESTRICTED，不动就无影响）。
 5. 组同步开启后，SSO 账号的角色以目录组为准（MANUAL 授的除外）；开启前先配好映射。
 6. **图谱抽取默认并发从 2 提到 8**（§4.3）：模型侧调用速率随之上升约四倍，峰值并发 = 抽取任务池上限 2 × 8 = 16。限流额度紧的部署把 `GRAPH_EXTRACT_CONCURRENCY` 调回去即可，正确性不依赖它。`GRAPH_EXTRACT_BATCH_SIZE` 已移除，存量 `.env` 里留着不报错也不生效。
+7. **嵌入请求速率上升、同时索引的文档数从 2 变 4**（§4.4）：新增 `EMBEDDING_CONCURRENCY`（默认 4，全局上限），索引池由 `core=2/max=4`（max 因队列 200 深而永不可达，实际并发恒为 2）改为 `core=max=4`。嵌入服务限流紧的部署把 `EMBEDDING_CONCURRENCY` 填 1 即恢复串行；解析服务扛不住 4 路并发的部署需要相应扩 parser 实例。
 7. 开放 API 反馈端点开始校验 request_id 的应用归属（§3.6）：**只用自己检索返回的 request_id 提交反馈**的集成方不受影响；此前若有跨应用复用 request_id 的用法会被拒为 `APP_ACCESS_DENIED`。控制台调试检索的 request_id 一律不再被该端点接受。
 
 ## 11. 单测清单（离线，精确断言）
@@ -233,6 +252,7 @@
 - **F1**：删库置 PENDING_CLEANUP + 建 CLEANUP 任务；执行器幂等（indexExists=false 不报错）；引擎异常任务留存可重试；快照存量 PENDING_CLEANUP 行被同一执行器收走。
 - **F2**：0/1 个超管不告警，2 个告警且逐一点名；**两个租户各有同 code 超管角色时各报一条且带 tenantId**（回归 `limit 1` 盲区）。
 - **F4.3**：barrier 只在凑满 `extract-concurrency` 个模型调用时才放行（串行或并发不足则超时并计入 skipped，断言 skipped=0）；图写入并发峰值恒为 1 而抽取峰值 > 1；进度按列更新且次数 ≤ 分片数。
+- **F4.4**：嵌入批次并发（barrier 凑不齐即超时）；状态写入次数 = 批次数而非分片数且不走 `updateById`，内存状态仍为 DONE；单批次不进线程池；一批失败即整次失败且抛出的仍是原 `BizException`（错误码可读）；零 Key 模式不调 provider 也不落库。
 - **F3**：TenantLineHandler 无主体跳过拼接、忽略清单命中；建租户复制五内置角色；停用租户后 resolve 抛 401；停用 DEFAULT 被拒；IndexNaming 默认租户名不变（回归红线）、非默认租户带段、tenant 段归一化。
 - **F4**：`DocumentAclService.trimRestricted` 叠加 ACL 正负例（含快照冻结集分支）；开放 API 滤 RESTRICTED；`requireDocumentContentAccess` 四象限（范围内/外 × 有/无 ACL）+ doc:review 豁免 + kb_scope_all 不豁免；角色删除/文档删除清 ACL 残行。
 - **F5**：映射解析（大小写、空白、非法条目跳过）；LDAP_SYNC 全量替换且 MANUAL 不动；组查询失败不阻断登录；同步开启时首登不授默认角色。

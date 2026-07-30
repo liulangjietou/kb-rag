@@ -359,6 +359,16 @@ public class KbProperties {
         /** Maximum texts per provider request. */
         private int batchSize = 10;
 
+        /**
+         * Provider requests in flight while one document is embedded.
+         *
+         * <p>一个批次就是一次网络往返，串行跑完全部批次是文档索引里最长的一段等待：500 个分片按
+         * 批大小 10 算就是 50 次往返，每次半秒到两秒，光嵌入就要半分钟到两分钟。批次之间没有任何
+         * 依赖，所以这个值直接摊薄总等待。它是**全局**上限（共享线程池），几个文档同时索引也不会
+         * 把嵌入服务的限流打穿；调到 1 就是改造前的串行行为。
+         */
+        private int concurrency = 4;
+
         /** Request timeout in milliseconds. */
         private int timeoutMs = 30000;
     }

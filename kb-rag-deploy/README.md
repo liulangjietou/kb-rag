@@ -369,6 +369,14 @@ docker compose -f docker-compose.lite.yml --profile graph up -d
   `IMAGE_DESCRIBE_CONCURRENCY`（单文档图片描述并发度，默认 8，见
   `docs/M3-CONTRACTS.md` §7.6）。
 
+**索引吞吐（M16 起）**：文档索引有两级并发，乘起来才是上游服务看到的量。索引池决定
+**同时索引几个文档**（4，M16 前因队列容量导致实际恒为 2）；单个文档内部，嵌入批次再按
+`EMBEDDING_CONCURRENCY`（默认 4）并发——一个批次就是一次嵌入请求，500 个分片按批大小 10
+算是 50 次往返，串行跑是索引里最长的一段等待。嵌入并发是**全局**上限（共享线程池），所以
+4 个文档同时索引时共享这 4 路，不会把嵌入服务限流打穿；填 1 即恢复串行。解析本身在 parser
+服务侧，server 只是等 HTTP 响应，扛不住 4 路并发时扩 parser 实例即可。详见
+[`docs/M16-CONTRACTS.md`](docs/M16-CONTRACTS.md) §4.4。
+
 ## 聊天记录格式扩展与映射维护（M8）
 
 在 M3 的 CSV/Excel 基础上，聊天记录导入新增 **TXT / HTML** 两种格式

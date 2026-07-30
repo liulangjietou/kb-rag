@@ -87,6 +87,10 @@ kb:
     api-key: ${DASHSCOPE_API_KEY:}
     base-url: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     batch-size: ${EMBEDDING_BATCH_SIZE:10}
+    # Provider requests in flight while one document is embedded; batches share nothing, so this is what
+    # keeps a 500 chunk document from being 50 sequential round trips. Global ceiling (shared pool), so
+    # several documents indexing at once still cannot exceed it. Set to 1 for the pre-M16 sequential shape.
+    concurrency: ${EMBEDDING_CONCURRENCY:4}
     timeout-ms: ${EMBEDDING_TIMEOUT_MS:30000}
   multimodal-embedding:
     provider: ${MULTIMODAL_EMBEDDING_PROVIDER:dashscope}
