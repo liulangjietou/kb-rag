@@ -8,11 +8,13 @@ import type { DemoStatus, KnowledgeBase } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
 import CreateKbModal from './components/CreateKbModal';
+import EditKbModal from './components/EditKbModal';
 
 export default function KbListPage() {
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [loading, setLoading] = useState(true);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [editingKb, setEditingKb] = useState<KnowledgeBase | null>(null);
   const [demoStatus, setDemoStatus] = useState<DemoStatus | null>(null);
   const [demoImporting, setDemoImporting] = useState(false);
   const navigate = useNavigate();
@@ -116,6 +118,15 @@ export default function KbListPage() {
                     </span>,
                     ...(canWrite
                       ? [
+                          <span
+                            key="edit"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingKb(kb);
+                            }}
+                          >
+                            编辑
+                          </span>,
                           <Popconfirm
                             key="delete"
                             title="确认删除该知识库？"
@@ -150,6 +161,15 @@ export default function KbListPage() {
         onClose={() => setCreateModalOpen(false)}
         onCreated={() => {
           setCreateModalOpen(false);
+          loadKbs();
+        }}
+      />
+
+      <EditKbModal
+        kb={editingKb}
+        onClose={() => setEditingKb(null)}
+        onUpdated={() => {
+          setEditingKb(null);
           loadKbs();
         }}
       />

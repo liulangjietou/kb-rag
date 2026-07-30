@@ -7,6 +7,10 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 新增
+
+- 知识库重命名：`PUT /api/v1/kb/{kbId}`（`kb:write`）更新 name 与 description，新名称与其他知识库重名时拒绝（排除自身，仅改描述不改名不受此限）；只动展示字段——索引配置与指纹不变，改名不会使任何文档 config_stale，也不触发重建；审计落 `KB/UPDATE`。控制台知识库卡片新增「编辑」入口（仅 `kb:write` 可见）
+
 ### 新增（M16）
 
 - `[schema]` Flyway `V17__tenant_doc_acl_audit.sql`：新增 `t_kb_tenant`（内置默认租户 `tnt_default0000000` 随迁移种子化，不可停用）、`t_kb_doc_acl`（受限文档→授权角色绑定）、`t_kb_operation_audit`（操作审计，含 `username` 冗余列——账号删了记录还得可读）；6 张根聚合表（用户 / 角色 / 知识库 / API Key / 评测集 / 应用）增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户，升级零迁移），从属资源经根资源归属租户，刻意不给四十张表全加列；`t_kb_role` 的 `code` 唯一范围从全局收缩为租户内（`uk_tenant_code`）；`t_kb_document` 增 `visibility`（INHERIT/RESTRICTED）、`t_kb_user_role` 增 `granted_by`（MANUAL/LDAP_SYNC）、`t_kb_retrieval_feedback` 增 `channel` / `end_user_id`；新增权限码 `tenant:manage`（仅授超级管理员）

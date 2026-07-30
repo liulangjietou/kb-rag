@@ -1057,6 +1057,29 @@ paths:
                 $ref: '#/components/schemas/KnowledgeBaseResult'
         '404':
           $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - knowledge-base
+      summary: 更新知识库（重命名/改描述）
+      description: '仅更新展示字段 name 与 description：不触碰索引配置与指纹，不会使任何文档
+        变为 config_stale。新名称与其他知识库重名时拒绝（INVALID_PARAM），仅改描述不改名不受此限。 '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateKbRequest'
+      responses:
+        '200':
+          description: 更新成功，返回最新知识库信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeBaseResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       tags:
       - knowledge-base
@@ -4809,6 +4832,16 @@ components:
             items:
               $ref: '#/components/schemas/PermissionEntry'
     CreateKbRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+    UpdateKbRequest:
       type: object
       required:
       - name
