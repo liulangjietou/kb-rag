@@ -458,6 +458,20 @@ export interface RebuildRequest {
   doc_ids?: string[];
 }
 
+/**
+ * GET /api/v1/kb/{kbId}/rebuild-status response：整库口径的配置追平状态。
+ *
+ * 三个计数都是服务端现算的，与文档列表的分页无关——待重建的文档落在第几页不影响它是不是活儿。
+ */
+export interface RebuildStatus {
+  /** 仍需按新配置重建的文档数，归零即全部追平。 */
+  stale_count: number;
+  /** 其中正在跑重建管线的文档数。 */
+  in_progress_count: number;
+  /** 其中重建失败、需要人工介入的文档数。 */
+  failed_count: number;
+}
+
 // ---------------------------------------------------------------------------
 // Retrieval
 // ---------------------------------------------------------------------------

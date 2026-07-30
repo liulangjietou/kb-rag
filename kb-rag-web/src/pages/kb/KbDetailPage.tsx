@@ -39,11 +39,12 @@ import {
   batchReindexDocuments,
   confirmKbDocuments,
   getKnowledgeBase,
+  getRebuildStatus,
   rebuildKb,
   updateKbGovernance,
 } from '../../api/kb';
 import { PUBLISH_STATUS_META } from '../../api/types';
-import type { KbDocument, KnowledgeBase } from '../../api/types';
+import type { KbDocument, KnowledgeBase, RebuildStatus } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
 import { formatFileSize } from '../../utils/format';
@@ -63,9 +64,9 @@ import VisibilityDrawer from './components/VisibilityDrawer';
 import WebSourcesTab from './components/WebSourcesTab';
 
 // Document list is polled every 3s while this page stays mounted, per M1-CONTRACTS.md section 7.
-// The same poll loop is reused to track rebuild progress (M2-CONTRACTS.md section 4): there is
-// no dedicated task-status endpoint in the contract, so completion is derived from watching
-// each targeted document's config_stale flag flip back to false.
+// 同一个轮询顺带拉 GET /kb/{kbId}/rebuild-status（M2-CONTRACTS.md section 4 的追平状态）：重建跑在
+// 服务端线程池里，比这个页面活得久，所以"是否在重建、还差多少"只能问服务端。早先版本把它记在组件
+// state 里，操作员一离开详情页进度条就没了、完成提示再也不出现、按钮回到可点击态引来重复提交。
 const POLL_INTERVAL_MS = 3000;
 
 // 与 DocumentController 的 DEFAULT_PAGE_SIZE 对齐：首屏不传 size 时服务端就按 20 返回，
@@ -90,9 +91,10 @@ export default function KbDetailPage() {
   const [versionDocId, setVersionDocId] = useState<string | null>(null);
   const [chatImportOpen, setChatImportOpen] = useState(false);
   const [indexConfigOpen, setIndexConfigOpen] = useState(false);
-  const [rebuilding, setRebuilding] = useState(false);
-  const [rebuildTargetIds, setRebuildTargetIds] = useState<string[]>([]);
-  const [rebuildInitialCount, setRebuildInitialCount] = useState(0);
+  // 追平状态由服务端派生，null 表示还没拉到第一份（首屏别急着下"无需重建"的结论）
+  const [rebuildStatus, setRebuildStatus] = useState<RebuildStatus | null>(null);
+  // 仅用于按钮的即时反馈：提交请求在飞的那一小段，服务端还看不到 in_progress
+  const [rebuildSubmitting, setRebuildSubmitting] = useState(false);
   // 表格只有一套勾选：批量删除、批量重建作用于全部勾选项，批量确认取其中还在等确认的那部分。
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [batchConfirming, setBatchConfirming] = useState(false);
@@ -111,6 +113,11 @@ export default function KbDetailPage() {
     if (!kbId) return;
     const detail = await getKnowledgeBase(kbId);
     setKb(detail);
+  }, [kbId]);
+
+  const loadRebuildStatus = useCallback(async () => {
+    if (!kbId) return;
+    setRebuildStatus(await getRebuildStatus(kbId));
   }, [kbId]);
 
   /**
@@ -144,24 +151,28 @@ export default function KbDetailPage() {
   useEffect(() => {
     if (!kbId) return;
     setLoading(true);
-    Promise.all([loadKb(), loadDocuments()]).finally(() => setLoading(false));
-  }, [kbId, loadKb, loadDocuments]);
+    Promise.all([loadKb(), loadDocuments(), loadRebuildStatus()]).finally(() => setLoading(false));
+  }, [kbId, loadKb, loadDocuments, loadRebuildStatus]);
 
   useEffect(() => {
     pollTimerRef.current = setInterval(() => {
       loadDocuments();
+      loadRebuildStatus();
     }, POLL_INTERVAL_MS);
     return () => {
       if (pollTimerRef.current) {
         clearInterval(pollTimerRef.current);
       }
     };
-  }, [loadDocuments]);
+  }, [loadDocuments, loadRebuildStatus]);
 
-  const staleDocs = useMemo(() => documents.filter((doc) => doc.config_stale), [documents]);
-  const remainingRebuildCount = useMemo(
-    () => documents.filter((doc) => rebuildTargetIds.includes(doc.doc_id) && doc.config_stale).length,
-    [documents, rebuildTargetIds],
+  const staleCount = rebuildStatus?.stale_count ?? 0;
+  const rebuildInProgress = (rebuildStatus?.in_progress_count ?? 0) > 0;
+  const rebuildFailedCount = rebuildStatus?.failed_count ?? 0;
+  // 排队中 = 待追平里既没在跑、也没失败的那部分：线程池并发有限，提交一批后大多数文档在这里等着
+  const rebuildQueuedCount = Math.max(
+    0,
+    staleCount - (rebuildStatus?.in_progress_count ?? 0) - rebuildFailedCount,
   );
   // M3-CONTRACTS.md section 3.4/4: documents paused on parse-preview confirmation.
   const pendingConfirmDocs = useMemo(
@@ -175,15 +186,20 @@ export default function KbDetailPage() {
     [documents, versionDocId],
   );
 
-  // Once every targeted document's config_stale flag clears, consider the rebuild finished.
+  /**
+   * 待追平数从有到无就是重建收尾。只提示一次、且只在本次驻留期间观察到这个跳变时提示——离开又回来
+   * 时上一份计数不可知，此时告警条直接消失本身就是完成信号，硬补一句 toast 反而像凭空冒出来。
+   * 重建失败的文档仍是 stale，所以计数不会归零，不存在把失败说成成功的路径。
+   */
+  const prevStaleCountRef = useRef<number | null>(null);
   useEffect(() => {
-    if (!rebuilding || rebuildTargetIds.length === 0) return;
-    if (remainingRebuildCount === 0) {
-      setRebuilding(false);
-      setRebuildTargetIds([]);
+    if (!rebuildStatus) return;
+    const prev = prevStaleCountRef.current;
+    prevStaleCountRef.current = rebuildStatus.stale_count;
+    if (prev !== null && prev > 0 && rebuildStatus.stale_count === 0) {
       message.success('重建完成，新分片配置已生效');
     }
-  }, [rebuilding, rebuildTargetIds, remainingRebuildCount]);
+  }, [rebuildStatus]);
 
   // 勾选项里"还在等预览确认"的那部分：批量确认只该作用于它们，而删除与重建作用于全部勾选项。
   const selectedPendingConfirmIds = useMemo(
@@ -222,20 +238,26 @@ export default function KbDetailPage() {
     }
   };
 
+  /**
+   * 提交整库追平。不传 doc_ids 让服务端自己圈定全部 config_stale 文档：早先传的是当前页那几篇，
+   * 翻页外的待重建文档因此永远追不平。
+   */
   const handleRebuildStale = async () => {
-    if (!kbId || staleDocs.length === 0) return;
-    const targetIds = staleDocs.map((doc) => doc.doc_id);
-    await rebuildKb(kbId, { doc_ids: targetIds });
-    message.success('已提交按新配置重建任务');
-    setRebuildTargetIds(targetIds);
-    setRebuildInitialCount(targetIds.length);
-    setRebuilding(true);
-    loadDocuments();
+    if (!kbId || staleCount === 0) return;
+    setRebuildSubmitting(true);
+    try {
+      await rebuildKb(kbId);
+      message.success('已提交按新配置重建任务');
+      await Promise.all([loadDocuments(), loadRebuildStatus()]);
+    } finally {
+      setRebuildSubmitting(false);
+    }
   };
 
   const handleIndexConfigSaved = () => {
     loadKb();
     loadDocuments();
+    loadRebuildStatus();
   };
 
   const handlePreviewConfirmed = () => {
@@ -406,25 +428,43 @@ export default function KbDetailPage() {
             label: '文档管理',
             children: (
               <>
-                {staleDocs.length > 0 && (
+                {staleCount > 0 && (
                   <Alert
                     type="warning"
                     showIcon
-                    message={`${staleDocs.length} 篇文档使用旧配置`}
+                    message={`${staleCount} 篇文档使用旧配置`}
                     description={
-                      rebuilding ? (
-                        <Progress
-                          percent={Math.round(((rebuildInitialCount - remainingRebuildCount) / rebuildInitialCount) * 100)}
-                          size="small"
-                          status="active"
-                        />
+                      rebuildInProgress ? (
+                        <>
+                          <Typography.Text type="secondary">
+                            {`正在按新配置重建：${rebuildStatus?.in_progress_count} 篇处理中`}
+                            {rebuildQueuedCount > 0 ? `，${rebuildQueuedCount} 篇排队中` : ''}
+                            {rebuildFailedCount > 0 ? `，${rebuildFailedCount} 篇失败` : ''}
+                          </Typography.Text>
+                          {/* 进度是"整库有多少文档已按当前配置建好"，服务端现算，刷新或换人看都一致 */}
+                          {docTotal > 0 && (
+                            <Progress
+                              percent={Math.round(((docTotal - staleCount) / docTotal) * 100)}
+                              size="small"
+                              status="active"
+                            />
+                          )}
+                        </>
+                      ) : rebuildFailedCount > 0 ? (
+                        `${rebuildFailedCount} 篇文档重建失败，可在下方列表查看失败原因后重试；其余待重建文档可再次提交`
                       ) : (
                         '索引配置已变更，需要按新配置重建后才能生效'
                       )
                     }
                     action={
-                      <Button size="small" type="primary" loading={rebuilding} disabled={rebuilding} onClick={handleRebuildStale}>
-                        {rebuilding ? '重建中' : '按新配置重建'}
+                      <Button
+                        size="small"
+                        type="primary"
+                        loading={rebuildSubmitting || rebuildInProgress}
+                        disabled={rebuildSubmitting || rebuildInProgress}
+                        onClick={handleRebuildStale}
+                      >
+                        {rebuildInProgress ? '重建中' : '按新配置重建'}
                       </Button>
                     }
                     style={{ marginBottom: 16 }}

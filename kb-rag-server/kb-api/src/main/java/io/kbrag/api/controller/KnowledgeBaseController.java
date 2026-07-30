@@ -9,6 +9,7 @@ import io.kbrag.api.dto.CreateKnowledgeBaseRequest;
 import io.kbrag.api.dto.DocumentBatchRequest;
 import io.kbrag.api.dto.KnowledgeBaseResponse;
 import io.kbrag.api.dto.RebuildRequest;
+import io.kbrag.api.dto.RebuildStatusResponse;
 import io.kbrag.api.dto.UpdateIndexConfigRequest;
 import io.kbrag.api.dto.UpdateKbGovernanceRequest;
 import io.kbrag.app.auth.AccessGuard;
@@ -152,6 +153,24 @@ public class KnowledgeBaseController {
         AccessGuard.requireKbAccess(kbId);
         List<String> queued = rebuildService.submit(kbId, request == null ? null : request.docIds());
         return Result.success(Map.of(FIELD_QUEUED_DOC_IDS, queued));
+    }
+
+    /**
+     * Reports how far the knowledge base is from running entirely on the current configuration.
+     *
+     * <p>Separate from the rebuild submission on purpose: a rebuild survives the page that started it,
+     * so the console has to be able to ask for the state rather than remember it. Counting is scoped to
+     * the whole base, not one page of documents, because a stale document on page two is just as much
+     * work as one on page one.
+     *
+     * @param kbId business identifier
+     * @return stale, in progress and failed document counts
+     */
+    @GetMapping("/{kbId}/rebuild-status")
+    @RequiresPermission(PermissionCodes.KB_READ)
+    public Result<RebuildStatusResponse> rebuildStatus(@PathVariable String kbId) {
+        AccessGuard.requireKbAccess(kbId);
+        return Result.success(RebuildStatusResponse.from(rebuildService.status(kbId)));
     }
 
     /**
