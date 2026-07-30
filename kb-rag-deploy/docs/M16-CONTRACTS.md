@@ -244,8 +244,36 @@
 4. 开放 API 检索结果可能变少：RESTRICTED 文档被滤出。发布前评估存量文档是否需要收窄密级（默认没有任何文档是 RESTRICTED，不动就无影响）。
 5. 组同步开启后，SSO 账号的角色以目录组为准（MANUAL 授的除外）；开启前先配好映射。
 6. **图谱抽取默认并发从 2 提到 8**（§4.3）：模型侧调用速率随之上升约四倍，峰值并发 = 抽取任务池上限 2 × 8 = 16。限流额度紧的部署把 `GRAPH_EXTRACT_CONCURRENCY` 调回去即可，正确性不依赖它。`GRAPH_EXTRACT_BATCH_SIZE` 已移除，存量 `.env` 里留着不报错也不生效。
-7. **嵌入请求速率上升、同时索引的文档数从 2 变 4**（§4.4）：新增 `EMBEDDING_CONCURRENCY`（默认 4，全局上限），索引池由 `core=2/max=4`（max 因队列 200 深而永不可达，实际并发恒为 2）改为 `core=max=4`。嵌入服务限流紧的部署把 `EMBEDDING_CONCURRENCY` 填 1 即恢复串行；解析服务扛不住 4 路并发的部署需要相应扩 parser 实例。
 7. 开放 API 反馈端点开始校验 request_id 的应用归属（§3.6）：**只用自己检索返回的 request_id 提交反馈**的集成方不受影响；此前若有跨应用复用 request_id 的用法会被拒为 `APP_ACCESS_DENIED`。控制台调试检索的 request_id 一律不再被该端点接受。
+8. **嵌入请求速率上升、同时索引的文档数从 2 变 4**（§4.4）：新增 `EMBEDDING_CONCURRENCY`（默认 4，全局上限），索引池由 `core=2/max=4`（max 因队列 200 深而永不可达，实际并发恒为 2）改为 `core=max=4`。嵌入服务限流紧的部署把 `EMBEDDING_CONCURRENCY` 填 1 即恢复串行；解析服务扛不住 4 路并发的部署需要相应扩 parser 实例。
+
+### 10.1 开发期排障：V17 checksum 不匹配导致启动失败
+
+**只影响在 M16 开发期中途启动过服务的本地库**。合并后的新部署不会遇到——它会一次性跑完整的 V17。
+
+```
+Migration checksum mismatch for migration version 17
+-> Applied to database : 1966083435
+-> Resolved locally    : -795986924
+```
+
+起因是未发布分支上迁移文件被继续修改：本地库应用的是 V17 的中间版本，而工作区是最终版（评审后往 V17 追加了 `t_kb_search_insight.app_id`，即 §3.6 那个越权修复所需的列）。Flyway 用 checksum 保证"已应用的迁移文件没被改过"，于是拒绝启动。
+
+**不要只跑 `flyway repair`**。repair 只更新 checksum 让启动通过，库里缺的列不会补上，启动后一写检索洞察就报 `Unknown column 'app_id'`——那个列是安全修复的落地点，必须真的存在，不能只骗过校验。正确顺序是先补结构、再对齐 checksum：
+
+```bash
+docker exec kb-rag-mysql mysql -ukbrag -p<MYSQL_PASSWORD> kb_rag -e "ALTER TABLE t_kb_search_insight ADD COLUMN app_id VARCHAR(64) DEFAULT NULL COMMENT '开放接口调用方应用标识，控制台调试检索为空', ADD KEY idx_request (request_id); UPDATE flyway_schema_history SET checksum = <报错里的 Resolved locally 值> WHERE version = '17';"
+```
+
+`checksum` 填**报错信息里的 `Resolved locally`**，不要照抄本文的数值——那是写文档时的值，V17 若再有改动就不同了。回滚点是报错里的 `Applied to database` 值。
+
+若中间版缺的不止这一列（取决于本地库是哪天应用的），用下面这条列出全部差异，逐项补齐后再改 checksum：
+
+```bash
+docker exec kb-rag-mysql mysql -ukbrag -p<MYSQL_PASSWORD> kb_rag -N -e "SELECT 'tables', GROUP_CONCAT(table_name) FROM information_schema.tables WHERE table_schema='kb_rag' AND table_name IN ('t_kb_tenant','t_kb_doc_acl','t_kb_operation_audit'); SELECT 'tenant_id_on', GROUP_CONCAT(table_name) FROM information_schema.columns WHERE table_schema='kb_rag' AND column_name='tenant_id'; SELECT 'doc.visibility', COUNT(*) FROM information_schema.columns WHERE table_schema='kb_rag' AND table_name='t_kb_document' AND column_name='visibility'; SELECT 'user_role.granted_by', COUNT(*) FROM information_schema.columns WHERE table_schema='kb_rag' AND table_name='t_kb_user_role' AND column_name='granted_by'; SELECT 'feedback.channel+end_user', COUNT(*) FROM information_schema.columns WHERE table_schema='kb_rag' AND table_name='t_kb_retrieval_feedback' AND column_name IN ('channel','end_user_id'); SELECT 'insight.app_id', COUNT(*) FROM information_schema.columns WHERE table_schema='kb_rag' AND table_name='t_kb_search_insight' AND column_name='app_id'; SELECT 'idx_request', COUNT(*) FROM information_schema.statistics WHERE table_schema='kb_rag' AND table_name='t_kb_search_insight' AND index_name='idx_request'; SELECT 'perm tenant:manage', COUNT(*) FROM t_kb_permission WHERE code='tenant:manage';"
+```
+
+最终版 V17 跑完应该是：三张新表齐全、八张表带 `tenant_id`（六张由 V17 补列，`t_kb_tenant` 与 `t_kb_operation_audit` 建表自带）、其余每项为 1，`feedback` 那项为 2。空库或无业务数据的开发库直接 `DROP DATABASE kb_rag; CREATE DATABASE kb_rag;` 重跑全部迁移更省事——**有业务数据的库不要这么做**。
 
 ## 11. 单测清单（离线，精确断言）
 
