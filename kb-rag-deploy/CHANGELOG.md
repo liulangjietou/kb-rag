@@ -50,6 +50,15 @@
   共用 core 2 / max 4 的索引池，两个全量抽取就能让文档上传排在一个明天才结束的活后面。
   **模型侧峰值并发 = 2 × `GRAPH_EXTRACT_CONCURRENCY`**（默认 16），限流额度紧的部署把后者调小即可，
   正确性不依赖它。
+- **并发参数按机器可调（`docs/M16-CONTRACTS.md` §4.5）**：`.env.example` 新增
+  `INDEX_CONCURRENCY`（同时索引几个文档）、`GRAPH_TASK_CONCURRENCY`（几个知识库能同时重建图谱）、
+  `PARSER_MAX_WORKERS`（解析服务工作线程数），默认值等于此前的硬编码值，**不设变量的部署行为不变**。
+  文档里点明三个不随机器变大而变大的天花板：模型侧限流（撞上表现为任务失败率上升而非变慢）、
+  `PARSER_MAX_WORKERS`（解析是真 CPU 密集且 uvicorn 单进程，调大调用侧只会把队列挪到 parser 门口）、
+  `MYSQL_POOL_SIZE`（不同步扩就是把瓶颈换成 connection timeout），并给出 10 核 / 64GB 单机的一套
+  参考值。**图谱任务池由实际恒为 1 变为 2**（同 §4.4 ③ 的队列陷阱），parser 侧 OCR 调用池由固定 2
+  改为跟随 `PARSER_MAX_WORKERS`——它原本只是给单页 OCR 套超时的载体，却被所有 worker 共享，
+  扫描件批量场景被卡在 2 页并发。
 - **文档索引吞吐优化（回补进 `docs/M16-CONTRACTS.md` §4.4）**：①`.env.example` 新增
   `EMBEDDING_CONCURRENCY`（默认 4）——嵌入批次此前逐批串行，500 个分片按批大小 10 算就是 50 次
   网络往返、光嵌入要半分钟到两分钟，而批次之间毫无依赖；这是**全局**上限（共享线程池），几个文档

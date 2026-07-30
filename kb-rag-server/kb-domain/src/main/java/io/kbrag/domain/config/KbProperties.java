@@ -78,6 +78,9 @@ public class KbProperties {
     /** Document level policy, currently the version retention window. */
     private Doc doc = new Doc();
 
+    /** Document indexing throughput. */
+    private Index index = new Index();
+
     /** Splitting defaults of the indexing pipeline. */
     private Split split = new Split();
 
@@ -920,6 +923,28 @@ public class KbProperties {
     }
 
     /**
+     * Document indexing throughput.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Index {
+
+        /**
+         * Documents indexed at once.
+         *
+         * <p>索引线程一生都在等外部服务：解析等 kb-rag-parser、嵌入等模型、写入等 ES/Qdrant，本机 CPU 上
+         * 只有切分那一小段。所以这个值不该照着机器核数定，而要看**下游能吃下多少**——解析服务的工作线程
+         * 数通常是真正的天花板，把这个值调到远超它只会让请求堆在解析服务门口，看起来并发很高实际没变快。
+         *
+         * <p>与嵌入并发的关系：这个值决定几个文档同时在跑，每个文档内部的嵌入批次再按
+         * {@code kb.embedding.concurrency} 并发，而后者是全局上限（共享线程池），所以同时索引的文档会
+         * 分摊那几路嵌入而不是各占一份。
+         */
+        private int concurrency = 4;
+    }
+
+    /**
      * Splitting defaults of the indexing pipeline.
      */
     @Getter
@@ -1107,9 +1132,21 @@ public class KbProperties {
          * <p>模型调用是抽取的全部成本，且没有共享状态，所以这个值直接决定一次抽取要跑多久：一万个分片
          * 按每次 3 秒算，并发 2 是四个多小时，并发 8 是一小时出头。图写入已经被收到单写入者线程上串行
          * 执行（见 {@code GraphExtractionService}），并发不再影响 MERGE 的正确性，唯一的约束是模型侧
-         * 的限流 —— 同时进行的抽取任务数又受索引池上限约束，所以模型侧的峰值并发是两者之积。
+         * 的限流 —— 同时进行的抽取任务数由 {@link #taskConcurrency} 决定，所以模型侧的峰值并发是
+         * 两者之积。
          */
         private int extractConcurrency = 8;
+
+        /**
+         * Extraction tasks running at once.
+         *
+         * <p>抽取任务有自己的线程池（不再挤占索引池），这个值就是池大小。它与 {@link #extractConcurrency}
+         * 相乘才是聊天模型看到的峰值并发，而聊天模型的限流通常比嵌入更紧——两个值一起调之前先确认额度。
+         *
+         * <p>一次抽取按分片规模能跑上小时级，所以这里的意义是"几个知识库能同时重建图谱"，而不是吞吐旋钮：
+         * 单个任务的快慢看 {@link #extractConcurrency}。
+         */
+        private int taskConcurrency = 2;
 
         /**
          * Generation budget of one extraction call.

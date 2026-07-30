@@ -67,20 +67,14 @@ public class AsyncConfig {
     public static final String EMBED_EXECUTOR = "embedTaskExecutor";
 
     /**
-     * Documents indexed at once.
+     * Queue depth of the task pools whose size comes from configuration.
      *
-     * <p>Core and max are equal on purpose. A {@link ThreadPoolTaskExecutor} only grows past its core
-     * size once the queue is <em>full</em>, so with a 200 deep queue the old {@code core=2, max=4} meant
-     * the pool never left 2 - the max was unreachable configuration, and a batch upload of fifty files
-     * was processed two at a time. Stating one number makes the actual concurrency the one that is
-     * written down.
-     *
-     * <p>Four rather than the core count of the machine: this thread spends its life waiting on the
-     * parser service, the embedding provider and the engines, not on local CPU. The splitting stage is
-     * the only in-process work and it is cheap next to those round trips.
+     * <p>Those pools set core and max to the same number on purpose. A {@link ThreadPoolTaskExecutor}
+     * only grows past its core size once the queue is <em>full</em>, so any queue deep enough to be
+     * useful makes the max unreachable: the old indexing {@code core=2, max=4} behind a 200 deep queue
+     * never left 2, and a batch upload of fifty files was processed two at a time. One number, and it is
+     * the concurrency that actually happens.
      */
-    private static final int CORE_POOL_SIZE = 4;
-    private static final int MAX_POOL_SIZE = 4;
     private static final int QUEUE_CAPACITY = 200;
     private static final String THREAD_PREFIX = "kb-index-";
 
@@ -140,8 +134,6 @@ public class AsyncConfig {
      * internally by {@code kb.graph.extract-concurrency} - this bounds how many corpora are extracted at
      * once, and the product of the two is what the model provider sees.
      */
-    private static final int GRAPH_CORE_POOL_SIZE = 1;
-    private static final int GRAPH_MAX_POOL_SIZE = 2;
     private static final int GRAPH_QUEUE_CAPACITY = 50;
     private static final String GRAPH_THREAD_PREFIX = "kb-graph-task-";
 
@@ -149,15 +141,22 @@ public class AsyncConfig {
     private static final String EMBED_THREAD_PREFIX = "kb-embed-";
 
     /**
-     * Creates the indexing executor.
+     * Creates the indexing executor, sized from configuration.
      *
+     * <p>Configurable because the right number depends on the deployment, not on the code: this thread
+     * spends its life waiting on the parser service, the embedding provider and the engines, so the
+     * ceiling is what those can absorb rather than the local core count. A 10 core host running the
+     * engines alongside the application wants a different number than a laptop.
+     *
+     * @param properties knowledge base configuration, source of the concurrency
      * @return executor used by the asynchronous pipeline
      */
     @Bean(INDEX_EXECUTOR)
-    public Executor indexTaskExecutor() {
+    public Executor indexTaskExecutor(KbProperties properties) {
+        int concurrency = Math.max(1, properties.getIndex().getConcurrency());
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(CORE_POOL_SIZE);
-        executor.setMaxPoolSize(MAX_POOL_SIZE);
+        executor.setCorePoolSize(concurrency);
+        executor.setMaxPoolSize(concurrency);
         executor.setQueueCapacity(QUEUE_CAPACITY);
         executor.setThreadNamePrefix(THREAD_PREFIX);
         executor.setTaskDecorator(requestIdPropagatingDecorator());
@@ -275,15 +274,21 @@ public class AsyncConfig {
     }
 
     /**
-     * Creates the executor a knowledge graph extraction runs on.
+     * Creates the executor a knowledge graph extraction runs on, sized from configuration.
      *
+     * <p>This is how many extractions run at once; how many model calls one extraction fans out to is
+     * {@code kb.graph.extract-concurrency}. The two multiply into the peak load on the chat model, which
+     * is the tighter rate limit of the two providers - raise this one knowing that.
+     *
+     * @param properties knowledge base configuration, source of the concurrency
      * @return executor used by the graph extraction task
      */
     @Bean(GRAPH_EXECUTOR)
-    public Executor graphTaskExecutor() {
+    public Executor graphTaskExecutor(KbProperties properties) {
+        int concurrency = Math.max(1, properties.getGraph().getTaskConcurrency());
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(GRAPH_CORE_POOL_SIZE);
-        executor.setMaxPoolSize(GRAPH_MAX_POOL_SIZE);
+        executor.setCorePoolSize(concurrency);
+        executor.setMaxPoolSize(concurrency);
         executor.setQueueCapacity(GRAPH_QUEUE_CAPACITY);
         executor.setThreadNamePrefix(GRAPH_THREAD_PREFIX);
         executor.setTaskDecorator(requestIdPropagatingDecorator());

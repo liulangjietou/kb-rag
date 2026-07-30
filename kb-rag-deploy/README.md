@@ -369,13 +369,16 @@ docker compose -f docker-compose.lite.yml --profile graph up -d
   `IMAGE_DESCRIBE_CONCURRENCY`（单文档图片描述并发度，默认 8，见
   `docs/M3-CONTRACTS.md` §7.6）。
 
-**索引吞吐（M16 起）**：文档索引有两级并发，乘起来才是上游服务看到的量。索引池决定
-**同时索引几个文档**（4，M16 前因队列容量导致实际恒为 2）；单个文档内部，嵌入批次再按
-`EMBEDDING_CONCURRENCY`（默认 4）并发——一个批次就是一次嵌入请求，500 个分片按批大小 10
-算是 50 次往返，串行跑是索引里最长的一段等待。嵌入并发是**全局**上限（共享线程池），所以
-4 个文档同时索引时共享这 4 路，不会把嵌入服务限流打穿；填 1 即恢复串行。解析本身在 parser
-服务侧，server 只是等 HTTP 响应，扛不住 4 路并发时扩 parser 实例即可。详见
-[`docs/M16-CONTRACTS.md`](docs/M16-CONTRACTS.md) §4.4。
+**索引吞吐调优（M16 起）**：文档索引是多级并发串起来的，乘起来才是上游服务看到的量。
+`INDEX_CONCURRENCY`（默认 4）决定同时索引几个文档；每个文档内部的嵌入批次再按
+`EMBEDDING_CONCURRENCY`（默认 4，**全局**上限）并发——一个批次就是一次嵌入请求，500 个分片按
+批大小 10 算是 50 次往返，串行跑是索引里最长的一段等待。
+
+调参前先认清三个**不随机器变大而变大**的天花板：**模型侧限流**（撞上的表现是任务失败率上升
+而不是变慢）、**`PARSER_MAX_WORKERS`**（解析是真 CPU 密集且 uvicorn 单进程，把
+`INDEX_CONCURRENCY` 调到远超它只是把队列挪到 parser 门口）、**`MYSQL_POOL_SIZE`**（不同步扩
+就是把瓶颈换成 connection timeout）。10 核 / 64GB 单机的一套参考值见
+[`docs/M16-CONTRACTS.md`](docs/M16-CONTRACTS.md) §4.5。
 
 ## 聊天记录格式扩展与映射维护（M8）
 

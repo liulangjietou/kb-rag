@@ -180,7 +180,45 @@
 
 **两级并发相乘**：索引池决定几个文档同时在跑（4），文档内部嵌入批次再并发（全局 4）。嵌入池是全局上限，所以 4 个文档同时索引时它们**共享**这 4 路，不会把限流打穿 —— 单文档会比独占时慢，但总吞吐不降。填 `EMBEDDING_CONCURRENCY=1` 即恢复改造前的串行行为。
 
-**没做的**：解析阶段本身（在 parser 服务侧，server 只是等 HTTP 响应）；索引写入的攒批（`ChunkIndexWriter` 已走引擎 bulk）；`INDEX_EXECUTOR` 未超过 4 —— 再往上要看部署机的实际 CPU 与 parser 服务的并发能力，无实测依据的调参是猜。
+**没做的**：解析阶段本身（在 parser 服务侧，server 只是等 HTTP 响应）；索引写入的攒批（`ChunkIndexWriter` 已走引擎 bulk）。
+
+### 4.5 并发参数配置化与按机器调优
+
+§4.3/§4.4 把并发提上去之后，暴露出一个更基础的问题：**这些池的大小全是硬编码常量**，运维想按机器规格调只能改代码重编译。而"该调多大"本质上不由代码决定 —— 索引线程一生都在等外部服务，天花板是下游能吃下多少，一台 10 核跑全套中间件的主机和一台笔记本要的数字不一样。
+
+配置化四处，默认值一律保持原样（面向最小部署，升级无行为变化）：
+
+| 变量 | 含义 | 默认 |
+|---|---|---|
+| `INDEX_CONCURRENCY` | 同时索引几个文档 | 4 |
+| `GRAPH_TASK_CONCURRENCY` | 几个知识库能同时重建图谱 | 2 |
+| `PARSER_MAX_WORKERS` | 解析服务工作线程数（parser 侧） | 4 |
+| `EMBEDDING_CONCURRENCY` | 单文档嵌入批次并发（§4.4 已加） | 4 |
+
+`GRAPH_EXECUTOR` 也踩了 §4.4 ③ 同一个陷阱：`core=1 / max=2 / queue=50` —— 队列 50 深意味着 `max=2` 永不可达，实际恒为 1。配置化时一并改为 `core=max`。
+
+**顺带修掉 parser 侧一处并发错配**：OCR 调用池原本是固定 2，注释理由是"每次解析里 OCR 逐页串行"——但这个池被**所有** parser worker 共享，4 个 worker 同时解析扫描件时有 2 个在排队。这个池的职责只是给单页 OCR 调用套超时，不该成为吞吐限制，现改为跟随 `PARSER_MAX_WORKERS`。
+
+**三个不随机器变大的天花板**（调参前必须知道，否则调大只是把瓶颈换个地方）：
+
+1. **模型侧限流** —— DashScope 嵌入/聊天/vision 各自的 QPS 与并发额度。撞限流的表现是**任务失败率上升而不是变慢**（被限流的调用记为失败且不重试），所以调大后要先看 error 日志再往上加。
+2. **`PARSER_MAX_WORKERS`** —— 解析是真 CPU 密集（PDF 文本抽取、页面渲染、图片解码）且 uvicorn 单进程。把 `INDEX_CONCURRENCY` 调到远超它不会更快，只是把队列从 server 挪到 parser 门口。
+3. **`MYSQL_POOL_SIZE`** —— 并发调大不扩连接池，瓶颈只是从"慢"换成 connection timeout。索引链路没有 `@Transactional`（mapper 调用短借短还），所以不会出现"持连接等子任务"的死锁，连接池只需覆盖瞬时峰值：索引并发 + 嵌入并发 + 图谱 3 + 在线检索 16 + 审计/Web 若干。
+
+**10 CPU / 64GB 单机参考配置**（同机还跑 MySQL + ES + Qdrant + Redis）：
+
+```
+INDEX_CONCURRENCY=8          # 比 PARSER_MAX_WORKERS 略高，让解析服务始终有活干
+EMBEDDING_CONCURRENCY=12     # 纯网络等待，可超核数；受嵌入限流约束
+GRAPH_EXTRACT_CONCURRENCY=12 # × GRAPH_TASK_CONCURRENCY = 聊天模型峰值 24
+GRAPH_TASK_CONCURRENCY=2
+IMAGE_DESCRIBE_CONCURRENCY=12
+EVAL_CONCURRENCY=8
+PARSER_MAX_WORKERS=6         # 真 CPU 活：10 核给 6，留 4 给 ES/MySQL/server/系统
+MYSQL_POOL_SIZE=48           # MySQL max_connections=151，余量充足
+```
+
+聊天模型的限流通常比嵌入更紧，所以 `GRAPH_EXTRACT_CONCURRENCY × GRAPH_TASK_CONCURRENCY` 这个乘积是最容易撞限流的一项。
 
 ## 5. F4：文档级数据权限的执行点
 
@@ -246,6 +284,7 @@
 6. **图谱抽取默认并发从 2 提到 8**（§4.3）：模型侧调用速率随之上升约四倍，峰值并发 = 抽取任务池上限 2 × 8 = 16。限流额度紧的部署把 `GRAPH_EXTRACT_CONCURRENCY` 调回去即可，正确性不依赖它。`GRAPH_EXTRACT_BATCH_SIZE` 已移除，存量 `.env` 里留着不报错也不生效。
 7. 开放 API 反馈端点开始校验 request_id 的应用归属（§3.6）：**只用自己检索返回的 request_id 提交反馈**的集成方不受影响；此前若有跨应用复用 request_id 的用法会被拒为 `APP_ACCESS_DENIED`。控制台调试检索的 request_id 一律不再被该端点接受。
 8. **嵌入请求速率上升、同时索引的文档数从 2 变 4**（§4.4）：新增 `EMBEDDING_CONCURRENCY`（默认 4，全局上限），索引池由 `core=2/max=4`（max 因队列 200 深而永不可达，实际并发恒为 2）改为 `core=max=4`。嵌入服务限流紧的部署把 `EMBEDDING_CONCURRENCY` 填 1 即恢复串行；解析服务扛不住 4 路并发的部署需要相应扩 parser 实例。
+9. **并发参数改为可配置，默认值一律不变**（§4.5）：新增 `INDEX_CONCURRENCY` / `GRAPH_TASK_CONCURRENCY` / `PARSER_MAX_WORKERS`，取值等于此前的硬编码值，所以**不设任何变量的部署行为完全不变**。唯一的实际行为变化是图谱任务池由 `core=1/max=2`（同 §4.4 ③ 的陷阱，实际恒为 1）改为 `core=max=2`——同时能跑两个图谱重建了，模型侧峰值随之变成 `GRAPH_EXTRACT_CONCURRENCY × 2`。parser 侧 OCR 调用池由固定 2 改为跟随 `PARSER_MAX_WORKERS`，扫描件批量场景不再被卡在 2 页并发。按机器调参见 §4.5，**调大任何并发都要同步扩 `MYSQL_POOL_SIZE`**。
 
 ### 10.1 开发期排障：V17 checksum 不匹配导致启动失败
 
