@@ -2,6 +2,15 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式。
 
+## [未发布] - M16
+
+### 优化
+
+- **pdf 内嵌图片按对象去重**（M3-CONTRACTS.md §2.1）：页眉页脚 logo 在 pdf 里是**一个**图片对象（xref）被每页绘制，此前按出现位置逐页上报——实测一份 247 页 2.7MB 的国标省市区 pdf 只有 3 张不同的图，却报出 493 张，撑满 `MAX_IMAGES_PER_DOC`（100）后再刷出 393 条 warning，base64 让响应体涨到 1.7MB，且 kb-rag-server 要为同两张 logo 逐个调 100 次 VLM（单张超时 20s，串行）。现按 xref 在**文档级**去重：同一图片对象只产出一条 `images[]` 与一个占位符，位置取首次出现页。该文件实测 `images` 100→3、warnings 393→0、base64 1.7MB→0.03MB、解析 1.59s→0.77s；也维持了"markdown 中占位符 id 唯一"这一 server 回填偏移量所依赖的不变量（同一 id 出现 247 次会把 logo 描述插进 247 处，污染每个分片）。
+- **超上限的扫描页不再白渲染**：图片数已达上限且 `OCR_ENGINE=none` 时，该页的 150dpi 位图既不进 `images[]` 也不产文本，纯属白烧 CPU（单页渲染约 100ms 量级）。现于渲染前判定容量与本地 OCR 开关，两者皆无则跳过；`OCR_ENGINE=paddle` 时仍渲染——上限约束的是响应携带的图片数，不是本服务读取页面的能力。合成 220 页扫描件实测 29.34s→13.54s。
+- `ImageAssetCollector` 新增 `has_capacity()`（原内联于 `try_add` 的数量上限判定提为公开方法），让调用方能在生产昂贵字节**之前**预判；warning 语义不变（每次越限追加一条）。
+- pytest 新增（`tests/test_parse_pdf_images.py`）：多页同一 logo 只报一张图且不写 warning、超上限的扫描页不再调用 `get_pixmap`、开本地 OCR 后超上限仍渲染并回填 `ocr_source`。
+
 ## [未发布] - M14
 
 ### 修复

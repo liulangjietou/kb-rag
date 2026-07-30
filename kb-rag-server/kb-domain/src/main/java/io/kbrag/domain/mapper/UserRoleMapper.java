@@ -35,4 +35,17 @@ public interface UserRoleMapper extends BaseMapper<UserRole> {
      */
     @Delete("DELETE FROM t_kb_user_role WHERE role_id = #{roleId}")
     int deleteByRoleId(@Param("roleId") String roleId);
+
+    /**
+     * Physically removes the bindings of one user that came from one grant source.
+     *
+     * <p>This is what lets group synchronisation replace its own grants in full while an operator's
+     * manual grants stay untouched - the two sets share a table but never a lifecycle.
+     *
+     * @param userId    user business id
+     * @param grantedBy grant source literal, {@code LDAP_SYNC} for synchronised rows
+     * @return deleted row count
+     */
+    @Delete("DELETE FROM t_kb_user_role WHERE user_id = #{userId} AND granted_by = #{grantedBy}")
+    int deleteByUserIdAndGrantedBy(@Param("userId") String userId, @Param("grantedBy") String grantedBy);
 }

@@ -1,6 +1,7 @@
 package io.kbrag.app.retrieval;
 
 import io.kbrag.app.alert.RetrievalDegradeMonitor;
+import io.kbrag.app.document.DocumentAclService;
 import io.kbrag.app.graph.GraphRetrievalService;
 import io.kbrag.app.graph.GraphRouteOutcome;
 import io.kbrag.app.index.ActiveVersionResolver;
@@ -148,9 +149,14 @@ class RetrievalServiceTest {
 
         // A real context resolver over mocked collaborators rather than a mocked one: which index a base is
         // searched in and which versions it may see is the M6 decision under test in several cases below, and a
-        // stubbed resolver would let that decision be asserted against itself.
+        // stubbed resolver would let that decision be asserted against itself. The ACL passes everything
+        // through: document visibility trimming is covered by its own tests, not these.
+        DocumentAclService documentAclService = mock(DocumentAclService.class);
+        when(documentAclService.trimRestricted(anyString(), anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
         indexContextResolver = new RetrievalIndexContextResolver(indexAliasManager,
-                new ActiveVersionResolver(documentMapper, properties), fulltextStore, vectorStore);
+                new ActiveVersionResolver(documentMapper, properties), documentAclService,
+                fulltextStore, vectorStore);
         retrievalService = new RetrievalService(knowledgeBaseService, chunkMapper,
                 fulltextStore, vectorStore, embeddingProvider, indexContextResolver,
                 new FusionRouter(List.of(new RrfFusion(), new WeightedFusion())),

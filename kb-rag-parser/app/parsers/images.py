@@ -81,22 +81,38 @@ class ImageAssetCollector:
     def warnings(self) -> List[str]:
         return self._warnings
 
+    def has_capacity(self, page_no: int, kind: str) -> bool:
+        """Tell whether one more image still fits under the per-document
+        count cap, recording the same skip warning try_add() would have
+        recorded when it does not.
+
+        Exposed so a caller can avoid *producing* bytes this collector
+        would only throw away. Rasterizing one pdf page costs on the order
+        of 100ms, and a long scanned document reaches the cap far before
+        its last page, so asking first turns those renders into no-ops
+        (see app/parsers/pdf.py). Call it at most once per candidate image:
+        each call over the cap appends one warning.
+        """
+        if len(self._images) < self._max_images:
+            return True
+        logger.info(
+            "image skipped, reason=doc_image_count_limit, pageNo=%d, kind=%s, limit=%d",
+            page_no,
+            kind,
+            self._max_images,
+        )
+        self._warnings.append(
+            f"image on page {page_no} ({kind}) skipped: document image count reached limit {self._max_images}"
+        )
+        return False
+
     def try_add(self, page_no: int, kind: str, media_type: str, raw_bytes: bytes) -> Optional[str]:
         """Add one image if under both caps; returns its image_id, or None if skipped.
 
         A skip never raises: the containing document remains fully
         parseable (M3-CONTRACTS.md §2.1 "超限跳过并写 warnings，不失败整篇").
         """
-        if len(self._images) >= self._max_images:
-            logger.info(
-                "image skipped, reason=doc_image_count_limit, pageNo=%d, kind=%s, limit=%d",
-                page_no,
-                kind,
-                self._max_images,
-            )
-            self._warnings.append(
-                f"image on page {page_no} ({kind}) skipped: document image count reached limit {self._max_images}"
-            )
+        if not self.has_capacity(page_no, kind):
             return None
 
         size = len(raw_bytes)

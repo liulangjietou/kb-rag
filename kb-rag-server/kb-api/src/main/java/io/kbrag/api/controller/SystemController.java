@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.AlertConfigResponse;
 import io.kbrag.api.dto.DemoStatusResponse;
@@ -76,6 +77,7 @@ public class SystemController {
      */
     @PutMapping("/alert-config")
     @RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
+    @AuditedOperation(module = "SYSTEM", action = "UPDATE_ALERT_CONFIG", targetType = "SYSTEM_CONFIG")
     public Result<AlertConfigResponse> updateAlertConfig(
             @Valid @RequestBody UpdateAlertConfigRequest request) {
         AlertConfig updated = alertConfigService.update(
@@ -98,6 +100,7 @@ public class SystemController {
      */
     @PostMapping("/alert-config/test")
     @RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
+    @AuditedOperation(module = "SYSTEM", action = "TEST_ALERT", targetType = "SYSTEM_CONFIG")
     public Result<Void> testAlert() {
         if (!alertService.sendTest(TEST_MESSAGE)) {
             throw new BizException(ErrorCode.INTERNAL_ERROR,
@@ -113,6 +116,7 @@ public class SystemController {
      */
     @PostMapping("/demo/import")
     @RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
+    @AuditedOperation(module = "SYSTEM", action = "IMPORT_DEMO", targetType = "SYSTEM_CONFIG")
     public Result<Map<String, String>> importDemo() {
         return Result.success(Map.of(FIELD_KB_ID, demoImportService.importDemo()));
     }

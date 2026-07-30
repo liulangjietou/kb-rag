@@ -6,13 +6,16 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.constant.BuiltinRoles;
+import io.kbrag.domain.constant.BuiltinTenants;
 import io.kbrag.domain.entity.AdminUser;
 import io.kbrag.domain.entity.Role;
+import io.kbrag.domain.entity.Tenant;
 import io.kbrag.domain.entity.UserRole;
 import io.kbrag.domain.enums.UserSource;
 import io.kbrag.domain.enums.UserStatus;
 import io.kbrag.domain.mapper.AdminUserMapper;
 import io.kbrag.domain.mapper.RoleMapper;
+import io.kbrag.domain.mapper.TenantMapper;
 import io.kbrag.domain.mapper.UserRoleMapper;
 import io.kbrag.domain.model.UserPrincipal;
 import io.kbrag.domain.service.BizIdGenerator;
@@ -55,6 +58,7 @@ public class UserService {
     private final AdminUserMapper adminUserMapper;
     private final UserRoleMapper userRoleMapper;
     private final RoleMapper roleMapper;
+    private final TenantMapper tenantMapper;
     private final BizIdGenerator idGenerator;
     private final BCryptPasswordEncoder passwordEncoder;
     private final TokenStore tokenStore;
@@ -106,19 +110,25 @@ public class UserService {
      * @param email       contact address, optional
      * @param password    initial password chosen by the operator
      * @param roleIds     roles granted right away, may be empty
+     * @param tenantId    owning tenant, {@code null} keeps the caller's own tenant
      * @return created account
      */
     @Transactional(rollbackFor = Exception.class)
     public AdminUser create(String username, String displayName, String email,
-                            String password, List<String> roleIds) {
+                            String password, List<String> roleIds, String tenantId) {
         String login = normalizeUsername(username);
-        if (findByUsername(login) != null) {
+        if (adminUserMapper.selectByUsernameAcrossTenants(login) != null) {
             throw BizException.invalidParam("username already taken: " + login);
         }
         requirePasswordStrength(password);
 
         AdminUser user = new AdminUser();
         user.setUserId(idGenerator.userId());
+        if (tenantId != null && !tenantId.isBlank()) {
+            // An explicit tenant is the platform operator seeding a fresh tenant; anyone else leaves
+            // it blank and the row lands in the caller's own tenant.
+            user.setTenantId(requireEnabledTenant(tenantId).getTenantId());
+        }
         user.setUsername(login);
         user.setDisplayName(displayName == null || displayName.isBlank() ? login : displayName);
         user.setEmail(email);
@@ -129,7 +139,7 @@ public class UserService {
         user.setMustChangePassword(MUST_CHANGE);
         adminUserMapper.insert(user);
 
-        replaceRoles(user.getUserId(), roleIds);
+        replaceRoles(user, roleIds);
         log.info("user created, userId={}, username={}, roles={}", user.getUserId(), login,
                 roleIds == null ? 0 : roleIds.size());
         return user;
@@ -138,31 +148,59 @@ public class UserService {
     /**
      * Provisions an account for a directory login that has no local record yet.
      *
-     * <p>Called only after the directory has already accepted the credentials, so the person is known to
-     * exist and to have authenticated. The alternative - refusing the login until an operator pre-creates
-     * the row - means every new colleague files a ticket to see a read only page.
-     *
-     * <p>The granted role comes from configuration and defaults to read only. That is the whole reason
-     * automatic provisioning is safe: it hands out visibility, never the ability to change anything.
-     *
      * @param username directory login name, without the domain suffix
      * @return provisioned account
      */
     @Transactional(rollbackFor = Exception.class)
     public AdminUser provisionDirectoryUser(String username) {
+        return provisionExternalUser(username, UserSource.LDAP, null, null);
+    }
+
+    /**
+     * Provisions an account for an externally authenticated login that has no local record yet.
+     *
+     * <p>Called only after the directory or identity provider has already accepted the credentials,
+     * so the person is known to exist and to have authenticated. The alternative - refusing the login
+     * until an operator pre-creates the row - means every new colleague files a ticket to see a read
+     * only page.
+     *
+     * <p>The granted role comes from configuration and defaults to read only. That is the whole reason
+     * automatic provisioning is safe: it hands out visibility, never the ability to change anything.
+     * With group synchronisation enabled a directory account gets no default at all - the directory
+     * groups are then the source of truth, and a default pushed into the manually granted set could
+     * never be revoked by the synchronisation.
+     *
+     * <p>The row lands in the default tenant: an assertion names a person, not a tenant, and the
+     * platform operator moves the account afterwards when it belongs elsewhere.
+     *
+     * @param username    login name as asserted, already stripped of any domain suffix
+     * @param source      external origin the account is bound to
+     * @param displayName asserted display label, falls back to the login name
+     * @param email       asserted contact address, optional
+     * @return provisioned account
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public AdminUser provisionExternalUser(String username, UserSource source,
+                                           String displayName, String email) {
         String login = normalizeUsername(username);
         AdminUser user = new AdminUser();
         user.setUserId(idGenerator.userId());
         user.setUsername(login);
-        user.setDisplayName(login);
-        user.setSource(UserSource.LDAP);
+        user.setDisplayName(displayName == null || displayName.isBlank() ? login : displayName);
+        user.setEmail(email);
+        user.setSource(source);
         user.setStatus(UserStatus.ENABLED);
         // No local password exists, and none is invented: a hash here would be a second credential able
-        // to outlive the directory account it was created for.
+        // to outlive the external account it was created for.
         user.setPasswordHash(null);
         user.setMustChangePassword(NOT_REQUIRED);
         adminUserMapper.insert(user);
 
+        if (source == UserSource.LDAP && properties.getAuth().getLdap().getGroupSync().isEnabled()) {
+            log.info("directory user provisioned without default role, group sync owns the role set, "
+                    + "userId={}, username={}", user.getUserId(), login);
+            return user;
+        }
         String defaultRoleCode = properties.getAuth().getLdap().getDefaultRoleCode();
         Role role = findRoleByCode(defaultRoleCode);
         if (role == null) {
@@ -173,8 +211,8 @@ public class UserService {
         } else {
             bindRole(user.getUserId(), role.getRoleId());
         }
-        log.info("directory user provisioned, userId={}, username={}, roleCode={}",
-                user.getUserId(), login, role == null ? null : role.getCode());
+        log.info("external user provisioned, userId={}, username={}, source={}, roleCode={}",
+                user.getUserId(), login, source, role == null ? null : role.getCode());
         return user;
     }
 
@@ -251,9 +289,38 @@ public class UserService {
     @Transactional(rollbackFor = Exception.class)
     public void assignRoles(String userId, List<String> roleIds) {
         AdminUser user = requireUser(userId);
-        replaceRoles(userId, roleIds);
+        replaceRoles(user, roleIds);
         principalResolver.evict(user.getUsername());
         log.info("user roles replaced, userId={}, roles={}", userId, roleIds == null ? 0 : roleIds.size());
+    }
+
+    /**
+     * Moves an account into another tenant, the M16 contract section 5.
+     *
+     * <p>The role bindings are dropped rather than carried over: they point at roles of the old
+     * tenant, and an account in tenant B holding roles of tenant A is exactly the cross tenant leak
+     * the fence exists to prevent. The operator grants roles of the target tenant right after the
+     * move, on the same screen.
+     *
+     * @param userId   user business id
+     * @param tenantId tenant business id the account moves to
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void moveTenant(String userId, String tenantId) {
+        AdminUser user = requireUser(userId);
+        requireNotSelf(user, "you cannot move your own account");
+        Tenant tenant = requireEnabledTenant(tenantId);
+        if (tenant.getTenantId().equals(user.getTenantId())) {
+            throw BizException.invalidParam("account already belongs to that tenant");
+        }
+        user.setTenantId(tenant.getTenantId());
+        adminUserMapper.updateById(user);
+        userRoleMapper.deleteByUserId(userId);
+        // The account changes what it may see entirely; ending its sessions makes it come back
+        // through login and resolve inside the new tenant.
+        tokenStore.revokeAll(user.getUsername());
+        principalResolver.evict(user.getUsername());
+        log.info("user moved to tenant, userId={}, tenantId={}", userId, tenant.getTenantId());
     }
 
     /**
@@ -334,19 +401,47 @@ public class UserService {
         log.info("bootstrap role granted, userId={}", userId);
     }
 
-    private void replaceRoles(String userId, List<String> roleIds) {
-        userRoleMapper.deleteByUserId(userId);
+    private void replaceRoles(AdminUser user, List<String> roleIds) {
+        userRoleMapper.deleteByUserId(user.getUserId());
         if (roleIds == null || roleIds.isEmpty()) {
             return;
         }
         Set<String> distinct = new LinkedHashSet<>(roleIds);
-        long known = roleMapper.selectCount(new LambdaQueryWrapper<Role>().in(Role::getRoleId, distinct));
-        if (known != distinct.size()) {
+        List<Role> roles = roleMapper.selectList(new LambdaQueryWrapper<Role>()
+                .in(Role::getRoleId, distinct));
+        if (roles.size() != distinct.size()) {
             throw BizException.invalidParam("unknown role in the submitted set");
         }
-        for (String roleId : distinct) {
-            bindRole(userId, roleId);
+        for (Role role : roles) {
+            // A role of another tenant must not be grantable, or the grant is a cross tenant leak the
+            // row fence cannot catch - the binding table itself carries no tenant.
+            if (!sameTenant(role.getTenantId(), user.getTenantId())) {
+                throw BizException.invalidParam("role belongs to another tenant: " + role.getRoleId());
+            }
         }
+        for (String roleId : distinct) {
+            bindRole(user.getUserId(), roleId);
+        }
+    }
+
+    private boolean sameTenant(String left, String right) {
+        if (BuiltinTenants.isDefault(left) && BuiltinTenants.isDefault(right)) {
+            return true;
+        }
+        return left != null && left.equals(right);
+    }
+
+    private Tenant requireEnabledTenant(String tenantId) {
+        Tenant tenant = tenantMapper.selectOne(new LambdaQueryWrapper<Tenant>()
+                .eq(Tenant::getTenantId, tenantId)
+                .last("limit 1"));
+        if (tenant == null) {
+            throw BizException.invalidParam("tenant not found: " + tenantId);
+        }
+        if (!tenant.enabled()) {
+            throw BizException.invalidParam("tenant is disabled: " + tenantId);
+        }
+        return tenant;
     }
 
     private void bindRole(String userId, String roleId) {

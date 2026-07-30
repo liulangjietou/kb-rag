@@ -1,10 +1,10 @@
 // Author: owlzhangfq@gmail.com
 import { useEffect, useState } from 'react';
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
-import { Button, Card, Form, Input, Tabs, Typography } from 'antd';
+import { Button, Card, Divider, Form, Input, Space, Tabs, Typography, message } from 'antd';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getSsoAvailability, login } from '../api/auth';
-import type { LoginMode } from '../api/types';
+import { getSsoAvailability, getSsoProviders, login } from '../api/auth';
+import type { LoginMode, SsoProviders } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 
 interface LocationState {
@@ -14,6 +14,16 @@ interface LocationState {
 interface FormValues {
   username: string;
   password: string;
+}
+
+// M16-CONTRACTS.md section 5: the SSO callback 302s back here with the outcome in the URL
+// fragment -- a fragment never reaches server logs or the Referer header, unlike a query string.
+const SSO_TOKEN_PREFIX = '#sso_token=';
+const SSO_ERROR_PREFIX = '#sso_error=';
+
+/** Browser SSO entry: a full-page redirect, not an XHR -- the IdP has to see the user's browser. */
+function startBrowserSso(protocol: 'oidc' | 'saml' | 'cas') {
+  window.location.href = `/api/v1/auth/${protocol}/login`;
 }
 
 /**
@@ -30,10 +40,30 @@ interface FormValues {
 export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [ssoAvailable, setSsoAvailable] = useState(false);
+  const [ssoProviders, setSsoProviders] = useState<SsoProviders | null>(null);
   const [mode, setMode] = useState<LoginMode>('LOCAL');
   const { loginSuccess } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Consumes a browser-SSO callback outcome before anything renders twice: the token is stored and
+  // the fragment removed from the address bar so a copied URL or a refresh does not replay it.
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash.startsWith(SSO_TOKEN_PREFIX)) {
+      const token = decodeURIComponent(hash.slice(SSO_TOKEN_PREFIX.length));
+      window.history.replaceState(null, '', window.location.pathname);
+      // Browser SSO never forces a password change -- the IdP owns that credential, not us.
+      loginSuccess(token, false);
+      navigate('/', { replace: true });
+    } else if (hash.startsWith(SSO_ERROR_PREFIX)) {
+      const reason = decodeURIComponent(hash.slice(SSO_ERROR_PREFIX.length));
+      window.history.replaceState(null, '', window.location.pathname);
+      message.error(`单点登录失败：${reason}`);
+    }
+    // Runs once against the URL the page was opened with; loginSuccess/navigate are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,6 +79,15 @@ export default function LoginPage() {
       .catch(() => {
         // Already reported by the interceptor; the local form stands on its own.
       });
+    // A failure means "no protocols": offering a redirect button that 302s onto an error page is
+    // worse than not offering it, and the credential form above stays available either way.
+    getSsoProviders()
+      .then((res) => {
+        if (!cancelled) {
+          setSsoProviders(res);
+        }
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -104,6 +143,33 @@ export default function LoginPage() {
       </Typography.Text>
     );
 
+  const ssoButtons = ssoProviders && (ssoProviders.oidc || ssoProviders.saml || ssoProviders.cas) && (
+    <>
+      <Divider plain>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          或通过企业单点登录
+        </Typography.Text>
+      </Divider>
+      <Space direction="vertical" style={{ width: '100%' }}>
+        {ssoProviders.oidc && (
+          <Button block onClick={() => startBrowserSso('oidc')}>
+            OIDC 单点登录
+          </Button>
+        )}
+        {ssoProviders.saml && (
+          <Button block onClick={() => startBrowserSso('saml')}>
+            SAML 单点登录
+          </Button>
+        )}
+        {ssoProviders.cas && (
+          <Button block onClick={() => startBrowserSso('cas')}>
+            CAS 单点登录
+          </Button>
+        )}
+      </Space>
+    </>
+  );
+
   return (
     <div
       style={{
@@ -131,6 +197,7 @@ export default function LoginPage() {
         ) : (
           form
         )}
+        {ssoButtons}
         <div style={{ marginTop: 16, textAlign: 'center' }}>{hint}</div>
       </Card>
       <Typography.Text type="secondary" style={{ fontSize: 12, marginTop: 16 }}>

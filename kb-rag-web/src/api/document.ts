@@ -2,11 +2,13 @@
 import { apiDelete, apiGet, apiPost, apiPut, apiUpload } from './request';
 import type {
   DocumentPreview,
+  DocumentVisibilityView,
   KbChunk,
   KbDocument,
   PageResult,
   ProcessStatus,
   ReparseDocumentRequest,
+  UpdateDocumentVisibilityRequest,
 } from './types';
 
 export interface ListDocumentsParams {
@@ -114,4 +116,25 @@ export function restoreDocument(docId: string): Promise<KbDocument> {
  */
 export function purgeDocument(docId: string): Promise<void> {
   return apiDelete<void>(`/documents/${docId}/purge`);
+}
+
+// ---------------------------------------------------------------------------
+// Document-level visibility (M16-CONTRACTS.md section 4)
+// ---------------------------------------------------------------------------
+
+/** GET /api/v1/kb/{kbId}/documents/{docId}/visibility: current setting for the drawer to bind. */
+export function getDocumentVisibility(kbId: string, docId: string): Promise<DocumentVisibilityView> {
+  return apiGet<DocumentVisibilityView>(`/kb/${kbId}/documents/${docId}/visibility`);
+}
+
+/**
+ * PUT /api/v1/kb/{kbId}/documents/{docId}/visibility: replaces the whole grant. Switching back to
+ * INHERIT drops the role list server-side, so the drawer does not have to clear it first.
+ */
+export function updateDocumentVisibility(
+  kbId: string,
+  docId: string,
+  payload: UpdateDocumentVisibilityRequest,
+): Promise<void> {
+  return apiPut<void>(`/kb/${kbId}/documents/${docId}/visibility`, payload);
 }

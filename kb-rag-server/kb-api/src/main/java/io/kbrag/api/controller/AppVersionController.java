@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.AppVersionResponse;
 import io.kbrag.api.dto.GateDatasetRequest;
@@ -63,6 +64,8 @@ public class AppVersionController {
      */
     @PutMapping("/{appVersionId}/gate-dataset")
     @RequiresPermission(PermissionCodes.APP_WRITE)
+    @AuditedOperation(module = "APP", action = "GATE_DATASET", targetType = "APP_VERSION",
+            targetId = "#appVersionId")
     public Result<AppVersionResponse> gateDataset(@PathVariable String appVersionId,
                                                  @Valid @RequestBody GateDatasetRequest request) {
         // Binding reaches into an evaluation data set, so the caller has to be allowed the knowledge base
@@ -82,6 +85,8 @@ public class AppVersionController {
      */
     @PostMapping("/{appVersionId}/submit-test")
     @RequiresPermission(PermissionCodes.APP_WRITE)
+    @AuditedOperation(module = "APP", action = "SUBMIT_TEST", targetType = "APP_VERSION",
+            targetId = "#appVersionId")
     public Result<AppVersionResponse> submitTest(@PathVariable String appVersionId) {
         return Result.success(AppVersionResponse.from(appVersionService.submitTest(appVersionId)));
     }
@@ -101,6 +106,8 @@ public class AppVersionController {
      */
     @PostMapping("/{appVersionId}/release")
     @RequiresPermission(PermissionCodes.APP_RELEASE)
+    @AuditedOperation(module = "APP", action = "RELEASE", targetType = "APP_VERSION",
+            targetId = "#appVersionId")
     public Result<AppVersionResponse> release(@PathVariable String appVersionId,
                                              @RequestParam(defaultValue = "false") boolean force,
                                              HttpServletRequest request) {
@@ -117,6 +124,8 @@ public class AppVersionController {
      */
     @PostMapping("/{appVersionId}/rollback")
     @RequiresPermission(PermissionCodes.APP_RELEASE)
+    @AuditedOperation(module = "APP", action = "ROLLBACK", targetType = "APP_VERSION",
+            targetId = "#appVersionId")
     public Result<AppVersionResponse> rollback(@PathVariable String appVersionId) {
         return Result.success(AppVersionResponse.from(appVersionService.rollback(appVersionId)));
     }

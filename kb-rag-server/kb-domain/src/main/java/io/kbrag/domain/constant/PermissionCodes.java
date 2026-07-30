@@ -1,5 +1,7 @@
 package io.kbrag.domain.constant;
 
+import java.util.Set;
+
 /**
  * Permission codes recognised by the console endpoints.
  *
@@ -85,6 +87,19 @@ public final class PermissionCodes {
 
     /** Create roles, edit their permission set and their knowledge base scope. */
     public static final String ROLE_MANAGE = "role:manage";
+
+    /** Create tenants, rename and suspend them; the only cross tenant vantage point of the console. */
+    public static final String TENANT_MANAGE = "tenant:manage";
+
+    /**
+     * Codes only a role of the default tenant may hold.
+     *
+     * <p>平台级权限码：它们的语义是"站在全平台之上"，一旦落到子租户的角色上，该租户的管理员就拿到了
+     * 建租户、停租户以及跨租户查看用户与角色的能力（见 {@code KbTenantLineHandler} 的放行分支），
+     * 多租户隔离从根上就没了。所以这不是一条可以由运营方自行决定的配置，而是一条不变量：
+     * 授予入口统一在 {@code RoleService#replacePermissions} 上守。
+     */
+    public static final Set<String> PLATFORM_ONLY = Set.of(TENANT_MANAGE);
 
     private PermissionCodes() {
     }

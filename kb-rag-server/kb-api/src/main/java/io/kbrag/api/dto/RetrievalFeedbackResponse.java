@@ -17,6 +17,8 @@ import io.kbrag.domain.entity.RetrievalFeedback;
  * @param docId           owning document, {@code null} when the chunk was already deleted
  * @param verdict         {@code GOOD} or {@code BAD}
  * @param status          {@code NEW}, {@code CONVERTED} or {@code DISMISSED}
+ * @param channel         {@code CONSOLE} or {@code OPEN_API}, the boundary the verdict arrived through
+ * @param endUserId       caller asserted end user id of an open API row, {@code null} on console rows
  * @param convertedCaseId evaluation case created from this row, {@code null} until converted
  * @param note            free form operator note
  * @param createdAt       ISO submission timestamp
@@ -31,6 +33,8 @@ public record RetrievalFeedbackResponse(
         @JsonProperty("doc_id") String docId,
         String verdict,
         String status,
+        String channel,
+        @JsonProperty("end_user_id") String endUserId,
         @JsonProperty("converted_case_id") String convertedCaseId,
         String note,
         @JsonProperty("created_at") String createdAt) {
@@ -50,6 +54,8 @@ public record RetrievalFeedbackResponse(
                 row.getDocId(),
                 row.getVerdict() == null ? null : row.getVerdict().name(),
                 row.getStatus() == null ? null : row.getStatus().name(),
+                row.getChannel() == null ? null : row.getChannel().name(),
+                row.getEndUserId(),
                 row.getConvertedCaseId(),
                 row.getNote(),
                 row.getCreatedAt() == null ? null : row.getCreatedAt().toString());

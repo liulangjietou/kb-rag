@@ -5,11 +5,16 @@ import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.AdminUser;
 import io.kbrag.domain.entity.LoginAudit;
+import io.kbrag.domain.entity.Tenant;
 import io.kbrag.domain.enums.DirectoryBindResult;
 import io.kbrag.domain.enums.LoginMode;
 import io.kbrag.domain.enums.LoginResult;
+import io.kbrag.domain.enums.UserSource;
 import io.kbrag.domain.mapper.AdminUserMapper;
 import io.kbrag.domain.mapper.LoginAuditMapper;
+import io.kbrag.domain.mapper.TenantMapper;
+import io.kbrag.domain.model.DirectoryBindOutcome;
+import io.kbrag.domain.model.ExternalIdentity;
 import io.kbrag.domain.port.DirectoryAuthenticator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,10 +48,12 @@ public class AuthService {
 
     private final AdminUserMapper adminUserMapper;
     private final LoginAuditMapper loginAuditMapper;
+    private final TenantMapper tenantMapper;
     private final TokenStore tokenStore;
     private final KbProperties properties;
     private final BCryptPasswordEncoder passwordEncoder;
     private final DirectoryAuthenticator directoryAuthenticator;
+    private final DirectoryGroupSyncService groupSyncService;
     private final UserService userService;
     private final PrincipalResolver principalResolver;
 
@@ -109,31 +116,83 @@ public class AuthService {
             throw BizException.unauthorized("single sign on is not enabled");
         }
         AdminUser existing = findByUsername(username);
-        // Checked before the bind: a local account must never be authenticated by the directory, or a
-        // domain account whose name matches the local administrator would inherit it.
-        if (existing != null && !existing.directoryAccount()) {
+        // Checked before the bind: only an account born from the directory may be authenticated by
+        // it. A local account whose name matches a domain account would otherwise be inherited, and
+        // an account bound to another identity provider must not have a second door.
+        if (existing != null && existing.getSource() != UserSource.LDAP) {
             audit(username, ip, false, LoginResult.WRONG_LOGIN_MODE);
-            throw BizException.unauthorized("this account signs in with a local password");
+            throw BizException.unauthorized("this account does not sign in through the directory");
         }
         // Also checked before the bind, so a suspended account cannot be used to probe the directory.
         if (existing != null) {
             requireEnabled(existing, ip);
         }
 
-        DirectoryBindResult bind = directoryAuthenticator.bind(username, password);
-        if (bind == DirectoryBindResult.SERVICE_UNAVAILABLE) {
+        DirectoryBindOutcome bind = directoryAuthenticator.bind(username, password);
+        if (bind.result() == DirectoryBindResult.SERVICE_UNAVAILABLE) {
             // Audited as a failure but never counted towards the lockout, which is why the reason is a
             // separate value: one domain controller outage would otherwise lock out everyone who retried.
             audit(username, ip, false, LoginResult.DIRECTORY_UNAVAILABLE);
             throw BizException.unauthorized("directory is unavailable, try again later");
         }
-        if (bind == DirectoryBindResult.INVALID_CREDENTIALS) {
+        if (bind.result() == DirectoryBindResult.INVALID_CREDENTIALS) {
             audit(username, ip, false, LoginResult.DIRECTORY_REJECTED);
             throw BizException.unauthorized("invalid username or password");
         }
 
         AdminUser user = existing == null ? userService.provisionDirectoryUser(username) : existing;
+        if (groupSyncService.enabled()) {
+            // Synchronised before the token is issued, so the session being opened already sees the
+            // roles the directory groups map to - not the ones of the previous visit.
+            groupSyncService.sync(user, bind.groupDns());
+        }
         return issue(user, username, ip);
+    }
+
+    /**
+     * Lands a verified single sign on assertion: matches or provisions the account and issues a
+     * session token.
+     *
+     * <p>The assertion is already verified by the protocol adapter when this runs; what is decided
+     * here is whether the asserted person maps to a console account that may open a session. The
+     * checks mirror the directory path exactly - same lock window, same source discipline, same
+     * audit rows - because to the rest of the system these are all just logins.
+     *
+     * @param source   protocol the assertion arrived through
+     * @param identity identity the provider asserted
+     * @param ip       source address of the callback
+     * @return session ticket
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public LoginTicket completeExternalLogin(UserSource source, ExternalIdentity identity, String ip) {
+        String login = normalize(identity.username());
+        if (login.isBlank()) {
+            // A verified assertion naming nobody is a provider misconfiguration, not a user error,
+            // but it still must not mint a session keyed on an empty name.
+            log.error("single sign on assertion carries no usable login name, source={}", source);
+            throw BizException.unauthorized("identity provider asserted no login name");
+        }
+        if (isLocked(login, ip)) {
+            audit(login, ip, false, LoginResult.ACCOUNT_LOCKED);
+            throw BizException.unauthorized("account temporarily locked, retry after "
+                    + properties.getAuth().getLockMinutes() + " minutes");
+        }
+        AdminUser existing = findByUsername(login);
+        // An account is bound to the entry point that created it. Letting a SAML assertion open an
+        // OIDC account would make every configured provider a master key for every other.
+        if (existing != null && existing.getSource() != source) {
+            audit(login, ip, false, LoginResult.WRONG_LOGIN_MODE);
+            throw BizException.unauthorized("this account signs in through a different entry point");
+        }
+        if (existing != null) {
+            requireEnabled(existing, ip);
+        }
+        AdminUser user = existing == null
+                ? userService.provisionExternalUser(login, source, identity.displayName(), identity.email())
+                : existing;
+        LoginTicket ticket = issue(user, login, ip);
+        log.info("single sign on login succeeded, username={}, source={}, ip={}", login, source, ip);
+        return ticket;
     }
 
     private LoginTicket issue(AdminUser user, String username, String ip) {
@@ -150,6 +209,16 @@ public class AuthService {
         if (!user.enabled()) {
             audit(user.getUsername(), ip, false, LoginResult.ACCOUNT_DISABLED);
             throw BizException.unauthorized("account is disabled");
+        }
+        // Refused at the door, not only by the resolver: a disabled tenant means every one of its
+        // accounts stops working, and letting the login succeed just to be rejected on the first
+        // request would issue a token for a session that can never be used.
+        Tenant tenant = tenantMapper.selectOne(new LambdaQueryWrapper<Tenant>()
+                .eq(Tenant::getTenantId, user.getTenantId())
+                .last("limit 1"));
+        if (tenant != null && !tenant.enabled()) {
+            audit(user.getUsername(), ip, false, LoginResult.TENANT_DISABLED);
+            throw BizException.unauthorized("tenant is disabled");
         }
     }
 

@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.PermissionResponse;
 import io.kbrag.api.dto.RoleResponse;
@@ -42,10 +43,15 @@ public class RoleController {
     /**
      * Lists every role with its grants and its scope, built in ones first.
      *
+     * <p>Besides the two administration screens, doc:review is admitted too (M16): granting a
+     * restricted document to roles means picking them from this list, and a reviewer who cannot
+     * see the catalogue cannot grant anything.
+     *
      * @return roles
      */
     @GetMapping
-    @RequiresPermission({PermissionCodes.ROLE_MANAGE, PermissionCodes.USER_MANAGE})
+    @RequiresPermission({PermissionCodes.ROLE_MANAGE, PermissionCodes.USER_MANAGE,
+            PermissionCodes.DOC_REVIEW})
     public Result<List<RoleResponse>> list() {
         return Result.success(roleService.list().stream()
                 .map(role -> RoleResponse.from(role,
@@ -87,6 +93,8 @@ public class RoleController {
      * @return created role
      */
     @PostMapping
+    @AuditedOperation(module = "ROLE", action = "CREATE", targetType = "ROLE",
+            targetId = "#result.data.roleId")
     public Result<RoleResponse> create(@Valid @RequestBody SaveRoleRequest request) {
         Role role = roleService.create(request.code(), request.name(), request.description(),
                 request.kbScopeAll(), request.kbIds(), request.permissionCodes());
@@ -103,6 +111,7 @@ public class RoleController {
      * @return updated role
      */
     @PutMapping("/{roleId}")
+    @AuditedOperation(module = "ROLE", action = "UPDATE", targetType = "ROLE", targetId = "#roleId")
     public Result<RoleResponse> update(@PathVariable String roleId,
                                       @Valid @RequestBody SaveRoleRequest request) {
         roleService.update(roleId, request.name(), request.description(),
@@ -120,6 +129,7 @@ public class RoleController {
      * @return empty success envelope
      */
     @DeleteMapping("/{roleId}")
+    @AuditedOperation(module = "ROLE", action = "DELETE", targetType = "ROLE", targetId = "#roleId")
     public Result<Void> delete(@PathVariable String roleId) {
         roleService.delete(roleId);
         return Result.success(null);

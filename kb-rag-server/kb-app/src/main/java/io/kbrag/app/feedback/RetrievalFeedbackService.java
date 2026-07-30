@@ -4,15 +4,20 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.kbrag.app.eval.EvalDatasetService;
+import io.kbrag.app.openapi.ApiKeyPrincipal;
+import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.EvalCase;
 import io.kbrag.domain.entity.RetrievalFeedback;
+import io.kbrag.domain.entity.SearchInsight;
 import io.kbrag.domain.enums.CaseSource;
+import io.kbrag.domain.enums.FeedbackChannel;
 import io.kbrag.domain.enums.FeedbackStatus;
 import io.kbrag.domain.enums.FeedbackVerdict;
 import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.mapper.RetrievalFeedbackMapper;
+import io.kbrag.domain.mapper.SearchInsightMapper;
 import io.kbrag.domain.service.BizIdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,8 +46,12 @@ import java.util.List;
 @RequiredArgsConstructor
 public class RetrievalFeedbackService {
 
+    /** Widest caller comment stored, matching the note column; the rest is cut, not rejected. */
+    private static final int NOTE_MAX_LENGTH = 512;
+
     private final RetrievalFeedbackMapper retrievalFeedbackMapper;
     private final ChunkMapper chunkMapper;
+    private final SearchInsightMapper searchInsightMapper;
     private final EvalDatasetService evalDatasetService;
     private final BizIdGenerator bizIdGenerator;
 
@@ -68,9 +77,72 @@ public class RetrievalFeedbackService {
         feedback.setDocId(resolveDocId(chunkId));
         feedback.setVerdict(verdict);
         feedback.setStatus(FeedbackStatus.NEW);
+        feedback.setChannel(FeedbackChannel.CONSOLE);
         retrievalFeedbackMapper.insert(feedback);
         log.info("retrieval feedback recorded, feedbackId={}, kbId={}, verdict={}",
                 feedback.getFeedbackId(), kbId, verdict);
+        return feedback;
+    }
+
+    /**
+     * Records one verdict arriving through the open API, the M16 contract section 7.
+     *
+     * <p>The caller names a {@code request_id}, never a knowledge base: the knowledge base and the
+     * query are looked up from the insight row it points at. A feedback that cannot be tied to a
+     * recorded retrieval is refused - anonymous verdicts can never be converted into evaluation
+     * material, which makes them noise, not data.
+     *
+     * <p><b>The request id is not a credential.</b> It travels in the {@code X-Request-Id} header, so a
+     * caller picks its own; on its own it proves nothing about who ran the retrieval. What authorises
+     * the write is the application recorded on the insight row being inside this key's scope, which is
+     * why the insight carries an {@code app_id} and why a console debug search - it has none - can
+     * never be commented on through this channel. Without that check any key holder who learned
+     * another application's request id could write verdicts against a knowledge base it cannot read.
+     *
+     * <p>The stored query is the insight digest, masked and truncated, not the raw text: the open
+     * API channel must not become a path around the insight masking rules.
+     *
+     * @param principal authenticated caller, the source of the authorisation scope
+     * @param requestId correlation id of the retrieval the verdict concerns
+     * @param chunkId   chunk the verdict concerns, must belong to the retrieved knowledge base
+     * @param verdict   end user verdict
+     * @param comment   free form comment, truncated to the note column width, optional
+     * @param endUserId caller asserted end user identifier, optional, not vouched for
+     * @return persisted row, {@code status=NEW}, {@code channel=OPEN_API}
+     */
+    public RetrievalFeedback recordFromOpenApi(ApiKeyPrincipal principal, String requestId, String chunkId,
+                                               FeedbackVerdict verdict, String comment, String endUserId) {
+        SearchInsight insight = searchInsightMapper.selectOne(new LambdaQueryWrapper<SearchInsight>()
+                .eq(SearchInsight::getRequestId, requestId)
+                .isNotNull(SearchInsight::getAppId)
+                .last("limit 1"));
+        if (insight == null) {
+            // Unknown, purged by the insight retention window, or a console debug search which this
+            // channel does not cover; the message deliberately does not distinguish them, since none
+            // is actionable differently by the caller.
+            throw BizException.invalidParam("request_id 无效或已过期");
+        }
+        // The one authorisation gate of this channel, reusing the single scope check of the key.
+        principal.requireAccessTo(insight.getAppId());
+        RetrievalFeedback feedback = new RetrievalFeedback();
+        feedback.setFeedbackId(bizIdGenerator.retrievalFeedbackId());
+        feedback.setKbId(insight.getKbId());
+        feedback.setQuery(insight.getQueryDigest());
+        feedback.setChunkId(chunkId);
+        feedback.setDocId(resolveOpenApiDocId(insight.getKbId(), chunkId));
+        feedback.setVerdict(verdict);
+        feedback.setStatus(FeedbackStatus.NEW);
+        feedback.setChannel(FeedbackChannel.OPEN_API);
+        feedback.setEndUserId(endUserId);
+        if (comment != null && !comment.isBlank()) {
+            String trimmed = comment.trim();
+            feedback.setNote(trimmed.length() > NOTE_MAX_LENGTH
+                    ? trimmed.substring(0, NOTE_MAX_LENGTH)
+                    : trimmed);
+        }
+        retrievalFeedbackMapper.insert(feedback);
+        log.info("open api feedback recorded, feedbackId={}, kbId={}, verdict={}, requestId={}",
+                feedback.getFeedbackId(), insight.getKbId(), verdict, requestId);
         return feedback;
     }
 
@@ -80,12 +152,13 @@ public class RetrievalFeedbackService {
      * @param kbId    knowledge base business id
      * @param verdict optional verdict filter
      * @param status  optional status filter
+     * @param channel optional channel filter
      * @param page    one based page number
      * @param size    page size
      * @return paged rows
      */
     public IPage<RetrievalFeedback> list(String kbId, FeedbackVerdict verdict, FeedbackStatus status,
-                                         long page, long size) {
+                                         FeedbackChannel channel, long page, long size) {
         LambdaQueryWrapper<RetrievalFeedback> wrapper = new LambdaQueryWrapper<RetrievalFeedback>()
                 .eq(RetrievalFeedback::getKbId, kbId);
         if (verdict != null) {
@@ -93,6 +166,9 @@ public class RetrievalFeedbackService {
         }
         if (status != null) {
             wrapper.eq(RetrievalFeedback::getStatus, status);
+        }
+        if (channel != null) {
+            wrapper.eq(RetrievalFeedback::getChannel, channel);
         }
         return retrievalFeedbackMapper.selectPage(new Page<>(page, size),
                 wrapper.orderByDesc(RetrievalFeedback::getId));
@@ -182,6 +258,34 @@ public class RetrievalFeedbackService {
         if (chunk == null) {
             log.info("feedback chunk no longer exists, recorded without doc id, chunkId={}", chunkId);
             return null;
+        }
+        return chunk.getDocId();
+    }
+
+    /**
+     * Resolves the owning document of an open API verdict, refusing a chunk of another knowledge base.
+     *
+     * <p>A chunk that no longer exists keeps the console semantics - the verdict is still a fact, the
+     * row simply carries no {@code doc_id} - because a signal may legitimately arrive after a deletion.
+     * A chunk that exists elsewhere is a different matter: nothing legitimate produces it, since the
+     * retrieval this verdict names only ever returned chunks of {@code kbId}, so it is refused rather
+     * than stored as a verdict whose evidence points into a corpus the caller was never served.
+     *
+     * @param kbId    knowledge base the named retrieval ran against
+     * @param chunkId chunk the verdict concerns
+     * @return owning document id, {@code null} when the chunk is gone
+     */
+    private String resolveOpenApiDocId(String kbId, String chunkId) {
+        Chunk chunk = chunkOf(chunkId);
+        if (chunk == null) {
+            log.info("feedback chunk no longer exists, recorded without doc id, chunkId={}", chunkId);
+            return null;
+        }
+        if (!kbId.equals(chunk.getKbId())) {
+            log.error("open api feedback names a chunk of another knowledge base, errorCode={}, "
+                            + "kbId={}, chunkId={}",
+                    ErrorCode.FORBIDDEN, kbId, chunkId);
+            throw BizException.invalidParam("chunk_id 不属于该次检索的知识库");
         }
         return chunk.getDocId();
     }

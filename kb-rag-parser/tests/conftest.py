@@ -61,10 +61,33 @@ def make_pdf_with_embedded_image_bytes(
     return data
 
 
-def make_scanned_pdf_bytes() -> bytes:
-    """A one-page PDF with no text layer at all, simulating a scanned page."""
+def make_pdf_with_repeated_image_bytes(
+    pages: int = 3,
+    text: str = "Hello kb-rag PDF, this page has a normal text layer and a header logo.",
+) -> bytes:
+    """A multi-page PDF whose pages all draw the *same* raster, the way a
+    header/footer logo appears throughout a real document.
+
+    pymupdf stores an identical stream once and lets every page reference
+    that one xref (verified: all pages report the same xref), which is
+    exactly the shape the parser's per-xref deduplication keys on.
+    """
+    logo = make_tiny_png_bytes()
     document = pymupdf.open()
-    document.new_page()
+    for _ in range(pages):
+        page = document.new_page()
+        page.insert_text((72, 72), text)
+        page.insert_image(pymupdf.Rect(72, 100, 172, 200), stream=logo)
+    data = document.tobytes()
+    document.close()
+    return data
+
+
+def make_scanned_pdf_bytes(pages: int = 1) -> bytes:
+    """A PDF with no text layer at all, simulating scanned pages."""
+    document = pymupdf.open()
+    for _ in range(pages):
+        document.new_page()
     data = document.tobytes()
     document.close()
     return data

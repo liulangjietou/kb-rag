@@ -2,6 +2,7 @@ package io.kbrag.domain.entity;
 
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import io.kbrag.domain.enums.FeedbackChannel;
 import io.kbrag.domain.enums.FeedbackStatus;
 import io.kbrag.domain.enums.FeedbackVerdict;
 import lombok.Getter;
@@ -61,7 +62,15 @@ public class RetrievalFeedback extends BaseEntity {
     @TableField("converted_case_id")
     private String convertedCaseId;
 
-    /** Free form operator note. */
+    /** Free form operator note; on the open API channel, the caller's comment truncated. */
     @TableField("note")
     private String note;
+
+    /** Boundary the verdict arrived through, the M16 contract section 7. */
+    @TableField("channel")
+    private FeedbackChannel channel;
+
+    /** Caller asserted end user identifier, open API channel only, not vouched for. */
+    @TableField("end_user_id")
+    private String endUserId;
 }

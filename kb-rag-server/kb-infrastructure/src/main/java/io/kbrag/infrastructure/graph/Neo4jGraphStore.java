@@ -41,8 +41,11 @@ import java.util.Map;
  *
  * <p><b>Schema uses plain composite indexes, not uniqueness constraints.</b> A constraint would make the
  * merges race free, but composite constraint support differs between editions and a schema statement
- * that fails on a community server would leave the whole capability unusable. The extraction concurrency
- * is small and bounded by configuration, so an indexed {@code MERGE} is the right trade here.
+ * that fails on a community server would leave the whole capability unusable. What keeps an indexed
+ * {@code MERGE} safe instead is the caller: {@code GraphExtractionService} funnels the writes of one
+ * knowledge base through a single writer thread, so no two transactions merge the same
+ * {@code (kb_id, name)} pair concurrently. Two knowledge bases writing at once never collide - the pair
+ * differs by {@code kb_id} - which is why that serialisation is per run rather than global.
  *
  * <p><b>Match scores are normalised against the best match of the same result set</b>, as the port
  * requires: a Lucene score has no upper bound, and the relevance formula the debug page displays has to
@@ -74,9 +77,18 @@ public class Neo4jGraphStore implements GraphStore {
             "CREATE FULLTEXT INDEX " + ENTITY_NAME_INDEX + " IF NOT EXISTS FOR (e:Entity) ON EACH [e.name] "
                     + "OPTIONS {indexConfig: {`fulltext.analyzer`: '" + ENTITY_NAME_ANALYZER + "'}}";
 
+    /**
+     * Entity upsert of one passage.
+     *
+     * <p>The Chunk merge names {@code kb_id} alongside {@code chunk_id} so it can seek
+     * {@code kb_chunk_lookup}. Merging on {@code chunk_id} alone cannot use that index - a composite
+     * index only serves a lookup that supplies its leading property - so the statement fell back to
+     * NodeByLabelScan over every Chunk of every knowledge base, which grows with the corpus. The id is
+     * globally unique either way, so adding the predicate narrows nothing that was not already implied.
+     */
     private static final String CYPHER_UPSERT_ENTITIES = """
-            MERGE (c:Chunk {chunk_id: $chunkId})
-              SET c.kb_id = $kbId, c.document_version_id = $documentVersionId
+            MERGE (c:Chunk {kb_id: $kbId, chunk_id: $chunkId})
+              SET c.document_version_id = $documentVersionId
             WITH c
             UNWIND $entities AS entity
             MERGE (e:Entity {kb_id: $kbId, name: entity.name})

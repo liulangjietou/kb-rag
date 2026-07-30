@@ -87,6 +87,10 @@ kb:
     api-key: ${DASHSCOPE_API_KEY:}
     base-url: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
     batch-size: ${EMBEDDING_BATCH_SIZE:10}
+    # Provider requests in flight while one document is embedded; batches share nothing, so this is what
+    # keeps a 500 chunk document from being 50 sequential round trips. Global ceiling (shared pool), so
+    # several documents indexing at once still cannot exceed it. Set to 1 for the pre-M16 sequential shape.
+    concurrency: ${EMBEDDING_CONCURRENCY:4}
     timeout-ms: ${EMBEDDING_TIMEOUT_MS:30000}
   multimodal-embedding:
     provider: ${MULTIMODAL_EMBEDDING_PROVIDER:dashscope}
@@ -136,6 +140,10 @@ kb:
     standalone-extensions: ${IMAGE_STANDALONE_EXTENSIONS:png,jpg,jpeg,webp,bmp,gif}
     max-per-document: ${MAX_IMAGES_PER_DOC:100}
     max-image-size-mb: ${MAX_IMAGE_SIZE_MB:10}
+    # Vision calls in flight per document. One image is one round trip of up to vision.timeout-ms, so
+    # serial calls made a fully illustrated document occupy a pipeline slot for half an hour. Bounded by
+    # the provider rate limit, not by the machine: a throttled call becomes a failed proxy, not a retry.
+    describe-concurrency: ${IMAGE_DESCRIBE_CONCURRENCY:8}
   chat-import:
     default-mapping-profile: ${CHAT_MAPPING_PROFILE:memotrace}
     upload-token-ttl-minutes: ${CHAT_UPLOAD_TOKEN_TTL_MINUTES:30}
@@ -177,6 +185,41 @@ kb:
       # Role a directory account is granted the first time it logs in. Read only on purpose: anything
       # wider would hand write access to everyone who holds a domain account.
       default-role-code: ${AUTH_LDAP_DEFAULT_ROLE_CODE:VIEWER}
+      group-sync:
+        # When on, every single sign on login re-derives roles from directory groups; synchronised
+        # grants are replaced wholesale while manually granted roles stay untouched.
+        enabled: ${AUTH_LDAP_GROUP_SYNC_ENABLED:false}
+        # Entries groupDn=ROLE_CODE separated by semicolons; DNs compared ignoring case and whitespace.
+        role-mappings: ${AUTH_LDAP_GROUP_ROLE_MAPPINGS:}
+    oidc:
+      # The three browser redirect protocols are independent switches; the login page renders a
+      # button per provider that is both enabled and fully configured.
+      enabled: ${AUTH_OIDC_ENABLED:false}
+      # Every endpoint is taken from {issuer}/.well-known/openid-configuration.
+      issuer: ${AUTH_OIDC_ISSUER:}
+      client-id: ${AUTH_OIDC_CLIENT_ID:}
+      client-secret: ${AUTH_OIDC_CLIENT_SECRET:}
+      scopes: ${AUTH_OIDC_SCOPES:openid profile email}
+    saml:
+      enabled: ${AUTH_SAML_ENABLED:false}
+      idp-entity-id: ${AUTH_SAML_IDP_ENTITY_ID:}
+      idp-sso-url: ${AUTH_SAML_IDP_SSO_URL:}
+      # PEM certificate of the IdP, the single trust anchor of every assertion signature.
+      idp-certificate: ${AUTH_SAML_IDP_CERTIFICATE:}
+      sp-entity-id: ${AUTH_SAML_SP_ENTITY_ID:kb-rag}
+    cas:
+      enabled: ${AUTH_CAS_ENABLED:false}
+      # Base URL such as https://cas.corp.example.com/cas; validation goes to /p3/serviceValidate.
+      server-url: ${AUTH_CAS_SERVER_URL:}
+    sso:
+      # Console address the browser is redirected back to after a successful callback. Left blank,
+      # every redirect protocol counts as unconfigured even when enabled.
+      web-base-url: ${AUTH_SSO_WEB_BASE_URL:}
+  audit:
+    # Days an operation audit row stays queryable, aligned with the M6 API audit retention.
+    operation-retention-days: ${AUDIT_OPERATION_RETENTION_DAYS:180}
+    cleanup-batch-size: ${AUDIT_OPERATION_CLEANUP_BATCH_SIZE:5000}
+    cleanup-cron: ${AUDIT_OPERATION_CLEANUP_CRON:0 50 3 * * *}
   upload:
     max-file-size-mb: ${UPLOAD_MAX_FILE_SIZE_MB:100}
     allowed-extensions: ${UPLOAD_ALLOWED_EXTENSIONS:pdf,docx,txt,md,sql,xlsx,csv,html,png,jpg,jpeg,webp,bmp,gif}
@@ -185,6 +228,11 @@ kb:
       # Non active READY versions kept per document; the older ones are archived and lose their chunks,
       # while their original file and parse artifact stay so they can still be rebuilt. Clamped to 1-20.
       retain-count: ${DOC_VERSION_RETAIN_COUNT:3}
+  index:
+    # 同时索引几个文档。索引线程一生都在等外部服务（解析等 kb-rag-parser、嵌入等模型、写入等
+    # ES/Qdrant），本机 CPU 上只有切分那一小段，所以别照机器核数定——真正的天花板通常是解析服务的
+    # 工作线程数（PARSER_MAX_WORKERS），调到远超它只会让请求堆在解析服务门口。
+    concurrency: ${INDEX_CONCURRENCY:4}
   split:
     max-tokens: ${SPLIT_MAX_TOKENS:600}
     overlap-tokens: ${SPLIT_OVERLAP_TOKENS:100}
@@ -241,13 +289,33 @@ kb:
     # Relationship hops a matched entity is expanded by; the relevance of a hit decays as 1/(1+hops).
     max-hops: ${GRAPH_MAX_HOPS:2}
     entity-match-limit: ${GRAPH_ENTITY_MATCH_LIMIT:10}
-    # One model call carries exactly one chunk; the batch is how many of those are submitted together,
-    # and the concurrency is how many run at a time inside a batch.
-    extract-batch-size: ${GRAPH_EXTRACT_BATCH_SIZE:10}
-    extract-concurrency: ${GRAPH_EXTRACT_CONCURRENCY:2}
+    # One model call carries exactly one chunk; the concurrency is how many of those are in flight inside
+    # one extraction task, and it is what decides how long a run takes. Graph writes are serialised on a
+    # single writer thread regardless, so raising this trades no correctness - only the provider's rate
+    # limit bounds it, multiplied by task-concurrency below (the chat model's peak = the two values).
+    extract-concurrency: ${GRAPH_EXTRACT_CONCURRENCY:8}
+    # 几个知识库能同时重建图谱（抽取任务池大小，抽取已不再挤占索引池）。一次抽取按分片规模能跑上
+    # 小时级，所以这是"同时几个任务"而非吞吐旋钮；单任务快慢看 extract-concurrency。两者相乘才是
+    # 聊天模型看到的峰值并发，而聊天模型限流通常比嵌入更紧——一起调之前先确认额度。
+    task-concurrency: ${GRAPH_TASK_CONCURRENCY:2}
+    # 抽取专用模型，留空 = 沿用 kb.chat.model。抽取与查询改写对模型的要求相反：改写是一句话、要
+    # 语感，抽取是照固定 JSON 形状填空、要吞吐。共用一个模型时，为改写质量选的 qwen-plus 会让抽取
+    # 按 ~40 token/s 生成上千 token——单次三十多秒，全量抽取以小时计。换 turbo 档能把生成速度翻倍
+    # 以上，而"填 JSON"的质量损失远小于改写。与 kb.eval.judge-model 同一模式，不需要第二份凭据。
+    extract-model: ${GRAPH_EXTRACT_MODEL:}
+    # 单个分片遇到 429（限流）时的重试次数。429 不是"坏答案"而是"稍后再试"，且成片到来——额度一
+    # 打穿，接下来几十个调用都是 429；不重试就是静默丢掉几百个分片。等待发生在抽取线程内部、占着
+    # 并发槽位，所以限流时整次抽取自然降速到额度能承受的水平。退避带抖动（否则所有线程一起重试，
+    # 复现触发 429 的突发）。填 0 = 不重试。
+    extract-retry-on-throttle: ${GRAPH_EXTRACT_RETRY_ON_THROTTLE:3}
+    # 一次抽取答案最多包含的实体数与关系数（同一个上限给两者，模型遵循更稳）。抽取延迟几乎全是生成
+    # 时间，而不设上限时模型会把长分片能想到的都抽出来：实测均值 16 实体 / 20 关系约 1500 token，
+    # 长尾直接撞上预算被截断、那一片整个丢失（实测约 9%）。给宽松但明确的上限，常规分片碰不到它，
+    # 长尾则被截在上限而不是半个 JSON 上——"截断丢整片"变成"限量保主要"。
+    extract-max-entities: ${GRAPH_EXTRACT_MAX_ENTITIES:24}
     # Budget of one extraction answer. Deliberately not kb.chat.max-tokens: that one sizes a single line
     # query rewrite, and running out mid JSON makes the parser reject an answer that was in fact fine.
-    extract-max-tokens: ${GRAPH_EXTRACT_MAX_TOKENS:2048}
+    extract-max-tokens: ${GRAPH_EXTRACT_MAX_TOKENS:3072}
   web:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:20002,http://127.0.0.1:20002}
   eval:

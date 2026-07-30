@@ -18,19 +18,22 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { listRoles } from '../../api/role';
+import { listTenants } from '../../api/tenant';
 import {
   assignUserRoles,
   createUser,
   deleteUser,
   getUser,
   listUsers,
+  moveUserTenant,
   resetUserPassword,
   updateUser,
   updateUserStatus,
 } from '../../api/user';
 import type { ListUsersParams } from '../../api/user';
-import type { PageResult, RoleSummary, UserSummary } from '../../api/types';
+import type { PageResult, RoleSummary, TenantSummary, UserSummary } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
+import { PERMISSIONS } from '../../auth/permissions';
 
 const EMPTY_PAGE: PageResult<UserSummary> = { items: [], page: 1, size: 10, total: 0 };
 
@@ -53,19 +56,25 @@ interface UserFormValues {
  * manage either way, which is the point of provisioning domain logins into a local record at all.
  */
 export default function UserManagePage() {
-  const { username: signedInAs } = useAuth();
+  const { username: signedInAs, can } = useAuth();
+  // The tenant column and the move action ride on tenant:manage: the tenant list endpoint answers
+  // only that code, so without it the page would render a column it cannot fill.
+  const canTenantManage = can(PERMISSIONS.TENANT_MANAGE);
   const [page, setPage] = useState<PageResult<UserSummary>>(EMPTY_PAGE);
   const [loading, setLoading] = useState(false);
   const [params, setParams] = useState<ListUsersParams>({ page: 1, size: 10 });
   const [roles, setRoles] = useState<RoleSummary[]>([]);
+  const [tenants, setTenants] = useState<TenantSummary[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [editing, setEditing] = useState<UserSummary | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [rolesTarget, setRolesTarget] = useState<UserSummary | null>(null);
   const [resetTarget, setResetTarget] = useState<UserSummary | null>(null);
+  const [moveTarget, setMoveTarget] = useState<UserSummary | null>(null);
   const [userForm] = Form.useForm<UserFormValues>();
   const [rolesForm] = Form.useForm<{ role_ids: string[] }>();
   const [resetForm] = Form.useForm<{ new_password: string }>();
+  const [moveForm] = Form.useForm<{ tenant_id: string }>();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,7 +95,24 @@ export default function UserManagePage() {
     listRoles().then(setRoles).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    if (canTenantManage) {
+      listTenants().then(setTenants).catch(() => undefined);
+    }
+  }, [canTenantManage]);
+
   const roleOptions = roles.map((role) => ({ value: role.role_id, label: `${role.name}（${role.code}）` }));
+
+  // The user row carries the tenant id; the name lives on the tenant list. An id whose tenant has
+  // not loaded (or was created since) still shows as the raw id rather than nothing.
+  const tenantNameOf = (tenantId: string) =>
+    tenants.find((tenant) => tenant.tenant_id === tenantId)?.name ?? tenantId;
+
+  // Only enabled tenants are offered as a destination: moving an account into a disabled tenant
+  // would lock it out on its next login.
+  const tenantOptions = tenants
+    .filter((tenant) => tenant.status === 'ENABLED')
+    .map((tenant) => ({ value: tenant.tenant_id, label: `${tenant.name}（${tenant.code}）` }));
 
   const openCreate = () => {
     setEditing(null);
@@ -173,6 +199,26 @@ export default function UserManagePage() {
     load();
   };
 
+  const openMove = (record: UserSummary) => {
+    setMoveTarget(record);
+    moveForm.setFieldsValue({ tenant_id: record.tenant_id });
+  };
+
+  const submitMove = async (values: { tenant_id: string }) => {
+    if (!moveTarget) {
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await moveUserTenant(moveTarget.user_id, values.tenant_id);
+      message.success('账号已移至新租户');
+      setMoveTarget(null);
+      load();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const removeUser = async (record: UserSummary) => {
     await deleteUser(record.user_id);
     message.success('账号已删除');
@@ -197,6 +243,15 @@ export default function UserManagePage() {
       dataIndex: 'source',
       render: (value: string) => SOURCE_LABEL[value] ?? value,
     },
+    ...(canTenantManage
+      ? ([
+          {
+            title: '租户',
+            dataIndex: 'tenant_id',
+            render: (value: string) => <Tag color="geekblue">{tenantNameOf(value)}</Tag>,
+          },
+        ] as ColumnsType<UserSummary>)
+      : []),
     {
       title: '角色',
       dataIndex: 'role_names',
@@ -220,6 +275,7 @@ export default function UserManagePage() {
           <Space size={4} wrap>
             <a onClick={() => openEdit(record)}>编辑</a>
             <a onClick={() => openRoles(record)}>角色</a>
+            {canTenantManage && !isSelf && <a onClick={() => openMove(record)}>移户</a>}
             {record.source === 'LOCAL' && (
               <a onClick={() => setResetTarget(record)}>重置密码</a>
             )}
@@ -407,6 +463,28 @@ export default function UserManagePage() {
             extra="重置后该账号下次登录会被要求再次修改，此处填写的只是交接口令"
           >
             <Input.Password placeholder="至少 8 位" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={!!moveTarget}
+        title={`移动租户 - ${moveTarget?.username ?? ''}`}
+        okText="移动"
+        cancelText="取消"
+        confirmLoading={submitting}
+        onOk={() => moveForm.submit()}
+        onCancel={() => setMoveTarget(null)}
+        destroyOnClose
+      >
+        <Form form={moveForm} layout="vertical" onFinish={submitMove} preserve={false}>
+          <Form.Item
+            name="tenant_id"
+            label="目标租户"
+            rules={[{ required: true, message: '请选择目标租户' }]}
+            extra="仅移动账号本身：其创建的知识库仍留在原租户，移动后该账号将看不到它们"
+          >
+            <Select options={tenantOptions} placeholder="选择租户" />
           </Form.Item>
         </Form>
       </Modal>

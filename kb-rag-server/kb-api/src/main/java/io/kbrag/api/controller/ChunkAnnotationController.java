@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.ChunkResponse;
 import io.kbrag.api.dto.MergeChunksRequest;
@@ -57,6 +58,7 @@ public class ChunkAnnotationController {
      * @return updated chunk
      */
     @PutMapping("/{chunkId}")
+    @AuditedOperation(module = "ANNOTATION", action = "EDIT", targetType = "CHUNK", targetId = "#chunkId")
     public Result<ChunkResponse> edit(@PathVariable String chunkId,
                                       @Valid @RequestBody UpdateChunkRequest request) {
         kbScopeGuard.requireChunkAccess(chunkId);
@@ -71,6 +73,7 @@ public class ChunkAnnotationController {
      * @return chunk ids whose flag actually changed
      */
     @PostMapping("/{chunkId}/toggle")
+    @AuditedOperation(module = "ANNOTATION", action = "TOGGLE", targetType = "CHUNK", targetId = "#chunkId")
     public Result<Map<String, Object>> toggle(@PathVariable String chunkId,
                                               @Valid @RequestBody ToggleChunkRequest request) {
         kbScopeGuard.requireChunkAccess(chunkId);
@@ -85,6 +88,7 @@ public class ChunkAnnotationController {
      * @return chunk the merge produced
      */
     @PostMapping("/merge")
+    @AuditedOperation(module = "ANNOTATION", action = "MERGE", targetType = "CHUNK")
     public Result<ChunkResponse> merge(@Valid @RequestBody MergeChunksRequest request) {
         kbScopeGuard.requireChunkAccess(request.chunkIds().get(0));
         return Result.success(ChunkResponse.from(chunkAnnotationService.merge(request.chunkIds())));
@@ -98,6 +102,7 @@ public class ChunkAnnotationController {
      * @return chunks the split produced, in order
      */
     @PostMapping("/{chunkId}/split")
+    @AuditedOperation(module = "ANNOTATION", action = "SPLIT", targetType = "CHUNK", targetId = "#chunkId")
     public Result<Map<String, Object>> split(@PathVariable String chunkId,
                                              @Valid @RequestBody SplitChunkRequest request) {
         kbScopeGuard.requireChunkAccess(chunkId);

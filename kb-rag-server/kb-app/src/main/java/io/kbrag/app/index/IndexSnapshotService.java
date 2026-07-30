@@ -5,9 +5,11 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.constant.KbConstants;
 import io.kbrag.domain.entity.IndexRegistry;
+import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.IndexRegistryStatus;
 import io.kbrag.domain.enums.VectorEngine;
 import io.kbrag.domain.mapper.IndexRegistryMapper;
+import io.kbrag.domain.mapper.KnowledgeBaseMapper;
 import io.kbrag.domain.model.AppIndexSnapshot;
 import io.kbrag.domain.port.FulltextStore;
 import io.kbrag.domain.port.VectorStore;
@@ -57,6 +59,7 @@ public class IndexSnapshotService {
     private final FulltextStore fulltextStore;
     private final VectorStore vectorStore;
     private final IndexRegistryMapper indexRegistryMapper;
+    private final KnowledgeBaseMapper knowledgeBaseMapper;
 
     /**
      * Snapshots every engine of one knowledge base.
@@ -71,10 +74,12 @@ public class IndexSnapshotService {
      */
     public List<AppIndexSnapshot> snapshot(String kbId) {
         int sequence = nextSequence(kbId);
+        String tenantId = tenantOf(kbId);
         List<IndexTarget> targets = indexAliasManager.resolveTargets(kbId);
         List<AppIndexSnapshot> created = new ArrayList<>(targets.size());
         for (IndexTarget target : targets) {
-            String snapshotName = indexNaming.snapshotPhysicalName(kbId, target.embeddingSegment(), sequence);
+            String snapshotName = indexNaming.snapshotPhysicalName(tenantId, kbId,
+                    target.embeddingSegment(), sequence);
             if (target.engine() == VectorEngine.ES) {
                 fulltextStore.snapshotIndex(target.physicalIndexName(), snapshotName);
             } else {
@@ -206,6 +211,21 @@ public class IndexSnapshotService {
             highest = Math.max(highest, indexNaming.snapshotSequenceOf(row.getSnapshotVersion()));
         }
         return highest == 0 ? FIRST_SEQUENCE : highest + 1;
+    }
+
+    /**
+     * Owning tenant of a knowledge base, so a snapshot of a base outside the default tenant carries
+     * the same tenant segment its live indexes do.
+     *
+     * @param kbId knowledge base business id
+     * @return owning tenant business id, or {@code null} for the default tenant
+     */
+    private String tenantOf(String kbId) {
+        KnowledgeBase base = knowledgeBaseMapper.selectOne(new LambdaQueryWrapper<KnowledgeBase>()
+                .select(KnowledgeBase::getTenantId)
+                .eq(KnowledgeBase::getKbId, kbId)
+                .last("limit 1"));
+        return base == null ? null : base.getTenantId();
     }
 
     /**

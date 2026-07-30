@@ -23,6 +23,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Stores the images of a document version and turns each one into a textual proxy.
@@ -37,6 +41,13 @@ import java.util.Set;
  * reuses their proxies instead of paying for the vision calls again. That is what makes tuning the split
  * or the cleaning rules cheap: those stages do not depend on the model, so they must not re-invoke it.
  *
+ * <p><b>The vision calls of one document run in parallel.</b> Each image costs one round trip bounded by
+ * {@code kb.vision.timeout-ms}, so a document at the image ceiling took half an hour of wall clock when
+ * they were issued one after another — the indexing of a single illustrated report would occupy a
+ * pipeline slot for that whole time. The rows are still inserted sequentially in reading order
+ * afterwards: {@link #findByVersion} orders by the primary key, and the placeholder resolver depends on
+ * that order matching the order the images appear in the markdown.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
@@ -49,6 +60,8 @@ public class ImageAssetService {
     private static final String DEFAULT_EXTENSION = "bin";
     private static final int BYTES_PER_MB = 1024 * 1024;
     private static final int FAIL_REASON_MAX_LENGTH = 1024;
+    private static final String THREAD_PREFIX = "kb-image-";
+    private static final int MIN_CONCURRENCY = 1;
 
     /** Extension per MIME type, so an object key stays recognisable in a storage browser. */
     private static final Map<String, String> EXTENSION_BY_MEDIA_TYPE = Map.of(
@@ -92,10 +105,10 @@ public class ImageAssetService {
         Set<Integer> ocrPages = parsed.ocrPageNumbers();
         int limit = properties.getImage().getMaxPerDocument();
         long maxBytes = (long) properties.getImage().getMaxImageSizeMb() * BYTES_PER_MB;
-        List<ImageAsset> assets = new ArrayList<>(Math.min(images.size(), limit));
+        List<ParsedDocument.ParsedImage> accepted = new ArrayList<>(Math.min(images.size(), limit));
         for (ParsedDocument.ParsedImage image : images) {
-            if (assets.size() >= limit) {
-                warnings.add("image limit of " + limit + " reached, " + (images.size() - assets.size())
+            if (accepted.size() >= limit) {
+                warnings.add("image limit of " + limit + " reached, " + (images.size() - accepted.size())
                         + " image(s) skipped");
                 log.info("image limit reached, docId={}, limit={}, total={}",
                         document.getDocId(), limit, images.size());
@@ -106,7 +119,11 @@ public class ImageAssetService {
                 warnings.add("image " + image.getImageId() + " skipped, size out of bounds");
                 continue;
             }
-            assets.add(persist(document, version, image, ocrPages));
+            accepted.add(image);
+        }
+        List<ImageAsset> assets = storeAndDescribeAll(document, version, accepted, ocrPages);
+        for (ImageAsset asset : assets) {
+            imageAssetMapper.insert(asset);
         }
         log.info("image assets materialized, docId={}, versionId={}, images={}, visionConfigured={}",
                 document.getDocId(), version.getVersionId(), assets.size(), visionProvider.isConfigured());
@@ -171,13 +188,81 @@ public class ImageAssetService {
      */
     private ImageAsset persist(Document document, DocumentVersion version,
                                ParsedDocument.ParsedImage image, Set<Integer> ocrPages) {
+        ImageAsset asset = newAsset(document, version, image);
+        storeAndDescribe(asset, image, ocrPages);
+        imageAssetMapper.insert(asset);
+        return asset;
+    }
+
+    /**
+     * Stores and describes a whole document's images, several at a time.
+     *
+     * <p>The returned rows follow the reading order of the argument whatever order the calls complete in,
+     * because that order is what the caller inserts them in and therefore what the placeholder resolver
+     * later reads back.
+     *
+     * <p>A storage failure still ends the document as it did before. It is unwrapped from the
+     * {@link CompletionException} the join would otherwise raise, so the pipeline records the same reason
+     * it always recorded. A failing vision call is not a failure here at all — {@link #describe} turns it
+     * into a status on the row.
+     *
+     * @param document document record
+     * @param version  version being built
+     * @param images   images that passed the count and size limits, in reading order
+     * @param ocrPages page numbers an OCR engine already read
+     * @return asset rows in reading order, not yet inserted
+     */
+    private List<ImageAsset> storeAndDescribeAll(Document document, DocumentVersion version,
+                                                 List<ParsedDocument.ParsedImage> images,
+                                                 Set<Integer> ocrPages) {
+        List<ImageAsset> assets = new ArrayList<>(images.size());
+        for (ParsedDocument.ParsedImage image : images) {
+            assets.add(newAsset(document, version, image));
+        }
+        int concurrency = Math.min(
+                Math.max(MIN_CONCURRENCY, properties.getImage().getDescribeConcurrency()), images.size());
+        if (concurrency <= 1) {
+            for (int index = 0; index < images.size(); index++) {
+                storeAndDescribe(assets.get(index), images.get(index), ocrPages);
+            }
+            return assets;
+        }
+        ExecutorService executor = Executors.newFixedThreadPool(concurrency,
+                runnable -> new Thread(runnable, THREAD_PREFIX + document.getDocId()));
+        try {
+            List<CompletableFuture<Void>> futures = new ArrayList<>(images.size());
+            for (int index = 0; index < images.size(); index++) {
+                ImageAsset asset = assets.get(index);
+                ParsedDocument.ParsedImage image = images.get(index);
+                futures.add(CompletableFuture.runAsync(
+                        () -> storeAndDescribe(asset, image, ocrPages), executor));
+            }
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        } catch (CompletionException e) {
+            throw e.getCause() instanceof RuntimeException cause ? cause : e;
+        } finally {
+            executor.shutdown();
+        }
+        log.info("image assets described in parallel, docId={}, images={}, concurrency={}",
+                document.getDocId(), images.size(), concurrency);
+        return assets;
+    }
+
+    /**
+     * Everything about an asset row that needs no network call.
+     *
+     * <p>Built on the calling thread, so the business id sequence and the reading order stay outside the
+     * concurrent part of the work.
+     *
+     * @param document document record
+     * @param version  version being built
+     * @param image    parser supplied image
+     * @return asset row without its status or proxy
+     */
+    private ImageAsset newAsset(Document document, DocumentVersion version,
+                                ParsedDocument.ParsedImage image) {
         String mediaType = image.getMediaType() == null || image.getMediaType().isBlank()
                 ? DEFAULT_MEDIA_TYPE : image.getMediaType();
-        String objectKey = String.format(OBJECT_KEY_TEMPLATE, document.getKbId(), document.getDocId(),
-                version.getVersionId(), image.getImageId(), extensionOf(mediaType));
-        objectStorage.put(objectKey, new ByteArrayInputStream(image.getContent()),
-                image.getContent().length, mediaType);
-
         ImageAsset asset = new ImageAsset();
         asset.setImageId(bizIdGenerator.imageAssetId());
         asset.setSourceImageId(image.getImageId());
@@ -186,18 +271,34 @@ public class ImageAssetService {
         asset.setDocumentVersionId(version.getVersionId());
         asset.setPageNo(image.getPageNo());
         asset.setKind(ImageAssetKind.from(image.getKind()));
-        asset.setObjectKey(objectKey);
+        asset.setObjectKey(String.format(OBJECT_KEY_TEMPLATE, document.getKbId(), document.getDocId(),
+                version.getVersionId(), image.getImageId(), extensionOf(mediaType)));
         asset.setMediaType(mediaType);
         asset.setBytes((long) image.getContent().length);
+        return asset;
+    }
+
+    /**
+     * The two network calls of one image: upload the bytes, then describe them.
+     *
+     * <p>Touches nothing but the given row, which is what lets the caller run this over many images at
+     * once and read every result back after the join.
+     *
+     * @param asset    asset row being filled in
+     * @param image    parser supplied image
+     * @param ocrPages page numbers an OCR engine already read
+     */
+    private void storeAndDescribe(ImageAsset asset, ParsedDocument.ParsedImage image,
+                                  Set<Integer> ocrPages) {
+        objectStorage.put(asset.getObjectKey(), new ByteArrayInputStream(image.getContent()),
+                image.getContent().length, asset.getMediaType());
         if (alreadyRead(asset, ocrPages)) {
             asset.setStatus(ImageAssetStatus.SKIPPED);
             log.info("page already read by the parser OCR engine, vision call skipped, objectKey={}",
                     asset.getObjectKey());
-        } else {
-            describe(asset, image.getContent(), mediaType);
+            return;
         }
-        imageAssetMapper.insert(asset);
-        return asset;
+        describe(asset, image.getContent(), asset.getMediaType());
     }
 
     /**

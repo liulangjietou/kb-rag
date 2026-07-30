@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.AppResponse;
 import io.kbrag.api.dto.AppVersionConfigRequest;
@@ -67,6 +68,7 @@ public class AppController {
      */
     @PostMapping
     @RequiresPermission(PermissionCodes.APP_WRITE)
+    @AuditedOperation(module = "APP", action = "CREATE", targetType = "APP", targetId = "#result.data.appId")
     public Result<AppResponse> create(@Valid @RequestBody CreateAppRequest request) {
         App app = appService.create(request.name(), request.description());
         return Result.success(AppResponse.from(app, null));
@@ -108,6 +110,7 @@ public class AppController {
      */
     @PutMapping("/{appId}")
     @RequiresPermission(PermissionCodes.APP_WRITE)
+    @AuditedOperation(module = "APP", action = "UPDATE", targetType = "APP", targetId = "#appId")
     public Result<AppResponse> update(@PathVariable String appId,
                                       @Valid @RequestBody UpdateAppRequest request) {
         App app = appService.update(appId, request.name(), request.description());
@@ -122,6 +125,7 @@ public class AppController {
      */
     @DeleteMapping("/{appId}")
     @RequiresPermission(PermissionCodes.APP_WRITE)
+    @AuditedOperation(module = "APP", action = "DELETE", targetType = "APP", targetId = "#appId")
     public Result<Void> delete(@PathVariable String appId) {
         appService.delete(appId);
         return Result.success(null);
@@ -136,6 +140,8 @@ public class AppController {
      */
     @PostMapping("/{appId}/versions")
     @RequiresPermission(PermissionCodes.APP_WRITE)
+    @AuditedOperation(module = "APP", action = "CREATE_VERSION", targetType = "APP_VERSION",
+            targetId = "#result.data.appVersionId")
     public Result<AppVersionResponse> createVersion(@PathVariable String appId,
                                                     @Valid @RequestBody AppVersionConfigRequest request) {
         appService.require(appId);

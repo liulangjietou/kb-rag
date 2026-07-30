@@ -68,4 +68,14 @@ public class SearchInsight extends BaseEntity {
     /** Correlation id, links the row to logs and audit. */
     @TableField("request_id")
     private String requestId;
+
+    /**
+     * Application the open API call named, {@code null} for a console debug search.
+     *
+     * <p>调用方身份，不只是统计维度：开放接口的反馈只认自己检索过的那次调用，而 {@code requestId}
+     * 可以由调用方通过 {@code X-Request-Id} 头自选，光凭它无法回答"这次检索是谁的"。这一列让反馈
+     * 接口能把洞察行的应用和当前 API Key 的授权范围对上。
+     */
+    @TableField("app_id")
+    private String appId;
 }

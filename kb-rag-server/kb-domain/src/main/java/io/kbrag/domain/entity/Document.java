@@ -2,6 +2,7 @@ package io.kbrag.domain.entity;
 
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import io.kbrag.domain.enums.DocVisibility;
 import io.kbrag.domain.enums.ProcessStatus;
 import io.kbrag.domain.enums.PublishStatus;
 import lombok.Getter;
@@ -50,6 +51,10 @@ public class Document extends BaseEntity {
     /** Single valued processing state. */
     @TableField("process_status")
     private ProcessStatus processStatus;
+
+    /** Document level visibility, INHERIT for every row until an operator restricts it (M16). */
+    @TableField("visibility")
+    private DocVisibility visibility;
 
     /** Editorial state, orthogonal to the processing state (M11 governance). */
     @TableField("publish_status")

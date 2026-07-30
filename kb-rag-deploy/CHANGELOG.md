@@ -8,6 +8,86 @@
 
 ### Added
 
+- **企业化：多租户 / 文档级数据权限 / LDAP 组同步 / SSO 三协议 / 操作审计（M16）**：新增 `docs/M16-CONTRACTS.md`
+  （开发契约，含租户模型与索引命名租户段、文档 ACL 判定点、三协议 SSO 行为与升级说明）；
+  `.env.example` 新增「企业化（M16）」分节：`AUTH_LDAP_GROUP_SYNC_ENABLED`（默认 false）/
+  `AUTH_LDAP_GROUP_ROLE_MAPPINGS`（`组DN=角色CODE` 逗号分隔）、`AUTH_OIDC_ENABLED` /
+  `AUTH_OIDC_ISSUER` / `AUTH_OIDC_CLIENT_ID` / `AUTH_OIDC_CLIENT_SECRET` / `AUTH_OIDC_SCOPES`、
+  `AUTH_SAML_ENABLED` / `AUTH_SAML_IDP_ENTITY_ID` / `AUTH_SAML_IDP_SSO_URL` /
+  `AUTH_SAML_IDP_CERTIFICATE` / `AUTH_SAML_SP_ENTITY_ID`（默认 `kb-rag`）、`AUTH_CAS_ENABLED` /
+  `AUTH_CAS_SERVER_URL`、`AUTH_SSO_WEB_BASE_URL`（SSO 回调落地的控制台地址，开任一协议必填）、
+  `AUDIT_OPERATION_RETENTION_DAYS`（默认 180）——全部缺省即升级前行为。**升级提示**：Flyway
+  `V17__tenant_doc_acl_audit.sql` 把存量用户 / 角色 / 知识库 / API Key / 评测集 / 应用全部划入
+  内置默认租户（存量索引命名不变，零迁移）；删除知识库从本版起会一并删掉 ES/Qdrant 物理索引
+  （此前只删数据行留索引壳）；文档设为 RESTRICTED 后无授权的 API Key 检索结果会相应变少；
+  开放反馈端点开始校验 request_id 的应用归属，只用自己检索返回的 request_id 提交反馈不受影响。
+- OpenAPI 升至 `0.16.0-m16`：新增 `/api/v1/auth/sso/providers` 与 OIDC/SAML/CAS 六个登录回调端点
+  （全部免认证，302 + URL fragment 交付）、`/api/v1/tenants` 租户管理五端点、`/api/v1/users/{userId}/tenant`
+  移户、`/api/v1/kb/{kbId}/documents/{docId}/visibility` 文档可见性读写、`/api/v1/operation-audits`
+  操作审计列表与详情、`/api/v1/knowledge/feedback` 开放反馈（API Key 鉴权）；`ConsoleUser` 补
+  `tenant_id`、`source` 枚举扩 OIDC/SAML/CAS、`RetrievalFeedback` 补 `channel` / `end_user_id`、
+  `Document` 补 `restricted`，新增租户 / 可见性 / 审计 / 反馈相关 schema 18 个。
+- 需求文档升至 v1.18：收口 M14/M15/M16 交付记载，权限延后清单销账（多租户 / 文档级权限 /
+  组同步 / 操作审计均已交付），与主仓 `docs/` 副本逐字一致。
+- **图片阶段吞吐优化（回补进 `docs/M3-CONTRACTS.md` §2.1/§7.6）**：①parser 对 pdf 内嵌图片按图片
+  对象（xref）去重——页眉页脚 logo 这类「一个对象画在每一页」的图按出现位置计数，会让
+  247 页文档报出 493 张图、刷出几百条 warning，实测一份 2.7MB 国标省市区 pdf 的 `images[]`
+  从 100 降到 3、响应体 base64 从 1.7MB 降到 0.03MB、解析耗时 1.59s → 0.77s；图片数已达上限
+  且 `OCR_ENGINE=none` 时扫描页不再白渲染（渲出的 PNG 无人可读），220 页扫描件 29.34s → 13.54s；
+  ②server 侧图片描述改为并发，`.env.example` 新增 `IMAGE_DESCRIBE_CONCURRENCY`（默认 8）——
+  一张图一次 VLM 往返（`VISION_TIMEOUT_MS` 量级），串行时撑满上限的文档占着索引槽位半小时，
+  100 张的最坏耗时从约 33 分钟降到约 4 分钟；并发度上界看模型服务方限流而不是本机 CPU（被限
+  流的调用记 FAILED 且不重试）。两项均不改变对外行为：占位符回填仍按阅读顺序，单图失败仍不
+  失败整篇。`MAX_IMAGES_PER_DOC` 刻意未调大（parser 与 server 共用，调大同时放大解析响应体）
+- **知识图谱抽取吞吐优化（回补进 `docs/M16-CONTRACTS.md` §4.3）**：一万分片的库开启 GraphRAG 后
+  "重新抽取"以小时计。根因是分批栅栏——每批等齐最慢的那次 LLM 调用才提交下一批，而 LLM 延迟
+  长尾极重，线程池大半时间在批尾空转。改为无栅栏流水线（全部分片一次排队，谁空闲谁接下一个），
+  并把一次抽取拆成"N 路并发调模型 + 单写入者串行落图"两段：图 schema 用复合索引而非唯一约束，
+  并发 MERGE 同名实体会打架，原先"并发只能是 2"正是拿正确性换速度；拆开后模型调用只受限流约束，
+  同一个库的图写入反而比原先更严格。`.env.example` **移除 `GRAPH_EXTRACT_BATCH_SIZE`**（它描述的
+  机制已不存在；存量 `.env` 里留着不报错也不生效），`GRAPH_EXTRACT_CONCURRENCY` 默认 2 → 8。
+  抽取任务同时移到独立线程池（core 1 / max 2）——它是全系统唯一以小时计的任务，此前与文档解析
+  共用 core 2 / max 4 的索引池，两个全量抽取就能让文档上传排在一个明天才结束的活后面。
+  **模型侧峰值并发 = 2 × `GRAPH_EXTRACT_CONCURRENCY`**（默认 16），限流额度紧的部署把后者调小即可，
+  正确性不依赖它。
+- **抽取限流改为退避重试（`docs/M16-CONTRACTS.md` §4.6，醒目提示：此前限流会静默丢片）**：
+  把抽取并发调到 24（峰值 = 24 × `GRAPH_TASK_CONCURRENCY`= 48）后 DashScope 返回 429，而抽取原先把
+  429 和"模型答歪了"同等对待——计入跳过、不重试。429 的语义是"稍后再试"且成片到来（额度一打穿，接下来
+  几十个调用全是 429），所以一次抽取可能静默丢掉几百个分片，还把它们计进界面上写着「输出校验未通过」
+  的那个数里。`.env.example` 新增 `GRAPH_EXTRACT_RETRY_ON_THROTTLE`（默认 3，填 0 恢复旧行为），
+  指数退避 + 抖动（固定退避会让所有线程一起重试、复现触发 429 的突发），等待发生在抽取线程内部并占着
+  并发槽位——限流时整次抽取自然降速到额度能承受的水平。只重试限流：鉴权失败/模型不存在/输入过长重试
+  一次也是同样结果。结束日志新增 `throttleRetries=`，它是"该不该降 `GRAPH_EXTRACT_CONCURRENCY`"的
+  唯一依据。**调并发前先看这个数**：撞限流的表现是失败率上升而不是变慢。
+- **图谱抽取降延迟（`docs/M16-CONTRACTS.md` §4.6，醒目提示：同一分片抽出的实体/关系可能比升级前少）**：
+  流水线化并把并发提到 12 之后，385 分片仍要 20 分钟，而并发从 2 提到 12（6 倍）几乎没变快——瓶颈不在并发。
+  实测归因：Neo4j 写入每片约 50ms（385 片共 19 秒，占 1.6%）、热点实体度数最大 88，最终落到 LLM 调用
+  37.4 秒/次，而用图里的实测均值精算 —— 16 实体 + 20 关系序列化约 1482 token，占 `max_tokens=2048` 的
+  72%，qwen-plus 约 40 token/s → 37 秒，与反算吻合。**抽取延迟 ≈ 输出 token 数 ÷ 生成速度，与并发无关**，
+  且均值就占 72% 预算、长尾必然溢出（实测 9% 的分片因 JSON 截断而整片丢失）。`.env.example` 新增
+  `GRAPH_EXTRACT_MODEL`（留空 = 沿用 `CHAT_MODEL`；换 turbo 档生成速度翻倍以上，而抽取只是照固定 JSON
+  形状填空，质量损失远小于用它做查询改写）与 `GRAPH_EXTRACT_MAX_ENTITIES`（默认 24，实体与关系共用上限）；
+  **`GRAPH_EXTRACT_MAX_TOKENS` 默认 2048 → 3072**。提示词新增数量上限与紧凑 JSON 要求，换来的是不再有
+  分片因截断整片丢失。另：图写入的 Chunk MERGE 补 `kb_id` 谓词以命中复合索引（原先退化为全 Chunk 扫描）。
+  **运维注意**：抽取只覆盖任务启动那一刻已完成索引的分片——批量导入后应等索引全部完成再点「重新抽取」，
+  否则界面上的覆盖分片数会远小于库里的分片总数，需要重跑。
+- **并发参数按机器可调（`docs/M16-CONTRACTS.md` §4.5）**：`.env.example` 新增
+  `INDEX_CONCURRENCY`（同时索引几个文档）、`GRAPH_TASK_CONCURRENCY`（几个知识库能同时重建图谱）、
+  `PARSER_MAX_WORKERS`（解析服务工作线程数），默认值等于此前的硬编码值，**不设变量的部署行为不变**。
+  文档里点明三个不随机器变大而变大的天花板：模型侧限流（撞上表现为任务失败率上升而非变慢）、
+  `PARSER_MAX_WORKERS`（解析是真 CPU 密集且 uvicorn 单进程，调大调用侧只会把队列挪到 parser 门口）、
+  `MYSQL_POOL_SIZE`（不同步扩就是把瓶颈换成 connection timeout），并给出 10 核 / 64GB 单机的一套
+  参考值。**图谱任务池由实际恒为 1 变为 2**（同 §4.4 ③ 的队列陷阱），parser 侧 OCR 调用池由固定 2
+  改为跟随 `PARSER_MAX_WORKERS`——它原本只是给单页 OCR 套超时的载体，却被所有 worker 共享，
+  扫描件批量场景被卡在 2 页并发。
+- **文档索引吞吐优化（回补进 `docs/M16-CONTRACTS.md` §4.4）**：①`.env.example` 新增
+  `EMBEDDING_CONCURRENCY`（默认 4）——嵌入批次此前逐批串行，500 个分片按批大小 10 算就是 50 次
+  网络往返、光嵌入要半分钟到两分钟，而批次之间毫无依赖；这是**全局**上限（共享线程池），几个文档
+  同时索引也不会把嵌入服务限流打穿，填 1 即恢复串行行为。②嵌入状态由逐分片 UPDATE 改为按批一条
+  语句（500 条降到 50 条）。③**同时索引的文档数由 2 变 4**：原索引池 `core=2/max=4/queue=200`，
+  而线程池只在队列满后才扩容，200 深的队列让 `max=4` 永不可达、实际并发恒为 2——批量上传 50 个
+  文件是两个两个处理的；改为 `core=max=4`。解析服务扛不住 4 路并发的部署需相应扩 parser 实例。
+
 - **权限体系：功能权限 + 知识库数据权限 + 单点登录（M15）**：新增 `docs/M15-CONTRACTS.md`（开发契约，
   含 6 张表的数据模型、18 个权限码与 5 个内置角色矩阵、两层授权的执行点、单点登录行为与升级说明）；
   `.env.example` 新增权限/SSO 分节：`AUTH_LDAP_ENABLED`（默认 false，不配就是升级前的行为）、

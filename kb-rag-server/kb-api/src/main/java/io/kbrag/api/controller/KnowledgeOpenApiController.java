@@ -2,14 +2,19 @@ package io.kbrag.api.controller;
 
 import io.kbrag.api.dto.KnowledgeCallRequest;
 import io.kbrag.api.dto.KnowledgeChatResponse;
+import io.kbrag.api.dto.KnowledgeFeedbackRequest;
+import io.kbrag.api.dto.KnowledgeFeedbackResponse;
 import io.kbrag.api.dto.KnowledgeSearchResponse;
 import io.kbrag.api.filter.ApiKeyAuthFilter;
 import io.kbrag.api.sse.SseChatStreamListener;
+import io.kbrag.app.feedback.RetrievalFeedbackService;
 import io.kbrag.app.openapi.ApiKeyPrincipal;
 import io.kbrag.app.openapi.KnowledgeApiService;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.entity.RetrievalFeedback;
+import io.kbrag.domain.enums.FeedbackVerdict;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -43,6 +48,7 @@ public class KnowledgeOpenApiController {
     private static final String EVENT_STREAM_CONTENT_TYPE = "text/event-stream";
 
     private final KnowledgeApiService knowledgeApiService;
+    private final RetrievalFeedbackService retrievalFeedbackService;
 
     /**
      * Retrieval only call.
@@ -100,6 +106,33 @@ public class KnowledgeOpenApiController {
         SseChatStreamListener listener = new SseChatStreamListener();
         knowledgeApiService.chatStreamAsync(principal, request.toCommand(), listener);
         return listener.emitter();
+    }
+
+    /**
+     * End user verdict on a returned chunk, the M16 contract section 7.
+     *
+     * <p>Authentication and the key's rate limit are the filter's, exactly as for the two call
+     * endpoints; the payload names a retrieval by its correlation id and the application layer
+     * resolves the knowledge base from the recorded insight. The caller is handed down rather than
+     * only checked for presence - like {@code /search} and {@code /chat} - because the authorisation
+     * question here is "was this retrieval yours", which only the key's scope can answer.
+     *
+     * @param request     feedback payload
+     * @param httpRequest current request, source of the authenticated caller
+     * @return persisted feedback id
+     */
+    @PostMapping("/feedback")
+    public Result<KnowledgeFeedbackResponse> feedback(@Valid @RequestBody KnowledgeFeedbackRequest request,
+                                                      HttpServletRequest httpRequest) {
+        ApiKeyPrincipal principal = principalOf(httpRequest);
+        FeedbackVerdict verdict = FeedbackVerdict.from(request.getVerdict());
+        if (verdict == null) {
+            throw BizException.invalidParam("verdict 仅支持 GOOD 或 BAD");
+        }
+        RetrievalFeedback feedback = retrievalFeedbackService.recordFromOpenApi(
+                principal, request.getRequestId(), request.getChunkId(), verdict,
+                request.getComment(), request.getEndUserId());
+        return Result.success(KnowledgeFeedbackResponse.from(feedback));
     }
 
     /**

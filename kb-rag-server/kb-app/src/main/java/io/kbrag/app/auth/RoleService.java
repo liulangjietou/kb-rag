@@ -1,12 +1,16 @@
 package io.kbrag.app.auth;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.BuiltinTenants;
+import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.Permission;
 import io.kbrag.domain.entity.Role;
 import io.kbrag.domain.entity.RoleKbScope;
 import io.kbrag.domain.entity.RolePermission;
 import io.kbrag.domain.entity.UserRole;
+import io.kbrag.domain.mapper.DocAclMapper;
 import io.kbrag.domain.mapper.KnowledgeBaseMapper;
 import io.kbrag.domain.mapper.PermissionMapper;
 import io.kbrag.domain.mapper.RoleKbScopeMapper;
@@ -17,6 +21,7 @@ import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.service.BizIdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,6 +49,7 @@ public class RoleService {
     private final RolePermissionMapper rolePermissionMapper;
     private final RoleKbScopeMapper roleKbScopeMapper;
     private final UserRoleMapper userRoleMapper;
+    private final DocAclMapper docAclMapper;
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final BizIdGenerator idGenerator;
     private final PrincipalResolver principalResolver;
@@ -135,7 +141,7 @@ public class RoleService {
         role.setKbScopeAll(kbScopeAll ? 1 : 0);
         roleMapper.insert(role);
 
-        replacePermissions(role.getRoleId(), permissionCodes);
+        replacePermissions(role, permissionCodes);
         replaceKbScope(role.getRoleId(), kbScopeAll, kbIds);
         principalResolver.evictAll();
         log.info("role created, roleId={}, code={}", role.getRoleId(), roleCode);
@@ -166,7 +172,7 @@ public class RoleService {
         role.setKbScopeAll(kbScopeAll ? 1 : 0);
         roleMapper.updateById(role);
 
-        replacePermissions(roleId, permissionCodes);
+        replacePermissions(role, permissionCodes);
         replaceKbScope(roleId, kbScopeAll, kbIds);
         principalResolver.evictAll();
         log.info("role updated, roleId={}", roleId);
@@ -195,6 +201,9 @@ public class RoleService {
         }
         rolePermissionMapper.deleteByRoleId(roleId);
         roleKbScopeMapper.deleteByRoleId(roleId);
+        // Document grants held through the role go with it, the same argument as the two lines above:
+        // a grant naming a role nobody can resolve renders as a corrupted binding, never as an open door.
+        docAclMapper.deleteByRoleId(roleId);
         roleMapper.deleteById(role.getId());
         principalResolver.evictAll();
         log.info("role deleted, roleId={}", roleId);
@@ -217,12 +226,24 @@ public class RoleService {
         }
     }
 
-    private void replacePermissions(String roleId, List<String> permissionCodes) {
-        rolePermissionMapper.deleteByRoleId(roleId);
-        if (permissionCodes == null || permissionCodes.isEmpty()) {
+    /**
+     * Replaces the permission grants of one role.
+     *
+     * <p>The single gate of the whole permission granting: the console editor, the role creation and the
+     * built in role copy a new tenant is seeded with all pass through here, so the platform level rule
+     * below is stated once and cannot be walked around by a caller that inserts grant rows itself.
+     *
+     * @param role            role receiving the grants, its tenant decides what it may hold
+     * @param permissionCodes complete new set of granted permission codes
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void replacePermissions(Role role, List<String> permissionCodes) {
+        rolePermissionMapper.deleteByRoleId(role.getRoleId());
+        if (CollectionUtils.isEmpty(permissionCodes)) {
             return;
         }
         Set<String> distinct = new LinkedHashSet<>(permissionCodes);
+        requireGrantableByTenant(role, distinct);
         Set<String> known = permissionMapper.selectList(new LambdaQueryWrapper<Permission>()
                         .in(Permission::getCode, distinct))
                 .stream()
@@ -234,9 +255,36 @@ public class RoleService {
         }
         for (String code : distinct) {
             RolePermission grant = new RolePermission();
-            grant.setRoleId(roleId);
+            grant.setRoleId(role.getRoleId());
             grant.setPermissionCode(code);
             rolePermissionMapper.insert(grant);
+        }
+    }
+
+    /**
+     * Refuses a platform level code on a role outside the default tenant.
+     *
+     * <p>平台级权限码只有默认租户（平台运营方）的角色能持有：{@code tenant:manage} 既能建租户停租户，
+     * 又让查询绕过用户表与角色表的租户行过滤，落到子租户手里等于该租户管理员能接管整个平台。
+     * 这条不变量对所有入口一视同仁 —— 人工勾选是一个入口，建租户时复制默认租户的内置角色是另一个，
+     * 后者曾原样搬走 {@code tenant:manage}，正是这个方法要拦掉的情况。
+     *
+     * @param role  role receiving the grants
+     * @param codes distinct codes about to be granted
+     */
+    private void requireGrantableByTenant(Role role, Set<String> codes) {
+        if (BuiltinTenants.isDefault(role.getTenantId())) {
+            return;
+        }
+        List<String> refused = codes.stream()
+                .filter(PermissionCodes.PLATFORM_ONLY::contains)
+                .toList();
+        if (CollectionUtils.isNotEmpty(refused)) {
+            log.error("platform only permission refused on a tenant role, errorCode={}, roleId={}, "
+                            + "tenantId={}, codes={}",
+                    ErrorCode.FORBIDDEN, role.getRoleId(), role.getTenantId(), refused);
+            throw new BizException(ErrorCode.FORBIDDEN,
+                    "平台级权限仅默认租户的角色可持有：" + refused);
         }
     }
 

@@ -10,6 +10,25 @@ Author: owlzhangfq@gmail.com
 
 import os
 
+
+def _read_int_env(name: str, default: int) -> int:
+    """Read an integer env var, falling back to a fixed default on absence
+    or a malformed value.
+
+    Kept as the single lenient parsing point for runtime configuration
+    (fast-fail is enforced elsewhere, at the request boundary) so a typo in
+    an env var degrades to the documented default instead of crashing
+    service startup.
+    """
+    raw = os.getenv(name)
+    if not raw or not raw.strip():
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
+
+
 # Service identity
 SERVICE_NAME = "kb-rag-parser"
 SERVICE_PORT = 20001
@@ -29,7 +48,15 @@ MAX_ZIP_ENTRY_COUNT = 2000
 PARSE_TIMEOUT_SECONDS = 300
 
 # Thread pool size used to run blocking parser code off the event loop.
-PARSER_EXECUTOR_MAX_WORKERS = 4
+#
+# This is the service's real concurrency ceiling: uvicorn runs a single process here, so however many
+# documents kb-rag-server submits at once, only this many are parsed in parallel and the rest queue.
+# Raising the caller's INDEX_CONCURRENCY past this value does not make anything faster - it only moves
+# the queue upstream. Configurable (it used to be a fixed 4) because the right number depends on the
+# host: unlike the caller's threads, these do real CPU work (PDF text extraction, page rendering, image
+# decoding), so keep it under the core count and leave room for whatever else runs alongside
+# (MySQL/ES/Qdrant, typically).
+PARSER_EXECUTOR_MAX_WORKERS = _read_int_env("PARSER_MAX_WORKERS", 4)
 
 # Supported file extensions (registry keys), kept in one place to avoid
 # scattering the whitelist across modules.
@@ -38,24 +65,6 @@ SUPPORTED_FILE_EXTENSIONS = frozenset({"pdf", "docx", "txt", "md", "sql", "xlsx"
 # Zip-based formats that must go through the zip safety precheck before
 # being handed to python-docx / openpyxl.
 ZIP_BASED_FILE_EXTENSIONS = frozenset({"docx", "xlsx"})
-
-
-def _read_int_env(name: str, default: int) -> int:
-    """Read an integer env var, falling back to a fixed default on absence
-    or a malformed value.
-
-    Kept as the single lenient parsing point for runtime configuration
-    (fast-fail is enforced elsewhere, at the request boundary) so a typo in
-    an env var degrades to the documented default instead of crashing
-    service startup.
-    """
-    raw = os.getenv(name)
-    if not raw or not raw.strip():
-        return default
-    try:
-        return int(raw.strip())
-    except ValueError:
-        return default
 
 
 # --- M3 multimodal parsing additions (M3-CONTRACTS.md §2.1) ---

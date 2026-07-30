@@ -1,5 +1,6 @@
 package io.kbrag.app.retrieval;
 
+import io.kbrag.app.document.DocumentAclService;
 import io.kbrag.app.index.ActiveVersionResolver;
 import io.kbrag.app.index.IndexAliasManager;
 import io.kbrag.domain.port.FulltextStore;
@@ -13,6 +14,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -52,8 +54,13 @@ class RetrievalIndexContextResolverTest {
         when(indexAliasManager.fulltextAlias(KB_ID)).thenReturn(ES_ALIAS);
         when(indexAliasManager.vectorAlias(KB_ID)).thenReturn(VECTOR_ALIAS);
         when(activeVersionResolver.activeVersionIds(KB_ID)).thenReturn(List.of(ACTIVE_VERSION));
+        // A pass-through ACL: document visibility is not the decision under test here, and trimming
+        // nothing keeps every version-set assertion below meaningful.
+        DocumentAclService documentAclService = mock(DocumentAclService.class);
+        when(documentAclService.trimRestricted(anyString(), anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
         resolver = new RetrievalIndexContextResolver(indexAliasManager, activeVersionResolver,
-                fulltextStore, vectorStore);
+                documentAclService, fulltextStore, vectorStore);
     }
 
     @Test

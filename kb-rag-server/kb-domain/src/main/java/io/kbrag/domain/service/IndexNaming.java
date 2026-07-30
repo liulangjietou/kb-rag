@@ -1,6 +1,7 @@
 package io.kbrag.domain.service;
 
 import io.kbrag.common.constant.KbConstants;
+import io.kbrag.domain.constant.BuiltinTenants;
 import io.kbrag.domain.enums.VectorEngine;
 import org.springframework.stereotype.Component;
 
@@ -23,6 +24,12 @@ import java.util.Locale;
  * version is deliberate: swapping the embedding model must not force a rebuild of the full text
  * index, which would also reset the BM25 scoring baseline and the tokenizer dictionary.
  *
+ * <p>Since M16 a knowledge base outside the default tenant carries a tenant segment right after the
+ * prefix: {@code kb_{tenantSegment}_{kbId}_...}. The default tenant keeps the historical names - that
+ * is the compatibility red line, injecting a segment there would orphan every alias an upgraded
+ * deployment has. The one argument overloads without a tenant exist for exactly that default tenant
+ * behaviour and for the M1-M15 call sites and tests written against it.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Component
@@ -44,7 +51,19 @@ public class IndexNaming {
      * @return physical index or collection name
      */
     public String vectorPhysicalName(String kbId, String embeddingSegment) {
-        return physicalName(kbId, embeddingSegment, KbConstants.SNAPSHOT_SEGMENT_V1);
+        return vectorPhysicalName(null, kbId, embeddingSegment);
+    }
+
+    /**
+     * Builds the physical name of the vector index of a tenant scoped knowledge base.
+     *
+     * @param tenantId         owning tenant business id, the default tenant adds no segment
+     * @param kbId             knowledge base business id
+     * @param embeddingSegment embedding version segment, {@code none} in zero key mode
+     * @return physical index or collection name
+     */
+    public String vectorPhysicalName(String tenantId, String kbId, String embeddingSegment) {
+        return physicalName(tenantId, kbId, embeddingSegment, KbConstants.SNAPSHOT_SEGMENT_V1);
     }
 
     /**
@@ -61,7 +80,21 @@ public class IndexNaming {
      * @return physical snapshot index or collection name
      */
     public String snapshotPhysicalName(String kbId, String embeddingSegment, int sequence) {
-        return physicalName(kbId, embeddingSegment,
+        return snapshotPhysicalName(null, kbId, embeddingSegment, sequence);
+    }
+
+    /**
+     * Builds the physical name of a release snapshot of a tenant scoped knowledge base.
+     *
+     * @param tenantId         owning tenant business id, the default tenant adds no segment
+     * @param kbId             knowledge base business id
+     * @param embeddingSegment embedding segment of the source index, carried over unchanged
+     * @param sequence         knowledge base level snapshot sequence, one based
+     * @return physical snapshot index or collection name
+     */
+    public String snapshotPhysicalName(String tenantId, String kbId, String embeddingSegment,
+                                       int sequence) {
+        return physicalName(tenantId, kbId, embeddingSegment,
                 KbConstants.SNAPSHOT_SEGMENT_PREFIX + sequence);
     }
 
@@ -109,7 +142,21 @@ public class IndexNaming {
      * @return physical index name
      */
     public String fulltextPhysicalName(String kbId, VectorEngine engine, String embeddingSegment) {
-        return physicalName(kbId, fulltextEmbeddingSegment(engine, embeddingSegment),
+        return fulltextPhysicalName(null, kbId, engine, embeddingSegment);
+    }
+
+    /**
+     * Builds the physical name of the full text index of a tenant scoped knowledge base.
+     *
+     * @param tenantId         owning tenant business id, the default tenant adds no segment
+     * @param kbId             knowledge base business id
+     * @param engine           configured vector engine
+     * @param embeddingSegment embedding version segment, {@code none} in zero key mode
+     * @return physical index name
+     */
+    public String fulltextPhysicalName(String tenantId, String kbId, VectorEngine engine,
+                                       String embeddingSegment) {
+        return physicalName(tenantId, kbId, fulltextEmbeddingSegment(engine, embeddingSegment),
                 KbConstants.SNAPSHOT_SEGMENT_V1);
     }
 
@@ -136,7 +183,20 @@ public class IndexNaming {
      * @return alias name
      */
     public String alias(String kbId, VectorEngine engine) {
-        return NAME_PREFIX + NAME_SEPARATOR + normalizeKbId(kbId) + NAME_SEPARATOR + engine.code();
+        return alias(null, kbId, engine);
+    }
+
+    /**
+     * Builds the alias of an engine for a tenant scoped knowledge base.
+     *
+     * @param tenantId owning tenant business id, the default tenant adds no segment
+     * @param kbId     knowledge base business id
+     * @param engine   engine the alias belongs to
+     * @return alias name
+     */
+    public String alias(String tenantId, String kbId, VectorEngine engine) {
+        return NAME_PREFIX + tenantInfix(tenantId) + NAME_SEPARATOR + normalizeKbId(kbId)
+                + NAME_SEPARATOR + engine.code();
     }
 
     /**
@@ -151,7 +211,19 @@ public class IndexNaming {
      * @return multimodal alias
      */
     public String multimodalAlias(String kbId) {
-        return NAME_PREFIX + NAME_SEPARATOR + normalizeKbId(kbId) + NAME_SEPARATOR + MULTIMODAL_MARKER;
+        return multimodalAlias(null, kbId);
+    }
+
+    /**
+     * Builds the alias of the multimodal index of a tenant scoped knowledge base.
+     *
+     * @param tenantId owning tenant business id, the default tenant adds no segment
+     * @param kbId     knowledge base business id
+     * @return multimodal alias
+     */
+    public String multimodalAlias(String tenantId, String kbId) {
+        return NAME_PREFIX + tenantInfix(tenantId) + NAME_SEPARATOR + normalizeKbId(kbId)
+                + NAME_SEPARATOR + MULTIMODAL_MARKER;
     }
 
     /**
@@ -166,7 +238,19 @@ public class IndexNaming {
      * @return physical multimodal index or collection name
      */
     public String multimodalPhysicalName(String kbId, String embeddingSegment) {
-        return physicalName(kbId, embeddingSegment, MULTIMODAL_MARKER);
+        return multimodalPhysicalName(null, kbId, embeddingSegment);
+    }
+
+    /**
+     * Builds the physical name of the multimodal index of a tenant scoped knowledge base.
+     *
+     * @param tenantId         owning tenant business id, the default tenant adds no segment
+     * @param kbId             knowledge base business id
+     * @param embeddingSegment abbreviated multimodal model segment
+     * @return physical multimodal index or collection name
+     */
+    public String multimodalPhysicalName(String tenantId, String kbId, String embeddingSegment) {
+        return physicalName(tenantId, kbId, embeddingSegment, MULTIMODAL_MARKER);
     }
 
     /**
@@ -198,10 +282,31 @@ public class IndexNaming {
         return builder.length() == 0 ? KbConstants.EMBEDDING_SEGMENT_NONE : builder.toString();
     }
 
-    private String physicalName(String kbId, String embeddingSegment, String snapshotSegment) {
-        return NAME_PREFIX + NAME_SEPARATOR + normalizeKbId(kbId)
+    private String physicalName(String tenantId, String kbId, String embeddingSegment,
+                                String snapshotSegment) {
+        return NAME_PREFIX + tenantInfix(tenantId) + NAME_SEPARATOR + normalizeKbId(kbId)
                 + NAME_SEPARATOR + embeddingSegment
                 + NAME_SEPARATOR + snapshotSegment;
+    }
+
+    /**
+     * Tenant infix of a name, empty for the default tenant.
+     *
+     * <p>The default tenant deliberately contributes nothing: its names must stay byte identical to
+     * the pre-M16 ones or an upgraded deployment loses every alias it has. The value of the segment on
+     * the other tenants is operational legibility - a physical index attached to the wrong tenant is
+     * visible in the name itself - not collision avoidance, the kbId is already globally unique.
+     *
+     * @param tenantId owning tenant business id, {@code null} means the default tenant
+     * @return {@code _segment} infix, or an empty string for the default tenant
+     */
+    private String tenantInfix(String tenantId) {
+        if (BuiltinTenants.isDefault(tenantId)) {
+            return "";
+        }
+        String prefix = KbConstants.TENANT_ID_PREFIX + KbConstants.ID_SEPARATOR;
+        String value = tenantId.startsWith(prefix) ? tenantId.substring(prefix.length()) : tenantId;
+        return NAME_SEPARATOR + value.toLowerCase(Locale.ROOT);
     }
 
     /**

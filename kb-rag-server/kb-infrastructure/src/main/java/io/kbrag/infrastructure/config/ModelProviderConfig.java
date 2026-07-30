@@ -185,26 +185,40 @@ public class ModelProviderConfig {
             log.info("graph extraction chat provider not configured, extraction disabled");
             return new UnconfiguredChatProvider();
         }
-        KbProperties.Chat extractConfig = withMaxTokens(chatConfig, properties.getGraph().getExtractMaxTokens());
-        log.info("graph extraction chat provider configured, model={}, maxTokens={}",
-                extractConfig.getModel(), extractConfig.getMaxTokens());
+        KbProperties.Graph graphConfig = properties.getGraph();
+        KbProperties.Chat extractConfig = withExtractionSettings(chatConfig,
+                graphConfig.getExtractMaxTokens(), graphConfig.getExtractModel());
+        log.info("graph extraction chat provider configured, model={}, maxTokens={}, inheritedModel={}",
+                extractConfig.getModel(), extractConfig.getMaxTokens(),
+                graphConfig.getExtractModel() == null || graphConfig.getExtractModel().isBlank());
         return new DashScopeChatProvider(extractConfig);
     }
 
     /**
-     * Copies a chat configuration substituting only the token budget.
+     * Copies a chat configuration for the extraction stage, substituting the budget and the model.
+     *
+     * <p>The model is substituted only when the extraction one is set, so a deployment that says nothing
+     * keeps running the shared chat model. Extraction and query rewrite want opposite things from a model
+     * - rewrite is one sentence and wants fluency, extraction fills a fixed JSON shape and wants
+     * throughput - and a turbo tier model roughly halves the generation time of the thousand-odd tokens
+     * an extraction answer carries.
      *
      * @param source    configuration to copy
      * @param maxTokens generation budget to substitute
-     * @return copy carrying the substituted budget
+     * @param model     extraction model, blank inherits the source model
+     * @return copy carrying the substituted budget and model
      */
-    private KbProperties.Chat withMaxTokens(KbProperties.Chat source, int maxTokens) {
+    private KbProperties.Chat withExtractionSettings(KbProperties.Chat source, int maxTokens, String model) {
         KbProperties.Chat copy = new KbProperties.Chat();
         copy.setProvider(source.getProvider());
-        copy.setModel(source.getModel());
+        copy.setModel(model == null || model.isBlank() ? source.getModel() : model.trim());
         copy.setApiKey(source.getApiKey());
         copy.setBaseUrl(source.getBaseUrl());
         copy.setTimeoutMs(source.getTimeoutMs());
+        // The read ceiling has to come along: it is what bounds a generation, and an extraction answer is
+        // the longest one the deployment produces. Leaving it at the field default silently ignored
+        // whatever kb.chat.generate-timeout-ms the deployment had set.
+        copy.setGenerateTimeoutMs(source.getGenerateTimeoutMs());
         copy.setTemperature(source.getTemperature());
         copy.setMaxTokens(maxTokens);
         return copy;
@@ -225,6 +239,7 @@ public class ModelProviderConfig {
         copy.setApiKey(source.getApiKey());
         copy.setBaseUrl(source.getBaseUrl());
         copy.setTimeoutMs(source.getTimeoutMs());
+        copy.setGenerateTimeoutMs(source.getGenerateTimeoutMs());
         copy.setTemperature(0.0d);
         copy.setMaxTokens(source.getMaxTokens());
         return copy;

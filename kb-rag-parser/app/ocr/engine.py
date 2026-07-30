@@ -29,12 +29,16 @@ from app.errors import ErrorCode
 logger = logging.getLogger(__name__)
 
 # Bounds a single page's OCR call under OCR_TIMEOUT_S from within the
-# parser's own worker thread (app.config.PARSER_EXECUTOR_MAX_WORKERS);
-# small and module-level since OCR calls only ever run one at a time per
-# in-flight parse (one page at a time, sequentially).
-_OCR_CALL_EXECUTOR_MAX_WORKERS = 2
+# parser's own worker thread. OCR calls do run one at a time *per* in-flight
+# parse (one page after another), but this executor is shared across all of
+# them, so its size has to cover PARSER_EXECUTOR_MAX_WORKERS parses each
+# holding one slot. The previous fixed 2 silently capped a scanned-document
+# batch at two concurrent pages no matter how many parser workers were free:
+# the pool existed only to carry the timeout, yet it had become the narrowest
+# point in the chain. Sizing it off the worker count keeps it a timeout
+# carrier rather than a throughput limit.
 _ocr_call_executor = ThreadPoolExecutor(
-    max_workers=_OCR_CALL_EXECUTOR_MAX_WORKERS, thread_name_prefix="ocr-worker"
+    max_workers=config.PARSER_EXECUTOR_MAX_WORKERS, thread_name_prefix="ocr-worker"
 )
 
 

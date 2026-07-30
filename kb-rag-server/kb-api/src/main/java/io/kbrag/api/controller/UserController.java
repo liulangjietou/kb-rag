@@ -1,14 +1,17 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.AssignRolesRequest;
 import io.kbrag.api.dto.CreateUserRequest;
+import io.kbrag.api.dto.MoveUserTenantRequest;
 import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.ResetUserPasswordRequest;
 import io.kbrag.api.dto.UpdateUserRequest;
 import io.kbrag.api.dto.UpdateUserStatusRequest;
 import io.kbrag.api.dto.UserResponse;
 import io.kbrag.app.auth.UserService;
+import io.kbrag.app.auth.AccessGuard;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.constant.PermissionCodes;
@@ -88,13 +91,22 @@ public class UserController {
     /**
      * Creates a local account with an initial password that has to be rotated at first login.
      *
+     * <p>Naming a tenant is reserved to the platform operator: it is how the first account of a
+     * fresh tenant comes into being, and nobody else has a reason to create accounts outside their
+     * own tenant.
+     *
      * @param request account payload
      * @return created account
      */
     @PostMapping
+    @AuditedOperation(module = "USER", action = "CREATE", targetType = "USER",
+            targetId = "#result.data.userId")
     public Result<UserResponse> create(@Valid @RequestBody CreateUserRequest request) {
+        if (request.tenantId() != null && !request.tenantId().isBlank()) {
+            AccessGuard.requirePermission(PermissionCodes.TENANT_MANAGE);
+        }
         AdminUser user = userService.create(request.username(), request.displayName(), request.email(),
-                request.password(), request.roleIds());
+                request.password(), request.roleIds(), request.tenantId());
         return Result.success(UserResponse.from(user, userService.roleIdsOf(user.getUserId()), null));
     }
 
@@ -106,6 +118,7 @@ public class UserController {
      * @return updated account
      */
     @PutMapping("/{userId}")
+    @AuditedOperation(module = "USER", action = "UPDATE", targetType = "USER", targetId = "#userId")
     public Result<UserResponse> update(@PathVariable String userId,
                                        @Valid @RequestBody UpdateUserRequest request) {
         userService.update(userId, request.displayName(), request.email());
@@ -121,6 +134,7 @@ public class UserController {
      * @return empty success envelope
      */
     @PutMapping("/{userId}/status")
+    @AuditedOperation(module = "USER", action = "UPDATE_STATUS", targetType = "USER", targetId = "#userId")
     public Result<Void> updateStatus(@PathVariable String userId,
                                      @Valid @RequestBody UpdateUserStatusRequest request) {
         UserStatus status = parseStatus(request.status());
@@ -139,9 +153,29 @@ public class UserController {
      * @return empty success envelope
      */
     @PutMapping("/{userId}/roles")
+    @AuditedOperation(module = "USER", action = "ASSIGN_ROLES", targetType = "USER", targetId = "#userId")
     public Result<Void> assignRoles(@PathVariable String userId,
                                     @Valid @RequestBody AssignRolesRequest request) {
         userService.assignRoles(userId, request.roleIds());
+        return Result.success(null);
+    }
+
+    /**
+     * Moves an account into another tenant, dropping its role bindings.
+     *
+     * <p>Held to {@code tenant:manage} instead of the class level code: crossing a tenant boundary
+     * is a platform operator action, not day to day user administration.
+     *
+     * @param userId  user business id
+     * @param request target tenant
+     * @return empty success envelope
+     */
+    @PutMapping("/{userId}/tenant")
+    @RequiresPermission(PermissionCodes.TENANT_MANAGE)
+    @AuditedOperation(module = "USER", action = "MOVE_TENANT", targetType = "USER", targetId = "#userId")
+    public Result<Void> moveTenant(@PathVariable String userId,
+                                   @Valid @RequestBody MoveUserTenantRequest request) {
+        userService.moveTenant(userId, request.tenantId());
         return Result.success(null);
     }
 
@@ -153,6 +187,7 @@ public class UserController {
      * @return empty success envelope
      */
     @PostMapping("/{userId}/reset-password")
+    @AuditedOperation(module = "USER", action = "RESET_PASSWORD", targetType = "USER", targetId = "#userId")
     public Result<Void> resetPassword(@PathVariable String userId,
                                       @Valid @RequestBody ResetUserPasswordRequest request) {
         userService.resetPassword(userId, request.newPassword());
@@ -166,6 +201,7 @@ public class UserController {
      * @return empty success envelope
      */
     @DeleteMapping("/{userId}")
+    @AuditedOperation(module = "USER", action = "DELETE", targetType = "USER", targetId = "#userId")
     public Result<Void> delete(@PathVariable String userId) {
         userService.delete(userId);
         return Result.success(null);

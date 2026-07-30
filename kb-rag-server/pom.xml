@@ -43,6 +43,10 @@
         <minio.version>8.5.17</minio.version>
         <neo4j-java-driver.version>5.28.9</neo4j-java-driver.version>
         <commons-collections4.version>4.4</commons-collections4.version>
+        <!-- The exact release Spring Security 6.3 (the Boot 3.3 line) builds against, so the jar
+             stays in step with the rest of the ecosystem even though the Boot BOM itself does not
+             manage this coordinate. -->
+        <nimbus-jose-jwt.version>9.37.3</nimbus-jose-jwt.version>
     </properties>
 
     <dependencyManagement>
@@ -91,6 +95,11 @@
                 <groupId>org.apache.commons</groupId>
                 <artifactId>commons-collections4</artifactId>
                 <version>${commons-collections4.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.nimbusds</groupId>
+                <artifactId>nimbus-jose-jwt</artifactId>
+                <version>${nimbus-jose-jwt.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

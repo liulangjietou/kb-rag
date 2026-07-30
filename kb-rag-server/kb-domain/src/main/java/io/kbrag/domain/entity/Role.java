@@ -32,6 +32,10 @@ public class Role extends BaseEntity {
     @TableField("role_id")
     private String roleId;
 
+    /** Owning tenant business id, defaulted to the built in tenant by the V17 migration. */
+    @TableField("tenant_id")
+    private String tenantId;
+
     /** Stable code, referenced by the bootstrap wiring of the built in roles. */
     @TableField("code")
     private String code;

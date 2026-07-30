@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.CreateEvalDatasetRequest;
 import io.kbrag.api.dto.EvalDatasetResponse;
@@ -46,6 +47,8 @@ public class EvalDatasetController {
      */
     @PostMapping("/api/v1/kb/{kbId}/eval-datasets")
     @RequiresPermission(PermissionCodes.EVAL_WRITE)
+    @AuditedOperation(module = "EVAL", action = "CREATE", targetType = "EVAL_DATASET",
+            targetId = "#result.data.datasetId")
     public Result<EvalDatasetResponse> create(@PathVariable String kbId,
                                               @Valid @RequestBody CreateEvalDatasetRequest request) {
         AccessGuard.requireKbAccess(kbId);
@@ -74,6 +77,8 @@ public class EvalDatasetController {
      */
     @PostMapping("/api/v1/kb/{kbId}/eval-datasets/import-demo")
     @RequiresPermission(PermissionCodes.EVAL_WRITE)
+    @AuditedOperation(module = "EVAL", action = "IMPORT_DEMO", targetType = "KNOWLEDGE_BASE",
+            targetId = "#kbId")
     public Result<ImportDemoEvalDatasetResponse> importDemo(@PathVariable String kbId) {
         AccessGuard.requireKbAccess(kbId);
         return Result.success(ImportDemoEvalDatasetResponse.from(evalDemoImportService.importDemo(kbId)));
@@ -100,6 +105,7 @@ public class EvalDatasetController {
      */
     @DeleteMapping("/api/v1/eval-datasets/{datasetId}")
     @RequiresPermission(PermissionCodes.EVAL_WRITE)
+    @AuditedOperation(module = "EVAL", action = "DELETE", targetType = "EVAL_DATASET", targetId = "#datasetId")
     public Result<Void> delete(@PathVariable String datasetId) {
         kbScopeGuard.requireDatasetAccess(datasetId);
         evalDatasetService.delete(datasetId);

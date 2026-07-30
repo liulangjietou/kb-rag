@@ -341,7 +341,15 @@ docker compose -f docker-compose.lite.yml --profile graph up -d
 - 管理端提供实体/关系抽取触发、抽取概要、实体列表与实体关联分片查询五个端点，
   以及知识图谱可视化页（前端零依赖 SVG 力导向布局）
 
-详见 [`docs/M7-CONTRACTS.md`](docs/M7-CONTRACTS.md)。
+**抽取吞吐（M16 起）**：抽取按无栅栏流水线跑，`GRAPH_EXTRACT_CONCURRENCY`（默认 8）
+是一次抽取任务内并发进行的 LLM 调用数——抽取耗时几乎全在模型调用上，这个值直接决定
+一次全量抽取跑多久（一万分片按每次 3 秒算，并发 2 是四个多小时，并发 8 是一小时出头）。
+图写入由单写入者线程串行执行，调高并发不影响 Neo4j 的正确性，只需看模型侧限流吃不吃得住；
+同时进行的抽取任务数受独立线程池上限（2）约束，所以**模型侧峰值并发 = 2 × 该值**（默认 16）。
+`GRAPH_EXTRACT_BATCH_SIZE` 已随栅栏机制一同移除（存量 `.env` 里留着不报错也不生效）。
+
+详见 [`docs/M7-CONTRACTS.md`](docs/M7-CONTRACTS.md) 与
+[`docs/M16-CONTRACTS.md`](docs/M16-CONTRACTS.md) §4.3。
 
 ## Demo 数据集与聊天记录映射（M3）
 
@@ -357,7 +365,20 @@ docker compose -f docker-compose.lite.yml --profile graph up -d
   档案见 [`mappings/README.md`](mappings/README.md)。
 - M3 新增环境变量（`.env.example`）：`VISION_MODEL`/`VISION_TIMEOUT_MS`（图片理解
   VisionProvider 配置）、`SCANNED_PAGE_TEXT_THRESHOLD`（扫描页判定阈值）、
-  `MAX_IMAGES_PER_DOC`（单文档图片数上限）、`DEMO_DATA_DIR`。
+  `MAX_IMAGES_PER_DOC`（单文档图片数上限）、`DEMO_DATA_DIR`；后补
+  `IMAGE_DESCRIBE_CONCURRENCY`（单文档图片描述并发度，默认 8，见
+  `docs/M3-CONTRACTS.md` §7.6）。
+
+**索引吞吐调优（M16 起）**：文档索引是多级并发串起来的，乘起来才是上游服务看到的量。
+`INDEX_CONCURRENCY`（默认 4）决定同时索引几个文档；每个文档内部的嵌入批次再按
+`EMBEDDING_CONCURRENCY`（默认 4，**全局**上限）并发——一个批次就是一次嵌入请求，500 个分片按
+批大小 10 算是 50 次往返，串行跑是索引里最长的一段等待。
+
+调参前先认清三个**不随机器变大而变大**的天花板：**模型侧限流**（撞上的表现是任务失败率上升
+而不是变慢）、**`PARSER_MAX_WORKERS`**（解析是真 CPU 密集且 uvicorn 单进程，把
+`INDEX_CONCURRENCY` 调到远超它只是把队列挪到 parser 门口）、**`MYSQL_POOL_SIZE`**（不同步扩
+就是把瓶颈换成 connection timeout）。10 核 / 64GB 单机的一套参考值见
+[`docs/M16-CONTRACTS.md`](docs/M16-CONTRACTS.md) §4.5。
 
 ## 聊天记录格式扩展与映射维护（M8）
 

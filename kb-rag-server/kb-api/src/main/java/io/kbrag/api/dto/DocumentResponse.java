@@ -3,6 +3,7 @@ package io.kbrag.api.dto;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.kbrag.app.document.UploadOutcome;
 import io.kbrag.domain.entity.Document;
+import io.kbrag.domain.enums.DocVisibility;
 import io.kbrag.domain.enums.PublishStatus;
 
 import java.time.LocalDateTime;
@@ -24,6 +25,8 @@ import java.time.LocalDateTime;
  * @param effectiveAt      ISO lower bound of the validity window, {@code null} means unbounded
  * @param expiresAt        ISO upper bound of the validity window, {@code null} means unbounded
  * @param trashedAt        ISO instant the document entered the recycle bin, {@code null} outside it
+ * @param restricted       {@code true} when the content is readable only by the granted roles; the row
+ *                         itself always shows (M16 - hiding rows would make the list lie about counts)
  * @param createdAt        ISO creation timestamp
  * @param versionId        version the upload produced, only present on the upload response
  * @param version          version number of that version, only present on the upload response
@@ -47,6 +50,7 @@ public record DocumentResponse(
         @JsonProperty("effective_at") String effectiveAt,
         @JsonProperty("expires_at") String expiresAt,
         @JsonProperty("trashed_at") String trashedAt,
+        boolean restricted,
         @JsonProperty("created_at") String createdAt,
         @JsonProperty("version_id") String versionId,
         String version,
@@ -98,6 +102,7 @@ public record DocumentResponse(
                 iso(entity.getEffectiveAt()),
                 iso(entity.getExpiresAt()),
                 iso(entity.getTrashedAt()),
+                entity.getVisibility() == DocVisibility.RESTRICTED,
                 entity.getCreatedAt() == null ? null : entity.getCreatedAt().toString(),
                 versionId,
                 version,

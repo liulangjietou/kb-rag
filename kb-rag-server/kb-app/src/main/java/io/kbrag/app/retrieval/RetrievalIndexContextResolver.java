@@ -1,5 +1,6 @@
 package io.kbrag.app.retrieval;
 
+import io.kbrag.app.document.DocumentAclService;
 import io.kbrag.app.index.ActiveVersionResolver;
 import io.kbrag.app.index.IndexAliasManager;
 import io.kbrag.common.api.ErrorCode;
@@ -38,6 +39,13 @@ import java.util.Map;
  * the check lives here and not in the search path: falling back has to switch the visibility set at the same
  * time, and only this class holds both.
  *
+ * <p><b>The document ACL trim happens here</b> (M16 contract section 5.2) and on both branches, because
+ * this is the one place every visibility set of every calling context flows through. A release freezes
+ * <em>which versions</em> answer, never <em>who may see them</em>: a document restricted after the
+ * release must disappear from the released application too, and the open API - a caller with no roles -
+ * must never receive a restricted document at all. The trim is uncached by design; an expired clearance
+ * costs more than the one indexed query it takes.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
@@ -47,6 +55,7 @@ public class RetrievalIndexContextResolver {
 
     private final IndexAliasManager indexAliasManager;
     private final ActiveVersionResolver activeVersionResolver;
+    private final DocumentAclService documentAclService;
     private final FulltextStore fulltextStore;
     private final VectorStore vectorStore;
 
@@ -69,8 +78,8 @@ public class RetrievalIndexContextResolver {
                     ErrorCode.INTERNAL_ERROR, kbId, override.fulltextIndex(), override.vectorIndex());
             return liveContext(kbId, true);
         }
-        return new IndexContext(override.fulltextIndex(), override.vectorIndex(), frozenVersionIds,
-                false, true);
+        return new IndexContext(override.fulltextIndex(), override.vectorIndex(),
+                documentAclService.trimRestricted(kbId, frozenVersionIds), false, true);
     }
 
     /**
@@ -98,7 +107,8 @@ public class RetrievalIndexContextResolver {
      */
     private IndexContext liveContext(String kbId, boolean snapshotDegraded) {
         return new IndexContext(indexAliasManager.fulltextAlias(kbId), indexAliasManager.vectorAlias(kbId),
-                activeVersionResolver.activeVersionIds(kbId), snapshotDegraded, false);
+                documentAclService.trimRestricted(kbId, activeVersionResolver.activeVersionIds(kbId)),
+                snapshotDegraded, false);
     }
 
     private RetrievalIndexOverride overrideOf(String kbId, RetrievalCommand command) {

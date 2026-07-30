@@ -4,7 +4,7 @@ Author: owlzhangfq@gmail.com
 """
 
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 import pymupdf
 
@@ -71,6 +71,11 @@ class PdfParser(BaseParser):
     whole page is already captured as one page_render image, so extracting
     its raw embedded images too would just double-count the same content.
 
+    An embedded image is reported once per distinct xref rather than once
+    per placement (see _extract_embedded_images): a header logo is a single
+    PDF object drawn on every page, and reporting it per page would cost
+    kb-rag-server one vision call per page for one picture.
+
     A page whose text layer extracts as garbled glyph soup (broken/missing
     ToUnicode CMap, see _is_garbled_text) is downgraded to the same
     scanned-page path: its unusable text is dropped, the page is rendered,
@@ -103,6 +108,8 @@ class PdfParser(BaseParser):
             pages: List[PageContent] = []
             markdown_parts: List[str] = []
             page_warnings: List[str] = []
+            # Document-wide, so an image drawn on many pages is reported once.
+            seen_xrefs: Set[int] = set()
             for page_index in range(document.page_count):
                 page = document.load_page(page_index)
                 text = page.get_text()
@@ -131,7 +138,9 @@ class PdfParser(BaseParser):
                         text = ocr_text
                         ocr_source = config.OCR_SOURCE_PADDLE
                 else:
-                    placeholder_lines = self._extract_embedded_images(document, page, page_no, collector)
+                    placeholder_lines = self._extract_embedded_images(
+                        document, page, page_no, collector, seen_xrefs
+                    )
 
                 pages.append(PageContent(page_no=page_no, text=text, scanned=scanned, ocr_source=ocr_source))
                 page_markdown = f"## Page {page_no}\n\n{text}"
@@ -162,22 +171,61 @@ class PdfParser(BaseParser):
         """Render a text-less page to PNG (so kb-rag-server's VLM can OCR
         it, same as pre-M8), and additionally attempt this service's own
         PaddleOCR fallback on that same PNG (M8-CONTRACTS.md §0.4) -- a
-        no-op returning None when OCR_ENGINE=none (the default)."""
+        no-op returning None when OCR_ENGINE=none (the default).
+
+        The render is skipped outright once the document image cap is
+        reached and no local OCR engine is configured, because then nobody
+        would read the PNG: the collector would discard it and no text
+        would come out of it. With OCR_ENGINE=paddle the page is still
+        rendered past the cap -- the cap bounds the images the response
+        carries, not this service's ability to read a page.
+        """
+        wants_asset = collector.has_capacity(page_no, KIND_PAGE_RENDER)
+        ocr_enabled = config.OCR_ENGINE != config.OCR_ENGINE_NONE
+        if not wants_asset and not ocr_enabled:
+            return [], None
         pixmap = page.get_pixmap(dpi=SCANNED_PAGE_RENDER_DPI)
         png_bytes = pixmap.tobytes("png")
-        image_id = collector.try_add(
-            page_no, kind=KIND_PAGE_RENDER, media_type=_PAGE_RENDER_MEDIA_TYPE, raw_bytes=png_bytes
+        image_id = (
+            collector.try_add(
+                page_no, kind=KIND_PAGE_RENDER, media_type=_PAGE_RENDER_MEDIA_TYPE, raw_bytes=png_bytes
+            )
+            if wants_asset
+            else None
         )
         placeholder_lines = [image_placeholder(image_id)] if image_id else []
         ocr_text = get_ocr_engine().recognize(png_bytes, page_no)
         return placeholder_lines, ocr_text
 
     @staticmethod
-    def _extract_embedded_images(document, page, page_no: int, collector: ImageAssetCollector) -> List[str]:
-        """Pull every raster image embedded on a (non-scanned) page."""
+    def _extract_embedded_images(
+        document, page, page_no: int, collector: ImageAssetCollector, seen_xrefs: Set[int]
+    ) -> List[str]:
+        """Pull the raster images embedded on a (non-scanned) page that no
+        earlier page has already reported.
+
+        An xref identifies one image object within the file, and a page
+        header logo is a single such object drawn on every page. Reporting
+        it per placement instead of per object made a 250-page document
+        report the same two rasters ~250 times: each copy base64'd into the
+        response, then described by kb-rag-server's vision model again --
+        hundreds of serial model calls for two pictures, and hundreds of
+        "image count limit reached" warnings once the cap cut them off.
+
+        So one distinct image yields one asset, whose placeholder marks its
+        first occurrence. That also keeps the placeholder ids in markdown
+        unique, which is what kb-rag-server's substitution relies on: were
+        one id to appear on 250 pages, its vision description would be
+        spliced into all 250 and pollute every chunk.
+        """
         placeholder_lines: List[str] = []
         for image_info in page.get_images(full=True):
             xref = image_info[0]
+            if xref in seen_xrefs:
+                continue
+            # Marked before the attempt, so a malformed object is tried once
+            # for the document rather than once per page that draws it.
+            seen_xrefs.add(xref)
             try:
                 extracted = document.extract_image(xref)
             except Exception:

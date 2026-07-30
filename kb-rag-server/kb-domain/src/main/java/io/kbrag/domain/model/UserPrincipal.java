@@ -18,10 +18,12 @@ import java.util.Set;
  * fewer roles, not by subtracting.
  *
  * @param userId      user business id
+ * @param tenantId    owning tenant business id, every root aggregate query is fenced by it
  * @param username    login name, the key session tokens and audit rows are written against
  * @param displayName display label, falls back to the login name
  * @param source      whether the account is local or came from the directory
  * @param roleCodes   codes of the roles held, for display and logging only
+ * @param roleIds     business ids of the roles held, what the document ACL rows are matched against
  * @param permissions union of the permission codes granted by those roles
  * @param kbScopeAll  {@code true} when any role held sees every knowledge base
  * @param kbIds       knowledge bases reachable through the scoped roles, ignored when {@code kbScopeAll}
@@ -30,10 +32,12 @@ import java.util.Set;
  */
 public record UserPrincipal(
         String userId,
+        String tenantId,
         String username,
         String displayName,
         UserSource source,
         Set<String> roleCodes,
+        Set<String> roleIds,
         Set<String> permissions,
         boolean kbScopeAll,
         Set<String> kbIds) {

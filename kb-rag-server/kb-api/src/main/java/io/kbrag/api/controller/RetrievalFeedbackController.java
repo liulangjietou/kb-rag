@@ -13,6 +13,7 @@ import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.RetrievalFeedback;
+import io.kbrag.domain.enums.FeedbackChannel;
 import io.kbrag.domain.enums.FeedbackStatus;
 import io.kbrag.domain.enums.FeedbackVerdict;
 import jakarta.validation.Valid;
@@ -73,6 +74,7 @@ public class RetrievalFeedbackController {
      * @param kbId    knowledge base business id
      * @param verdict optional {@code GOOD} or {@code BAD} filter
      * @param status  optional {@code NEW}, {@code CONVERTED} or {@code DISMISSED} filter
+     * @param channel optional {@code CONSOLE} or {@code OPEN_API} filter
      * @param page    one based page number
      * @param size    page size
      * @return paged rows
@@ -83,11 +85,13 @@ public class RetrievalFeedbackController {
             @PathVariable String kbId,
             @RequestParam(required = false) String verdict,
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) String channel,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
         AccessGuard.requireKbAccess(kbId);
         IPage<RetrievalFeedback> paged = retrievalFeedbackService.list(kbId,
-                parseVerdict(verdict), parseStatus(status), normalizePage(page), normalizeSize(size));
+                parseVerdict(verdict), parseStatus(status), parseChannel(channel),
+                normalizePage(page), normalizeSize(size));
         return Result.success(PageResponse.from(paged, RetrievalFeedbackResponse::from));
     }
 
@@ -144,6 +148,17 @@ public class RetrievalFeedbackController {
             throw BizException.invalidParam("status 仅支持 NEW、CONVERTED 或 DISMISSED");
         }
         return status;
+    }
+
+    private FeedbackChannel parseChannel(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        FeedbackChannel channel = FeedbackChannel.from(value);
+        if (channel == null) {
+            throw BizException.invalidParam("channel 仅支持 CONSOLE 或 OPEN_API");
+        }
+        return channel;
     }
 
     private long normalizePage(long page) {

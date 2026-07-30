@@ -47,6 +47,18 @@ export interface SsoAvailability {
   sso_available: boolean;
 }
 
+/**
+ * GET /auth/sso/providers (M16-CONTRACTS.md section 5): which browser SSO protocols this
+ * deployment has configured. Each true flag renders one redirect button on the login page; the
+ * button sends the browser to /api/v1/auth/{protocol}/login and the callback lands the token in
+ * the /login URL fragment.
+ */
+export interface SsoProviders {
+  oidc: boolean;
+  saml: boolean;
+  cas: boolean;
+}
+
 export interface ChangePasswordRequest {
   old_password: string;
   new_password: string;
@@ -83,6 +95,8 @@ export interface CurrentUser {
 /** One row of GET /users. role_names is filled on the list, role_ids on the single-account read. */
 export interface UserSummary {
   user_id: string;
+  /** Owning tenant (M16). Every account belongs to exactly one; the default tenant before a move. */
+  tenant_id: string;
   username: string;
   display_name: string | null;
   email: string | null;
@@ -400,6 +414,8 @@ export interface KbDocument {
   expires_at: string | null;
   /** M11: ISO instant the document entered the recycle bin, null outside it. */
   trashed_at: string | null;
+  /** M16: content readable only by the granted roles; the row itself always shows in the list. */
+  restricted: boolean;
   created_at: string;
   /** Upload only: id of the document version this upload created. */
   version_id?: string;
@@ -1972,16 +1988,24 @@ export interface RetrievalFeedbackEntry {
   doc_id: string | null;
   verdict: FeedbackVerdict;
   status: FeedbackStatus;
+  /** Which entrance filed the row (M16): the console debug screen or an Open API end user. */
+  channel: FeedbackChannel;
+  /** Caller-supplied end user tag of an OPEN_API row; null on console rows. */
+  end_user_id: string | null;
   /** Evaluation case created from this row, null until converted. */
   converted_case_id: string | null;
   note: string | null;
   created_at: string;
 }
 
+/** t_kb_retrieval_feedback.channel (M16-CONTRACTS.md section 6): which entrance filed the row. */
+export type FeedbackChannel = 'CONSOLE' | 'OPEN_API';
+
 /** GET /api/v1/kb/{kbId}/retrieval-feedback query params (M10-CONTRACTS.md section 2.1). */
 export interface ListRetrievalFeedbackParams {
   verdict?: FeedbackVerdict;
   status?: FeedbackStatus;
+  channel?: FeedbackChannel;
   page?: number;
   size?: number;
 }
@@ -2182,6 +2206,87 @@ export interface ExtSourceSyncAccepted {
 export interface ExtSourceTestResult {
   up: boolean;
   detail: string;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-tenancy, document visibility and operation audit (M16-CONTRACTS.md)
+// ---------------------------------------------------------------------------
+
+export type TenantStatus = 'ENABLED' | 'DISABLED';
+
+/**
+ * t_kb_tenant row (M16-CONTRACTS.md section 3). The built-in default tenant hosts every row that
+ * predates M16; it cannot be disabled or renamed away, which is why the actions column checks the
+ * flag before offering anything.
+ */
+export interface TenantSummary {
+  tenant_id: string;
+  /** Stable identity used in index names; immutable after creation. */
+  code: string;
+  name: string;
+  status: TenantStatus;
+  builtin: boolean;
+  created_at: string;
+}
+
+/**
+ * POST /api/v1/tenants and PUT /api/v1/tenants/{tenantId} request body. The server validates both
+ * fields on either call but only reads `name` on a rename -- code is fixed at creation.
+ */
+export interface SaveTenantRequest {
+  code: string;
+  name: string;
+}
+
+/**
+ * t_kb_document.visibility (M16-CONTRACTS.md section 4). INHERIT means the knowledge base scope
+ * decides alone; RESTRICTED additionally requires one of the granted roles to read the content.
+ */
+export type DocumentVisibility = 'INHERIT' | 'RESTRICTED';
+
+/** GET /api/v1/kb/{kbId}/documents/{docId}/visibility response. */
+export interface DocumentVisibilityView {
+  visibility: DocumentVisibility;
+  /** Roles allowed to read the content while RESTRICTED; empty otherwise. */
+  role_ids: string[];
+}
+
+/** PUT /api/v1/kb/{kbId}/documents/{docId}/visibility request body. */
+export interface UpdateDocumentVisibilityRequest {
+  visibility: DocumentVisibility;
+  role_ids?: string[];
+}
+
+/**
+ * t_kb_operation_audit row (M16-CONTRACTS.md section 7): one successful write endpoint call and
+ * who made it. Rows are written asynchronously after the response, so a just-performed action may
+ * take a moment to appear in the list.
+ */
+export interface OperationAuditEntry {
+  audit_id: string;
+  user_id: string | null;
+  username: string | null;
+  module: string;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  /** Compact JSON of method + path, the "what exactly" behind module/action. */
+  detail: string | null;
+  client_ip: string | null;
+  request_id: string | null;
+  created_at: string;
+}
+
+/** GET /api/v1/operation-audits query params (M16-CONTRACTS.md section 7). */
+export interface ListOperationAuditParams {
+  module?: string;
+  username?: string;
+  target_id?: string;
+  /** ISO date-times, e.g. 2026-07-26T00:00:00. */
+  from?: string;
+  to?: string;
+  page?: number;
+  size?: number;
 }
 
 

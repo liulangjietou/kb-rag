@@ -6,6 +6,7 @@ import type {
   LoginRequest,
   LoginResponse,
   SsoAvailability,
+  SsoProviders,
 } from './types';
 
 export function login(payload: LoginRequest): Promise<LoginResponse> {
@@ -21,6 +22,15 @@ export function login(payload: LoginRequest): Promise<LoginResponse> {
  */
 export function getSsoAvailability(): Promise<SsoAvailability> {
   return apiGet<SsoAvailability>('/auth/sso-available');
+}
+
+/**
+ * GET /api/v1/auth/sso/providers: which browser SSO protocols (OIDC/SAML/CAS) are configured
+ * (M16-CONTRACTS.md section 5). Unauthenticated for the same reason as sso-available, and a
+ * failure is likewise treated as "none configured" by the login page.
+ */
+export function getSsoProviders(): Promise<SsoProviders> {
+  return apiGet<SsoProviders>('/auth/sso/providers');
 }
 
 export function changePassword(payload: ChangePasswordRequest): Promise<void> {

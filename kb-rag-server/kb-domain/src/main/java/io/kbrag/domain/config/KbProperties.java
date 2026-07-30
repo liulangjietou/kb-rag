@@ -78,6 +78,9 @@ public class KbProperties {
     /** Document level policy, currently the version retention window. */
     private Doc doc = new Doc();
 
+    /** Document indexing throughput. */
+    private Index index = new Index();
+
     /** Splitting defaults of the indexing pipeline. */
     private Split split = new Split();
 
@@ -101,6 +104,9 @@ public class KbProperties {
 
     /** Search insight policy: recording switch and retention, the M10 contract section 2.3. */
     private Insight insight = new Insight();
+
+    /** Operation audit policy: retention of the "who did what" trail, the M16 contract section 7. */
+    private Audit audit = new Audit();
 
     /** Application release policy: index snapshot timeout and retention. */
     private App app = new App();
@@ -356,6 +362,16 @@ public class KbProperties {
         /** Maximum texts per provider request. */
         private int batchSize = 10;
 
+        /**
+         * Provider requests in flight while one document is embedded.
+         *
+         * <p>一个批次就是一次网络往返，串行跑完全部批次是文档索引里最长的一段等待：500 个分片按
+         * 批大小 10 算就是 50 次往返，每次半秒到两秒，光嵌入就要半分钟到两分钟。批次之间没有任何
+         * 依赖，所以这个值直接摊薄总等待。它是**全局**上限（共享线程池），几个文档同时索引也不会
+         * 把嵌入服务的限流打穿；调到 1 就是改造前的串行行为。
+         */
+        private int concurrency = 4;
+
         /** Request timeout in milliseconds. */
         private int timeoutMs = 30000;
     }
@@ -528,6 +544,19 @@ public class KbProperties {
 
         /** Maximum size of one image in megabytes, larger ones are skipped. */
         private int maxImageSizeMb = 10;
+
+        /**
+         * Vision calls in flight while the images of one document are described.
+         *
+         * <p>One image is one round trip bounded by {@code kb.vision.timeout-ms}, so this is the wall
+         * clock divisor of the image stage: a document at {@code maxPerDocument} took the ceiling times
+         * that timeout when the calls were serial.
+         *
+         * <p>Raise it against the provider's rate limit rather than against the machine: the work is
+         * entirely waiting on a remote model, and a throttled call is recorded as a failed proxy instead
+         * of being retried, so overshooting trades latency for missing text.
+         */
+        private int describeConcurrency = 8;
     }
 
     /**
@@ -656,6 +685,18 @@ public class KbProperties {
         /** Corporate directory single sign on. */
         private Ldap ldap = new Ldap();
 
+        /** OpenID Connect single sign on, the M16 contract section 3.3. */
+        private Oidc oidc = new Oidc();
+
+        /** SAML 2.0 single sign on, the M16 contract section 3.3. */
+        private Saml saml = new Saml();
+
+        /** CAS single sign on, the M16 contract section 3.3. */
+        private Cas cas = new Cas();
+
+        /** Settings shared by every browser redirect based protocol. */
+        private Sso sso = new Sso();
+
         /**
          * Corporate directory single sign on.
          *
@@ -694,8 +735,127 @@ public class KbProperties {
              * <p>Read only on purpose. The alternative, no role at all, means a person who authenticated
              * successfully lands on an empty console and files a ticket; the alternative in the other
              * direction hands write access to anyone with a domain account.
+             *
+             * <p>Ignored while group synchronisation is enabled: groups are then the source of truth,
+             * and a default pushed into the manually granted set could never be revoked by the sync.
              */
             private String defaultRoleCode = "VIEWER";
+
+            /** Directory group to console role synchronisation, the M16 contract section 6. */
+            private GroupSync groupSync = new GroupSync();
+
+            /**
+             * Directory group to console role synchronisation.
+             *
+             * <p>Off by default. Switching it on changes who owns the role set of a single sign on
+             * account: every login replaces the synchronised grants with what the mapping derives from
+             * the directory groups, while manually granted roles stay untouched.
+             */
+            @Getter
+            @Setter
+            @ToString
+            public static class GroupSync {
+
+                /** Whether every single sign on login re-derives roles from directory groups. */
+                private boolean enabled = false;
+
+                /**
+                 * Mapping entries {@code groupDn=ROLE_CODE} separated by semicolons.
+                 *
+                 * <p>A single string rather than a structured list so the whole mapping fits one
+                 * environment variable; distinguished names are compared ignoring case and whitespace.
+                 */
+                private String roleMappings;
+            }
+        }
+
+        /**
+         * OpenID Connect relying party settings.
+         *
+         * <p>Only the issuer is asked for; every endpoint is taken from the discovery document at
+         * {@code {issuer}/.well-known/openid-configuration} - hand-configured endpoints drift from
+         * what the IdP actually serves, and the discovery document is the IdP's own statement.
+         */
+        @Getter
+        @Setter
+        @ToString
+        public static class Oidc {
+
+            /** Whether the OIDC login button is offered. */
+            private boolean enabled = false;
+
+            /** Issuer URL, the base of the discovery document. */
+            private String issuer;
+
+            /** Client identifier registered at the IdP. */
+            private String clientId;
+
+            /** Client secret registered at the IdP. */
+            private String clientSecret;
+
+            /** Requested scopes; {@code openid} is what makes the response an OIDC one. */
+            private String scopes = "openid profile email";
+        }
+
+        /**
+         * SAML 2.0 service provider settings.
+         *
+         * <p>The IdP certificate is pasted as PEM straight into configuration rather than pulled from
+         * a metadata URL: the certificate is the single trust anchor of every assertion, and a
+         * metadata fetcher is one more remote dependency whose availability and authenticity would
+         * then need their own handling.
+         */
+        @Getter
+        @Setter
+        @ToString
+        public static class Saml {
+
+            /** Whether the SAML login button is offered. */
+            private boolean enabled = false;
+
+            /** Entity id of the identity provider. */
+            private String idpEntityId;
+
+            /** Single sign on URL of the identity provider, target of the AuthnRequest redirect. */
+            private String idpSsoUrl;
+
+            /** X.509 signing certificate of the identity provider, PEM. */
+            private String idpCertificate;
+
+            /** Entity id this deployment presents as service provider. */
+            private String spEntityId = "kb-rag";
+        }
+
+        /**
+         * CAS client settings.
+         */
+        @Getter
+        @Setter
+        @ToString
+        public static class Cas {
+
+            /** Whether the CAS login button is offered. */
+            private boolean enabled = false;
+
+            /** Base URL of the CAS server, for example {@code https://cas.corp.example.com/cas}. */
+            private String serverUrl;
+        }
+
+        /**
+         * Settings shared by the redirect based single sign on protocols.
+         */
+        @Getter
+        @Setter
+        @ToString
+        public static class Sso {
+
+            /**
+             * Base URL of the console the browser is sent back to after a successful callback.
+             *
+             * <p>Left blank, every protocol counts as unconfigured even when enabled: a callback that
+             * cannot say where to deliver the token has nowhere safe to send the browser.
+             */
+            private String webBaseUrl;
         }
     }
 
@@ -760,6 +920,28 @@ public class KbProperties {
                 return Math.min(MAX_RETAIN_COUNT, Math.max(MIN_RETAIN_COUNT, retainCount));
             }
         }
+    }
+
+    /**
+     * Document indexing throughput.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Index {
+
+        /**
+         * Documents indexed at once.
+         *
+         * <p>索引线程一生都在等外部服务：解析等 kb-rag-parser、嵌入等模型、写入等 ES/Qdrant，本机 CPU 上
+         * 只有切分那一小段。所以这个值不该照着机器核数定，而要看**下游能吃下多少**——解析服务的工作线程
+         * 数通常是真正的天花板，把这个值调到远超它只会让请求堆在解析服务门口，看起来并发很高实际没变快。
+         *
+         * <p>与嵌入并发的关系：这个值决定几个文档同时在跑，每个文档内部的嵌入批次再按
+         * {@code kb.embedding.concurrency} 并发，而后者是全局上限（共享线程池），所以同时索引的文档会
+         * 分摊那几路嵌入而不是各占一份。
+         */
+        private int concurrency = 4;
     }
 
     /**
@@ -944,11 +1126,27 @@ public class KbProperties {
         /** Entities the full text index match of one query keeps, highest scoring first. */
         private int entityMatchLimit = 10;
 
-        /** Chunks submitted to the extraction executor per batch. */
-        private int extractBatchSize = 10;
+        /**
+         * Model calls in flight inside one extraction task.
+         *
+         * <p>模型调用是抽取的全部成本，且没有共享状态，所以这个值直接决定一次抽取要跑多久：一万个分片
+         * 按每次 3 秒算，并发 2 是四个多小时，并发 8 是一小时出头。图写入已经被收到单写入者线程上串行
+         * 执行（见 {@code GraphExtractionService}），并发不再影响 MERGE 的正确性，唯一的约束是模型侧
+         * 的限流 —— 同时进行的抽取任务数由 {@link #taskConcurrency} 决定，所以模型侧的峰值并发是
+         * 两者之积。
+         */
+        private int extractConcurrency = 8;
 
-        /** Chunks extracted concurrently inside one extraction task. */
-        private int extractConcurrency = 2;
+        /**
+         * Extraction tasks running at once.
+         *
+         * <p>抽取任务有自己的线程池（不再挤占索引池），这个值就是池大小。它与 {@link #extractConcurrency}
+         * 相乘才是聊天模型看到的峰值并发，而聊天模型的限流通常比嵌入更紧——两个值一起调之前先确认额度。
+         *
+         * <p>一次抽取按分片规模能跑上小时级，所以这里的意义是"几个知识库能同时重建图谱"，而不是吞吐旋钮：
+         * 单个任务的快慢看 {@link #extractConcurrency}。
+         */
+        private int taskConcurrency = 2;
 
         /**
          * Generation budget of one extraction call.
@@ -957,8 +1155,53 @@ public class KbProperties {
          * an extraction answer is a JSON object holding every entity and relation of the passage, and a
          * budget that runs out mid object yields truncated JSON the parser can only reject - the chunk is
          * then silently counted as skipped. A table heavy passage routinely needs several hundred tokens.
+         *
+         * <p>实测依据：一个 1600 字左右的分片平均抽出 16 个实体、20 个关系，序列化后约 1500 token，
+         * 是 2048 的七成——均值刚好在预算内，长尾必然溢出，实测约 9% 的分片因 JSON 被截断而整片丢失。
+         * 提到 3072 给长尾留出余量；配合 {@link #extractMaxEntities} 的数量上限，常规分片的输出并不
+         * 会因此变长，所以这不是"用延迟换成功率"。
          */
-        private int extractMaxTokens = 2048;
+        private int extractMaxTokens = 3072;
+
+        /**
+         * Upper bound on what one extraction answer may contain.
+         *
+         * <p>抽取延迟几乎全是**生成**时间（输出 token 数 ÷ 生成速度），而原先的提示词对数量没有任何
+         * 约束，模型会把一个长分片能想到的都抽出来——输出越长越慢，且长尾直接撞上预算被截断，那一片
+         * 就整个丢了。给一个宽松但明确的上限：常规分片（16 实体 / 20 关系）碰不到它，长尾则被截在
+         * 上限而不是截在半个 JSON 上，于是"截断丢整片"变成"限量保主要"。
+         *
+         * <p>实体与关系共用一个上限值，因为提示词里两句话给同一个数字，模型遵循得更稳。
+         */
+        private int extractMaxEntities = 24;
+
+        /**
+         * Model of the extraction call, blank inherits {@code kb.chat.model}.
+         *
+         * <p>抽取和查询改写对模型的要求相反：改写是一句话、要求语感，抽取是照固定 JSON 形状填空、
+         * 要求吞吐。两者共用 `kb.chat.model` 时，为了改写质量选的 qwen-plus 会让抽取按 40 token/s
+         * 的速度去生成上千 token——一次调用三十多秒，全量抽取以小时计。换成 turbo 档模型能把生成
+         * 速度翻倍以上，而"填 JSON"这件事的质量损失远小于改写。
+         *
+         * <p>默认留空 = 沿用 `kb.chat.model`，升级无行为变化。与 {@code kb.eval.judge-model} 同一个
+         * 模式：换模型不需要第二份凭据。
+         */
+        private String extractModel = "";
+
+        /**
+         * Retries taken when the provider answers 429 for one chunk.
+         *
+         * <p>429 不是"坏答案"而是"稍后再试"，且它成片到来——额度一打穿，接下来几十个调用都是 429。
+         * 把它当成被拒的答案（其余失败都是这么处理的）会让一次抽取静默丢掉几百个分片，而且计入的那个
+         * 计数在界面上写着"输出校验未通过"，与真实原因毫无关系。
+         *
+         * <p>等待发生在抽取线程内部、占着并发槽位，所以一旦限流，整次抽取会自然降速到额度能承受的水平，
+         * 而不是继续对着关闭的门猛敲。退避带抖动：所有抽取线程几乎同时被限流，固定退避会把它们一起送
+         * 回去，复现出触发 429 的那个突发。
+         *
+         * <p>填 0 = 不重试，恢复改造前的行为（限流即丢片）。
+         */
+        private int extractRetryOnThrottle = 3;
 
         /**
          * Tells whether the deployment runs a graph at all.
@@ -1093,5 +1336,26 @@ public class KbProperties {
 
         /** Cron expression of the daily cleanup pass. */
         private String cleanupCron = "0 45 3 * * *";
+    }
+
+    /**
+     * Operation audit policy, the M16 contract section 7.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Audit {
+
+        /** Days an operation audit row stays before the cleanup removes it, aligned with the API audit. */
+        private int operationRetentionDays = 180;
+
+        /**
+         * Rows one cleanup batch deletes. Bounded so a retention pass never holds a long transaction
+         * over a table the request path keeps inserting into.
+         */
+        private int cleanupBatchSize = 5000;
+
+        /** Cron expression of the daily cleanup pass. */
+        private String cleanupCron = "0 50 3 * * *";
     }
 }

@@ -6,6 +6,7 @@ import io.kbrag.app.auth.AccessGuard;
 import io.kbrag.app.auth.RoleService;
 import io.kbrag.app.index.EngineChunkCleaner;
 import io.kbrag.app.index.IndexAliasManager;
+import io.kbrag.app.index.IndexCleanupService;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
@@ -70,6 +71,7 @@ public class KnowledgeBaseService {
     private final BizIdGenerator bizIdGenerator;
     private final IndexAliasManager indexAliasManager;
     private final EngineChunkCleaner engineChunkCleaner;
+    private final IndexCleanupService indexCleanupService;
     private final VersionFingerprintFactory fingerprintFactory;
     private final VisionProvider visionProvider;
     private final ChatProvider chatProvider;
@@ -279,11 +281,13 @@ public class KnowledgeBaseService {
     }
 
     /**
-     * Soft deletes a knowledge base, its documents and its chunks, and clears the search engines.
+     * Soft deletes a knowledge base, its documents and its chunks, and drops its physical indices.
      *
-     * <p>Physical indices are left in place and marked for the cleanup task instead of being dropped
-     * inline, so a mis-click never destroys the index definition; their documents are removed because
-     * a soft deleted chunk that stayed searchable would still be returned by a query.
+     * <p>The physical indices are not dropped inline: they are marked and handed to the CLEANUP task,
+     * which runs after the commit - an engine drop is irreversible, so it must not happen inside a
+     * transaction that can still roll the rows back into existence. The chunks are removed from the
+     * engines separately because a soft deleted chunk that stayed searchable would still be returned
+     * by a query while the drop is pending.
      *
      * @param kbId business id
      */
@@ -300,8 +304,10 @@ public class KnowledgeBaseService {
         // Role scopes name bases by business id, so a row surviving the deletion would keep a dead base in
         // the role editor and, worse, would be re-created by the next save of that role.
         roleService.detachKnowledgeBase(kbId);
+        // M16 contract section 4.1: the marks and the task row join this transaction, the engine
+        // drops wait for its commit inside the cleanup service.
+        indexCleanupService.submit(kbId);
         log.info("knowledge base deleted, kbId={}", kbId);
-        // TODO(M4): schedule a CLEANUP task that drops the physical indices of this knowledge base.
     }
 
     /**

@@ -10,6 +10,7 @@ import io.kbrag.domain.enums.FeedbackStatus;
 import io.kbrag.domain.enums.FeedbackVerdict;
 import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.mapper.RetrievalFeedbackMapper;
+import io.kbrag.domain.mapper.SearchInsightMapper;
 import io.kbrag.domain.service.BizIdGenerator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,7 +61,7 @@ class RetrievalFeedbackServiceTest {
         BizIdGenerator bizIdGenerator = mock(BizIdGenerator.class);
         when(bizIdGenerator.retrievalFeedbackId()).thenReturn(FEEDBACK_ID);
         service = new RetrievalFeedbackService(retrievalFeedbackMapper, chunkMapper,
-                evalDatasetService, bizIdGenerator);
+                mock(SearchInsightMapper.class), evalDatasetService, bizIdGenerator);
     }
 
     @Test

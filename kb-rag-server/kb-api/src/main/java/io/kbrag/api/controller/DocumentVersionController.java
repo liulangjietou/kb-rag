@@ -1,5 +1,6 @@
 package io.kbrag.api.controller;
 
+import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.ActivateImpactResponse;
 import io.kbrag.api.dto.ActivateVersionResponse;
@@ -77,6 +78,8 @@ public class DocumentVersionController {
      */
     @PostMapping("/versions/{versionId}/activate")
     @RequiresPermission(PermissionCodes.DOC_WRITE)
+    @AuditedOperation(module = "DOCUMENT", action = "ACTIVATE_VERSION", targetType = "DOCUMENT",
+            targetId = "#docId")
     public Result<ActivateVersionResponse> activate(@PathVariable String docId,
                                                     @PathVariable String versionId) {
         kbScopeGuard.requireDocumentAccess(docId);
