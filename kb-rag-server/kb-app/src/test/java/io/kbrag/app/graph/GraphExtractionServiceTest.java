@@ -3,6 +3,8 @@ package io.kbrag.app.graph;
 import io.kbrag.app.index.ActiveVersionResolver;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.app.support.MybatisLambdaCache;
+import io.kbrag.common.exception.ProviderErrorType;
+import io.kbrag.common.exception.ProviderException;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.Document;
@@ -33,6 +35,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -87,6 +90,52 @@ class GraphExtractionServiceTest {
         service = new GraphExtractionService(knowledgeBaseService, activeVersionResolver, chunkMapper,
                 documentVersionMapper, kbTaskMapper, graphStore, chatProvider,
                 new GraphExtractionParser(), bizIdGenerator, properties);
+    }
+
+    @Test
+    void shouldRetryAThrottledChunkAndStillWriteIt() {
+        // 429 不是"坏答案"而是"稍后再试"，且成片到来。当成被拒答案处理会让一次抽取静默丢掉几百个
+        // 分片，还把它们计进一个界面上写着"输出校验未通过"的计数里。
+        properties.getGraph().setExtractRetryOnThrottle(2);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_1", ACTIVE_VERSION_ID)));
+        when(chatProvider.complete(anyString(), anyString()))
+                .thenThrow(new ProviderException("dashscope", ProviderErrorType.QUOTA_EXCEEDED,
+                        "chat provider returned status 429"))
+                .thenReturn(VALID_ANSWER);
+
+        service.runFullExtraction(KB_ID, task());
+
+        verify(chatProvider, times(2)).complete(anyString(), anyString());
+        verify(graphStore).upsert(any(GraphExtraction.class));
+    }
+
+    @Test
+    void shouldGiveUpAfterTheRetryBudgetIsSpent() {
+        properties.getGraph().setExtractRetryOnThrottle(1);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_1", ACTIVE_VERSION_ID)));
+        when(chatProvider.complete(anyString(), anyString()))
+                .thenThrow(new ProviderException("dashscope", ProviderErrorType.QUOTA_EXCEEDED,
+                        "chat provider returned status 429"));
+
+        service.runFullExtraction(KB_ID, task());
+
+        // 预算 1 = 首次 + 1 次重试；耗尽后该分片才计入丢失，绝不无限重试。
+        verify(chatProvider, times(2)).complete(anyString(), anyString());
+        verify(graphStore, never()).upsert(any(GraphExtraction.class));
+    }
+
+    @Test
+    void shouldNotRetryAFailureThatWouldFailIdentically() {
+        // 鉴权失败/模型不存在/输入过长重试一次也是同样的结果，重试只是把一次注定失败的抽取拖长。
+        properties.getGraph().setExtractRetryOnThrottle(3);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_1", ACTIVE_VERSION_ID)));
+        when(chatProvider.complete(anyString(), anyString()))
+                .thenThrow(new ProviderException("dashscope", ProviderErrorType.AUTH_FAILED,
+                        "chat provider returned status 401"));
+
+        service.runFullExtraction(KB_ID, task());
+
+        verify(chatProvider, times(1)).complete(anyString(), anyString());
     }
 
     @Test

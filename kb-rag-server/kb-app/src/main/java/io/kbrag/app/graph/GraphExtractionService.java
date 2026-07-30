@@ -6,6 +6,8 @@ import io.kbrag.app.config.AsyncConfig;
 import io.kbrag.app.index.ActiveVersionResolver;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.ErrorCode;
+import io.kbrag.common.exception.ProviderException;
+import io.kbrag.common.exception.ProviderErrorType;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.Chunk;
@@ -33,6 +35,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -118,6 +121,10 @@ public class GraphExtractionService {
     private static final int MIN_CONCURRENCY = 1;
     /** Below this a bound would suppress the extraction rather than shape it. */
     private static final int MIN_MAX_ENTITIES = 4;
+    /** One attempt is the call itself, so a zero retry budget still calls once. */
+    private static final int MIN_ATTEMPTS = 1;
+    private static final long THROTTLE_BACKOFF_BASE_MS = 1000L;
+    private static final long THROTTLE_BACKOFF_MAX_MS = 30000L;
     private static final int ENABLED = 1;
 
     private final KnowledgeBaseService knowledgeBaseService;
@@ -254,6 +261,7 @@ public class GraphExtractionService {
         AtomicInteger skipped = new AtomicInteger();
         AtomicInteger done = new AtomicInteger();
         AtomicInteger reported = new AtomicInteger();
+        AtomicInteger throttled = new AtomicInteger();
         int concurrency = Math.max(MIN_CONCURRENCY, properties.getGraph().getExtractConcurrency());
         ExecutorService extractors = Executors.newFixedThreadPool(
                 concurrency, threadFactory(EXTRACT_THREAD_PREFIX, kbId));
@@ -263,7 +271,7 @@ public class GraphExtractionService {
             List<CompletableFuture<Void>> futures = new ArrayList<>(chunks.size());
             for (Chunk chunk : chunks) {
                 futures.add(CompletableFuture
-                        .supplyAsync(() -> extractOne(kbId, chunk, skipped), extractors)
+                        .supplyAsync(() -> extractOne(kbId, chunk, skipped, throttled), extractors)
                         .thenAcceptAsync(this::upsertOne, writer)
                         .exceptionally(error -> {
                             // One passage the provider refused must not end a run over a whole corpus; the
@@ -285,8 +293,11 @@ public class GraphExtractionService {
             writer.shutdown();
         }
         completeTask(task, skipped.get());
-        log.info("graph extraction finished, kbId={}, chunks={}, skipped={}, concurrency={}",
-                kbId, chunks.size(), skipped.get(), concurrency);
+        // 限流重试次数单独报出来：它是"该不该降 extract-concurrency"的唯一依据，混在 skipped 里
+        // 就分不清丢的分片是模型答歪了还是额度不够。
+        log.info("graph extraction finished, kbId={}, chunks={}, skipped={}, throttleRetries={}, "
+                        + "concurrency={}",
+                kbId, chunks.size(), skipped.get(), throttled.get(), concurrency);
     }
 
     /**
@@ -302,6 +313,66 @@ public class GraphExtractionService {
     }
 
     /**
+     * Calls the model for one chunk, backing off and retrying while the provider is throttling.
+     *
+     * <p>A 429 is not a bad answer, it is "ask again later" - and it arrives in waves: once the account's
+     * ceiling is hit, the next dozens of calls get it too. Treating it like a rejected answer, as the
+     * single failure handler does for everything else, silently drops hundreds of passages out of one run
+     * and reports them under a count whose label says the output failed validation. Waiting inside the
+     * extraction thread is the right shape here: it holds the slot, so the run throttles itself down to
+     * what the account tolerates instead of hammering a closed door.
+     *
+     * <p>The jitter is not decoration. Every extraction thread is throttled at roughly the same moment, so
+     * a fixed backoff would send all of them back together and reproduce the burst that caused the 429.
+     *
+     * <p>Retried only for {@link ProviderErrorType#QUOTA_EXCEEDED}. An auth failure, a missing model or an
+     * over-long input will fail again identically, and retrying those only delays a run that is already
+     * doomed.
+     *
+     * @param kbId      knowledge base business id, for the log line
+     * @param chunkId   chunk business id, for the log line
+     * @param content   passage handed to the model
+     * @param throttled counter of the backoffs taken across the run
+     * @return raw model answer
+     */
+    private String completeWithRetryOnThrottle(String kbId, String chunkId, String content,
+                                              AtomicInteger throttled) {
+        int maxAttempts = Math.max(MIN_ATTEMPTS, properties.getGraph().getExtractRetryOnThrottle() + 1);
+        ProviderException last = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                return chatProvider.complete(systemPrompt(), userPrompt(content));
+            } catch (ProviderException e) {
+                if (e.getErrorType() != ProviderErrorType.QUOTA_EXCEEDED || attempt == maxAttempts) {
+                    throw e;
+                }
+                last = e;
+                throttled.incrementAndGet();
+                sleepBeforeRetry(attempt);
+                log.info("graph extraction throttled, retrying, kbId={}, chunkId={}, attempt={}/{}",
+                        kbId, chunkId, attempt, maxAttempts);
+            }
+        }
+        throw last;
+    }
+
+    /**
+     * Sleeps the exponential backoff of one retry, with jitter.
+     *
+     * @param attempt 1 based attempt that was just throttled
+     */
+    private void sleepBeforeRetry(int attempt) {
+        long base = THROTTLE_BACKOFF_BASE_MS * (1L << (attempt - 1));
+        long jitter = ThreadLocalRandom.current().nextLong(base / 2 + 1);
+        try {
+            Thread.sleep(Math.min(THROTTLE_BACKOFF_MAX_MS, base + jitter));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("graph extraction interrupted while backing off", e);
+        }
+    }
+
+    /**
      * Turns one chunk into its extraction, {@code null} when it contributed nothing.
      *
      * <p>Runs on the extraction pool, which is where the whole cost of a run sits: the model call is
@@ -313,8 +384,10 @@ public class GraphExtractionService {
      * @param skipped counter of the chunks that contributed nothing
      * @return extraction to write, or {@code null} for a rejected or empty answer
      */
-    private GraphExtraction extractOne(String kbId, Chunk chunk, AtomicInteger skipped) {
-        String answer = chatProvider.complete(systemPrompt(), userPrompt(chunk.getContent()));
+    private GraphExtraction extractOne(String kbId, Chunk chunk, AtomicInteger skipped,
+                                       AtomicInteger throttled) {
+        String answer = completeWithRetryOnThrottle(kbId, chunk.getChunkId(), chunk.getContent(),
+                throttled);
         GraphExtractionParser.Result result = extractionParser.parse(answer);
         if (result == null) {
             skipped.incrementAndGet();

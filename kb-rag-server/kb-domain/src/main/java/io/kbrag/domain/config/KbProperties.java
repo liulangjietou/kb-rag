@@ -1189,6 +1189,21 @@ public class KbProperties {
         private String extractModel = "";
 
         /**
+         * Retries taken when the provider answers 429 for one chunk.
+         *
+         * <p>429 不是"坏答案"而是"稍后再试"，且它成片到来——额度一打穿，接下来几十个调用都是 429。
+         * 把它当成被拒的答案（其余失败都是这么处理的）会让一次抽取静默丢掉几百个分片，而且计入的那个
+         * 计数在界面上写着"输出校验未通过"，与真实原因毫无关系。
+         *
+         * <p>等待发生在抽取线程内部、占着并发槽位，所以一旦限流，整次抽取会自然降速到额度能承受的水平，
+         * 而不是继续对着关闭的门猛敲。退避带抖动：所有抽取线程几乎同时被限流，固定退避会把它们一起送
+         * 回去，复现出触发 429 的那个突发。
+         *
+         * <p>填 0 = 不重试，恢复改造前的行为（限流即丢片）。
+         */
+        private int extractRetryOnThrottle = 3;
+
+        /**
          * Tells whether the deployment runs a graph at all.
          *
          * @return {@code true} when a Bolt URI is configured
