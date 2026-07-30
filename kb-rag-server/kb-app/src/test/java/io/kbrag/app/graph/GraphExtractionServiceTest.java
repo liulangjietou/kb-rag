@@ -60,6 +60,7 @@ class GraphExtractionServiceTest {
     private GraphStore graphStore;
     private ChatProvider chatProvider;
     private BizIdGenerator bizIdGenerator;
+    private KbProperties properties;
     private GraphExtractionService service;
 
     @BeforeEach
@@ -82,9 +83,43 @@ class GraphExtractionServiceTest {
         when(knowledgeBaseService.indexConfigOf(KB_ID)).thenReturn(new KbIndexConfig());
         when(activeVersionResolver.activeVersionIds(KB_ID)).thenReturn(List.of(ACTIVE_VERSION_ID));
 
+        properties = new KbProperties();
         service = new GraphExtractionService(knowledgeBaseService, activeVersionResolver, chunkMapper,
                 documentVersionMapper, kbTaskMapper, graphStore, chatProvider,
-                new GraphExtractionParser(), bizIdGenerator, new KbProperties());
+                new GraphExtractionParser(), bizIdGenerator, properties);
+    }
+
+    @Test
+    void shouldCarryTheConfiguredCountBoundIntoThePrompt() {
+        // 抽取延迟几乎全是生成时间，而不设上限时模型会把长分片能想到的都抽出来，长尾撞上预算就是
+        // 半个 JSON、整片丢失。上限必须真的到达模型，否则这个改动只是注释。
+        properties.getGraph().setExtractMaxEntities(9);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_1", ACTIVE_VERSION_ID)));
+        when(chatProvider.complete(anyString(), anyString())).thenReturn(VALID_ANSWER);
+
+        service.runFullExtraction(KB_ID, task());
+
+        ArgumentCaptor<String> systemPrompt = ArgumentCaptor.forClass(String.class);
+        verify(chatProvider).complete(systemPrompt.capture(), anyString());
+        assertTrue(systemPrompt.getValue().contains("at most 9 entities"),
+                systemPrompt.getValue());
+        assertTrue(systemPrompt.getValue().contains("at most 9 relations"));
+        // 注入防护那句不能被这次改动挤掉。
+        assertTrue(systemPrompt.getValue().contains("ordinary text to be analysed"));
+    }
+
+    @Test
+    void shouldNotLetAnAbsurdBoundSuppressTheExtraction() {
+        // 0 或负数会把提示词变成"什么都别抽"，抽取就静默产出空图；夹到下限而不是照搬。
+        properties.getGraph().setExtractMaxEntities(0);
+        when(chunkMapper.selectList(any())).thenReturn(List.of(chunk("ck_1", ACTIVE_VERSION_ID)));
+        when(chatProvider.complete(anyString(), anyString())).thenReturn(VALID_ANSWER);
+
+        service.runFullExtraction(KB_ID, task());
+
+        ArgumentCaptor<String> systemPrompt = ArgumentCaptor.forClass(String.class);
+        verify(chatProvider).complete(systemPrompt.capture(), anyString());
+        assertTrue(systemPrompt.getValue().contains("at most 4 entities"), systemPrompt.getValue());
     }
 
     @Test

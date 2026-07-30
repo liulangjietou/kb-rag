@@ -1155,8 +1155,38 @@ public class KbProperties {
          * an extraction answer is a JSON object holding every entity and relation of the passage, and a
          * budget that runs out mid object yields truncated JSON the parser can only reject - the chunk is
          * then silently counted as skipped. A table heavy passage routinely needs several hundred tokens.
+         *
+         * <p>实测依据：一个 1600 字左右的分片平均抽出 16 个实体、20 个关系，序列化后约 1500 token，
+         * 是 2048 的七成——均值刚好在预算内，长尾必然溢出，实测约 9% 的分片因 JSON 被截断而整片丢失。
+         * 提到 3072 给长尾留出余量；配合 {@link #extractMaxEntities} 的数量上限，常规分片的输出并不
+         * 会因此变长，所以这不是"用延迟换成功率"。
          */
-        private int extractMaxTokens = 2048;
+        private int extractMaxTokens = 3072;
+
+        /**
+         * Upper bound on what one extraction answer may contain.
+         *
+         * <p>抽取延迟几乎全是**生成**时间（输出 token 数 ÷ 生成速度），而原先的提示词对数量没有任何
+         * 约束，模型会把一个长分片能想到的都抽出来——输出越长越慢，且长尾直接撞上预算被截断，那一片
+         * 就整个丢了。给一个宽松但明确的上限：常规分片（16 实体 / 20 关系）碰不到它，长尾则被截在
+         * 上限而不是截在半个 JSON 上，于是"截断丢整片"变成"限量保主要"。
+         *
+         * <p>实体与关系共用一个上限值，因为提示词里两句话给同一个数字，模型遵循得更稳。
+         */
+        private int extractMaxEntities = 24;
+
+        /**
+         * Model of the extraction call, blank inherits {@code kb.chat.model}.
+         *
+         * <p>抽取和查询改写对模型的要求相反：改写是一句话、要求语感，抽取是照固定 JSON 形状填空、
+         * 要求吞吐。两者共用 `kb.chat.model` 时，为了改写质量选的 qwen-plus 会让抽取按 40 token/s
+         * 的速度去生成上千 token——一次调用三十多秒，全量抽取以小时计。换成 turbo 档模型能把生成
+         * 速度翻倍以上，而"填 JSON"这件事的质量损失远小于改写。
+         *
+         * <p>默认留空 = 沿用 `kb.chat.model`，升级无行为变化。与 {@code kb.eval.judge-model} 同一个
+         * 模式：换模型不需要第二份凭据。
+         */
+        private String extractModel = "";
 
         /**
          * Tells whether the deployment runs a graph at all.

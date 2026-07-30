@@ -220,6 +220,44 @@ MYSQL_POOL_SIZE=48           # MySQL max_connections=151，余量充足
 
 聊天模型的限流通常比嵌入更紧，所以 `GRAPH_EXTRACT_CONCURRENCY × GRAPH_TASK_CONCURRENCY` 这个乘积是最容易撞限流的一项。
 
+### 4.6 抽取延迟的实测归因与降延迟改造
+
+§4.3 把抽取改成流水线、并发提到 8 之后，一次 385 分片的抽取仍要 20 分钟。**并发从 2 提到 12（6 倍）几乎没变快**，这个反常现象是定位的起点：说明瓶颈不在并发那一段。
+
+逐段排除，全部有实测数据：
+
+| 环节 | 实测 | 结论 |
+|---|---|---|
+| Neo4j 写入（单写入者串行） | 同形语句压测 20 分片约 1 秒 → 每片约 50ms，385 片共约 19 秒 | 占 1.6%，**不是瓶颈** |
+| 热点实体度数 | 最大 88 | MERGE 不退化 |
+| Chunk MERGE 索引 | `EXPLAIN` 显示 `NodeByLabelScan` | 真缺陷但 713 节点扫描是微秒级，**当期非瓶颈** |
+| LLM 调用 | 反算 `1200s × 12 ÷ 385 = 37.4 秒/次` | **就是它** |
+
+37.4 秒是怎么来的，用图里的实测均值精算即可闭合：
+
+```
+实体 16.2/片 × (22 结构 + 5.5 名长 + 7 类型)  ≈  559 token
+关系 19.9/片 × (30 结构 + 5.5×2 端点名 + 4.4)  ≈  903 token   ← 占 61%
+单次输出 ≈ 1482 token，占 max_tokens=2048 的 72%
+qwen-plus 约 40 token/s → 1482 ÷ 40 = 37 秒   ✓ 与反算的 37.4 秒吻合
+```
+
+两个结论直接落地：**抽取延迟 ≈ 输出 token 数 ÷ 模型生成速度**，与并发无关；而均值就占了 72% 预算，长尾必然溢出 —— 实测 35/385（9%）的分片因 JSON 被截断而**整片丢失**（解析器日志 `reason=no json object boundary`）。
+
+四处改动，分别打这两个因子：
+
+1. **抽取模型可独立配置**（`GRAPH_EXTRACT_MODEL`，默认空 = 沿用 `CHAT_MODEL`）。抽取与查询改写对模型的要求相反：改写是一句话要语感，抽取是照固定 JSON 形状填空要吞吐。为改写质量选的 qwen-plus 让抽取按 40 token/s 去生成上千 token，turbo 档能把生成速度翻倍以上，而"填 JSON"的质量损失远小于改写。与 `EVAL_JUDGE_MODEL` 同一模式，不需要第二份凭据。
+
+2. **提示词加数量上限**（`GRAPH_EXTRACT_MAX_ENTITIES`，默认 24，实体与关系共用）。原提示词对数量毫无约束，模型会把长分片能想到的都抽出来。常规分片（16/20）碰不到这个上限，长尾则被截在上限而不是截在半个 JSON 上 —— **"截断丢整片"变成"限量保主要"**。同时要求紧凑 JSON（无换行无多余空格），结构开销也随之下降。上限有下限保护（< 4 夹到 4）：0 或负数会让提示词变成"什么都别抽"，抽取静默产出空图。
+
+3. **生成预算 2048 → 3072**（`GRAPH_EXTRACT_MAX_TOKENS`）。给长尾留余量。与 ② 不冲突而是互补：② 控常规输出长度，③ 兜长尾不被截断。
+
+4. **修 Chunk MERGE 的索引未命中**。`MERGE (c:Chunk {chunk_id})` 用不上 `kb_chunk_lookup(kb_id, chunk_id)` —— 复合索引只服务提供了前导属性的查找，所以退化成扫描全部知识库的全部 Chunk 节点，随语料增长。补上 `kb_id` 谓词后 `EXPLAIN` 从 `NodeByLabelScan` 变 `NodeIndexSeek`。chunk_id 本就全局唯一，加谓词不缩小任何原本成立的范围。
+
+**顺带修掉一个真 bug**：`ModelProviderConfig` 里派生抽取/判题 provider 的两个复制方法都漏复制了 `generateTimeoutMs`（读超时）。字段默认值恰好也是 60000 所以一直没暴露，但部署方设了 `CHAT_GENERATE_TIMEOUT_MS` 时对这两条链路静默无效 —— 而抽取答案是全系统最长的一次生成，正是最需要这个预算的地方。
+
+**另一个容易误判的点**：抽取只覆盖"抽取任务启动那一刻已完成索引"的分片。批量导入时点「重新抽取」，任务只会看到当时已索引完的那部分，界面上的覆盖分片数因此远小于库里的分片总数。这不是缺陷（抽取按启动时的激活版本集合取分片），但**批量导入后应等索引全部完成再抽取**，否则要重跑。
+
 ## 5. F4：文档级数据权限的执行点
 
 ### 5.1 写路径
@@ -285,6 +323,7 @@ MYSQL_POOL_SIZE=48           # MySQL max_connections=151，余量充足
 7. 开放 API 反馈端点开始校验 request_id 的应用归属（§3.6）：**只用自己检索返回的 request_id 提交反馈**的集成方不受影响；此前若有跨应用复用 request_id 的用法会被拒为 `APP_ACCESS_DENIED`。控制台调试检索的 request_id 一律不再被该端点接受。
 8. **嵌入请求速率上升、同时索引的文档数从 2 变 4**（§4.4）：新增 `EMBEDDING_CONCURRENCY`（默认 4，全局上限），索引池由 `core=2/max=4`（max 因队列 200 深而永不可达，实际并发恒为 2）改为 `core=max=4`。嵌入服务限流紧的部署把 `EMBEDDING_CONCURRENCY` 填 1 即恢复串行；解析服务扛不住 4 路并发的部署需要相应扩 parser 实例。
 9. **并发参数改为可配置，默认值一律不变**（§4.5）：新增 `INDEX_CONCURRENCY` / `GRAPH_TASK_CONCURRENCY` / `PARSER_MAX_WORKERS`，取值等于此前的硬编码值，所以**不设任何变量的部署行为完全不变**。唯一的实际行为变化是图谱任务池由 `core=1/max=2`（同 §4.4 ③ 的陷阱，实际恒为 1）改为 `core=max=2`——同时能跑两个图谱重建了，模型侧峰值随之变成 `GRAPH_EXTRACT_CONCURRENCY × 2`。parser 侧 OCR 调用池由固定 2 改为跟随 `PARSER_MAX_WORKERS`，扫描件批量场景不再被卡在 2 页并发。按机器调参见 §4.5，**调大任何并发都要同步扩 `MYSQL_POOL_SIZE`**。
+10. **抽取延迟归因与降延迟改造**（§4.6）：抽取延迟 ≈ 输出 token 数 ÷ 模型生成速度，与并发无关（实测 1482 token ÷ 40 token/s = 37 秒/片，与 `1200s × 12 ÷ 385` 的反算吻合）。新增 `GRAPH_EXTRACT_MODEL`（默认空 = 沿用 `CHAT_MODEL`，可换 turbo 档把生成速度翻倍）、`GRAPH_EXTRACT_MAX_ENTITIES`（默认 24，实体与关系共用上限）；`GRAPH_EXTRACT_MAX_TOKENS` **默认 2048 → 3072**（均值就占 2048 的 72%，长尾必然截断、实测 9% 的分片因此整片丢失）。提示词新增数量上限与紧凑 JSON 要求，所以**同一分片抽出的实体/关系可能比升级前少**——换来的是不再有分片因 JSON 截断而整片丢失。图写入的 Chunk MERGE 补上 `kb_id` 谓词以命中复合索引（原先退化为全 Chunk 扫描）。另修 `ModelProviderConfig` 派生抽取/判题 provider 时漏复制 `generateTimeoutMs` 的 bug：字段默认值恰好相同所以从未暴露，但部署方设了 `CHAT_GENERATE_TIMEOUT_MS` 时对这两条链路静默无效。
 
 ### 10.1 开发期排障：V17 checksum 不匹配导致启动失败
 
@@ -320,6 +359,7 @@ docker exec kb-rag-mysql mysql -ukbrag -p<MYSQL_PASSWORD> kb_rag -N -e "SELECT '
 - **F2**：0/1 个超管不告警，2 个告警且逐一点名；**两个租户各有同 code 超管角色时各报一条且带 tenantId**（回归 `limit 1` 盲区）。
 - **F4.3**：barrier 只在凑满 `extract-concurrency` 个模型调用时才放行（串行或并发不足则超时并计入 skipped，断言 skipped=0）；图写入并发峰值恒为 1 而抽取峰值 > 1；进度按列更新且次数 ≤ 分片数。
 - **F4.4**：嵌入批次并发（barrier 凑不齐即超时）；状态写入次数 = 批次数而非分片数且不走 `updateById`，内存状态仍为 DONE；单批次不进线程池；一批失败即整次失败且抛出的仍是原 `BizException`（错误码可读）；零 Key 模式不调 provider 也不落库。
+- **F4.6**：配置的数量上限进入提示词（实体与关系两句都带同一数字），注入防护那句不被挤掉；荒谬上限（0）夹到下限 4 而不是照搬——否则提示词变成"什么都别抽"、抽取静默产出空图。
 - **F3**：TenantLineHandler 无主体跳过拼接、忽略清单命中；建租户复制五内置角色；停用租户后 resolve 抛 401；停用 DEFAULT 被拒；IndexNaming 默认租户名不变（回归红线）、非默认租户带段、tenant 段归一化。
 - **F4**：`DocumentAclService.trimRestricted` 叠加 ACL 正负例（含快照冻结集分支）；开放 API 滤 RESTRICTED；`requireDocumentContentAccess` 四象限（范围内/外 × 有/无 ACL）+ doc:review 豁免 + kb_scope_all 不豁免；角色删除/文档删除清 ACL 残行。
 - **F5**：映射解析（大小写、空白、非法条目跳过）；LDAP_SYNC 全量替换且 MANUAL 不动；组查询失败不阻断登录；同步开启时首登不授默认角色。

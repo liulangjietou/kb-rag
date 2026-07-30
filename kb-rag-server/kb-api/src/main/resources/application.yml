@@ -298,9 +298,19 @@ kb:
     # 小时级，所以这是"同时几个任务"而非吞吐旋钮；单任务快慢看 extract-concurrency。两者相乘才是
     # 聊天模型看到的峰值并发，而聊天模型限流通常比嵌入更紧——一起调之前先确认额度。
     task-concurrency: ${GRAPH_TASK_CONCURRENCY:2}
+    # 抽取专用模型，留空 = 沿用 kb.chat.model。抽取与查询改写对模型的要求相反：改写是一句话、要
+    # 语感，抽取是照固定 JSON 形状填空、要吞吐。共用一个模型时，为改写质量选的 qwen-plus 会让抽取
+    # 按 ~40 token/s 生成上千 token——单次三十多秒，全量抽取以小时计。换 turbo 档能把生成速度翻倍
+    # 以上，而"填 JSON"的质量损失远小于改写。与 kb.eval.judge-model 同一模式，不需要第二份凭据。
+    extract-model: ${GRAPH_EXTRACT_MODEL:}
+    # 一次抽取答案最多包含的实体数与关系数（同一个上限给两者，模型遵循更稳）。抽取延迟几乎全是生成
+    # 时间，而不设上限时模型会把长分片能想到的都抽出来：实测均值 16 实体 / 20 关系约 1500 token，
+    # 长尾直接撞上预算被截断、那一片整个丢失（实测约 9%）。给宽松但明确的上限，常规分片碰不到它，
+    # 长尾则被截在上限而不是半个 JSON 上——"截断丢整片"变成"限量保主要"。
+    extract-max-entities: ${GRAPH_EXTRACT_MAX_ENTITIES:24}
     # Budget of one extraction answer. Deliberately not kb.chat.max-tokens: that one sizes a single line
     # query rewrite, and running out mid JSON makes the parser reject an answer that was in fact fine.
-    extract-max-tokens: ${GRAPH_EXTRACT_MAX_TOKENS:2048}
+    extract-max-tokens: ${GRAPH_EXTRACT_MAX_TOKENS:3072}
   web:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:20002,http://127.0.0.1:20002}
   eval:
