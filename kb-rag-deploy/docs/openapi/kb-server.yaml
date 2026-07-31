@@ -203,8 +203,21 @@ info:
 
     （详见 M17/M18/M19-CONTRACTS.md）。
 
+
+    0.20.0-m20 增量：MCP 协议层——知识库应用与记忆库各暴露一个 MCP Streamable HTTP 端点
+
+    （POST /api/v1/knowledge/mcp、POST /api/v1/memory/mcp，mcp tag），JSON-RPC 2.0 单请求单
+
+    JSON 响应，协议版本 2025-03-26（兼容 2024-11-05）；鉴权/限流/审计完全复用各自 REST 过滤器链
+
+    （kb-sk-* / kb-mk-*）；工具集 knowledge_search/knowledge_chat（非流式）与 memory 六工具，
+
+    参数与返回结构同 REST 孪生端点。协议违规回 JSON-RPC error，业务失败回 isError=true 工具结果，
+
+    HTTP 恒 200（通知为 202 无 body）。全部纯新增（详见 M20-CONTRACTS.md）。
+
     '
-  version: 0.19.0-m19
+  version: 0.20.0-m20
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -261,6 +274,9 @@ tags:
   description: 记忆库管理：库/记忆片段规则/用户画像规则/记忆详情/检索调试/Memory Key（M19，对标百炼记忆库控制台）
 - name: memory-open-api
   description: 记忆库开放 API：add/search/memory_nodes/profiles，独立 Memory Key（kb-mk-*）鉴权与限流（M19）
+- name: mcp
+  description: MCP 协议层：知识库应用与记忆库的 MCP Streamable HTTP 端点，JSON-RPC 2.0，凭证与限流复用各自
+    REST 过滤器链（M20，docs/M20-CONTRACTS.md）
 security:
 - bearerAuth: []
 paths:
@@ -4154,6 +4170,38 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/RateLimited'
+  /api/v1/knowledge/mcp:
+    post:
+      tags:
+      - mcp
+      summary: 知识库应用 MCP 端点（API Key 鉴权，M20）
+      description: 'MCP Streamable HTTP transport：单个 JSON-RPC 2.0 请求 → 单个 JSON 响应（不开
+        SSE 流）。支持 initialize / ping / tools/list / tools/call 与 notifications/*（通知回
+        202 无 body）；不支持批量数组（-32600）。工具 knowledge_search / knowledge_chat 的参数与
+        返回结构同 REST 孪生端点（chat 仅非流式，stream=true 报 INVALID_PARAM）。鉴权/限流/审计与
+        /api/v1/knowledge/* REST 端点同一条 ApiKeyAuthFilter 链。业务失败（如 402x 错误码）不走
+        JSON-RPC error，而是 tools/call 成功响应中 isError=true 的工具结果，文本形如「错误码: 消息」。'
+      security:
+      - ApiKeyBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpJsonRpcRequest'
+      responses:
+        '200':
+          description: JSON-RPC 响应（result 或 error 平面）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpJsonRpcResponse'
+        '202':
+          description: 通知（notifications/*）已接受，无响应体
+        '401':
+          $ref: '#/components/responses/InvalidApiKey'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /api/v1/memory-libraries:
     get:
       tags:
@@ -4839,6 +4887,37 @@ paths:
                 $ref: '#/components/schemas/MemoryProfileListResult'
         '400':
           $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/InvalidApiKey'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /api/v1/memory/mcp:
+    post:
+      tags:
+      - mcp
+      summary: 记忆库 MCP 端点（Memory Key 鉴权，M20）
+      description: 'MCP Streamable HTTP transport，协议语义同 /api/v1/knowledge/mcp。工具
+        memory_add / memory_search / memory_list / memory_update / memory_delete /
+        memory_get_profile 与 M19 六个 REST 端点一一对应，参数与返回结构一致；操作的记忆库由 Key
+        绑定关系决定，参数无需也不可指定库。鉴权/限流与 /api/v1/memory/* REST 端点同一条
+        MemoryKeyAuthFilter 链。'
+      security:
+      - MemoryKeyBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/McpJsonRpcRequest'
+      responses:
+        '200':
+          description: JSON-RPC 响应（result 或 error 平面）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/McpJsonRpcResponse'
+        '202':
+          description: 通知（notifications/*）已接受，无响应体
         '401':
           $ref: '#/components/responses/InvalidApiKey'
         '429':
@@ -9843,3 +9922,61 @@ components:
         properties:
           data:
             $ref: '#/components/schemas/MemoryAppKeyIssued'
+    McpJsonRpcRequest:
+      type: object
+      description: 'MCP 端点的 JSON-RPC 2.0 请求（M20）。method 取 initialize / ping /
+        tools/list / tools/call / notifications/*；通知不带 id，其余请求必带 id；不支持批量数组。
+        tools/call 的 params 为 {name, arguments}，arguments 结构见 tools/list 返回的各工具
+        inputSchema（与 REST 孪生端点的请求体一致）。'
+      required:
+      - jsonrpc
+      - method
+      properties:
+        jsonrpc:
+          type: string
+          enum: ['2.0']
+        id:
+          description: 请求标识，数字或字符串；通知（notifications/*）不带
+          oneOf:
+          - type: integer
+          - type: string
+        method:
+          type: string
+          description: initialize / ping / tools/list / tools/call / notifications/*
+        params:
+          type: object
+          description: 方法参数；initialize 为 {protocolVersion, capabilities, clientInfo}，
+            tools/call 为 {name, arguments}
+          additionalProperties: true
+    McpJsonRpcResponse:
+      type: object
+      description: 'MCP 端点的 JSON-RPC 2.0 响应（M20），result 与 error 互斥。协议违规走 error
+        （-32700 解析错 / -32600 非法请求 / -32601 方法不存在 / -32602 参数错）；业务失败走
+        tools/call 的 result，isError=true，content[0].text 形如「错误码: 消息」；成功时 result 含
+        content（type=text 的 JSON 文本）与 structuredContent（同 REST data 结构）。'
+      required:
+      - jsonrpc
+      - id
+      properties:
+        jsonrpc:
+          type: string
+          enum: ['2.0']
+        id:
+          description: 回显请求 id；解析失败时为 null
+          oneOf:
+          - type: integer
+          - type: string
+          nullable: true
+        result:
+          type: object
+          description: 成功平面；initialize 返 {protocolVersion, capabilities, serverInfo}，
+            tools/list 返 {tools}，tools/call 返 {content, structuredContent, isError}
+          additionalProperties: true
+        error:
+          type: object
+          description: 协议错误平面
+          properties:
+            code:
+              type: integer
+            message:
+              type: string

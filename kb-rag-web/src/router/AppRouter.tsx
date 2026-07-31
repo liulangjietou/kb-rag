@@ -14,6 +14,7 @@ import ChatDebugPage from '../pages/chat/ChatDebugPage';
 import EvalCenterPage from '../pages/eval/EvalCenterPage';
 import KbDetailPage from '../pages/kb/KbDetailPage';
 import KbListPage from '../pages/kb/KbListPage';
+import McpDebugPage from '../pages/mcp/McpDebugPage';
 import MemoryLibraryDetailPage from '../pages/memory/MemoryLibraryDetailPage';
 import MemoryLibraryListPage from '../pages/memory/MemoryLibraryListPage';
 import SearchPage from '../pages/search/SearchPage';
@@ -72,6 +73,9 @@ export default function AppRouter() {
             <Route element={<RequirePermission anyOf={[PERMISSIONS.MEMORY_READ]} />}>
               <Route path="/memory" element={<MemoryLibraryListPage />} />
               <Route path="/memory/:libraryId" element={<MemoryLibraryDetailPage />} />
+            </Route>
+            <Route element={<RequirePermission anyOf={[PERMISSIONS.APP_READ, PERMISSIONS.MEMORY_READ]} />}>
+              <Route path="/mcp" element={<McpDebugPage />} />
             </Route>
             <Route element={<RequirePermission anyOf={[PERMISSIONS.EVAL_READ]} />}>
               <Route path="/eval" element={<EvalCenterPage />} />

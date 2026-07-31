@@ -4,6 +4,7 @@
 // account can open" true by construction instead of by two lists agreeing with each other.
 import {
   ApartmentOutlined,
+  ApiOutlined,
   AppstoreOutlined,
   AuditOutlined,
   BulbOutlined,
@@ -42,6 +43,12 @@ export const NAV_ENTRIES: NavEntry[] = [
   },
   { key: '/apps', icon: <AppstoreOutlined />, label: '应用中心', anyOf: [PERMISSIONS.APP_READ] },
   { key: '/memory', icon: <BulbOutlined />, label: '记忆库', anyOf: [PERMISSIONS.MEMORY_READ] },
+  {
+    key: '/mcp',
+    icon: <ApiOutlined />,
+    label: 'MCP 调试',
+    anyOf: [PERMISSIONS.APP_READ, PERMISSIONS.MEMORY_READ],
+  },
   { key: '/eval', icon: <ExperimentOutlined />, label: '评测中心', anyOf: [PERMISSIONS.EVAL_READ] },
   { key: '/users', icon: <TeamOutlined />, label: '用户管理', anyOf: [PERMISSIONS.USER_MANAGE] },
   {
