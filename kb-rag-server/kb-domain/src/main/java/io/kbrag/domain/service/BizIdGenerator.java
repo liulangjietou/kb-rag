@@ -253,6 +253,51 @@ public class BizIdGenerator {
         return generate(KbConstants.OPERATION_AUDIT_ID_PREFIX);
     }
 
+    /**
+     * Generates a memory library id.
+     *
+     * @return prefixed identifier
+     */
+    public String memoryLibraryId() {
+        return generate(KbConstants.MEMORY_LIBRARY_ID_PREFIX);
+    }
+
+    /**
+     * Generates a memory fragment rule id.
+     *
+     * @return prefixed identifier
+     */
+    public String memoryFragmentRuleId() {
+        return generate(KbConstants.MEMORY_FRAGMENT_RULE_ID_PREFIX);
+    }
+
+    /**
+     * Generates a memory profile rule id.
+     *
+     * @return prefixed identifier
+     */
+    public String memoryProfileRuleId() {
+        return generate(KbConstants.MEMORY_PROFILE_RULE_ID_PREFIX);
+    }
+
+    /**
+     * Generates a memory node id.
+     *
+     * @return prefixed identifier
+     */
+    public String memoryNodeId() {
+        return generate(KbConstants.MEMORY_NODE_ID_PREFIX);
+    }
+
+    /**
+     * Generates a memory app key row id; the key material itself is minted by {@link MemoryKeyFactory}.
+     *
+     * @return prefixed identifier
+     */
+    public String memoryAppKeyId() {
+        return generate(KbConstants.MEMORY_APP_KEY_ID_PREFIX);
+    }
+
     private String generate(String prefix) {
         String random = UUID.randomUUID().toString().replace("-", "").substring(0, RANDOM_LENGTH);
         return prefix + KbConstants.ID_SEPARATOR + random;

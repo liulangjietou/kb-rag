@@ -91,6 +91,21 @@ public final class KbConstants {
     /** Business id prefix of an operation audit row. */
     public static final String OPERATION_AUDIT_ID_PREFIX = "opa";
 
+    /** Business id prefix of a memory library. */
+    public static final String MEMORY_LIBRARY_ID_PREFIX = "ml";
+
+    /** Business id prefix of a memory fragment rule. */
+    public static final String MEMORY_FRAGMENT_RULE_ID_PREFIX = "mfr";
+
+    /** Business id prefix of a memory profile rule. */
+    public static final String MEMORY_PROFILE_RULE_ID_PREFIX = "mpr";
+
+    /** Business id prefix of a memory node. */
+    public static final String MEMORY_NODE_ID_PREFIX = "mn";
+
+    /** Business id prefix of a memory app key row, never the key material itself. */
+    public static final String MEMORY_APP_KEY_ID_PREFIX = "mak";
+
     /**
      * Fixed prefix of every open API key plaintext, requirement section 4.8 "kb-sk-{prefix}{random}".
      *
@@ -98,6 +113,15 @@ public final class KbConstants {
      * by pattern alone, which is what lets secret scanners revoke it.
      */
     public static final String API_KEY_PLAINTEXT_PREFIX = "kb-sk-";
+
+    /**
+     * Fixed prefix of every memory key plaintext, the M19 contract "kb-mk-{random}".
+     *
+     * <p>Deliberately distinct from {@link #API_KEY_PLAINTEXT_PREFIX}: the two credentials guard
+     * different surfaces, and the prefix is what lets a leaked string be routed to the right
+     * revocation page by pattern alone.
+     */
+    public static final String MEMORY_KEY_PLAINTEXT_PREFIX = "kb-mk-";
 
     /**
      * Operator recorded on every annotation.

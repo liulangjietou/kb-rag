@@ -194,8 +194,17 @@ info:
 
     `/api/v1/operation-audits` 查询端点。全部纯新增（详见 M16-CONTRACTS.md）。
 
+
+    0.19.0-m19 增量：M17 网页源 render_js（JS 渲染抓取）、M18 站点凭据 /api/v1/web-credentials、
+
+    M19 记忆库——管理端 /api/v1/memory-libraries（memory-library tag）与开放端 /api/v1/memory/*
+
+    （memory-open-api tag，Authorization: Bearer kb-mk-* 独立鉴权与限流）。全部纯新增
+
+    （详见 M17/M18/M19-CONTRACTS.md）。
+
     '
-  version: 0.17.0-m17
+  version: 0.19.0-m19
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -248,6 +257,10 @@ tags:
     §3）
 - name: system
   description: 系统状态与健康检查
+- name: memory-library
+  description: 记忆库管理：库/记忆片段规则/用户画像规则/记忆详情/检索调试/Memory Key（M19，对标百炼记忆库控制台）
+- name: memory-open-api
+  description: 记忆库开放 API：add/search/memory_nodes/profiles，独立 Memory Key（kb-mk-*）鉴权与限流（M19）
 security:
 - bearerAuth: []
 paths:
@@ -4141,6 +4154,695 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '429':
           $ref: '#/components/responses/RateLimited'
+  /api/v1/memory-libraries:
+    get:
+      tags:
+      - memory-library
+      summary: 记忆库列表（memory:read，M19）
+      parameters:
+      - name: keyword
+        in: query
+        required: false
+        schema: {type: string}
+        description: 按名称模糊过滤
+      - name: page
+        in: query
+        required: false
+        schema: {type: integer, default: 1}
+      - name: size
+        in: query
+        required: false
+        schema: {type: integer, default: 20}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryLibraryPageResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+    post:
+      tags:
+      - memory-library
+      summary: 创建记忆库（memory:write，M19）
+      description: 创建后自动预置一条「默认项目」记忆片段规则（默认指令、自动更新开、有效期 180 天），对齐百炼默认记忆库行为；该规则可编辑不可删除。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryLibraryUpsertRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryLibraryResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/memory-libraries/{libraryId}:
+    get:
+      tags:
+      - memory-library
+      summary: 记忆库详情（含规则与记忆统计，memory:read，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryLibraryDetailResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags:
+      - memory-library
+      summary: 编辑记忆库名称与描述（memory:write，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryLibraryUpsertRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryLibraryResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - memory-library
+      summary: 删除记忆库（级联清除规则/记忆/画像/Key，不可恢复，memory:write，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      responses:
+        '200':
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/memory-libraries/{libraryId}/fragment-rules:
+    get:
+      tags:
+      - memory-library
+      summary: 记忆片段规则列表（memory:read，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryFragmentRuleListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags:
+      - memory-library
+      summary: 添加记忆片段规则（每库上限 50 条，memory:write，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryFragmentRuleUpsertRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryFragmentRuleResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/memory-libraries/{libraryId}/fragment-rules/{ruleId}:
+    put:
+      tags:
+      - memory-library
+      summary: 编辑记忆片段规则（memory:write，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      - $ref: '#/components/parameters/MemoryRuleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryFragmentRuleUpsertRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryFragmentRuleResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - memory-library
+      summary: 删除记忆片段规则（预置默认规则不可删；级联删除该规则下记忆，memory:write，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      - $ref: '#/components/parameters/MemoryRuleId'
+      responses:
+        '200':
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/memory-libraries/{libraryId}/profile-rules:
+    get:
+      tags:
+      - memory-library
+      summary: 用户画像规则列表（memory:read，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryProfileRuleListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags:
+      - memory-library
+      summary: 添加用户画像规则（每库上限 50 条，字段上限 50 个，memory:write，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryProfileRuleUpsertRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryProfileRuleResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/memory-libraries/{libraryId}/profile-rules/{ruleId}:
+    put:
+      tags:
+      - memory-library
+      summary: 编辑用户画像规则（memory:write，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      - $ref: '#/components/parameters/MemoryRuleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryProfileRuleUpsertRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryProfileRuleResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - memory-library
+      summary: 删除用户画像规则（级联删除该规则下已提取画像，memory:write，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      - $ref: '#/components/parameters/MemoryRuleId'
+      responses:
+        '200':
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/memory-libraries/{libraryId}/entities:
+    get:
+      tags:
+      - memory-library
+      summary: 记忆实体列表（按 user_id 聚合，含记忆数与最近更新时间，memory:read，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      - name: user_id
+        in: query
+        required: false
+        schema: {type: string}
+        description: 按记忆实体 ID 精确筛选
+      - name: page
+        in: query
+        required: false
+        schema: {type: integer, default: 1}
+      - name: size
+        in: query
+        required: false
+        schema: {type: integer, default: 20}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryEntityPageResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/memory-libraries/{libraryId}/nodes:
+    get:
+      tags:
+      - memory-library
+      summary: 记忆节点列表（记忆详情，memory:read，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      - name: user_id
+        in: query
+        required: true
+        schema: {type: string}
+        description: 记忆实体 ID
+      - name: rule_id
+        in: query
+        required: false
+        schema: {type: string}
+        description: 按片段规则筛选
+      - name: page
+        in: query
+        required: false
+        schema: {type: integer, default: 1}
+      - name: size
+        in: query
+        required: false
+        schema: {type: integer, default: 20}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryNodePageResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/memory-libraries/{libraryId}/nodes/{nodeId}:
+    delete:
+      tags:
+      - memory-library
+      summary: 删除单条记忆（同步删 ES 向量，memory:write，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      - $ref: '#/components/parameters/MemoryNodeId'
+      responses:
+        '200':
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/memory-libraries/{libraryId}/profiles:
+    get:
+      tags:
+      - memory-library
+      summary: 查看用户画像（按实体，可选按画像规则筛选，memory:read，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      - name: user_id
+        in: query
+        required: true
+        schema: {type: string}
+      - name: rule_id
+        in: query
+        required: false
+        schema: {type: string}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryProfileListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/memory-libraries/{libraryId}/search-debug:
+    post:
+      tags:
+      - memory-library
+      summary: 记忆检索调试（控制台，参数与开放 API search 对齐，memory:read，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemorySearchRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemorySearchResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/UpstreamModelError'
+  /api/v1/memory-libraries/{libraryId}/keys:
+    get:
+      tags:
+      - memory-library
+      summary: Memory Key 列表（仅展示前缀形态，memory:read，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryAppKeyListResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags:
+      - memory-library
+      summary: 签发 Memory Key（明文仅本次返回，memory:write，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryAppKeyCreateRequest'
+      responses:
+        '200':
+          description: 签发成功，api_key 字段仅此处回传明文
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryAppKeyIssuedResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/memory-libraries/{libraryId}/keys/{memoryKeyId}/status:
+    put:
+      tags:
+      - memory-library
+      summary: 启用/禁用 Memory Key（memory:write，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      - $ref: '#/components/parameters/MemoryAppKeyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryAppKeyStatusRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/memory-libraries/{libraryId}/keys/{memoryKeyId}/rotate:
+    post:
+      tags:
+      - memory-library
+      summary: 轮换 Memory Key（旧明文立即失效，新明文仅本次返回，memory:write，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      - $ref: '#/components/parameters/MemoryAppKeyId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryAppKeyIssuedResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/memory-libraries/{libraryId}/keys/{memoryKeyId}:
+    delete:
+      tags:
+      - memory-library
+      summary: 删除 Memory Key（立即失效，memory:write，M19）
+      parameters:
+      - $ref: '#/components/parameters/MemoryLibraryId'
+      - $ref: '#/components/parameters/MemoryAppKeyId'
+      responses:
+        '200':
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/memory/add:
+    post:
+      tags:
+      - memory-open-api
+      summary: AddMemory 添加记忆（Memory Key 鉴权，M19）
+      description: '传入 messages 时由 LLM 按片段规则抽取记忆（规则 auto_update 开启时还会合并更新同实体旧记忆）；
+
+        传入 custom_content 时直接写入指定内容不走抽取；同时传 profile_rule_id 时额外抽取用户画像。
+
+        记忆库由 Key 绑定关系决定，请求体无需也不可指定库。LLM 未配置时 messages 抽取返回 502，custom_content 仍可写入。'
+      security:
+      - MemoryKeyBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryAddRequest'
+      responses:
+        '200':
+          description: 写入成功，返回本次产生/更新的记忆节点与画像
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryAddResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/InvalidApiKey'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          $ref: '#/components/responses/UpstreamModelError'
+  /api/v1/memory/search:
+    post:
+      tags:
+      - memory-open-api
+      summary: SearchMemory 检索记忆（Memory Key 鉴权，M19）
+      description: '语义检索该记忆实体未过期的记忆片段并附带用户画像。可选能力开关：
+
+        intent_recognition 意图判别召回（LLM 判断是否需要召回，不需要时返回空）、rewrite 查询改写、
+
+        rerank 重排（gte-rerank-v2）+ similarity_threshold 阈值过滤。embedding 未配置时降级 BM25。'
+      security:
+      - MemoryKeyBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemorySearchRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemorySearchResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/InvalidApiKey'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          $ref: '#/components/responses/UpstreamModelError'
+  /api/v1/memory/memory_nodes:
+    get:
+      tags:
+      - memory-open-api
+      summary: ListMemory 列出记忆（Memory Key 鉴权，M19）
+      security:
+      - MemoryKeyBearer: []
+      parameters:
+      - name: user_id
+        in: query
+        required: true
+        schema: {type: string}
+        description: 记忆实体 ID
+      - name: rule_id
+        in: query
+        required: false
+        schema: {type: string}
+        description: 按片段规则筛选
+      - name: page_num
+        in: query
+        required: false
+        schema: {type: integer, default: 1}
+      - name: page_size
+        in: query
+        required: false
+        schema: {type: integer, default: 10}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryNodePageResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/InvalidApiKey'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /api/v1/memory/memory_nodes/{nodeId}:
+    patch:
+      tags:
+      - memory-open-api
+      summary: UpdateMemory 更新记忆（Memory Key 鉴权，M19）
+      description: 改写记忆内容并重新向量化；节点必须属于 Key 绑定的记忆库与请求的 user_id，否则 404。
+      security:
+      - MemoryKeyBearer: []
+      parameters:
+      - $ref: '#/components/parameters/MemoryNodeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MemoryNodeUpdateRequest'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryNodeResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/InvalidApiKey'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+    delete:
+      tags:
+      - memory-open-api
+      summary: DeleteMemory 删除记忆（Memory Key 鉴权，M19）
+      security:
+      - MemoryKeyBearer: []
+      parameters:
+      - $ref: '#/components/parameters/MemoryNodeId'
+      - name: user_id
+        in: query
+        required: true
+        schema: {type: string}
+        description: 记忆实体 ID，与节点归属不符时 404
+      responses:
+        '200':
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '401':
+          $ref: '#/components/responses/InvalidApiKey'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /api/v1/memory/profiles:
+    get:
+      tags:
+      - memory-open-api
+      summary: GetUserProfile 获取用户画像（Memory Key 鉴权，M19）
+      description: 返回该实体在各画像规则下的属性值；尚未从对话提取到的字段回落规则定义的初始值。
+      security:
+      - MemoryKeyBearer: []
+      parameters:
+      - name: user_id
+        in: query
+        required: true
+        schema: {type: string}
+      - name: rule_id
+        in: query
+        required: false
+        schema: {type: string}
+        description: 指定画像规则，缺省返回全部
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MemoryProfileListResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/InvalidApiKey'
+        '429':
+          $ref: '#/components/responses/RateLimited'
 components:
   securitySchemes:
     bearerAuth:
@@ -4164,6 +4866,17 @@ components:
         kb-sk-*；按 key_hash（SHA-256）查验，与管理台 bearerAuth 会话令牌相互独立、走独立过滤器链，
 
         独立限流（按 Key 令牌桶）（M4c-CONTRACTS.md §3）。
+
+        '
+    MemoryKeyBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: kb-mk-*
+      description: '记忆库开放 API（/api/v1/memory/*）专用鉴权，Header：Authorization: Bearer
+
+        kb-mk-*；每把 Key 绑定唯一记忆库（应用级隔离），按 key_hash（SHA-256）查验，独立过滤器链，
+
+        独立限流（按 Key 令牌桶）（M19）。
 
         '
   parameters:
@@ -4238,6 +4951,34 @@ components:
       schema:
         type: string
       description: 检索反馈业务主键（feedback_id，M10）
+    MemoryLibraryId:
+      name: libraryId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 记忆库业务主键（library_id，M19）
+    MemoryRuleId:
+      name: ruleId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 记忆规则业务主键（片段规则 mfr_* 或画像规则 mpr_*，M19）
+    MemoryNodeId:
+      name: nodeId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 记忆节点业务主键（node_id，M19）
+    MemoryAppKeyId:
+      name: memoryKeyId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Memory Key 业务主键（key_id，M19）
   responses:
     InvalidParam:
       description: 参数校验失败
@@ -8434,3 +9175,671 @@ components:
         properties:
           data:
             $ref: '#/components/schemas/ApiAuditStats'
+    MemoryLibrary:
+      type: object
+      description: 记忆库（M19）
+      required:
+      - library_id
+      - name
+      properties:
+        library_id:
+          type: string
+          example: ml_1a2b3c4d5e6f7a8b
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        fragment_rule_count:
+          type: integer
+          description: 片段规则数（上限 50）
+        profile_rule_count:
+          type: integer
+          description: 画像规则数（上限 50）
+        node_count:
+          type: integer
+          format: int64
+          description: 记忆节点总数
+        entity_count:
+          type: integer
+          format: int64
+          description: 记忆实体（去重 user_id）总数
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MemoryLibraryUpsertRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          maxLength: 64
+          description: 记忆库名称，同名拒绝
+        description:
+          type: string
+          maxLength: 512
+          nullable: true
+          description: 可能用于指导智能体调用的描述语句
+    MemoryLibraryPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryLibrary'
+        page:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    MemoryLibraryPageResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/MemoryLibraryPage'
+    MemoryLibraryResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/MemoryLibrary'
+    MemoryLibraryDetail:
+      allOf:
+      - $ref: '#/components/schemas/MemoryLibrary'
+      - type: object
+        properties:
+          fragment_rules:
+            type: array
+            items:
+              $ref: '#/components/schemas/MemoryFragmentRule'
+          profile_rules:
+            type: array
+            items:
+              $ref: '#/components/schemas/MemoryProfileRule'
+    MemoryLibraryDetailResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/MemoryLibraryDetail'
+    MemoryExtractVersion:
+      type: string
+      description: 抽取版本：PRO 抽取前拉取同实体旧记忆交给 LLM 合并去重；LITE 单次直接抽取，更快更省 token
+      enum:
+      - PRO
+      - LITE
+    MemoryInstructionType:
+      type: string
+      description: 规则指令类型：DEFAULT 使用内置抽取指令；CUSTOM 使用 instruction 字段的自定义指令
+      enum:
+      - DEFAULT
+      - CUSTOM
+    MemoryFragmentRule:
+      type: object
+      description: 记忆片段规则（M19）
+      required:
+      - rule_id
+      - name
+      - instruction_type
+      properties:
+        rule_id:
+          type: string
+          example: mfr_1a2b3c4d5e6f7a8b
+        library_id:
+          type: string
+        name:
+          type: string
+        instruction_type:
+          $ref: '#/components/schemas/MemoryInstructionType'
+        instruction:
+          type: string
+          nullable: true
+          description: 自定义抽取指令，instruction_type=CUSTOM 时必填
+        auto_update:
+          type: boolean
+          description: 开启后模型自动合并更新同实体旧记忆
+        expire_days:
+          type: integer
+          nullable: true
+          description: 记忆有效期天数，7/30/180，null 表示永不过期
+          enum:
+          - 7
+          - 30
+          - 180
+          - null
+        extract_version:
+          $ref: '#/components/schemas/MemoryExtractVersion'
+        builtin:
+          type: boolean
+          description: 建库预置的「默认项目」规则为 true，不可删除
+        node_count:
+          type: integer
+          format: int64
+          description: 该规则下记忆节点数
+        created_at:
+          type: string
+          format: date-time
+    MemoryFragmentRuleUpsertRequest:
+      type: object
+      required:
+      - name
+      - instruction_type
+      properties:
+        name:
+          type: string
+          maxLength: 64
+          description: 规则名称，库内唯一
+        instruction_type:
+          $ref: '#/components/schemas/MemoryInstructionType'
+        instruction:
+          type: string
+          maxLength: 2000
+          nullable: true
+        auto_update:
+          type: boolean
+          default: true
+        expire_days:
+          type: integer
+          nullable: true
+          enum:
+          - 7
+          - 30
+          - 180
+          - null
+        extract_version:
+          $ref: '#/components/schemas/MemoryExtractVersion'
+    MemoryFragmentRuleListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/MemoryFragmentRule'
+    MemoryFragmentRuleResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/MemoryFragmentRule'
+    MemoryProfileField:
+      type: object
+      description: 用户画像字段定义（M19）
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          maxLength: 64
+          description: 画像字段名称，规则内唯一
+        description:
+          type: string
+          maxLength: 512
+          nullable: true
+          description: 字段含义，引导模型提取
+        initial_value:
+          type: string
+          maxLength: 512
+          nullable: true
+          description: 尚未从对话提取到时的初始默认值
+    MemoryProfileRule:
+      type: object
+      description: 用户画像规则（M19）
+      required:
+      - rule_id
+      - name
+      - fields
+      properties:
+        rule_id:
+          type: string
+          example: mpr_1a2b3c4d5e6f7a8b
+        library_id:
+          type: string
+        name:
+          type: string
+        extract_version:
+          $ref: '#/components/schemas/MemoryExtractVersion'
+        fields:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/MemoryProfileField'
+        created_at:
+          type: string
+          format: date-time
+    MemoryProfileRuleUpsertRequest:
+      type: object
+      required:
+      - name
+      - fields
+      properties:
+        name:
+          type: string
+          maxLength: 64
+          description: 画像规则名称，库内唯一
+        extract_version:
+          $ref: '#/components/schemas/MemoryExtractVersion'
+        fields:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/MemoryProfileField'
+    MemoryProfileRuleListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/MemoryProfileRule'
+    MemoryProfileRuleResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/MemoryProfileRule'
+    MemoryEntity:
+      type: object
+      description: 记忆实体（按 user_id 聚合的记忆主体，M19）
+      properties:
+        user_id:
+          type: string
+        node_count:
+          type: integer
+          format: int64
+        updated_at:
+          type: string
+          format: date-time
+          description: 最近一次记忆写入/更新时间
+    MemoryEntityPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryEntity'
+        page:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    MemoryEntityPageResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/MemoryEntityPage'
+    MemoryNodeSource:
+      type: string
+      description: 记忆来源：EXTRACTED 由 LLM 从对话抽取；CUSTOM 调用方直接写入
+      enum:
+      - EXTRACTED
+      - CUSTOM
+    MemoryNode:
+      type: object
+      description: 记忆节点（记忆片段，M19）
+      required:
+      - memory_node_id
+      - user_id
+      - content
+      properties:
+        memory_node_id:
+          type: string
+          example: mn_1a2b3c4d5e6f7a8b
+        library_id:
+          type: string
+        rule_id:
+          type: string
+          description: 产生该记忆的片段规则
+        user_id:
+          type: string
+        content:
+          type: string
+        source:
+          $ref: '#/components/schemas/MemoryNodeSource'
+        meta_data:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: 调用方自定义元数据，原样存储原样返回
+        expire_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 过期时间，null 表示永不过期；过期记忆不再被检索
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    MemoryNodePage:
+      type: object
+      properties:
+        memory_nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryNode'
+        page:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    MemoryNodePageResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/MemoryNodePage'
+    MemoryNodeResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/MemoryNode'
+    MemoryNodeUpdateRequest:
+      type: object
+      required:
+      - user_id
+      - custom_content
+      properties:
+        user_id:
+          type: string
+          description: 记忆实体 ID，与节点归属不符时 404
+        custom_content:
+          type: string
+          maxLength: 4000
+          description: 新的记忆内容，替换后重新向量化
+        meta_data:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: 不传时保留原元数据
+    MemoryChatMessage:
+      type: object
+      required:
+      - role
+      - content
+      properties:
+        role:
+          type: string
+          enum:
+          - user
+          - assistant
+        content:
+          type: string
+    MemoryEvent:
+      type: string
+      description: 本次 AddMemory 对该节点的动作
+      enum:
+      - ADD
+      - UPDATE
+    MemoryAddRequest:
+      type: object
+      description: 'messages 与 custom_content 至少传其一；同时传时 custom_content 直接写入、messages 另走抽取。'
+      required:
+      - user_id
+      properties:
+        user_id:
+          type: string
+          maxLength: 64
+          description: 记忆实体 ID，调用方自定义（如终端用户 ID），实体间记忆互相隔离
+        messages:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/MemoryChatMessage'
+          description: 待抽取的对话消息列表
+        custom_content:
+          type: string
+          maxLength: 4000
+          nullable: true
+          description: 直接写入的自定义记忆内容，不走 LLM 抽取
+        fragment_rule_id:
+          type: string
+          nullable: true
+          description: 指定片段规则，缺省使用库内预置的默认规则
+        profile_rule_id:
+          type: string
+          nullable: true
+          description: 同时抽取用户画像时传入画像规则 ID
+        meta_data:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: 附到本次产生的每条记忆上的自定义元数据
+    MemoryAddedNode:
+      type: object
+      properties:
+        memory_node_id:
+          type: string
+        content:
+          type: string
+        event:
+          $ref: '#/components/schemas/MemoryEvent'
+    MemoryProfile:
+      type: object
+      description: 一个实体在一条画像规则下的属性集（M19）
+      properties:
+        rule_id:
+          type: string
+        rule_name:
+          type: string
+        user_id:
+          type: string
+        attributes:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              value:
+                type: string
+                nullable: true
+                description: 尚未提取且无初始值时为 null
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+    MemoryProfileListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/MemoryProfile'
+    MemoryAddData:
+      type: object
+      properties:
+        memory_nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryAddedNode'
+        profile:
+          $ref: '#/components/schemas/MemoryProfile'
+    MemoryAddResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/MemoryAddData'
+    MemorySearchRequest:
+      type: object
+      required:
+      - user_id
+      - query
+      properties:
+        user_id:
+          type: string
+          description: 记忆实体 ID
+        query:
+          type: string
+          maxLength: 2000
+          description: 当前提问
+        fragment_rule_id:
+          type: string
+          nullable: true
+          description: 限定在指定片段规则下检索，缺省全部
+        max_results:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+          description: 最大召回数量
+        intent_recognition:
+          type: boolean
+          default: false
+          description: 意图判别召回：LLM 判断当前提问是否需要召回记忆，不需要时直接返回空
+        rewrite:
+          type: boolean
+          default: false
+          description: 查询改写：LLM 优化口语化提问后再检索
+        rerank:
+          type: boolean
+          default: false
+          description: 重排：候选结果经 rerank 模型重排序
+        similarity_threshold:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+          nullable: true
+          description: 相似度阈值，建议 0.5~0.7；仅 rerank 开启时生效，低于阈值的结果被丢弃
+    MemorySearchedNode:
+      allOf:
+      - $ref: '#/components/schemas/MemoryNode'
+      - type: object
+        properties:
+          score:
+            type: number
+            format: double
+            nullable: true
+            description: 相关度得分（rerank 开启时为 rerank 得分，否则为检索引擎得分）
+    MemorySearchData:
+      type: object
+      properties:
+        memory_nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemorySearchedNode'
+        profiles:
+          type: array
+          items:
+            $ref: '#/components/schemas/MemoryProfile'
+          description: 该实体的用户画像，随检索结果一并返回
+        rewritten_query:
+          type: string
+          nullable: true
+          description: rewrite 开启时的改写后查询
+        intent_recalled:
+          type: boolean
+          description: 意图判别结论；false 表示判定无需召回，memory_nodes 为空
+    MemorySearchResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/MemorySearchData'
+    MemoryAppKeyStatus:
+      type: string
+      enum:
+      - ENABLED
+      - DISABLED
+    MemoryAppKey:
+      type: object
+      description: 记忆库开放 API 的 Memory Key（M19）
+      properties:
+        key_id:
+          type: string
+          example: mak_1a2b3c4d5e6f7a8b
+        library_id:
+          type: string
+        name:
+          type: string
+        key_prefix:
+          type: string
+          description: 展示形态（前缀+末四位），如 kb-mk-a1b2c3…d4e5
+        status:
+          $ref: '#/components/schemas/MemoryAppKeyStatus'
+        qps_limit:
+          type: integer
+          description: 每秒请求上限（令牌桶）
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    MemoryAppKeyCreateRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+          maxLength: 64
+          description: 用途备注，如「客服智能体」
+        qps_limit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 10
+    MemoryAppKeyStatusRequest:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          $ref: '#/components/schemas/MemoryAppKeyStatus'
+    MemoryAppKeyListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/MemoryAppKey'
+    MemoryAppKeyIssued:
+      allOf:
+      - $ref: '#/components/schemas/MemoryAppKey'
+      - type: object
+        properties:
+          api_key:
+            type: string
+            description: 完整明文 Key，仅签发/轮换响应返回一次，服务端不存明文
+    MemoryAppKeyIssuedResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/MemoryAppKeyIssued'
