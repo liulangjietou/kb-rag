@@ -7,6 +7,11 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 新增（M20）
+
+- MCP 协议层（`docs/M20-CONTRACTS.md`）：知识库应用与记忆库各暴露一个 MCP Streamable HTTP 端点（`POST /api/v1/knowledge/mcp`、`POST /api/v1/memory/mcp`），任何 MCP 兼容客户端配一个 URL 加一把既有 Key 即可直接调用。手写无状态 JSON-RPC 2.0 引擎（`McpServerEngine`，支持 initialize / ping / tools/list / tools/call / notifications/*，协议版本 2025-03-26 兼容 2024-11-05，不支持批量数组），**零新增依赖**。工具集：knowledge_search / knowledge_chat（仅非流式，stream=true 报 INVALID_PARAM 指路 REST SSE）与 memory_add / memory_search / memory_list / memory_update / memory_delete / memory_get_profile，参数与返回结构同 REST 孪生端点（复用 DTO，`McpArgumentBinder` 补 jakarta Validator 显式校验）。
+- 鉴权复用而非新建：两个端点刻意落在 `ApiKeyAuthFilter`（kb-sk-*）与 `MemoryKeyAuthFilter`（kb-mk-*）既有 URL 前缀之下，鉴权/限流/审计与 REST 同一条链、零过滤器改动；记忆库隔离红线原样成立（库来自 Key 绑定关系，参数无法指定 library_id）。两个失败平面：协议违规回 JSON-RPC error（-32700/-32600/-32601/-32602），业务失败（BizException）回 tools/call 成功响应里 isError=true 的工具结果（文本形如「错误码: 消息」）；成功结果同时给 content 文本与 structuredContent 结构化两形态。离线单测 `McpServerEngineTest` 12 例。
+
 ### 新增（M19）
 
 - `[schema]` Flyway `V20__memory_library.sql`：新增 6 张记忆库表——`t_kb_memory_library`（记忆库，ID 前缀 `ml`）、`t_kb_memory_fragment_rule`（记忆片段规则，`mfr`，含 `instruction_type` DEFAULT/CUSTOM、`auto_update`、`expire_days`（存天数不存枚举串，NULL 永不过期）、`extract_version` PRO/LITE、`builtin`）、`t_kb_memory_profile_rule`（画像规则，`mpr`，`fields` 整体存 JSON 数组不拆子表——字段只随规则整体编辑读取，没有按字段查询的入口）、`t_kb_memory_node`（记忆节点，`mn`，唯一高频查询路径是（库，实体）翻页，索引 `idx_library_user`）、`t_kb_memory_profile`（用户画像，`uk_rule_user` 唯一键——一实体一规则一份画像，抽取结果按此 upsert 合并）、`t_kb_memory_app_key`（Memory Key，行 ID `mak`、明文 `kb-mk-*`，与 `t_kb_api_key` 同一决策：只存 SHA-256 摘要 + 展示前缀，明文仅签发响应回传一次）；权限种子 `memory:read` / `memory:write`（module=MEMORY）授予超级管理员与知识库管理员（沿 V16 授权口径）

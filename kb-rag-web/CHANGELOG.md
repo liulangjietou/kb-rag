@@ -6,6 +6,11 @@
 
 ### Added
 
+**M20 · MCP 调试页面**（`docs/M20-CONTRACTS.md`）
+- 新增一级菜单「MCP 调试」（`/mcp`，`app:read` 或 `memory:read` 任一可见，位于「记忆库」与「评测中心」之间）：针对知识库应用与记忆库两个 MCP 端点的在线调试页（`pages/mcp/McpDebugPage.tsx`）——端点二选一（切换即清场）、粘贴明文 Key（kb-sk-* / kb-mk-*，与 API 调试 tab 同一约定）、initialize 握手、tools/list 拉取工具目录（选中工具自动按 inputSchema.required 预填参数模板）、tools/call 发起调用。
+- 响应区显式区分三种结果平面：JSON-RPC error（红，协议错误码）、isError=true（橙，业务失败文本）、成功（绿），并展示原始 JSON-RPC 响应全文；接入示例区随表单实时生成 curl 与 MCP 客户端 `mcpServers` 配置片段（streamable-http）。
+- 新增 `api/mcp.ts`：仿 publicApi.ts 绕过共享 axios 实例直连 fetch 的 JSON-RPC 客户端（mcpInitialize / mcpListTools / mcpCallTool）——粘贴的 Key 不是管理台 JWT，401/429 正是页面要观察的对象。
+
 **M19 · 记忆库控制台**（`docs/M19-CONTRACTS.md`）
 - 新增一级菜单「记忆库」（`/memory`，`memory:read` 可见，位于「应用中心」与「评测中心」之间）：库列表页（`pages/memory/MemoryLibraryListPage.tsx`，关键词搜索/分页/新建/编辑/删除）。
 - 库详情页（`MemoryLibraryDetailPage.tsx`）五 Tab：片段规则（builtin 标签、指令类型/自动更新/过期天数/抽取版本表单）、画像规则（字段列表编辑器：name/description/initial_value，上限 50）、记忆数据（实体 → 节点下钻、节点删除、画像查看）、检索调试（意图识别/改写/重排三开关 + 相似度阈值 + 分数展示）、Memory Key（创建明文一次性弹窗 + 复制、启停/轮换/删除，轮换提示旧密钥即刻失效）。
