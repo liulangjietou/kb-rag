@@ -2154,6 +2154,45 @@ export interface UpdateWebSourceRequest {
   render_js?: boolean;
 }
 
+/** 站点凭据的认证类型（M18）：BASIC 用户名密码；HEADER 任意请求头，覆盖 Bearer 与 Cookie。 */
+export type WebAuthType = 'BASIC' | 'HEADER';
+
+/**
+ * GET /api/v1/web-credentials 响应行（M18）：按 host 挂的站点凭据。响应里没有 secret 字段——
+ * 不是省略，是接口层面就不存在，密码只进不出。
+ */
+export interface WebCredentialEntry {
+  credential_id: string;
+  host: string;
+  auth_type: WebAuthType;
+  username: string | null;
+  header_name: string | null;
+  enabled: boolean;
+  created_at: string;
+}
+
+/** POST /api/v1/web-credentials 请求体（M18）。 */
+export interface CreateWebCredentialRequest {
+  host: string;
+  auth_type: WebAuthType;
+  username?: string;
+  secret: string;
+  header_name?: string;
+  enabled?: boolean;
+}
+
+/**
+ * PUT /api/v1/web-credentials/{credentialId} 请求体（M18）：全部可选，缺省保持原值；secret 留空
+ * 表示不改密码，所以停启用不需要重新输入密码。host 与认证类型故意不可改——换站点或换方式就是
+ * 另一份凭据，删了重建。
+ */
+export interface UpdateWebCredentialRequest {
+  username?: string;
+  secret?: string;
+  header_name?: string;
+  enabled?: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // External data source connector (M14 contract section 2.3): S3/OSS compatible
 // object store, scanned into the knowledge base as documents.

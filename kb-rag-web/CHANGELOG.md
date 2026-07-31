@@ -6,6 +6,11 @@
 
 ### Added
 
+**M18 · 网页导入站点凭据（抓取需登录的站点）**
+- 系统设置新增「站点凭据」Tab（`pages/settings/components/WebCredentialTab.tsx`）：按 host 配置抓取凭据，列表（认证类型标签、用户名/头名、secret 恒显星号、启停 Switch）+ 新建/编辑/删除。BASIC（用户名+密码）与 HEADER（任意请求头，覆盖 Bearer 与 Cookie）两种类型，表单按类型切换字段。
+- secret 只进不出：接口不回传，编辑弹窗不回填、留空即保持原值，停启用不需要重新输入密码；host 与认证类型建后置灰不可改（换站点/换方式=删了重建）。
+- `types.ts` 增 `WebAuthType` / `WebCredentialEntry` / `CreateWebCredentialRequest` / `UpdateWebCredentialRequest`；新增 `api/webCredential.ts` 四个端点封装。
+
 **M17 · 网页导入 JS 渲染抓取**（`docs/M17-CONTRACTS.md`）
 - 网页导入 Tab 登记表单新增「JS 渲染」 Switch（默认关，`render_js` 随 register 传入），带说明——开启后用无头浏览器渲染再抓取，适用于内容靠脚本加载的页面（如 Javadoc 框架页），更慢更耗资源。
 - 来源列表新增「JS 渲染」列：行内 Switch 直接走 `PUT /web-sources/{id}`（传 `render_js`），与「定时同步」Switch 同交互模式；`updateWebSource` 由单传 `sync_enabled` 扩展为传 `UpdateWebSourceRequest`（`sync_enabled` / `render_js` 两可选字段，只改传入的那个）。

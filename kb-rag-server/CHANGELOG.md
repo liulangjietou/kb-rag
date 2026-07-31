@@ -13,6 +13,17 @@
 - 知识库重命名：`PUT /api/v1/kb/{kbId}`（`kb:write`）更新 name 与 description，新名称与其他知识库重名时拒绝（排除自身，仅改描述不改名不受此限）；只动展示字段——索引配置与指纹不变，改名不会使任何文档 config_stale，也不触发重建；审计落 `KB/UPDATE`。控制台知识库卡片新增「编辑」入口（仅 `kb:write` 可见）
 - 启动 banner 换成 KB-RAG：新增 `kb-api/src/main/resources/banner.txt` 顶掉 Spring Boot 默认图形，`KB` 两字母成一组、`RAG` 三字母各留一格、两组间双空格，靠间距读出分组因而不需要连字符（宽 41 列）；附 `${spring-boot.version}` 与构建版本 `${application.version:dev}`——jar 启动读 MANIFEST 显示实际版本，IDE 直跑没有 MANIFEST 时落到 `dev`，不留空洞。纯资源文件，不涉及任何代码与配置开关（`application.yml` 里那个 `banner: false` 是 MyBatis-Plus 的 logo 开关，与此无关）
 
+### 新增（M18）
+
+- `[schema]` Flyway `V19__web_credential.sql`：新增 `t_kb_web_credential`（站点级认证凭据，`host` 全局唯一）。凭据挂在 host 上而非 URL 上：同一站点登记再多 URL 只存一份，轮换只改一处。secret 与 `t_kb_ext_source.secret_key` 同一决策（D17）刻意明文存储，读接口永不回传
+- 网页导入支持抓取需要登录的站点（通用能力，非 Confluence 专用）：按 host 配置凭据后，静态与 JS 渲染两条抓取路径都会对**该 host 的请求**注入认证头。两种类型覆盖所有走请求头的认证：`BASIC`（用户名+密码，预置 `Authorization: Basic`）与 `HEADER`（任意头名+值，天然覆盖 Bearer token 与 Cookie，不需要单独的 COOKIE 类型）
+- 凭据注入的安全边界：host **精确匹配**、不做子域通配（通配是凭据被兄弟子域套走的经典入口）；静态抓取重定向跨 host 即剥离认证头；渲染路径在既有的 `context.route` SSRF 拦截回调里按请求逐个判 host 注入——刻意不用 `setExtraHTTPHeaders`，那会把密码广播给页面引用的每个第三方资源
+- 登录墙检测（本里程碑的止血项）：需登录的页面对匿名抓取回的是**登录表单 + HTTP 200**，此前会被当正文入库（hash 落库、状态 SUCCESS、可被检索命中）。新增 `LoginWallDetector` 于 `WebPageFetcherDispatcher`（两条抓取路径的唯一出口）拦截：body 含密码输入框即判定；最终 URL 像登录端点则需标题同时像登录页才判定（保住"介绍登录页的文章"仍可入库）。命中记 FAILED + `last_error`，不入库
+- 认证失败 fail-fast：Confluence 一类站点连续认证失败几次会触发 CAPTCHA 锁号。同一轮定时同步里某 host 一旦出现 401 或登录墙（`WebAuthException`），该 host 剩余登记直接记 FAILED 跳过、不再发请求——一轮最多错一次；普通抓取失败不触发该短路
+- `WebPageFetcher` 端口签名收敛为 `fetch(FetchRequest)` 值对象（url + renderJs + 已解析凭据），`FetchedPage` 增 `final_url`（登录墙判定要看抓取实际落在哪个地址）。凭据由 `WebSourceService` 按 host 解析后传入，fetcher 不查库、不认识任何认证方案
+- 端点：`GET/POST /api/v1/web-credentials`、`PUT/DELETE /api/v1/web-credentials/{credentialId}`，权限 `system:config`（站点级全局配置，作用于所有知识库的抓取，不归 `kb:write`）；全部变更落审计（`SYSTEM/CREATE|UPDATE|DELETE`，审计只记 host 不记 secret）。更新时 secret 缺省/空白保持原值，停启用不需要重新输入密码；host 与类型不可改，换站点即删了重建
+- 控制台系统设置新增「站点凭据」Tab：列表（secret 恒显星号）、新建/编辑/删除/停启用
+
 ### 新增（M17）
 
 - `[schema]` Flyway `V18__web_source_render_js.sql`：`t_kb_web_source` 增 `render_js TINYINT NOT NULL DEFAULT 0`（加在 `sync_enabled` 之后，语义相邻），置 1 时该源抓取走无头浏览器 JS 渲染、默认 0 静态抓取；不新增索引（不参与查询过滤，仅随行读出），存量源升级后行为零变化（继续静态抓取）

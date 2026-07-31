@@ -1837,6 +1837,117 @@ paths:
                 $ref: '#/components/schemas/EmptyResult'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/web-credentials:
+    get:
+      tags:
+      - web-credential
+      summary: 站点凭据列表（M18，需 system:config）
+      description: 'M18：网页导入的站点级凭据，按 host 挂、精确匹配。任何响应都不含 secret 字段——
+        密码只进不出，接口层面不存在该字段。'
+      responses:
+        '200':
+          description: 全部凭据，新建在前
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebCredentialListResult'
+    post:
+      tags:
+      - web-credential
+      summary: 为一个 host 创建凭据（M18，需 system:config）
+      description: 'M18：host 全局唯一、精确匹配（不做子域通配）。BASIC 需 username+secret，抓取时
+        预置 Authorization: Basic 头；HEADER 需 header_name+secret（值原样注入），覆盖 Bearer token
+        与 Cookie。抓取只对该 host 的请求注入认证头，重定向跨 host 即剥离。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host, auth_type, secret]
+              properties:
+                host:
+                  type: string
+                  maxLength: 255
+                  description: 仅主机名（可带端口），不含协议与路径
+                auth_type:
+                  type: string
+                  enum: [BASIC, HEADER]
+                username:
+                  type: string
+                  description: BASIC 必填
+                secret:
+                  type: string
+                  description: BASIC 存密码；HEADER 存头的完整值。永不回传
+                header_name:
+                  type: string
+                  description: HEADER 必填，如 Authorization / Cookie
+                enabled:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: 创建的凭据（不含 secret）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebCredentialResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/web-credentials/{credentialId}:
+    parameters:
+    - name: credentialId
+      in: path
+      required: true
+      schema:
+        type: string
+    put:
+      tags:
+      - web-credential
+      summary: 更新凭据（M18，需 system:config）
+      description: 'M18：全部字段可选，只写传入的；secret 缺省或空白保持原值，因此停启用不需要重新
+        输入密码。host 与 auth_type 不可改——换站点或换方式是另一份凭据，删了重建。'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                secret:
+                  type: string
+                  description: 缺省或空白保持原值
+                header_name:
+                  type: string
+                enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: 更新后的凭据（不含 secret）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebCredentialResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+      - web-credential
+      summary: 删除凭据（M18，需 system:config）
+      description: 'M18：物理删除，密码随行消失；该站点的抓取回到匿名方式，已入库文档不受影响。'
+      responses:
+        '200':
+          description: 已删除
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/kb/{kbId}/ext-sources:
     parameters:
     - $ref: '#/components/parameters/KbId'
@@ -5111,6 +5222,46 @@ components:
                 type: integer
               total:
                 type: integer
+    WebCredential:
+      type: object
+      description: 'M18：网页导入的站点级凭据。响应结构上就没有 secret 字段——密码只进不出。'
+      properties:
+        credential_id:
+          type: string
+        host:
+          type: string
+          description: 凭据生效的精确 host（可带端口），全局唯一
+        auth_type:
+          type: string
+          enum: [BASIC, HEADER]
+        username:
+          type: string
+          nullable: true
+          description: BASIC 的用户名，HEADER 为 null
+        header_name:
+          type: string
+          nullable: true
+          description: HEADER 的头名，BASIC 为 null
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+    WebCredentialResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/WebCredential'
+    WebCredentialListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items:
+              $ref: '#/components/schemas/WebCredential'
     MetadataRule:
       type: object
       description: 'M14-CONTRACTS.md §3.1：一条配置化元数据抽取规则。key 须符合 ^[a-z][a-z0-9_]{1,31}$
