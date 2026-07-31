@@ -200,6 +200,15 @@ public class BizIdGenerator {
     }
 
     /**
+     * Generates a web site credential id.
+     *
+     * @return prefixed identifier
+     */
+    public String webCredentialId() {
+        return generate(KbConstants.WEB_CREDENTIAL_ID_PREFIX);
+    }
+
+    /**
      * Generates a registered external data source id.
      *
      * @return prefixed identifier

@@ -73,6 +73,9 @@ public final class KbConstants {
     /** Business id prefix of a registered web source row. */
     public static final String WEB_SOURCE_ID_PREFIX = "ws";
 
+    /** Business id prefix of a web site credential row. */
+    public static final String WEB_CREDENTIAL_ID_PREFIX = "wcred";
+
     /** Business id prefix of a registered external data source row. */
     public static final String EXT_SOURCE_ID_PREFIX = "exts";
 

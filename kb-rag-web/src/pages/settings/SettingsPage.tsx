@@ -6,6 +6,7 @@ import AuditLogTab from './components/AuditLogTab';
 import IkDictTab from './components/IkDictTab';
 import ModelStatusCards from './components/ModelStatusCards';
 import SourceMappingTab from './components/SourceMappingTab';
+import WebCredentialTab from './components/WebCredentialTab';
 
 /**
  * System settings page (M2-CONTRACTS.md section 5): model status tab upgraded from the M1
@@ -80,6 +81,15 @@ export default function SettingsPage() {
             children: (
               <Card>
                 <SourceMappingTab />
+              </Card>
+            ),
+          },
+          {
+            key: 'web-credential',
+            label: '站点凭据',
+            children: (
+              <Card>
+                <WebCredentialTab />
               </Card>
             ),
           },

@@ -3,8 +3,10 @@ package io.kbrag.infrastructure.web;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.model.FetchCredential;
 import io.kbrag.domain.port.WebPageFetcher;
 import io.kbrag.domain.service.UrlGuard;
+import io.kbrag.domain.service.WebAuthException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -43,6 +45,7 @@ public class HttpWebPageFetcher implements WebPageFetcher {
 
     private static final int BYTES_PER_MB = 1024 * 1024;
     private static final int COPY_BUFFER_SIZE = 8192;
+    private static final int HTTP_UNAUTHORIZED = 401;
     private static final String HEADER_LOCATION = "Location";
     private static final String HEADER_CONTENT_TYPE = "Content-Type";
     private static final String USER_AGENT = "kb-rag/1.0 (+url-import)";
@@ -72,38 +75,50 @@ public class HttpWebPageFetcher implements WebPageFetcher {
     }
 
     @Override
-    public FetchedPage fetch(String url, boolean renderJs) {
+    public FetchedPage fetch(FetchRequest request) {
         // renderJs is handled by the dispatcher, which never routes a render_js source here; the
         // static path fetches the server HTML as is regardless of the flag.
-        String current = url;
+        String current = request.url();
         int maxRedirects = Math.max(0, properties.getWebImport().getMaxRedirects());
         for (int hop = 0; hop <= maxRedirects; hop++) {
             URI uri = urlGuard.validate(current);
-            HttpResponse<InputStream> response = send(uri);
+            HttpResponse<InputStream> response = send(uri, request.credential());
             int status = response.statusCode();
             if (isRedirect(status)) {
+                // The credential is not carried over explicitly: the next hop re-enters this loop
+                // and the host check in send() decides afresh - a redirect onto a foreign host
+                // therefore drops the header instead of walking it out of the site.
                 current = redirectTarget(uri, response);
                 continue;
+            }
+            if (status == HTTP_UNAUTHORIZED) {
+                // A dedicated type, because the sync pass stops fetching the same host after one of
+                // these: sites like Confluence CAPTCHA-lock an account after a few failures.
+                throw new WebAuthException("站点认证被拒绝（HTTP 401），请检查该 host 的凭据");
             }
             if (status < 200 || status >= 300) {
                 throw new BizException(ErrorCode.INTERNAL_ERROR, "页面返回状态码 " + status + "，抓取失败");
             }
             String extension = extensionOf(response);
-            return new FetchedPage(readBounded(response.body()), extension);
+            return new FetchedPage(readBounded(response.body()), extension, uri.toString());
         }
         throw new BizException(ErrorCode.INTERNAL_ERROR,
                 "重定向超过 " + maxRedirects + " 次，抓取中止");
     }
 
-    private HttpResponse<InputStream> send(URI uri) {
-        HttpRequest request = HttpRequest.newBuilder(uri)
+    private HttpResponse<InputStream> send(URI uri, FetchCredential credential) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri)
                 .timeout(Duration.ofMillis(properties.getWebImport().getFetchTimeoutMs()))
                 .header("Accept", "text/html, text/plain, text/markdown, application/xhtml+xml")
                 .header("User-Agent", USER_AGENT)
-                .GET()
-                .build();
+                .GET();
+        // Exact host match, decided per hop: the header goes to the credential's site and nowhere
+        // else, no matter where a redirect chain wanders.
+        if (credential != null && credential.appliesTo(uri)) {
+            builder.header(credential.headerName(), credential.headerValue());
+        }
         try {
-            return httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            return httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
         } catch (IOException e) {
             log.info("web page fetch failed, uri={}, error={}", uri, e.getMessage());
             throw new BizException(ErrorCode.INTERNAL_ERROR, "页面抓取失败：" + e.getMessage(), e);

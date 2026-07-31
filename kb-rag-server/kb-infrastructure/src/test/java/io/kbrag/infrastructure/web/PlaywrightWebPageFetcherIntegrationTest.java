@@ -5,6 +5,7 @@ import com.microsoft.playwright.Playwright;
 import com.sun.net.httpserver.HttpServer;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.model.FetchCredential;
 import io.kbrag.domain.port.WebPageFetcher;
 import io.kbrag.domain.service.UrlGuard;
 import org.junit.jupiter.api.AfterEach;
@@ -95,7 +96,7 @@ class PlaywrightWebPageFetcherIntegrationTest {
                 + "</body></html>";
         respondHtml("/js", raw);
 
-        WebPageFetcher.FetchedPage page = fetcher.fetch(url("/js"), true);
+        WebPageFetcher.FetchedPage page = fetcher.fetch(render(url("/js")));
 
         String rendered = new String(page.body(), StandardCharsets.UTF_8);
         // The contrast of the M17 acceptance case 1: the marker exists only in the rendered DOM,
@@ -111,7 +112,7 @@ class PlaywrightWebPageFetcherIntegrationTest {
                 + "<img src=\"http://192.168.255.250/pixel.png\">"
                 + "</body></html>");
 
-        WebPageFetcher.FetchedPage page = fetcher.fetch(url("/ssrf"), true);
+        WebPageFetcher.FetchedPage page = fetcher.fetch(render(url("/ssrf")));
 
         // The page renders and its own body survives; the hostile asset was validated and aborted.
         assertThat(new String(page.body(), StandardCharsets.UTF_8)).contains("public body");
@@ -134,11 +135,39 @@ class PlaywrightWebPageFetcherIntegrationTest {
         });
 
         long start = System.currentTimeMillis();
-        assertThatThrownBy(() -> fetcher.fetch(url("/slow"), true))
+        assertThatThrownBy(() -> fetcher.fetch(render(url("/slow"))))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("渲染");
         // Generous ceiling: the point is that the budget cuts the hang, not that it is exact.
         assertThat(System.currentTimeMillis() - start).isLessThan(8000);
+    }
+
+    @Test
+    void shouldInjectTheCredentialHeaderThroughTheRouteInterception() {
+        // M18: the header rides the same route callback the SSRF guard lives in, so it reaches the
+        // matching host's requests - the navigation included - without a context-wide broadcast.
+        List<String> seenAuth = new ArrayList<>();
+        byte[] body = "<html><body>secure body</body></html>".getBytes(StandardCharsets.UTF_8);
+        server.createContext("/auth", exchange -> {
+            seenAuth.add(exchange.getRequestHeaders().getFirst("Authorization"));
+            exchange.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
+            exchange.sendResponseHeaders(200, body.length);
+            try (OutputStream out = exchange.getResponseBody()) {
+                out.write(body);
+            }
+        });
+        FetchCredential credential = new FetchCredential("127.0.0.1", "Authorization", "Basic dTpw");
+
+        WebPageFetcher.FetchedPage page = fetcher.fetch(
+                new WebPageFetcher.FetchRequest(url("/auth"), true, credential));
+
+        assertThat(new String(page.body(), StandardCharsets.UTF_8)).contains("secure body");
+        assertThat(seenAuth).contains("Basic dTpw");
+    }
+
+    /** A rendering fetch request without a credential. */
+    private static WebPageFetcher.FetchRequest render(String url) {
+        return new WebPageFetcher.FetchRequest(url, true, null);
     }
 
     private String url(String path) {

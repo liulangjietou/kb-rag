@@ -16,9 +16,11 @@ import io.kbrag.domain.entity.WebSource;
 import io.kbrag.domain.enums.WebSourceFetchStatus;
 import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.mapper.WebSourceMapper;
+import io.kbrag.domain.model.FetchCredential;
 import io.kbrag.domain.port.WebPageFetcher;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.UrlGuard;
+import io.kbrag.domain.service.WebAuthException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
@@ -27,8 +29,10 @@ import org.springframework.stereotype.Service;
 
 import java.net.URI;
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * URL import and incremental sync, the M12 contract section 3.4.
@@ -77,6 +81,7 @@ public class WebSourceService {
     private final KnowledgeBaseService knowledgeBaseService;
     private final UrlGuard urlGuard;
     private final WebPageFetcher webPageFetcher;
+    private final WebCredentialService webCredentialService;
     private final BizIdGenerator bizIdGenerator;
     private final KbProperties properties;
     private final KbMetrics kbMetrics;
@@ -221,10 +226,33 @@ public class WebSourceService {
         if (CollectionUtils.isEmpty(batch)) {
             return 0;
         }
+        // One authentication rejection stops the whole host for this pass. Confluence-like sites
+        // CAPTCHA-lock an account after a few failed logins; a pass hammering fifty URLs of one
+        // wiki with a rotated password would lock it for good, so the first rejection is the last
+        // request this pass sends there.
+        Set<String> rejectedHosts = new HashSet<>();
         for (WebSource source : batch) {
-            sync(source);
+            String host = hostOf(source.getUrl());
+            if (host != null && rejectedHosts.contains(host)) {
+                source.setLastFetchAt(LocalDateTime.now());
+                record(source, WebSourceFetchStatus.FAILED, "同 host 本轮已出现认证失败，跳过以防账号被锁定");
+                continue;
+            }
+            boolean authRejected = sync(source);
+            if (authRejected && host != null) {
+                rejectedHosts.add(host);
+            }
         }
         return batch.size();
+    }
+
+    /** Host of a stored URL, {@code null} when it no longer parses; never throws. */
+    private static String hostOf(String url) {
+        try {
+            return URI.create(url).getHost();
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /**
@@ -235,24 +263,30 @@ public class WebSourceService {
      * in the recycle bin, otherwise feed the body to the upload chain and rebind.
      *
      * @param source registration row, mutated in place with the outcome
+     * @return {@code true} when the failure was an authentication rejection - the signal the batch
+     *         pass uses to stop fetching the same host, see {@link #syncEnabledSources()}
      */
-    public void sync(WebSource source) {
+    public boolean sync(WebSource source) {
         source.setLastFetchAt(LocalDateTime.now());
         try {
             URI uri = urlGuard.validate(source.getUrl());
             boolean renderJs = source.getRenderJs() != null && source.getRenderJs() == RENDER_ON;
-            WebPageFetcher.FetchedPage page = webPageFetcher.fetch(uri.toString(), renderJs);
+            // The credential is resolved here, per fetch, so a rotation applies to the very next
+            // sync; the fetcher only ever sees the ready-to-inject header form.
+            FetchCredential credential = webCredentialService.resolveFor(uri.getHost());
+            WebPageFetcher.FetchedPage page = webPageFetcher.fetch(
+                    new WebPageFetcher.FetchRequest(uri.toString(), renderJs, credential));
             String contentHash = HashUtil.sha256Hex(page.body());
             if (contentHash.equals(source.getLastContentHash())) {
                 record(source, WebSourceFetchStatus.UNCHANGED, null);
-                return;
+                return false;
             }
             Document bound = findBoundDocument(source);
             if (bound != null && bound.inTrash()) {
                 // Writing a version into a trashed document would silently resurrect content the
                 // operator chose to remove; the page waits until they restore or purge it.
                 record(source, WebSourceFetchStatus.SKIPPED, "绑定的文档在回收站中，本次同步已跳过");
-                return;
+                return false;
             }
             String fileName = source.getFileName() != null
                     ? source.getFileName()
@@ -267,10 +301,12 @@ public class WebSourceService {
             log.info("web source synced, sourceId={}, docId={}, version={}, duplicated={}",
                     source.getSourceId(), source.getDocId(), outcome.version(), outcome.duplicated());
         } catch (Exception e) {
-            log.warn("web source sync failed, sourceId={}, url={}, error={}",
+            log.info("web source sync failed, sourceId={}, url={}, error={}",
                     source.getSourceId(), source.getUrl(), e.getMessage());
             record(source, WebSourceFetchStatus.FAILED, e.getMessage());
+            return e instanceof WebAuthException;
         }
+        return false;
     }
 
     private void record(WebSource source, WebSourceFetchStatus status, String error) {

@@ -5,18 +5,25 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.Response;
+import com.microsoft.playwright.Route;
 import com.microsoft.playwright.options.WaitUntilState;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.model.FetchCredential;
 import io.kbrag.domain.port.WebPageFetcher;
 import io.kbrag.domain.service.UrlGuard;
+import io.kbrag.domain.service.WebAuthException;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
@@ -45,6 +52,7 @@ import java.util.concurrent.TimeUnit;
 public class PlaywrightWebPageFetcher implements WebPageFetcher {
 
     private static final int BYTES_PER_MB = 1024 * 1024;
+    private static final int HTTP_UNAUTHORIZED = 401;
     private static final String RENDERED_EXTENSION = "html";
     private static final String USER_AGENT = "kb-rag/1.0 (+url-import; render)";
 
@@ -65,20 +73,20 @@ public class PlaywrightWebPageFetcher implements WebPageFetcher {
     }
 
     @Override
-    public FetchedPage fetch(String url, boolean renderJs) {
+    public FetchedPage fetch(FetchRequest request) {
         int timeoutMs = properties.getWebImport().getRender().getTimeoutMs();
         boolean acquired = acquirePermit(timeoutMs);
         if (!acquired) {
             throw new BizException(ErrorCode.INTERNAL_ERROR, "渲染并发已满，等待超时，本次抓取中止");
         }
         try {
-            return render(url, timeoutMs);
+            return render(request, timeoutMs);
         } finally {
             renderPermits.release();
         }
     }
 
-    private FetchedPage render(String url, int timeoutMs) {
+    private FetchedPage render(FetchRequest request, int timeoutMs) {
         Browser current = browser();
         BrowserContext context = current.newContext(new Browser.NewContextOptions()
                 .setUserAgent(USER_AGENT)
@@ -88,11 +96,21 @@ public class PlaywrightWebPageFetcher implements WebPageFetcher {
             context.setDefaultTimeout(timeoutMs);
             // Every request the page makes - the navigation itself included - is re-validated, so a
             // redirect or a sub-resource pointing at an internal address is aborted before it opens.
+            // The credential rides the same interception: injected ONLY onto requests whose host it
+            // names. Never context.setExtraHTTPHeaders - that would broadcast the secret to every
+            // third party asset the page happens to embed.
+            FetchCredential credential = request.credential();
             context.route("**/*", route -> {
                 String requestUrl = route.request().url();
                 try {
-                    urlGuard.validate(requestUrl);
-                    route.resume();
+                    URI target = urlGuard.validate(requestUrl);
+                    if (credential != null && credential.appliesTo(target)) {
+                        Map<String, String> headers = new HashMap<>(route.request().headers());
+                        headers.put(credential.headerName(), credential.headerValue());
+                        route.resume(new Route.ResumeOptions().setHeaders(headers));
+                    } else {
+                        route.resume();
+                    }
                 } catch (BizException e) {
                     log.info("render sub-request blocked by ssrf guard, errorCode={}, url={}, reason={}",
                             ErrorCode.INVALID_PARAM, requestUrl, e.getMessage());
@@ -100,13 +118,19 @@ public class PlaywrightWebPageFetcher implements WebPageFetcher {
                 }
             });
             Page page = context.newPage();
-            page.navigate(url, new Page.NavigateOptions().setWaitUntil(waitUntil()).setTimeout(timeoutMs));
+            Response response = page.navigate(request.url(),
+                    new Page.NavigateOptions().setWaitUntil(waitUntil()).setTimeout(timeoutMs));
+            if (response != null && response.status() == HTTP_UNAUTHORIZED) {
+                // Same dedicated type as the static path: one 401 per host per sync pass is the
+                // ceiling, or a rotated password CAPTCHA-locks the account overnight.
+                throw new WebAuthException("站点认证被拒绝（HTTP 401），请检查该 host 的凭据");
+            }
             String dom = page.content();
-            return new FetchedPage(bounded(dom), RENDERED_EXTENSION);
+            return new FetchedPage(bounded(dom), RENDERED_EXTENSION, page.url());
         } catch (BizException e) {
             throw e;
         } catch (RuntimeException e) {
-            log.info("render fetch failed, url={}, error={}", url, e.getMessage());
+            log.info("render fetch failed, url={}, error={}", request.url(), e.getMessage());
             throw new BizException(ErrorCode.INTERNAL_ERROR, "页面渲染抓取失败：" + e.getMessage(), e);
         } finally {
             context.close();

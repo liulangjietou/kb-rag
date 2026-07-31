@@ -13,12 +13,15 @@ import io.kbrag.domain.entity.WebSource;
 import io.kbrag.domain.enums.WebSourceFetchStatus;
 import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.mapper.WebSourceMapper;
+import io.kbrag.domain.model.FetchCredential;
 import io.kbrag.domain.port.WebPageFetcher;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.UrlGuard;
+import io.kbrag.domain.service.WebAuthException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -31,11 +34,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -43,7 +47,8 @@ import static org.mockito.Mockito.when;
  * Covers the sync state machine of the M12 contract: everything a fetch produces must go through
  * the one upload chain, an unchanged page must write nothing, a trashed document must stay
  * untouched, a purged one must be rebuilt and rebound, and no sync failure may ever escape onto
- * the scheduler thread or the register call.
+ * the scheduler thread or the register call. M18 adds the credential hand-off and the one rule the
+ * batch pass owns: after one authentication rejection of a host, no more requests go there.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -60,6 +65,7 @@ class WebSourceServiceTest {
     private KnowledgeBaseService knowledgeBaseService;
     private UrlGuard urlGuard;
     private WebPageFetcher webPageFetcher;
+    private WebCredentialService webCredentialService;
     private BizIdGenerator bizIdGenerator;
     private KbProperties properties;
     private SimpleMeterRegistry meterRegistry;
@@ -74,12 +80,13 @@ class WebSourceServiceTest {
         knowledgeBaseService = mock(KnowledgeBaseService.class);
         urlGuard = mock(UrlGuard.class);
         webPageFetcher = mock(WebPageFetcher.class);
+        webCredentialService = mock(WebCredentialService.class);
         bizIdGenerator = mock(BizIdGenerator.class);
         properties = new KbProperties();
         meterRegistry = new SimpleMeterRegistry();
         service = new WebSourceService(webSourceMapper, documentMapper, documentService,
-                knowledgeBaseService, urlGuard, webPageFetcher, bizIdGenerator, properties,
-                new KbMetrics(meterRegistry));
+                knowledgeBaseService, urlGuard, webPageFetcher, webCredentialService, bizIdGenerator,
+                properties, new KbMetrics(meterRegistry));
         when(urlGuard.validate(anyString())).thenAnswer(invocation ->
                 URI.create(invocation.getArgument(0, String.class)));
         when(bizIdGenerator.webSourceId()).thenReturn(SOURCE_ID);
@@ -88,7 +95,7 @@ class WebSourceServiceTest {
     @Test
     void shouldRegisterAndRunTheFirstFetchThroughTheUploadChain() {
         when(webSourceMapper.selectCount(any())).thenReturn(0L);
-        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenReturn(page());
+        when(webPageFetcher.fetch(fetchOf(URL))).thenReturn(page());
         when(documentService.upload(eq(KB_ID), anyString(), eq(BODY))).thenReturn(outcome("doc_1"));
 
         WebSource source = service.register(KB_ID, URL, true, false);
@@ -118,7 +125,7 @@ class WebSourceServiceTest {
         // The operator registered the page, not the luck of this minute: the row must survive and
         // carry the failure for them to read.
         when(webSourceMapper.selectCount(any())).thenReturn(0L);
-        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenThrow(new IllegalStateException("connection refused"));
+        when(webPageFetcher.fetch(fetchOf(URL))).thenThrow(new IllegalStateException("connection refused"));
 
         WebSource source = assertDoesNotThrow(() -> service.register(KB_ID, URL, true, false));
 
@@ -132,7 +139,7 @@ class WebSourceServiceTest {
     void shouldWriteNothingWhenThePageIsUnchanged() {
         WebSource source = boundSource();
         source.setLastContentHash(HashUtil.sha256Hex(BODY));
-        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenReturn(page());
+        when(webPageFetcher.fetch(fetchOf(URL))).thenReturn(page());
 
         service.sync(source);
 
@@ -146,7 +153,7 @@ class WebSourceServiceTest {
     void shouldSkipWhileTheBoundDocumentSitsInTheTrash() {
         // Feeding a version into a trashed document would silently resurrect removed content.
         WebSource source = boundSource();
-        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenReturn(page());
+        when(webPageFetcher.fetch(fetchOf(URL))).thenReturn(page());
         when(documentMapper.selectOne(any())).thenReturn(trashedDocument());
 
         service.sync(source);
@@ -161,7 +168,7 @@ class WebSourceServiceTest {
         // The purge broke the binding; the next sync recreates the document under the same stable
         // file name and the registration follows it.
         WebSource source = boundSource();
-        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenReturn(page());
+        when(webPageFetcher.fetch(fetchOf(URL))).thenReturn(page());
         when(documentMapper.selectOne(any())).thenReturn(null);
         when(documentService.upload(KB_ID, source.getFileName(), BODY)).thenReturn(outcome("doc_new"));
 
@@ -175,7 +182,7 @@ class WebSourceServiceTest {
     @Test
     void shouldRecordAFailureTruncatedAndNeverRethrow() {
         WebSource source = boundSource();
-        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenThrow(new IllegalStateException("x".repeat(600)));
+        when(webPageFetcher.fetch(fetchOf(URL))).thenThrow(new IllegalStateException("x".repeat(600)));
 
         assertDoesNotThrow(() -> service.sync(source));
 
@@ -202,8 +209,8 @@ class WebSourceServiceTest {
         healthy.setSourceId("ws_2");
         healthy.setUrl(URL + "/second");
         when(webSourceMapper.selectList(any())).thenReturn(List.of(failing, healthy));
-        when(webPageFetcher.fetch(eq(URL), anyBoolean())).thenThrow(new IllegalStateException("down"));
-        when(webPageFetcher.fetch(eq(URL + "/second"), anyBoolean())).thenReturn(page());
+        when(webPageFetcher.fetch(fetchOf(URL))).thenThrow(new IllegalStateException("down"));
+        when(webPageFetcher.fetch(fetchOf(URL + "/second"))).thenReturn(page());
         when(documentMapper.selectOne(any())).thenReturn(null);
         when(documentService.upload(any(), any(), any())).thenReturn(outcome("doc_2"));
 
@@ -211,6 +218,54 @@ class WebSourceServiceTest {
 
         assertEquals(WebSourceFetchStatus.FAILED, failing.getLastFetchStatus());
         assertEquals(WebSourceFetchStatus.SUCCESS, healthy.getLastFetchStatus());
+    }
+
+    @Test
+    void shouldStopFetchingAHostAfterOneAuthenticationRejection() {
+        // The M18 fail-fast: sites like Confluence CAPTCHA-lock an account after a few failed
+        // logins, so the first 401 of a host must be the last request the pass sends there. A
+        // generic failure (the previous test) must NOT trigger this - only the auth rejection.
+        properties.getWebImport().setSyncBatchSize(3);
+        WebSource first = boundSource();
+        WebSource sameHost = boundSource();
+        sameHost.setSourceId("ws_2");
+        sameHost.setUrl(URL + "/second");
+        WebSource otherHost = boundSource();
+        otherHost.setSourceId("ws_3");
+        otherHost.setUrl("https://other.example.org/page");
+        when(webSourceMapper.selectList(any())).thenReturn(List.of(first, sameHost, otherHost));
+        when(webPageFetcher.fetch(fetchOf(URL))).thenThrow(new WebAuthException("401"));
+        when(webPageFetcher.fetch(fetchOf("https://other.example.org/page"))).thenReturn(page());
+        when(documentMapper.selectOne(any())).thenReturn(null);
+        when(documentService.upload(any(), any(), any())).thenReturn(outcome("doc_2"));
+
+        assertEquals(3, service.syncEnabledSources());
+
+        assertEquals(WebSourceFetchStatus.FAILED, first.getLastFetchStatus());
+        assertEquals(WebSourceFetchStatus.FAILED, sameHost.getLastFetchStatus());
+        assertNotNull(sameHost.getLastError());
+        // The same-host sibling was skipped without a request; the foreign host proceeded.
+        verify(webPageFetcher, never()).fetch(fetchOf(URL + "/second"));
+        assertEquals(WebSourceFetchStatus.SUCCESS, otherHost.getLastFetchStatus());
+    }
+
+    @Test
+    void shouldResolveTheCredentialByHostAndHandItToTheFetcher() {
+        // The service owns the lookup, the fetcher only receives the resolved header form; this is
+        // the seam that keeps infrastructure free of database access.
+        WebSource source = boundSource();
+        source.setLastContentHash(HashUtil.sha256Hex(BODY));
+        FetchCredential credential = new FetchCredential("example.com", "Authorization", "Basic dTpw");
+        when(webCredentialService.resolveFor("example.com")).thenReturn(credential);
+        when(webPageFetcher.fetch(any(WebPageFetcher.FetchRequest.class))).thenReturn(page());
+
+        service.sync(source);
+
+        ArgumentCaptor<WebPageFetcher.FetchRequest> captor =
+                ArgumentCaptor.forClass(WebPageFetcher.FetchRequest.class);
+        verify(webPageFetcher).fetch(captor.capture());
+        assertEquals(credential, captor.getValue().credential());
+        verify(webCredentialService, times(1)).resolveFor("example.com");
     }
 
     @Test
@@ -256,12 +311,17 @@ class WebSourceServiceTest {
         WebSource source = boundSource();
         source.setRenderJs(1);
         source.setLastContentHash(HashUtil.sha256Hex(BODY));
-        when(webPageFetcher.fetch(eq(URL), eq(true))).thenReturn(page());
+        when(webPageFetcher.fetch(argThat(r -> r != null && r.url().equals(URL) && r.renderJs())))
+                .thenReturn(page());
 
         service.sync(source);
 
         assertEquals(WebSourceFetchStatus.UNCHANGED, source.getLastFetchStatus());
-        verify(webPageFetcher).fetch(URL, true);
+    }
+
+    /** Matcher for "a fetch request of this URL", credential and render flag ignored. */
+    private static WebPageFetcher.FetchRequest fetchOf(String url) {
+        return argThat(r -> r != null && r.url().equals(url));
     }
 
     private WebSource boundSource() {
@@ -285,7 +345,7 @@ class WebSourceServiceTest {
     }
 
     private WebPageFetcher.FetchedPage page() {
-        return new WebPageFetcher.FetchedPage(BODY, "html");
+        return new WebPageFetcher.FetchedPage(BODY, "html", URL);
     }
 
     private UploadOutcome outcome(String docId) {
