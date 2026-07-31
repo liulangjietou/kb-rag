@@ -1,7 +1,7 @@
 # kb-rag 流程图文档
 
-> 版本：v1.2（基线与 `ARCHITECTURE.md` 相同 = M1-M13 及其后修复的状态）
-> 日期：2026-07-28
+> 版本：v1.3（基线与 `ARCHITECTURE.md` 相同 = M1-M19 及其后修复的状态；v1.2 基线为 M13）
+> 日期：2026-07-31
 > 作者：RichardFyoung / Claude
 >
 > 图使用 Mermaid 绘制（GitHub / 主流 IDE 原生渲染）。每张图标注对应的核心类与契约出处，与代码不一致时以代码为准并须在同一 PR 内修订本文档（项目铁律②）。
@@ -394,3 +394,71 @@ flowchart LR
     B --> C[pending-review 待复核清单<br/>懒计算 suggestions: 归一化 3-gram Dice 对称相似度<br/>阈值0.35 / top3 / 候选限同文档激活版本 / 短文本不推荐]
     C --> D[人工逐条 migrate 到目标分片<br/>仅禁用/编辑两类, 幂等, 强制同文档<br/>刻意不做自动与批量迁移]
 ```
+
+---
+
+## 14. 记忆库：写入抽取与检索（M19）
+
+对应：`MemoryKeyAuthFilter` / `MemoryApiService` / `MemoryExtractionService` / `EsMemoryStore`（契约 M19 §3/§5/§6）。
+
+### 14.1 AddMemory 写入与抽取时序
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as 智能体应用
+    participant F as MemoryKeyAuthFilter(第三条独立过滤器链)
+    participant M as MemoryApiService
+    participant X as MemoryExtractionService
+    participant L as ChatProvider(LLM)
+    participant DB as MySQL(t_kb_memory_node)
+    participant ES as EsMemoryStore(kb_memory_nodes_v1)
+
+    A->>F: POST /api/v1/memory/add<br/>Authorization: Bearer kb-mk-***
+    F->>F: SHA-256 哈希查 t_kb_memory_app_key(401)<br/>+ ApiRateLimiter 限流(429)
+    F--)F: last_used_at 异步 touch
+    F->>M: 放行(库上下文已绑定 Key 所属 library_id)
+    M->>M: messages/custom_content 二选一校验<br/>+ resolveFragmentRule(rule_id 缺省→库默认规则)
+    alt custom_content 直写
+        M->>DB: insertNode(CUSTOM, 原文不经 LLM)
+        M->>ES: index() 写检索副本
+    else messages 抽取(规则 PRO 档)
+        M->>X: extractAndApply(messages, rule, user_id)
+        X->>DB: auto_update 开启时加载该用户最近<br/>OLD_MEMORY_WINDOW=50 条旧记忆
+        X->>L: extractFragments(对话+旧记忆, 版本化 prompt)
+        L-->>X: fragments[] (ADD / UPDATE+目标ID)
+        loop 每个 fragment
+            X->>DB: ADD→insertNode / UPDATE→仅允许改窗口内目标节点
+            X->>ES: index(): embedOf 失败置 null<br/>该节点降级 BM25 可召回
+        end
+        opt 规则绑定 profile_rule_id
+            X->>L: extractProfile(画像字段抽取)
+            X->>DB: 按 uk_rule_user 幂等 upsert t_kb_memory_profile
+        end
+    end
+    M-->>A: memory_ids + request_id
+    Note over M,ES: add 刻意非事务: 逐节点独立落库+写副本,<br/>单节点失败不回滚已写入节点(ES 可从 MySQL 重建)
+```
+
+### 14.2 SearchMemory 检索链路
+
+```mermaid
+flowchart TD
+    Q[POST /api/v1/memory/search<br/>Bearer kb-mk-*** + user_id + query] --> P[加载该用户画像 profiles<br/>t_kb_memory_profile]
+    P --> IT{intent_recognition 开启?}
+    IT -- 是且 LLM 判定与记忆无关 --> VETO[veto: 返回空节点集 + profiles<br/>不再走检索]
+    IT -- 否/相关 --> RW{query_rewrite 开启?}
+    RW -- 是 --> RW1[LLM 改写 query<br/>失败降级原 query]
+    RW -- 否 --> SE
+    RW1 --> SE[MemoryStore.search<br/>强制 filter: library_id + user_id + 未过期<br/>rerank 开启时候选 = max_results×3 上限100]
+    SE --> EG{嵌入 Key 已配置?}
+    EG -- 是 --> H[kNN + BM25 并联召回]
+    EG -- 否 --> B[BM25 单路 degraded]
+    H & B --> RR{rerank provider 已配置?}
+    RR -- 是 --> RR1[重排 + similarity_threshold 过滤<br/>阈值只作用于 rerank 分]
+    RR -- 否 --> RR2[降级按召回序, 阈值不生效]
+    RR1 & RR2 --> HY[回 MySQL hydrate 事实源<br/>保序, 已删节点静默跳过]
+    HY --> T[截断 max_results<br/>返回 nodes + profiles + request_id]
+```
+
+边界：跨库/跨用户数据不可见由检索强制 filter 与管理端两层隔离查询谓词双保险（他库资源一律 404 不泄露存在性）；节点过期只在查询期过滤，物理清理由凌晨任务完成。

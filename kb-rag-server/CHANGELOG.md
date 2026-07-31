@@ -7,6 +7,17 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 新增（M19）
+
+- `[schema]` Flyway `V20__memory_library.sql`：新增 6 张记忆库表——`t_kb_memory_library`（记忆库，ID 前缀 `ml`）、`t_kb_memory_fragment_rule`（记忆片段规则，`mfr`，含 `instruction_type` DEFAULT/CUSTOM、`auto_update`、`expire_days`（存天数不存枚举串，NULL 永不过期）、`extract_version` PRO/LITE、`builtin`）、`t_kb_memory_profile_rule`（画像规则，`mpr`，`fields` 整体存 JSON 数组不拆子表——字段只随规则整体编辑读取，没有按字段查询的入口）、`t_kb_memory_node`（记忆节点，`mn`，唯一高频查询路径是（库，实体）翻页，索引 `idx_library_user`）、`t_kb_memory_profile`（用户画像，`uk_rule_user` 唯一键——一实体一规则一份画像，抽取结果按此 upsert 合并）、`t_kb_memory_app_key`（Memory Key，行 ID `mak`、明文 `kb-mk-*`，与 `t_kb_api_key` 同一决策：只存 SHA-256 摘要 + 展示前缀，明文仅签发响应回传一次）；权限种子 `memory:read` / `memory:write`（module=MEMORY）授予超级管理员与知识库管理员（沿 V16 授权口径）
+- 企业级记忆库（对标阿里云百炼「记忆库」）：外部智能体应用为最终用户维护**跨会话长期记忆**——对话经 LLM 抽取成记忆片段与结构化画像，后续会话按语义召回拼进提示词。开放 API 六端点（`/api/v1/memory/*`，语义与百炼 AddMemory 等一一对应）：AddMemory（`messages` 与 `custom_content` 至少传其一，custom 直写 source=CUSTOM、messages 走片段抽取，`fragment_rule_id` 缺省用库内 builtin 规则，`profile_rule_id` 需伴随 messages 同步抽画像）、SearchMemory（可选意图识别 / 查询改写 / 重排三开关，`similarity_threshold` 只在 rerank 开启时生效，`max_results` 1-100 默认 10）、ListMemory（（库，实体）分页倒序，**过期节点包含在内**——列表是管理视角，管理必须看见检索已看不见的东西）、UpdateMemory（替换 content 并重嵌入刷新 ES 副本，meta_data 传了才改）、DeleteMemory（逻辑删行 + 删 ES 副本）、GetUserProfile（未提取字段回落规则 `initial_value`）
+- 两层隔离**都是查询谓词而不是约定**：一把 Memory Key 只绑定一个记忆库（应用级隔离，请求无需也无法指定 library_id），库内按 `user_id`（记忆实体）隔离；每条语句都带 `library_id` 过滤、实体级语句再加 `user_id`，交集之外的节点对调用方等于不存在，所以越权一律 **404 而不是 403**
+- Memory Key 独立鉴权（`MemoryKeyAuthFilter`，第三条独立鉴权链）：`Authorization: Bearer kb-mk-*` → SHA-256 摘要查表，缺失/格式错 401 `INVALID_API_KEY`、禁用 401 `API_KEY_DISABLED`；与管理台拦截器、开放 API 的 `ApiKeyAuthFilter` 三面互不干扰，理由与 M4c 拆分开放 API 过滤器相同——凭据形态、失败面、限流口径都不同；限流复用 `ApiRateLimiter` 令牌桶（桶按 key_id 区分，两个 Key 家族的 ID 前缀不会撞），超限 429 `RATE_LIMITED`；认证通过后 `last_used_at` 异步 touch（尽力而为）；过滤器在 `@RestControllerAdvice` 之外，自写统一错误信封
+- 记忆抽取与演化（`MemoryExtractionService`）：PRO 抽取 + `auto_update=1` 时加载该（库，规则，实体）最近 50 条未过期旧记忆随 prompt 下发，模型可对窗口内节点发出 UPDATE 指令（语义重复的旧记忆被覆盖而非重复追加），解析器只放行目标在窗口内的 UPDATE；LITE / `auto_update=0` 只追加。**add 刻意不是一个事务**——抽取的 LLM 调用夹在写入之间，跨 LLM 往返持连接会在中等负载下耗干连接池；每个节点写入自身原子、ES 副本紧随其后，失败最多丢一次调用的尾部（调用方可见错误、可重试）
+- 检索实现：新增出站端口 `MemoryStore`（实现 `EsMemoryStore`），单物理索引 `kb_memory_nodes_v1` 所有记忆库共用——隔离靠 filter 不靠索引边界（记忆节点体量远小于文档分片，不值得按库建索引）；vector mapping **懒加载**（首个带 embedding 的写入按其维度 putMapping——嵌入维度由 Provider 声明，建索引时未必已配 Key）；有向量 kNN + BM25 并联，零 Key / 嵌入失败降级 BM25 单路——缺模型只削弱效果，绝不失败写入与检索；所有查询强制注入 `library_id` + `user_id` filter 与过期过滤；rerank 开启时候选 ×3、上限 100，未配 provider 降级召回序；命中回 MySQL 事实源 hydrate（分数序保持，行已删则静默跳过）
+- 管理 API 23 端点（`/api/v1/memory-libraries`，全部 `@RequiresPermission(memory:read/write)`，写操作落审计 module=MEMORY）：库 CRUD（建库自动预置内置「默认项目」片段规则；删库级联清 Key/规则/节点/画像 + ES）、片段规则与画像规则各限每库 50 条（builtin 规则可编辑不可删除；删片段规则级联删其节点与 ES 副本；画像行物理删除——软删行会占住规则×实体唯一键）、记忆数据（实体分页 / 节点分页含过期 / 节点删除 / 画像查看）、检索调试（控制台以管理台身份复用开放 API 的 search 语义）、Memory Key 管理（创建明文仅此一次 / 启停即刻生效 / 轮换即刻失效旧密钥 / 删除）
+- **无新增 Maven 依赖、无新增环境变量与配置键**：LLM 三类调用复用 `ChatProvider`/`EmbeddingProvider`/`RerankProvider` 及其零 Key 降级装置；`WebMvcConfig.PUBLIC_PATHS` 增 `/api/v1/memory/**`（该面鉴权由 MemoryKeyAuthFilter 承担，不走管理台拦截器）；存量端点与行为零变化
+
 ### 新增
 
 - 应用重命名：控制台应用中心卡片新增「编辑」入口（仅 `app:write` 可见），复用既有 `PUT /api/v1/apps/{appId}`（`app:write`，审计 `APP/UPDATE`）更新 name 与 description，新名称与其他应用重名时拒绝（排除自身，仅改描述不改名不受此限）

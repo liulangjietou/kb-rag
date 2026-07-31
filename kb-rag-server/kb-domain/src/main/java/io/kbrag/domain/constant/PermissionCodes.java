@@ -91,6 +91,12 @@ public final class PermissionCodes {
     /** Create tenants, rename and suspend them; the only cross tenant vantage point of the console. */
     public static final String TENANT_MANAGE = "tenant:manage";
 
+    /** Read memory libraries, rules, memory nodes and run the retrieval debugger. */
+    public static final String MEMORY_READ = "memory:read";
+
+    /** Create and delete memory libraries, edit rules and manage memory keys. */
+    public static final String MEMORY_WRITE = "memory:write";
+
     /**
      * Codes only a role of the default tenant may hold.
      *

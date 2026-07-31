@@ -6,6 +6,11 @@
 
 ### Added
 
+**M19 · 记忆库控制台**（`docs/M19-CONTRACTS.md`）
+- 新增一级菜单「记忆库」（`/memory`，`memory:read` 可见，位于「应用中心」与「评测中心」之间）：库列表页（`pages/memory/MemoryLibraryListPage.tsx`，关键词搜索/分页/新建/编辑/删除）。
+- 库详情页（`MemoryLibraryDetailPage.tsx`）五 Tab：片段规则（builtin 标签、指令类型/自动更新/过期天数/抽取版本表单）、画像规则（字段列表编辑器：name/description/initial_value，上限 50）、记忆数据（实体 → 节点下钻、节点删除、画像查看）、检索调试（意图识别/改写/重排三开关 + 相似度阈值 + 分数展示）、Memory Key（创建明文一次性弹窗 + 复制、启停/轮换/删除，轮换提示旧密钥即刻失效）。
+- `api/memory.ts` 23 个函数与管理端 23 端点一一对应；`auth/permissions.ts` 增 `MEMORY_READ` / `MEMORY_WRITE`；`types.ts` 增记忆库全套类型（`MemoryLibrary` / `MemoryFragmentRule` / `MemoryProfileRule` / `MemoryEntity` / `MemoryNode` / Memory Key 等）。
+
 **M18 · 网页导入站点凭据（抓取需登录的站点）**
 - 系统设置新增「站点凭据」Tab（`pages/settings/components/WebCredentialTab.tsx`）：按 host 配置抓取凭据，列表（认证类型标签、用户名/头名、secret 恒显星号、启停 Switch）+ 新建/编辑/删除。BASIC（用户名+密码）与 HEADER（任意请求头，覆盖 Bearer 与 Cookie）两种类型，表单按类型切换字段。
 - secret 只进不出：接口不回传，编辑弹窗不回填、留空即保持原值，停启用不需要重新输入密码；host 与认证类型建后置灰不可改（换站点/换方式=删了重建）。

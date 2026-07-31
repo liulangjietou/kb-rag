@@ -1,12 +1,12 @@
 # kb-rag 架构文档
 
-> 版本：v1.3（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14，2026-07-29；v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
-> 日期：2026-07-29
+> 版本：v1.4（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14 + 企业化 M15/M16 + 网页抓取增强 M17/M18 + 记忆库 M19，2026-07-31；v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
+> 日期：2026-07-31
 > 作者：RichardFyoung / Claude
 >
 > **文档定位**：本文描述系统的实际实现架构（以代码为准），与以下文档互补——
 > - `知识库需求文档.md`：需求与设计决策的唯一事实源（"为什么做、做什么"）
-> - `M1~M14-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
+> - `M1~M19-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
 > - `openapi/kb-server.yaml`、`openapi/kb-parser.yaml`：HTTP 接口的唯一契约源
 > - `FLOWS.md`：核心流程图（与本文配套阅读）
 
@@ -91,14 +91,14 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | 模块 | 职责 | 关键内容 |
 |---|---|---|
 | **kb-common** | 无 Spring 依赖的基础件 | `Result` 统一响应信封、`ErrorCode`、`BizException`/`ProviderException`、`JsonUtil`/`HashUtil`、`RequestIdHolder`、`KbConstants`（业务 ID 前缀与 `kb-sk-` Key 前缀） |
-| **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 28 张业务表一一对应）、30+ 枚举、60+ 领域模型、**16 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
-| **kb-infrastructure** | 端口实现，按外部依赖分包 | `search.es` / `search.qdrant` / `graph` / `provider.{chat,embedding,rerank,vision}` / `connector` / `storage` / `parser` / `notify` / `web` / `config` |
-| **kb-app** | 应用编排层（架构主体） | 20 个业务域包：`kb` / `document` / `index` / `retrieval` / `graph` / `annotation` / `eval` / `appcenter` / `openapi` / `chat` / `alert` / `dict` / `auth` / `system` / `config` / `feedback` / `insight` / `governance` / `websource` / `metrics` |
-| **kb-api** | HTTP 边界与装配点 | 24 个 Controller、过滤器/拦截器、SSE、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
+| **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 43 张业务表一一对应）、30+ 枚举、60+ 领域模型、**21 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
+| **kb-infrastructure** | 端口实现，按外部依赖分包 | `search.es` / `search.qdrant` / `graph` / `provider.{chat,embedding,rerank,vision}` / `connector` / `storage` / `parser` / `notify` / `web` / `auth`（LDAP/OIDC/SAML/CAS）/ `config` |
+| **kb-app** | 应用编排层（架构主体） | 23 个业务域包：`kb` / `document` / `index` / `retrieval` / `graph` / `annotation` / `eval` / `appcenter` / `openapi` / `chat` / `alert` / `dict` / `auth` / `audit` / `system` / `config` / `feedback` / `insight` / `governance` / `websource` / `extsource` / `memory` / `metrics` |
+| **kb-api** | HTTP 边界与装配点 | 33 个 Controller、过滤器/拦截器、SSE、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
 
 分层规则：Controller 只依赖 kb-app 的 Service 与 kb-domain 的 model/enum；kb-app 只依赖端口接口，**从不依赖 kb-infrastructure 具体类**；kb-infrastructure 实现端口，与 kb-app 互不感知。
 
-### 3.2 领域端口与实现（16 个）
+### 3.2 领域端口与实现（21 个）
 
 | 端口 | 实现（默认 / 降级） | 说明 |
 |---|---|---|
@@ -118,6 +118,11 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `WebPageFetcher`（M12） | `HttpWebPageFetcher` | 网页抓取（URL 导入/增量同步）：SSRF 防护由调用侧经 kb-domain 的 `UrlGuard` 前置校验，Content-Type 白名单、体积上限、超时控制 |
 | `MultimodalEmbeddingProvider`（M14） | `DashScopeMultimodalEmbeddingProvider` / `NoopMultimodalEmbeddingProvider` | 视觉理解整页索引与以图搜图的共用向量通道（DashScope multimodal-embedding-v1）；未配置时注入 Noop 实现，开关置灰、多模态路跳过并记 `mm_route_unavailable`；开启但多模态权重为 0 时跳过并记 `mm_route_skipped` |
 | `ExternalConnector`（M14） | `S3CompatibleConnector` | 外部数据源 SPI：扫描 S3/OSS 兼容对象存储、拉取对象体馈入普通上传链；source_type 为路由键，本期仅 s3 一种实现 |
+| `DirectoryAuthenticator`（M15） | `LdapDirectoryAuthenticator` | 单点登录目录认证：裸 JNDI simple bind，不引入 Spring LDAP；目录账号首登自动建号 |
+| `OidcClient`（M16） | `NimbusOidcClient` | OIDC 授权码模式：发现文档/code 换 token/JWKS 验签 |
+| `SamlProcessor`（M16） | `XmlDsigSamlProcessor` | SAML 2.0 Response 签名验证（自实现 XML-DSig，不引入 Spring Security SAML） |
+| `CasValidator`（M16） | `HttpCasValidator` | CAS ticket 服务端二次校验 |
+| `MemoryStore`（M19） | `EsMemoryStore` | 记忆节点检索副本：单物理索引 `kb_memory_nodes_v1` 所有记忆库共用（隔离靠 `library_id`+`user_id` filter）；vector mapping 懒加载（首个带 embedding 的写入按维度 putMapping）；kNN+BM25 并联，零 Key 降级 BM25 单路；过期节点查询期过滤 |
 
 **零 Key / 能力开关统一装置**：`ModelProviderConfig` 是唯一读模型凭据的地方，凭据为空即注入 `Unconfigured*` 实现；`GraphStoreConfig`（NEO4J_URI 空 → `DisabledGraphStore`）与 `QdrantClientConfig`（QDRANT_URI 空 → 不建 client、不注册健康探针）镜像同一模式。上游代码只写 `isConfigured()/isEnabled()` 一个分支，全链路无 null 检查——这是需求 §5"防御式编程只做一处且高复用"的落地点。
 
@@ -201,9 +206,9 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `ApiAuditArchiveService` | cron 03:30 | 审计日志归档 MinIO → 分批物理删除 |
 | `AppSnapshotRetentionService` | cron 04:15 | SUPERSEDED 版本快照按保留数清理（RELEASED 永不清理） |
 
-### 3.8 数据模型（28 张业务表，Flyway V1-V15）
+### 3.8 数据模型（43 张业务表，Flyway V1-V20）
 
-全部 InnoDB，统一 `id / created_at / updated_at / lock_version / deleted`，审计字段由 `AuditFieldFiller` 填充，业务 ID 带类型前缀（kb/doc/dv/ck/task/img/upt/an/evds/evc/evr/evre/app/av/ak/aud/smp/rfb/si/ws/exts）。
+全部 InnoDB，统一 `id / created_at / updated_at / lock_version / deleted`，审计字段由 `AuditFieldFiller` 填充，业务 ID 带类型前缀（kb/doc/dv/ck/task/img/upt/an/evds/evc/evr/evre/app/av/ak/aud/smp/rfb/si/ws/wcred/exts/usr/role/tnt/opa/ml/mfr/mpr/mn/mak）。
 
 | 迁移 | 表 / 变更 |
 |---|---|
@@ -222,6 +227,11 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V13（M11） | `t_kb_document` 加 `publish_status` / `review_note` / `effective_at` / `expires_at` / `trashed` / `trashed_at`；`t_kb_knowledge_base` 加 `review_required` |
 | V14（M12） | `t_kb_web_source`（网页来源登记：URL/content_hash/四态同步状态/派生文档关联） |
 | V15（M14） | `t_kb_ext_source`（外部对象存储源登记：端点/桶/前缀/凭证，secret_key 从不回读、库内 name 唯一）/ `t_kb_ext_source_item`（逐对象同步结果：object_key_hash 去重、etag 未变检查、四态 last_status，弱绑定于派生文档） |
+| V16（M15） | `t_kb_role` / `t_kb_permission` / `t_kb_user_role` / `t_kb_role_permission` / `t_kb_role_kb`（角色→知识库数据范围）；`t_kb_admin_user` 增 `user_id`/`display_name`/`email`/`source`/`status`，`password_hash` 改可空；内置 5 角色与 18 权限码随迁移落库，存量账号提为 SUPER_ADMIN |
+| V17（M16） | `t_kb_tenant`（内置默认租户种子化）/ `t_kb_doc_acl` / `t_kb_operation_audit`（含 username 冗余列）；6 张根聚合表增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户）；`t_kb_document` 增 `visibility`、`t_kb_user_role` 增 `granted_by`、`t_kb_retrieval_feedback` 增 `channel`/`end_user_id` |
+| V18（M17） | `t_kb_web_source` 增 `render_js`（JS 渲染抓取开关，默认 0 静态抓取） |
+| V19（M18） | `t_kb_web_credential`（站点级认证凭据，host 全局唯一；BASIC/HEADER 两类，secret 刻意明文存储、读接口永不回传） |
+| V20（M19） | 记忆库 6 张表：`t_kb_memory_library` / `t_kb_memory_fragment_rule`（instruction_type/auto_update/expire_days/extract_version/builtin）/ `t_kb_memory_profile_rule`（fields 整体存 JSON 数组）/ `t_kb_memory_node`（idx_library_user）/ `t_kb_memory_profile`（uk_rule_user 唯一键 upsert）/ `t_kb_memory_app_key`（明文 `kb-mk-*`，只存 SHA-256 摘要 + 展示前缀）；权限种子 `memory:read`/`memory:write` |
 
 引擎侧可过滤字段全集（Qdrant 标量 / ES filter，建索引时显式声明）：`kb_id`、`doc_id`、`document_version_id`、`enabled`、`parent_id`、`chunk_type`、`tag_ids`、`session_id`、`sender`、`msg_time`、`chunk_seq`；其余 metadata 只存 MySQL。新增可过滤维度视为 schema 变更，走索引重建迁移。
 
@@ -276,6 +286,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | `/search` | 检索调试（参数面板、分数明细、degraded 告警、收进评测集） |
 | `/chat` | 问答调试（JWT 走 `/apps/{id}/chat-preview` SSE） |
 | `/apps`、`/apps/:appId` | 应用中心（配置 / 版本与门禁 / API 调试三 tab） |
+| `/memory`、`/memory/:libraryId` | 记忆库（M19，`memory:read` 可见）：库列表；详情五 Tab（片段规则 / 画像规则 / 记忆数据 / 检索调试 / Memory Key） |
 | `/eval` | 评测中心（数据集 / case 标注 / 证据复核 / 运行报告四 tab） |
 | `/settings` | 系统设置（模型状态 / ik 词典 / API Key / 审计 / 告警 / 导入映射） |
 
@@ -305,7 +316,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | `scripts/benchmark.sh` | 纯 bash+curl 压测（P50/P95/P99），验收口径 P95<2s；`seed-bench.py` 零 Key 直灌 10 万分片种子数据 |
 | `demo/` | 4 篇原创文档（md/docx/pdf/xlsx 各一，字节级可复现生成）+ `eval-cases.json`（10 条，含文档级锚定图片 case，按文件名+content_hash 关联导入） |
 | `mappings/` | 聊天记录列名映射模板分发（memotrace 等） |
-| `docs/` | 需求文档、M1-M14 契约、OpenAPI（`kb-server.yaml` 0.14.0-m14，97 条路径 / `kb-parser.yaml` 0.12.0-m12，3 端点）、备份恢复手册、本文档与 `FLOWS.md` |
+| `docs/` | 需求文档、M1-M19 契约、OpenAPI（`kb-server.yaml` 0.19.0-m19 / `kb-parser.yaml` 0.12.0-m12，3 端点）、备份恢复手册、本文档与 `FLOWS.md` |
 
 ---
 
@@ -317,7 +328,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 
 ### 7.2 安全
 
-- **两条独立鉴权链**：管理台 Bearer Token（`AuthInterceptor`，Token 哈希落库 `t_kb_auth_token`、防爆破锁定、首登随机密码强制改密）与对外 API Key（`ApiKeyAuthFilter` 独立过滤器链、哈希存储、app_scope 授权范围、令牌桶限流）。
+- **三条独立鉴权链**：管理台 Bearer Token（`AuthInterceptor`，Token 哈希落库 `t_kb_auth_token`、防爆破锁定、首登随机密码强制改密；M15 起叠加 `PermissionInterceptor` 功能权限 + 知识库数据范围两层授权）、对外 API Key（`ApiKeyAuthFilter` 独立过滤器链、哈希存储、app_scope 授权范围、令牌桶限流）、记忆库 Memory Key（M19，`MemoryKeyAuthFilter`：`Bearer kb-mk-*` 只作用于 `/api/v1/memory/**`，一把 Key 绑定一个记忆库、库内再按 user_id 隔离，隔离是查询谓词、越权一律 404；限流复用 `ApiRateLimiter`）——三面凭据形态、失败面、限流口径互不干扰。
 - **Prompt 注入四防线**：①生成/judge prompt 固定分隔符包裹资料原文；②LLM 切分输出强校验（非法降级按长度切）；③路由白名单交集裁决；④改写结果仅作检索词。
 - 解析侧基线：magic number 校验、zip-slip/炸弹、XXE（defusedxml）、SSRF（解析期零出站）；前端零 `dangerouslySetInnerHTML`；聊天导入默认脱敏（手机号/身份证/银行卡 16-19 位）；审计 query 无条件脱敏；MinIO 私有桶 + 限时预签名 URL。
 

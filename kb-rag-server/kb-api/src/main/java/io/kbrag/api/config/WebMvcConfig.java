@@ -42,6 +42,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
             // session, and letting the console interceptor see these paths would reject every external call
             // for missing a token it is not supposed to have.
             "/api/v1/knowledge/**",
+            // Same reasoning for the memory open API: its credential is a memory key checked by
+            // MemoryKeyAuthFilter, never a console session.
+            "/api/v1/memory/**",
             // The ik tokenizer polls its remote dictionary from inside Elasticsearch with a plain HTTP
             // client that cannot carry a bearer token, so this path is deliberately unauthenticated.
             // It only serves the domain terms an operator entered on purpose: no document content, no

@@ -2379,4 +2379,171 @@ export interface ListOperationAuditParams {
   size?: number;
 }
 
+// ---------------------------------------------------------------- memory library (M19)
+
+/** One memory library card (GET /api/v1/memory-libraries). */
+export interface MemoryLibrary {
+  library_id: string;
+  name: string;
+  description: string | null;
+  fragment_rule_count: number;
+  profile_rule_count: number;
+  node_count: number;
+  entity_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryLibraryPage {
+  items: MemoryLibrary[];
+  page: number;
+  size: number;
+  total: number;
+}
+
+/** Library detail: the card fields flattened together with both rule lists. */
+export interface MemoryLibraryDetail extends MemoryLibrary {
+  fragment_rules: MemoryFragmentRule[];
+  profile_rules: MemoryProfileRule[];
+}
+
+export interface MemoryLibraryUpsertRequest {
+  name: string;
+  description?: string;
+}
+
+/** A memory fragment rule: how conversations are distilled into memory nodes. */
+export interface MemoryFragmentRule {
+  rule_id: string;
+  library_id: string;
+  name: string;
+  instruction_type: 'DEFAULT' | 'CUSTOM';
+  instruction: string | null;
+  auto_update: boolean;
+  /** 7/30/180 days, null means never expiring. */
+  expire_days: number | null;
+  extract_version: 'PRO' | 'LITE';
+  builtin: boolean;
+  node_count: number;
+  created_at: string;
+}
+
+export interface MemoryFragmentRuleUpsertRequest {
+  name: string;
+  instruction_type: 'DEFAULT' | 'CUSTOM';
+  instruction?: string;
+  auto_update?: boolean;
+  expire_days?: number | null;
+  extract_version?: 'PRO' | 'LITE';
+}
+
+/** One user profile field definition. */
+export interface MemoryProfileField {
+  name: string;
+  description: string | null;
+  initial_value: string | null;
+}
+
+/** A user profile rule: which structured attributes are extracted per entity. */
+export interface MemoryProfileRule {
+  rule_id: string;
+  library_id: string;
+  name: string;
+  extract_version: 'PRO' | 'LITE';
+  fields: MemoryProfileField[];
+  created_at: string;
+}
+
+export interface MemoryProfileRuleUpsertRequest {
+  name: string;
+  extract_version?: 'PRO' | 'LITE';
+  fields: MemoryProfileField[];
+}
+
+/** One memory entity aggregate: a user_id with its node count and latest write. */
+export interface MemoryEntity {
+  user_id: string;
+  node_count: number;
+  updated_at: string;
+}
+
+export interface MemoryEntityPage {
+  items: MemoryEntity[];
+  page: number;
+  size: number;
+  total: number;
+}
+
+/** One memory node; score only present in search responses. */
+export interface MemoryNode {
+  memory_node_id: string;
+  library_id: string;
+  rule_id: string;
+  user_id: string;
+  content: string;
+  source: 'EXTRACTED' | 'CUSTOM';
+  meta_data: Record<string, unknown> | null;
+  expire_at: string | null;
+  created_at: string;
+  updated_at: string;
+  score?: number;
+}
+
+export interface MemoryNodePage {
+  memory_nodes: MemoryNode[];
+  page: number;
+  size: number;
+  total: number;
+}
+
+/** An entity's profile under one rule, initial values filled in for unfilled fields. */
+export interface MemoryProfile {
+  rule_id: string;
+  rule_name: string;
+  user_id: string;
+  attributes: { name: string; value: string | null }[];
+  updated_at: string | null;
+}
+
+/** POST .../search-debug payload, same shape the open API search takes. */
+export interface MemorySearchDebugRequest {
+  user_id: string;
+  query: string;
+  fragment_rule_id?: string;
+  max_results?: number;
+  intent_recognition?: boolean;
+  rewrite?: boolean;
+  rerank?: boolean;
+  similarity_threshold?: number;
+}
+
+export interface MemorySearchResult {
+  memory_nodes: MemoryNode[];
+  profiles: MemoryProfile[];
+  rewritten_query: string | null;
+  intent_recalled: boolean;
+}
+
+/** A memory key row; never carries key material, only the display form. */
+export interface MemoryAppKey {
+  key_id: string;
+  library_id: string;
+  name: string;
+  key_prefix: string;
+  status: 'ENABLED' | 'DISABLED';
+  qps_limit: number;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+/** Issue/rotate response: the only shape that ever carries the plaintext key. */
+export interface MemoryAppKeyIssued extends MemoryAppKey {
+  api_key: string;
+}
+
+export interface MemoryAppKeyCreateRequest {
+  name: string;
+  qps_limit?: number;
+}
+
 

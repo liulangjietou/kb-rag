@@ -22,6 +22,8 @@ export const PERMISSIONS = {
   APP_WRITE: 'app:write',
   APP_RELEASE: 'app:release',
   APIKEY_MANAGE: 'apikey:manage',
+  MEMORY_READ: 'memory:read',
+  MEMORY_WRITE: 'memory:write',
   AUDIT_READ: 'audit:read',
   SYSTEM_CONFIG: 'system:config',
   USER_MANAGE: 'user:manage',
