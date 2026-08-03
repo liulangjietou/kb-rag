@@ -1,12 +1,12 @@
 # kb-rag 架构文档
 
-> 版本：v1.4（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14 + 企业化 M15/M16 + 网页抓取增强 M17/M18 + 记忆库 M19，2026-07-31；v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
-> 日期：2026-07-31
+> 版本：v1.5（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14 + 企业化 M15/M16 + 网页抓取增强 M17/M18 + 记忆库 M19 + MCP 协议层 M20，2026-08-03；v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
+> 日期：2026-08-03
 > 作者：RichardFyoung / Claude
 >
 > **文档定位**：本文描述系统的实际实现架构（以代码为准），与以下文档互补——
 > - `知识库需求文档.md`：需求与设计决策的唯一事实源（"为什么做、做什么"）
-> - `M1~M19-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
+> - `M1~M20-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
 > - `openapi/kb-server.yaml`、`openapi/kb-parser.yaml`：HTTP 接口的唯一契约源
 > - `FLOWS.md`：核心流程图（与本文配套阅读）
 
@@ -21,10 +21,13 @@
                     │  kb-rag-web  (React 18 + AntD5)│  dev :20002
                     └──────────────┬───────────────┘
                                    │ /api、/actuator（Vite 代理 / Nginx 反代）
- ┌──────────────┐  REST(API Key)  ┌▼──────────────────────────────────────┐
- │  智能体应用    │◄───────────────►│  kb-rag-server (Java 17 / Boot 3)      │ :20000
- └──────────────┘  /api/v1/       │  kb-api → kb-app → kb-domain           │
-                   knowledge/*    │                 ▲                      │
+ ┌──────────────┐  REST + MCP     ┌▼──────────────────────────────────────┐
+ │  智能体应用 /  │  (API Key /     │  kb-rag-server (Java 17 / Boot 3)      │ :20000
+ │  MCP 客户端   │◄──Memory Key)──►│  kb-api → kb-app → kb-domain           │
+ └──────────────┘  /api/v1/       │                 ▲                      │
+                   knowledge/*    │                                        │
+                   /api/v1/       │                                        │
+                   memory/*       │                                        │
                                   │       kb-infrastructure ───────────────┤
                                   └──┬─────┬─────┬─────┬─────┬─────┬──────┘
                                      │     │     │     │     │     │ HTTP multipart
@@ -35,7 +38,7 @@
                                                                  └──────────────────┘
 ```
 
-- **kb-rag-server**：唯一的业务中枢。管理台 API、对外开放 API、索引管线编排、检索链路、**全部大模型调用**（嵌入/重排/对话/视觉四类 Provider）。
+- **kb-rag-server**：唯一的业务中枢。管理台 API、对外开放 API（REST 与 MCP 双 transport，见 §3.9）、索引管线编排、检索链路、**全部大模型调用**（嵌入/重排/对话/视觉四类 Provider）。
 - **kb-rag-parser**：纯解析微服务。只做文件解析、版面/扫描页判定、图片抽取与可选本地 OCR，**不调用任何大模型**（M3 契约 §0 定版的职责边界）。
 - **kb-rag-web**：管理台前端，无 SSR、无状态库（React Context），通过 Vite 代理 / 反代与 server 同源交互。
 - **kb-rag-deploy**：入口仓。docker-compose（lite/full/es-ik/graph）、OpenAPI 契约、跨仓文档、备份恢复与压测脚本、Demo 素材。
@@ -94,7 +97,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 43 张业务表一一对应）、30+ 枚举、60+ 领域模型、**21 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
 | **kb-infrastructure** | 端口实现，按外部依赖分包 | `search.es` / `search.qdrant` / `graph` / `provider.{chat,embedding,rerank,vision}` / `connector` / `storage` / `parser` / `notify` / `web` / `auth`（LDAP/OIDC/SAML/CAS）/ `config` |
 | **kb-app** | 应用编排层（架构主体） | 23 个业务域包：`kb` / `document` / `index` / `retrieval` / `graph` / `annotation` / `eval` / `appcenter` / `openapi` / `chat` / `alert` / `dict` / `auth` / `audit` / `system` / `config` / `feedback` / `insight` / `governance` / `websource` / `extsource` / `memory` / `metrics` |
-| **kb-api** | HTTP 边界与装配点 | 33 个 Controller、过滤器/拦截器、SSE、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
+| **kb-api** | HTTP 边界与装配点 | 35 个 Controller、过滤器/拦截器、SSE、MCP 协议层（`api.mcp`，§3.9）、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
 
 分层规则：Controller 只依赖 kb-app 的 Service 与 kb-domain 的 model/enum；kb-app 只依赖端口接口，**从不依赖 kb-infrastructure 具体类**；kb-infrastructure 实现端口，与 kb-app 互不感知。
 
@@ -235,6 +238,22 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 引擎侧可过滤字段全集（Qdrant 标量 / ES filter，建索引时显式声明）：`kb_id`、`doc_id`、`document_version_id`、`enabled`、`parent_id`、`chunk_type`、`tag_ids`、`session_id`、`sender`、`msg_time`、`chunk_seq`；其余 metadata 只存 MySQL。新增可过滤维度视为 schema 变更，走索引重建迁移。
 
+### 3.9 MCP 协议层（M20）
+
+知识库应用与记忆库的开放能力在 REST 之外新增 **MCP（Model Context Protocol）** 第二种 transport：任何 MCP 兼容客户端（Claude Desktop / Cursor / Cline / 自研 Agent）配一个 URL 加一把既有 Key 即可接入，无需定制胶水代码（契约 M20）。
+
+| 端点 | server name | 工具集 | 凭证与过滤器链 |
+|---|---|---|---|
+| `POST /api/v1/knowledge/mcp` | `kb-rag-knowledge` | `knowledge_search` / `knowledge_chat` | `Bearer kb-sk-*`，`ApiKeyAuthFilter`（鉴权、app_scope、令牌桶限流、调用审计全部复用） |
+| `POST /api/v1/memory/mcp` | `kb-rag-memory` | `memory_add` / `memory_search` / `memory_list` / `memory_update` / `memory_delete` / `memory_get_profile` | `Bearer kb-mk-*`，`MemoryKeyAuthFilter`（鉴权、库绑定、限流全部复用） |
+
+- **`McpServerEngine`（kb-api `api.mcp`，手写零依赖）**：JSON-RPC 2.0 子集引擎，方法表 `initialize`（版本协商 `2025-03-26`，客户端报 `2024-11-05` 时向下回显）/ `ping` / `tools/list` / `tools/call` / `notifications/*`（202 无 body）。刻意不引 MCP SDK——协议面就是"一个 POST 上的 JSON-RPC 2.0 子集"，Jackson 手写 226 行闭合；SDK 附带的会话存储与 SSE 管线本期恰恰都不要。
+- **无状态设计**：不签发也不要求 `Mcp-Session-Id`，每个请求自带完整上下文（身份来自 `Authorization` 头，逐请求过滤器验证）——每 Controller 一个引擎实例持有不可变工具目录即并发安全。不做 SSE 流式（tools/call 本就是单次请求应答，chat 流式指路 REST 孪生端点的 SSE）、不做 resources/prompts/sampling（capabilities 只声明 tools）、拒绝 JSON-RPC 批量数组（2025-03-26 修订已移除，-32600）。
+- **两个失败平面（核心不变式）**：协议违规 → JSON-RPC error（坏 JSON -32700、批量/缺 id -32600、方法不存在 -32601、未知工具/参数形态 -32602）；业务失败 → tools/call **成功响应**里 `isError: true` 的工具结果（`BizException` 映射为 `错误码: 消息` 文本）——对 Agent 而言"参数不对/记忆不存在"是应自行修正重试的工具反馈，不是协议层故障。HTTP 状态恒 200（通知 202），非 200 只可能来自过滤器链（401/429，信封同 REST）。
+- **成功结果双形态**：`content[0].text`（JSON 文本，给只读 text 的老客户端）+ `structuredContent`（同 REST `data` 结构）同源产出。
+- **鉴权：第二种 transport，不是第二种身份**：两个端点路径刻意落在既有过滤器链的 URL 前缀之下，请求进 Controller 前已过完全同一条鉴权/限流/审计管线，零过滤器改动；Controller 只从 request attribute 读过滤器放入的 principal，读不到即 500 级装配故障。记忆库隔离红线原样成立：工具操作的库来自 principal（Key 绑定关系），arguments 无法指定 library_id，越权继续 404。
+- **参数绑定**：`McpArgumentBinder` 用 Jackson `treeToValue` + jakarta Validator 显式校验（tree 转换不触发 bean validation，手动补上这一刀）；知识库两工具复用 REST 的 `KnowledgeCallRequest`，记忆库 list/update/delete/profile 的 GET/path 形态参数收敛为 Controller 内部 record。`knowledge_chat` 带 `stream: true` 直接 INVALID_PARAM 并指路 REST SSE。
+
 ---
 
 ## 4. kb-rag-parser 架构
@@ -287,14 +306,16 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | `/chat` | 问答调试（JWT 走 `/apps/{id}/chat-preview` SSE） |
 | `/apps`、`/apps/:appId` | 应用中心（配置 / 版本与门禁 / API 调试三 tab） |
 | `/memory`、`/memory/:libraryId` | 记忆库（M19，`memory:read` 可见）：库列表；详情五 Tab（片段规则 / 画像规则 / 记忆数据 / 检索调试 / Memory Key） |
+| `/mcp` | MCP 调试（M20，`app:read` 或 `memory:read` 任一可见）：端点二选一（切换即清场）→ 粘贴明文 Key → initialize 握手 / tools/list 目录（按 inputSchema.required 预填参数模板）→ tools/call 调试；响应区显式区分三种结果平面（JSON-RPC error 红 / isError 橙 / 成功绿）；随表单实时生成 curl 与 `mcpServers` 配置片段 |
 | `/eval` | 评测中心（数据集 / case 标注 / 证据复核 / 运行报告四 tab） |
 | `/settings` | 系统设置（模型状态 / ik 词典 / API Key / 审计 / 告警 / 导入映射） |
 
-### 5.3 与后端的三条通道
+### 5.3 与后端的四条通道
 
 1. `api/request.ts`：axios 主通道，`baseURL=/api/v1`，Bearer 注入、401 统一跳登录、`unwrap` 拆信封。
 2. `api/chatStream.ts`：SSE 驱动用原生 fetch（刻意绕过 401 拦截器），同时服务问答调试（JWT）与 API 调试 tab（API Key）。
 3. `api/publicApi.ts`：API Key 直连对外端点，429 读 Retry-After。
+4. `api/mcp.ts`（M20）：MCP 调试页仿 publicApi.ts 绕过共享 axios 实例直连 fetch——粘贴的 Key 不是管理台 JWT，401/429 正是页面要观察的对象。
 
 ### 5.4 关键组件约定
 
@@ -316,7 +337,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | `scripts/benchmark.sh` | 纯 bash+curl 压测（P50/P95/P99），验收口径 P95<2s；`seed-bench.py` 零 Key 直灌 10 万分片种子数据 |
 | `demo/` | 4 篇原创文档（md/docx/pdf/xlsx 各一，字节级可复现生成）+ `eval-cases.json`（10 条，含文档级锚定图片 case，按文件名+content_hash 关联导入） |
 | `mappings/` | 聊天记录列名映射模板分发（memotrace 等） |
-| `docs/` | 需求文档、M1-M19 契约、OpenAPI（`kb-server.yaml` 0.19.0-m19 / `kb-parser.yaml` 0.12.0-m12，3 端点）、备份恢复手册、本文档与 `FLOWS.md` |
+| `docs/` | 需求文档、M1-M20 契约、OpenAPI（`kb-server.yaml` 0.20.0-m20（含 `mcp` tag 与两个 MCP path）/ `kb-parser.yaml` 0.12.0-m12，3 端点）、备份恢复手册、本文档与 `FLOWS.md`；调用方接入文档另见主仓 `docs/MCP接入指南.md` |
 
 ---
 
@@ -329,6 +350,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 ### 7.2 安全
 
 - **三条独立鉴权链**：管理台 Bearer Token（`AuthInterceptor`，Token 哈希落库 `t_kb_auth_token`、防爆破锁定、首登随机密码强制改密；M15 起叠加 `PermissionInterceptor` 功能权限 + 知识库数据范围两层授权）、对外 API Key（`ApiKeyAuthFilter` 独立过滤器链、哈希存储、app_scope 授权范围、令牌桶限流）、记忆库 Memory Key（M19，`MemoryKeyAuthFilter`：`Bearer kb-mk-*` 只作用于 `/api/v1/memory/**`，一把 Key 绑定一个记忆库、库内再按 user_id 隔离，隔离是查询谓词、越权一律 404；限流复用 `ApiRateLimiter`）——三面凭据形态、失败面、限流口径互不干扰。
+- **MCP 是第二种 transport，不是第二种身份**（M20）：`/api/v1/knowledge/mcp` 与 `/api/v1/memory/mcp` 刻意落在上述后两条过滤器链的 URL 前缀之下，凭证仍是既有 `kb-sk-*` / `kb-mk-*`，鉴权、授权范围、限流、审计与 REST 完全同一条管线，零过滤器改动、无新增凭据面；协议层错误（JSON-RPC error / `isError`）全部在 HTTP 200 的 body 里，401/429 信封同 REST（见 §3.9）。
 - **Prompt 注入四防线**：①生成/judge prompt 固定分隔符包裹资料原文；②LLM 切分输出强校验（非法降级按长度切）；③路由白名单交集裁决；④改写结果仅作检索词。
 - 解析侧基线：magic number 校验、zip-slip/炸弹、XXE（defusedxml）、SSRF（解析期零出站）；前端零 `dangerouslySetInnerHTML`；聊天导入默认脱敏（手机号/身份证/银行卡 16-19 位）；审计 query 无条件脱敏；MinIO 私有桶 + 限时预签名 URL。
 
