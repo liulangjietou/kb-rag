@@ -1,7 +1,7 @@
 # kb-rag 流程图文档
 
-> 版本：v1.3（基线与 `ARCHITECTURE.md` 相同 = M1-M19 及其后修复的状态；v1.2 基线为 M13）
-> 日期：2026-07-31
+> 版本：v1.4（基线与 `ARCHITECTURE.md` 相同 = M1-M20 及其后修复的状态；v1.3 基线为 M19，v1.2 基线为 M13）
+> 日期：2026-08-03
 > 作者：RichardFyoung / Claude
 >
 > 图使用 Mermaid 绘制（GitHub / 主流 IDE 原生渲染）。每张图标注对应的核心类与契约出处，与代码不一致时以代码为准并须在同一 PR 内修订本文档（项目铁律②）。
@@ -462,3 +462,73 @@ flowchart TD
 ```
 
 边界：跨库/跨用户数据不可见由检索强制 filter 与管理端两层隔离查询谓词双保险（他库资源一律 404 不泄露存在性）；节点过期只在查询期过滤，物理清理由凌晨任务完成。
+
+---
+
+## 15. MCP 调用链（M20）
+
+对应：`McpServerEngine` / `KnowledgeMcpController` / `MemoryMcpController` / `McpArgumentBinder`（契约 M20 §1/§2/§3）。
+
+两个端点共用同一引擎：`POST /api/v1/knowledge/mcp`（`Bearer kb-sk-*`，工具 knowledge_search / knowledge_chat）与 `POST /api/v1/memory/mcp`（`Bearer kb-mk-*`，memory_* 六工具）。MCP 是 REST 之外的第二种 transport——请求进 Controller 前已过完全同一条鉴权/限流/审计过滤器链。
+
+### 15.1 initialize / tools/list / tools/call 时序
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as MCP 客户端(Claude Desktop/Cursor/自研 Agent)
+    participant F as ApiKeyAuthFilter / MemoryKeyAuthFilter<br/>(与 REST 完全同一条过滤器链)
+    participant C as KnowledgeMcpController / MemoryMcpController
+    participant E as McpServerEngine(无状态, 每 Controller 一实例)
+    participant S as KnowledgeApiService / MemoryApiService<br/>(REST 孪生的同一服务层)
+
+    A->>F: POST /api/v1/{knowledge|memory}/mcp<br/>Authorization: Bearer kb-sk-*/kb-mk-*
+    Note over F: 鉴权/app_scope/库绑定/令牌桶限流/审计<br/>失败 → 401/429 信封同 REST(唯一的非 200 来源)
+    F->>C: 放行(principal 挂 request attribute)
+    C->>E: handle(body, executor 绑定 principal)
+    alt initialize
+        E-->>A: 200 protocolVersion 协商(2025-03-26,<br/>客户端报 2024-11-05 时回显) + capabilities.tools + serverInfo
+    else notifications/* (无 id)
+        E-->>A: 202 无 body
+    else ping
+        E-->>A: 200 空对象 result
+    else tools/list
+        E-->>A: 200 工具目录(name/description/inputSchema)
+    else tools/call
+        E->>E: 工具名在目录中? arguments 为对象?<br/>否 → JSON-RPC error -32602
+        E->>C: executor.execute(toolName, arguments)
+        C->>C: McpArgumentBinder: treeToValue + jakarta Validator<br/>显式校验(tree 转换不触发 bean validation)
+        C->>S: 调 REST 孪生的同一服务方法<br/>(记忆库: 库来自 principal, arguments 无法指定 library_id)
+        alt 业务成功
+            S-->>E: 响应 DTO(同 REST data 结构)
+            E-->>A: 200 result: content[0].text(JSON 文本)<br/>+ structuredContent + isError:false
+        else 业务失败(BizException)
+            S-->>E: 错误码 + 消息
+            E-->>A: 200 result: isError:true<br/>content[0].text = "错误码: 消息"(工具结果平面)
+        end
+    end
+```
+
+### 15.2 两个失败平面的裁决
+
+```mermaid
+flowchart TD
+    Q[POST JSON-RPC body] --> P{body 是合法 JSON?}
+    P -- 否 --> E1[JSON-RPC error -32700]
+    P -- 是 --> B{单个对象?<br/>批量数组 2025-03-26 修订已移除}
+    B -- 否 --> E2[JSON-RPC error -32600]
+    B -- 是 --> ID{有 id?}
+    ID -- 无 id 且是 notifications/* --> N[202 无 body]
+    ID -- 无 id 且非通知 --> E2
+    ID -- 有 id --> M{方法在表中?<br/>initialize/ping/tools/list/tools/call}
+    M -- 否 --> E3[JSON-RPC error -32601]
+    M -- 是 --> T{tools/call: 工具在目录?<br/>arguments 是对象?}
+    T -- 否 --> E4[JSON-RPC error -32602]
+    T -- 是 --> X[执行工具 = 调 REST 孪生服务层]
+    X -- 正常返回 --> OK[200 result: isError:false<br/>content text + structuredContent 同源双形态]
+    X -- BizException 业务失败 --> BE[200 result: isError:true<br/>text = 错误码: 消息<br/>参数不对/资源不存在/stream:true 等<br/>Agent 可读反馈, 自行修正后重试]
+    E1 & E2 & E3 & E4 -.协议违规平面.-> PL[客户端/框架处理<br/>HTTP 仍是 200]
+    OK & BE -.工具结果平面.-> ML[调用方模型处理]
+```
+
+要点：**协议违规是客户端框架的事，业务失败是调用方模型的事**——前者走 JSON-RPC error（框架层纠正请求形态），后者走 `isError: true` 的成功响应（模型读到 `错误码: 消息` 文本后自行修正参数重试），两个平面严格分离（契约 M20 §1 核心不变式）。HTTP 恒 200（通知 202），非 200 只可能来自过滤器链（401/429）。`knowledge_chat` 带 `stream: true` 落业务失败平面（INVALID_PARAM 并指路 REST SSE）——tools/call 是单次请求应答，流式生成走 REST 孪生端点。
