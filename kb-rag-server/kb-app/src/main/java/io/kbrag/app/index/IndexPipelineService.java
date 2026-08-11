@@ -29,6 +29,8 @@ import io.kbrag.domain.mapper.DocumentVersionMapper;
 import io.kbrag.domain.mapper.KbTaskMapper;
 import io.kbrag.domain.model.CleanRules;
 import io.kbrag.domain.model.KbIndexConfig;
+import io.kbrag.domain.model.PageRange;
+import io.kbrag.domain.model.PagedContent;
 import io.kbrag.domain.model.ParentChunk;
 import io.kbrag.domain.model.ParsePreview;
 import io.kbrag.domain.model.ParsedDocument;
@@ -47,6 +49,7 @@ import io.kbrag.domain.service.ImageChunkLinker;
 import io.kbrag.domain.service.ImagePlaceholderResolver;
 import io.kbrag.domain.service.MetadataRuleExtractor;
 import io.kbrag.domain.service.PageSplitter;
+import io.kbrag.domain.service.PagedContentAssembler;
 import io.kbrag.domain.service.ParentChildSplitter;
 import io.kbrag.domain.service.SplitterRouter;
 import io.kbrag.domain.service.VersionFingerprintFactory;
@@ -130,6 +133,7 @@ public class IndexPipelineService {
     private final VersionFingerprintFactory fingerprintFactory;
     private final ImageAssetService imageAssetService;
     private final DocumentCleaner documentCleaner;
+    private final PagedContentAssembler pagedContentAssembler;
     private final ImagePlaceholderResolver placeholderResolver;
     private final ImageChunkLinker imageChunkLinker;
     private final MetadataRuleExtractor metadataRuleExtractor;
@@ -258,7 +262,8 @@ public class IndexPipelineService {
             KbIndexConfig config = knowledgeBaseService.indexConfigOf(document.getKbId());
             ParsePreview preview = readPreview(document, version);
             StagedContent staged = new StagedContent(preview.toProxiedContent(),
-                    preview.warningsOrEmpty(), preview.getCleanRulesOverride());
+                    preview.pageRangesOrEmpty(), preview.warningsOrEmpty(),
+                    preview.getCleanRulesOverride());
             indexStaged(document, version, config, staged, task);
             log.info("confirmed document indexed, docId={}, versionId={}", document.getDocId(), versionId);
         } catch (Exception e) {
@@ -477,9 +482,6 @@ public class IndexPipelineService {
                 : imageAssetService.materialize(document, version, parsed, warnings);
 
         CleanRules rules = override == null ? config.cleanRulesOrDefaults() : override;
-        String markdown = markdownFor(document, parsed, assets);
-        String cleaned = documentCleaner.clean(markdown, parsed.pagesOrEmpty(), rules);
-
         Map<String, ImagePlaceholderResolver.ProxyTarget> proxies = new LinkedHashMap<>();
         for (ImageAsset asset : assets) {
             if (!asset.hasTextProxy()) {
@@ -489,13 +491,52 @@ public class IndexPipelineService {
                     asset.getImageId(), asset.getObjectKey(),
                     documentCleaner.cleanFragment(asset.getTextProxy(), rules)));
         }
-        ProxiedContent proxied = withStandaloneFallback(document, assets,
-                placeholderResolver.resolve(cleaned, proxies));
+
+        ProxiedContent proxied;
+        List<PageRange> pageRanges;
+        if (usesPageStrategy(document, config) && CollectionUtils.isNotEmpty(parsed.pagesOrEmpty())) {
+            // The page strategy is the only one that needs to know where a page starts, so it is the only
+            // one that pays for the page by page assembly; every other base keeps the whole document
+            // route unchanged, and switching to this strategy changes the chunk fingerprint anyway.
+            //
+            // A parse artifact with no pages - one written before the artifact was a JSON document -
+            // stays on the whole document route and reports no boundaries, which is what makes the
+            // splitter treat it as the single page the contract promises for a format without pages.
+            PagedContent paged = pagedContentAssembler.assemble(parsed.pagesOrEmpty(), rules, proxies);
+            proxied = paged.getContent();
+            pageRanges = paged.getPageRanges();
+        } else {
+            String markdown = markdownFor(document, parsed, assets);
+            String cleaned = documentCleaner.clean(markdown, parsed.pagesOrEmpty(), rules);
+            proxied = withStandaloneFallback(document, assets,
+                    placeholderResolver.resolve(cleaned, proxies));
+            pageRanges = List.of();
+        }
 
         version.setParseFingerprint(fingerprintFactory.parseFingerprint(configWithRules(config, rules),
                 visionProvider.model()));
         documentVersionMapper.updateById(version);
-        return new StagedContent(proxied, warnings, override);
+        return new StagedContent(proxied, pageRanges, warnings, override);
+    }
+
+    /**
+     * Tells whether this document is cut on the page boundaries the parser reported.
+     *
+     * <p>The single gate of the page route: the preparation stage reads it to decide whether to assemble
+     * the document page by page, and the split stage reads it to decide whether to dispatch to
+     * {@link PageSplitter}. Two independent conditions would let one stage produce boundaries the other
+     * never uses, or the reverse - the strategy silently degrading to fixed length.
+     *
+     * <p>A standalone image is never page split: it has no parse artifact and its whole text comes from
+     * the vision model, so the page route would find nothing and drop the one chunk the image needs.
+     *
+     * @param document document record
+     * @param config   knowledge base index configuration
+     * @return {@code true} when the page strategy applies
+     */
+    private boolean usesPageStrategy(Document document, KbIndexConfig config) {
+        return PageSplitter.STRATEGY_CODE.equals(config.getSplitStrategy())
+                && !imageAssetService.isStandaloneImage(document.getFileExt());
     }
 
     /**
@@ -619,6 +660,7 @@ public class IndexPipelineService {
                 .pages(parsed == null ? List.of() : parsed.pagesOrEmpty())
                 .images(images)
                 .placements(placements)
+                .pageRanges(staged.pageRanges())
                 .warnings(staged.warnings())
                 .cleanRulesOverride(override)
                 .build();
@@ -755,12 +797,11 @@ public class IndexPipelineService {
     private List<Chunk> splitSingleLevel(Document document, DocumentVersion version, StagedContent staged,
                                          KbIndexConfig config, boolean embeddingConfigured,
                                          boolean standaloneImage) {
-        List<SplitChunk> splitChunks = splitPage(config, standaloneImage)
-                ? pageSplitter.split(readParsedQuietly(document, version), staged.proxied().getMarkdown(),
-                        config.splitParams(cacheContextOf(document, version)))
+        SplitParams params = config.splitParams(cacheContextOf(document, version));
+        List<SplitChunk> splitChunks = usesPageStrategy(document, config)
+                ? pageSplitter.split(staged.proxied().getMarkdown(), staged.pageRanges(), params)
                 : splitterRouter.resolve(config.getSplitStrategy())
-                        .split(staged.proxied().getMarkdown(),
-                                config.splitParams(cacheContextOf(document, version)));
+                        .split(staged.proxied().getMarkdown(), params);
         Map<Integer, List<String>> imagesByChunk = imageChunkLinker.link(staged.proxied().getMarkdown(),
                 staged.proxied().getPlacements(), splitChunks.stream().map(SplitChunk::getContent).toList());
         List<MetadataRuleExtractor.PreparedRule> rules =
@@ -776,20 +817,6 @@ public class IndexPipelineService {
             chunks.add(chunk);
         }
         return chunks;
-    }
-
-    /**
-     * Tells whether the single level split should route through the page strategy.
-     *
-     * <p>A standalone image is never page split: it has no parse artifact and its whole text comes from
-     * the vision model, so the page strategy would find nothing and drop the one chunk the image needs.
-     *
-     * @param config          knowledge base index configuration
-     * @param standaloneImage {@code true} when the document is one uploaded image
-     * @return {@code true} when the page strategy applies
-     */
-    private boolean splitPage(KbIndexConfig config, boolean standaloneImage) {
-        return !standaloneImage && PageSplitter.STRATEGY_CODE.equals(config.getSplitStrategy());
     }
 
     /**
@@ -1081,10 +1108,12 @@ public class IndexPipelineService {
     /**
      * Text ready to be cut, together with what produced it.
      *
-     * @param proxied  cleaned text and the image placements inside it
-     * @param warnings non fatal findings surfaced in the preview
-     * @param override experimental cleaning rules that produced it, {@code null} for the stored ones
+     * @param proxied    cleaned text and the image placements inside it
+     * @param pageRanges page boundaries inside that text, empty for every strategy but {@code page}
+     * @param warnings   non fatal findings surfaced in the preview
+     * @param override   experimental cleaning rules that produced it, {@code null} for the stored ones
      */
-    private record StagedContent(ProxiedContent proxied, List<String> warnings, CleanRules override) {
+    private record StagedContent(ProxiedContent proxied, List<PageRange> pageRanges,
+                                 List<String> warnings, CleanRules override) {
     }
 }

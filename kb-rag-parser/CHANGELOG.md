@@ -13,6 +13,11 @@
 
 ## [未发布] - M14
 
+### 新增
+
+- **`pages[]` 增 `markdown`：该页对应的 `data.markdown` 切片**（M14-CONTRACTS.md §4）：含该页标题（pdf `## Page N` / xlsx `## Sheet: 名`）与 `[[IMAGE:{image_id}]]` 占位符行，各页按 `\n\n` 顺序拼接与 `data.markdown` 逐字符相等。此前 kb-rag-server 的按页切分策略消费的是 `pages[].text`，而纯文本既不含占位符也不含 markdown 结构——按页切出的分片因此永远关联不到图片，拿到的还是未经清洗脱敏的解析原文。有了逐页切片，server 才能逐页清洗后无损拼回并按页区间下刀。纯新增字段，既有消费方不受影响；早于本字段的产物为 null，消费方回退 `text`。
+- pytest 新增（`tests/test_parse_page_markdown.py`）：pdf 多页各带自己的切片且 `text` 不含页标题、内嵌图占位符落在所属页的切片里、txt/html/docx 单页切片即全文、xlsx 每 sheet 一段，以及五种格式统一验证"逐页拼接 == 合并 markdown"这一 server 侧依赖的不变量。
+
 ### 修复
 
 - **pdf 乱码页不再入库**（M3-CONTRACTS.md §2.1 乱码页判定）：内嵌子集字体缺失/损坏 ToUnicode CMap 的 pdf，`page.get_text()` 抽出的是错码位"字形汤"（中文变缅甸文/方块，数字与英文往往仍正常），文本长度达标故躲过扫描页阈值，垃圾文本被直接切分入库。现按可识别字符（ASCII/CJK/假名/中日标点等区段）占比判定：低于 `GARBLED_PAGE_VALID_CHAR_RATIO_PCT`（新环境变量，默认 50）即置空该页文本并复用扫描页路径（`scanned=true` + `page_render` 渲染交 OCR/VLM 兜底），同时在 `data.warnings[]` 记录一条说明，不失败整篇。

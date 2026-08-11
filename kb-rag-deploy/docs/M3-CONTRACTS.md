@@ -19,7 +19,7 @@
 ```json
 {"code":"OK","data":{
   "markdown":"...含 [[IMAGE:img_1]] 占位符...",
-  "pages":[{"page_no":1,"text":"...","scanned":false}],
+  "pages":[{"page_no":1,"text":"...","markdown":"...该页的 markdown 切片，M14 增...","scanned":false}],
   "images":[{"image_id":"img_1","page_no":1,"kind":"embedded|page_render","media_type":"image/png","content_base64":"..."}]
 }}
 ```
@@ -80,7 +80,7 @@
 ### 3.4 解析预览与确认
 - `index_config.parse_preview_required`（KB 级开关，**默认 false**——需求 §4.2 定的，保证批量上传顺畅）
 - 开启时：管线在 clean 完成后暂停，文档 `process_status=PENDING_CONFIRM`（ProcessStatus 新增枚举），预览产物存 MinIO
-- `GET /api/v1/documents/{docId}/preview` → `{markdown, pages, images:[{image_id,preview_url,text_proxy}], warnings}`
+- `GET /api/v1/documents/{docId}/preview` → `{markdown, pages, images:[{image_id,preview_url,text_proxy}], page_ranges, warnings}`（`page_ranges` 为 M14 增量，仅按页切分的库非空，见 M14-CONTRACTS.md §4）
 - `POST /api/v1/documents/{docId}/confirm` → 继续切分入库
 - `POST /api/v1/documents/{docId}/reparse` → 按当前清洗规则重解析（body 可选 clean_rules 覆盖，仅本次预览用，不改 KB 配置）
 - `POST /api/v1/kb/{kbId}/documents/confirm`（批量确认，body `doc_ids`，缺省=该库全部 PENDING_CONFIRM）
@@ -156,6 +156,8 @@
 
 ### 7.2 管线次序说明
 清洗与占位符替换的物理次序为 parse → 图片入库+VLM → **清洗（带占位符正文 + 各文本代理分别清洗）→ 代理插回**。可观察行为与 §3.2 一致（代理在原位、正文与代理都被清洗），但替换后置保证记录的偏移量精确，`image_urls` 与 chunk 的关联才是确定的——先替换再清洗会让每处偏移失效。
+
+**按页切分的库走同一次序、只是粒度到页**（M14 增量）：清洗与代理插回逐页进行（页眉页脚仍用全文档检出的行集），再按 `\n\n` 拼回整篇并记录每页区间 `page_ranges`。之所以不是"整篇清洗后再按页定位"：清洗会删行改字，解析产物里的页文本在清洗后已不再逐字出现于正文，定位只能靠猜；逐页清洗则让页边界是"拼接时的落点"这一确定值。无清洗规则时逐页拼接与 parser 的 `markdown` 逐字符相等，故该次序对既有非分页策略零影响。
 
 ### 7.3 config_stale 口径扩展（有副作用，属预期）
 `current_config_fingerprint` 由单一 chunk 指纹改为 parse+chunk 组合指纹，否则改清洗规则无法标记 config_stale（§3.3 要求）。**副作用**：升级后 M1/M2 时期的文档会显示 `config_stale=1`（视觉模型与清洗规则是新增指纹输入），重建后归零。

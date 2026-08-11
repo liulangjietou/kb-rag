@@ -130,6 +130,18 @@ public class ParsedDocument {
         @JsonProperty("text")
         private String text;
 
+        /**
+         * This page's slice of {@link ParsedDocument#markdown}, carrying its heading and its image
+         * placeholder lines.
+         *
+         * <p>The page splitting strategy cuts this rather than {@link #text}: the plain text of a page
+         * carries neither the placeholders nor the markdown structure, so a page chunk built from it
+         * could never be linked to an image and would not be the same kind of text every other strategy
+         * produces. {@code null} in an artifact the parser wrote before the field existed.
+         */
+        @JsonProperty("markdown")
+        private String markdown;
+
         /** Set when the page carries no usable text layer and was rendered as an image instead. */
         @JsonProperty("scanned")
         private boolean scanned;
@@ -151,6 +163,21 @@ public class ParsedDocument {
          */
         public boolean ocrApplied() {
             return ocrSource != null && !ocrSource.isBlank();
+        }
+
+        /**
+         * Markdown of this page, falling back to its plain text.
+         *
+         * <p>The single compatibility gate of the field: an artifact written before the parser reported
+         * per page markdown still yields a page, just one without the placeholders it never carried.
+         *
+         * @return page markdown, never {@code null}
+         */
+        public String markdownOrText() {
+            if (markdown != null && !markdown.isBlank()) {
+                return markdown;
+            }
+            return text == null ? "" : text;
         }
     }
 

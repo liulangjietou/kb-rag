@@ -32,7 +32,13 @@ info:
     html.parser，title 与 h1-h6 映射标题、块级元素分段，剔除
     script/style/noscript/template，单页返回、不产出图片、绝不请求任何远程资源；
     URL 抓取与 SSRF 防护在 kb-rag-server 侧）。
-  version: "0.12.0-m12"
+
+    M14 增量（docs/M14-CONTRACTS.md §4）：`/api/v1/parse` 响应的 `pages[]` 新增
+    `markdown`——该页对应的 `data.markdown` 切片（含页标题与 `[[IMAGE:id]]` 占位符
+    行），各页按 `\n\n` 拼接与 `data.markdown` 逐字符相等。纯新增字段，既有消费方
+    不受影响；kb-rag-server 的按页切分策略据此逐页清洗后再切，从而与其他切分策略
+    消费同一份已脱敏、已插回图片代理的正文。
+  version: "0.14.0-m14"
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -226,6 +232,20 @@ components:
           minimum: 1
         text:
           type: string
+          description: |
+            该页抽取的纯文本。kb-rag-server 的页眉页脚检测逐页比对的是它，
+            切分消费的是下面的 markdown。
+        markdown:
+          type: string
+          nullable: true
+          description: |
+            M14 新增（docs/M14-CONTRACTS.md §4）。该页对应的 ParseData.markdown
+            切片，含该页标题（pdf `## Page N` / xlsx `## Sheet: 名`）与
+            `[[IMAGE:{image_id}]]` 占位符行；各页按 `\n\n` 顺序拼接即等于
+            ParseData.markdown（kb-rag-server 的逐页清洗依赖该无损性）。
+            本字段存在的原因：`text` 既不含占位符也不含 markdown 结构，按页切分
+            若消费它，分片将永远关联不到图片，且拿到的是未经清洗的解析原文。
+            早于本字段的产物为 null，消费方回退 `text`。
         scanned:
           type: boolean
           default: false

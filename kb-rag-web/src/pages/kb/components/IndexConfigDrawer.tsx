@@ -4,7 +4,11 @@ import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Select, Space, S
 import { updateIndexConfig } from '../../../api/kb';
 import type { ChatAggregationConfig, CleanRules, IndexConfig, MetadataRule, SplitStrategy } from '../../../api/types';
 import { useModelStatus } from '../../../context/ModelStatusContext';
-import { LLM_SPLIT_REQUIRES_CHAT_MODEL, SPLIT_STRATEGY_META } from '../../../utils/statusMeta';
+import {
+  LLM_SPLIT_REQUIRES_CHAT_MODEL,
+  PARENT_CHILD_REQUIRES_FIXED_LENGTH,
+  SPLIT_STRATEGY_META,
+} from '../../../utils/statusMeta';
 import CleanRulesFields from './CleanRulesFields';
 
 // M1 pipeline defaults (M1-CONTRACTS.md section 4 "按长度策略切分... 默认 600 token / 重叠 100").
@@ -219,12 +223,24 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
             options={(Object.keys(SPLIT_STRATEGY_META) as SplitStrategy[]).map((code) => ({
               value: code,
               label: SPLIT_STRATEGY_META[code].label,
-              disabled: code === 'llm_semantic' && !chatConfigured,
+              // 父子分片由定长策略与自身组合而成，并不接受其他策略：后端会拒绝该组合，
+              // 这里同步禁用，避免用户填完整个表单才在保存时撞上报错。
+              disabled:
+                (code === 'llm_semantic' && !chatConfigured) ||
+                (parentChildEnabled && code !== 'fixed_length'),
             }))}
           />
         </Form.Item>
         {!chatConfigured && (
           <Alert type="warning" showIcon message={LLM_SPLIT_REQUIRES_CHAT_MODEL} style={{ marginBottom: 16 }} />
+        )}
+        {parentChildEnabled && splitStrategy !== 'fixed_length' && (
+          <Alert
+            type="warning"
+            showIcon
+            message={PARENT_CHILD_REQUIRES_FIXED_LENGTH}
+            style={{ marginBottom: 16 }}
+          />
         )}
         {splitStrategy === 'separator' && (
           <>
@@ -255,7 +271,7 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
           <Alert
             type="info"
             showIcon
-            message="按页切分：每个源文档页面独立成片，下方分段长度/重叠仅在单页过长时作为兑底上限"
+            message="按页切分：每个源文档页面独立成片，下方分段长度/重叠仅在单页过长时作为兜底上限"
             style={{ marginBottom: 16 }}
           />
         )}

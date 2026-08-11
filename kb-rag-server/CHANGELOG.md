@@ -7,6 +7,13 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+
+### 修复（M14 切分策略装配缺陷）
+
+- **separator / heading / page 三个切分策略此前保存不进去**（`docs/M14-CONTRACTS.md` §4）：`SplitStrategy` 枚举只登记了 `fixed_length`/`llm_semantic`，而 `KnowledgeBaseService#requireSplitStrategyUsable` 以该枚举为配置写入的唯一白名单，于是 M14 交付的三个策略在控制台一保存就报 `unknown split strategy: page`——实现类注册着、前端表单也齐着，整批是死代码。枚举补齐五项后策略方可选用；新增单测钉住"每个可保存的策略码都必须路由到同名实现"，避免再出现配置得上、跑的是定长。
+- **按页切分绕过清洗与脱敏**（同上）：`PageSplitter` 直接消费 `parsed.json` 的 `pages[].text`，那是解析原文——页眉页脚/水印/正则替换/脱敏四步清洗与图片占位符替换全部作用在合并后的 markdown 上，从未作用在它上面，导致按页切分的知识库把未脱敏的手机号等 PII 直接写进索引，且每个分片的 `image_urls` 恒空。现改为 parser 逐页返回该页 markdown 切片、`PagedContentAssembler` 逐页清洗后拼回整篇并记录页区间（`PageRange`），`PageSplitter` 按区间下刀，与其余策略消费同一份正文；无清洗规则时逐页拼接结果与 parser 的 markdown 逐字符相等，故对非分页策略零影响。页区间随预览产物落 `page_ranges`，确认入库按存档区间切、不重算。
+- **解析响应的 `pages[].markdown` 没接进来**（同上）：`HttpDocumentParserClient#toParsedDocument` 逐字段手写映射，新增字段不读就等于不存在。上一条修复因此在真实解析路径上形同虚设——每一次全新解析拿到的页 markdown 都是 null，逐页清洗回退到纯文本，占位符依旧无从谈起。两侧单测各自用手工 fixture，恰好把这条 HTTP 缝隙盖住了。补映射并新增 `HttpDocumentParserClientTest`：起本地 HTTP server 用真实响应体钉住 `pages[]` 的全部字段，含旧版 parser 不返回该字段时回退纯文本。
+- **父子分片 + LLM 语义切分是假组合**（同上）：`ParentChildSplitter` 注入的是 `TextSplitter` 接口、被 `@Primary` 解析成定长实现，两级切分从来只跑定长，而分片指纹照配置记 `llm_semantic`——配置读起来是一回事、索引出来是另一回事。校验层收窄为"开启父子分片时仅允许 `fixed_length`"，同时把该依赖显式声明为 `FixedLengthTextSplitter`，让类型系统而非装配顺序来表达这个约束。
 ### 安全修复（M19 后修复：记忆库多租户隔离）
 
 - `[schema]` Flyway `V21__memory_library_tenant.sql`：`t_kb_memory_library` 增 `tenant_id`（NOT NULL DEFAULT `'tnt_default0000000'`，存量行由列 DEFAULT 划入默认租户、升级零迁移）+ `idx_tenant`。**修复的缺陷**：V20 建六张记忆库表时漏了 M16 的租户层，`memory:read`/`memory:write` 只回答「这个账号能不能碰记忆库」、回答不了「能碰哪些」，于是多租户部署下任何租户持 `memory:read` 的账号能列出全部署的记忆库，持 `memory:write` 能改删其他租户的库、规则、记忆节点与 Memory Key

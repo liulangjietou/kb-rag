@@ -67,6 +67,49 @@ public class DocumentCleaner {
     }
 
     /**
+     * Cleans a document page by page, the M14 contract section 4 page strategy.
+     *
+     * <p>Exists so the page strategy consumes the same cleaned text every other strategy consumes.
+     * Cutting the already cleaned markdown on page boundaries is not an option: cleaning deletes lines
+     * and rewrites matches, so an offset taken on the parse artifact no longer addresses the same text
+     * afterwards. Cleaning each page separately keeps the boundary exact by construction.
+     *
+     * <p>The furniture lines are detected once over the whole document and then removed from every
+     * page: a header is by definition a line that repeats across pages, so detecting it inside a single
+     * page would find nothing.
+     *
+     * <p>The one behavioural difference with {@link #clean}: a watermark or a replacement pattern can no
+     * longer match across a page boundary. That is the more faithful reading of rules written against
+     * the furniture of a page, and with no rule active both routes produce the same text.
+     *
+     * @param pages per page text and markdown
+     * @param rules cleaning rules
+     * @return cleaned markdown per page, in page order and of the same size as {@code pages}
+     */
+    public List<String> cleanPages(List<ParsedDocument.ParsedPage> pages, CleanRules rules) {
+        List<ParsedDocument.ParsedPage> source = pages == null ? List.of() : pages;
+        List<String> cleaned = new ArrayList<>(source.size());
+        if (rules == null || !rules.anyActive()) {
+            for (ParsedDocument.ParsedPage page : source) {
+                cleaned.add(page.markdownOrText());
+            }
+            return cleaned;
+        }
+        Set<String> furniture = rules.isStripHeaderFooter() ? headerFooterDetector.detect(source) : Set.of();
+        int removed = 0;
+        for (ParsedDocument.ParsedPage page : source) {
+            StripResult stripped = stripLines(page.markdownOrText(), furniture);
+            removed += stripped.removed();
+            String text = stripWatermarks(stripped.text(), rules);
+            text = applyReplacements(text, rules);
+            cleaned.add(textDesensitizer.mask(text, rules.desensitizeOrDisabled()));
+        }
+        log.info("pages cleaned, pages={}, removedLines={}, patterns={}",
+                source.size(), removed, furniture.size());
+        return cleaned;
+    }
+
+    /**
      * Cleans a text fragment that has no page structure, such as the textual proxy of an image or a
      * rendered chat window.
      *
@@ -96,10 +139,24 @@ public class DocumentCleaner {
      */
     private String stripHeaderFooter(String markdown, List<ParsedDocument.ParsedPage> pages) {
         Set<String> furniture = headerFooterDetector.detect(pages);
+        StripResult stripped = stripLines(markdown, furniture);
+        log.info("header footer lines removed, removedLines={}, patterns={}",
+                stripped.removed(), furniture.size());
+        return stripped.text();
+    }
+
+    /**
+     * Drops every line the furniture list names.
+     *
+     * @param text      source text
+     * @param furniture normalised furniture lines, empty leaves the text untouched
+     * @return remaining text and how many lines were dropped
+     */
+    private StripResult stripLines(String text, Set<String> furniture) {
         if (CollectionUtils.isEmpty(furniture)) {
-            return markdown;
+            return new StripResult(text, 0);
         }
-        String[] lines = markdown.split(LINE_SPLIT, -1);
+        String[] lines = text.split(LINE_SPLIT, -1);
         List<String> kept = new ArrayList<>(lines.length);
         int removed = 0;
         for (String line : lines) {
@@ -109,8 +166,17 @@ public class DocumentCleaner {
             }
             kept.add(line);
         }
-        log.info("header footer lines removed, removedLines={}, patterns={}", removed, furniture.size());
-        return String.join(LINE_BREAK, kept);
+        return new StripResult(String.join(LINE_BREAK, kept), removed);
+    }
+
+    /**
+     * Outcome of the furniture removal, so both the whole document route and the page by page route
+     * can report one aggregated count instead of one line per page.
+     *
+     * @param text    remaining text
+     * @param removed number of dropped lines
+     */
+    private record StripResult(String text, int removed) {
     }
 
     /**

@@ -32,10 +32,11 @@ import java.util.List;
  * two level splitter turns those offsets into {@code t_kb_chunk.parent_start_offset}, which is what lets a
  * disabled child be cut out of its parent text precisely.
  *
- * <p>{@code @Primary} since M4b: a second {@link TextSplitter} bean joined the container
- * ({@link LlmSemanticTextSplitter}), and every collaborator that still autowires a single
- * {@code TextSplitter} directly - the two level splitter and the LLM strategy's own fallback path -
- * has to keep resolving to this one without being rewritten against {@link SplitterRouter}.
+ * <p>{@code @Primary} since M4b: several {@link TextSplitter} beans share the container, so a
+ * collaborator that autowires the interface rather than a named strategy - the chunk annotation
+ * service, whose manual re-split must not run a chat model - keeps resolving to this one. Everything
+ * that depends on this strategy specifically names the type instead, so the annotation is a tie
+ * breaker and never the reason a configured strategy fails to run.
  *
  * @author owlzhangfq@gmail.com
  */
