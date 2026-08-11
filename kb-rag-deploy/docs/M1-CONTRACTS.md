@@ -122,7 +122,7 @@ public interface FulltextStore { /* upsert/delete/searchBm25(alias, text, filter
 
 - `docker-compose.yml`（full：mysql8/es8.11+ik 说明/qdrant(单容器自带存储)/minio/redis 可选/含 healthcheck+固定镜像 tag）
 - `docker-compose.lite.yml`（mysql/es/minio，8GB 档）
-- `.env.example`、`scripts/backup.sh` 骨架、`../../docs/README.md`（快速启动：lite 优先、零 Key 路径与 DashScope 路径两条明路）、`docs/`（本契约、OpenAPI 骨架 openapi/kb-server.yaml 与 parser.yaml——按 §5/§6 写 M1 端点）
+- `.env.example`、`scripts/backup.sh` 骨架、`../../README.md`（快速启动：lite 优先、零 Key 路径与 DashScope 路径两条明路）、`docs/`（本契约、OpenAPI 骨架 openapi/kb-server.yaml 与 parser.yaml——按 §5/§6 写 M1 端点）
 - ES 中文分词：M1 允许 standard 分词器起步，README 注明 ik 安装步骤（M2 落地词典）
 
 ## 9. M1 验收（照抄需求 §10，实现完成后主会话逐条验）

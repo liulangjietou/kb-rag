@@ -16,7 +16,7 @@
 - [ ] 代码原创，未复制 LLMentor / know-engine 的任何代码片段
 - [ ] `npm run lint` 通过
 - [ ] `npm run build` 通过（tsc 类型检查 + 生产构建）
-- [ ] 涉及路由/菜单变更时已同步更新 `../../docs/README.md` 的路由表
+- [ ] 涉及路由/菜单变更时已同步更新 `kb-rag-web/README.md` 的路由表
 - [ ] 未提交任何真实密钥/凭据
 - [ ] 已更新 `CHANGELOG.md`
 
