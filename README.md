@@ -129,11 +129,11 @@ flowchart LR
     TK --> RS["复用 REST 孪生服务，返回结构同源<br/>业务失败 → isError:true 工具结果<br/>协议违规 → JSON-RPC error"]
 ```
 
-接入配置与工具目录见 [`MCP接入指南.md`](MCP接入指南.md)、[`记忆库接入指南.md`](记忆库接入指南.md)。
+接入配置与工具目录见 [`docs/MCP接入指南.md`](docs/MCP接入指南.md)、[`docs/记忆库接入指南.md`](docs/记忆库接入指南.md)。
 
 更完整的架构说明与全量流程图（文档/版本状态机、双写补偿、索引重建、评测运行、图路、备份恢复等），见
-[`../kb-rag-deploy/docs/ARCHITECTURE.md`](../kb-rag-deploy/docs/ARCHITECTURE.md) 与
-[`../kb-rag-deploy/docs/FLOWS.md`](../kb-rag-deploy/docs/FLOWS.md)。
+[`kb-rag-deploy/docs/ARCHITECTURE.md`](kb-rag-deploy/docs/ARCHITECTURE.md) 与
+[`kb-rag-deploy/docs/FLOWS.md`](kb-rag-deploy/docs/FLOWS.md)。
 
 ## 目录结构
 
@@ -146,20 +146,62 @@ flowchart LR
 
 ## 快速启动
 
+推荐**轻量模式（lite）**：MySQL + Elasticsearch（同时承担 BM25 与向量检索）+ MinIO，
+8GB 内存即可跑起来。不填 `DASHSCOPE_API_KEY` 即为**零 Key 模式**——不需要任何账号和
+Key，clone 下来就能看到「上传 → 检索」跑通（检索自动降级 BM25 单路，依赖模型的功能置灰并给出引导）。
+
+### 1. 拉起中间件
+
 ```bash
-cd kb-rag-deploy && cp .env.example .env
+cd kb-rag-deploy
+cp .env.example .env        # 编辑 .env：占位口令(CHANGE_ME_*)必须替换，DASHSCOPE_API_KEY 可选
+./scripts/preflight.sh lite # 校验 docker / 内存 / 端口占用 / 是否还在用占位口令
+docker compose -f docker-compose.lite.yml up -d
 ```
 
-编辑 `.env` 填入数据库口令、MinIO 密钥与（可选的）`DASHSCOPE_API_KEY`，然后拉起中间件：
+### 2. 启动应用层
 
 ```bash
-docker compose -f kb-rag-deploy/docker-compose.lite.yml up -d
+# kb-rag-server（:20000，JDK 17 + Maven）
+cd kb-rag-server && mvn -B -ntp -DskipTests package && java -jar kb-api/target/kb-rag-server.jar
 ```
 
-完整的部署模式、资源要求矩阵、各里程碑接口契约与架构流程图，见
-[`../kb-rag-deploy/README.md`](../kb-rag-deploy/README.md) 与 `../kb-rag-deploy/docs`。
+```bash
+# kb-rag-parser（:20001，Python 3.11）
+cd kb-rag-parser && python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 20001
+```
+
+```bash
+# kb-rag-web（dev :20002，Node）
+cd kb-rag-web && npm install && npm run dev
+```
+
+首次启动 kb-rag-server 时会在日志中打印随机生成的 `admin` 初始密码，登录管理台
+`http://localhost:20002` 后会强制修改密码。
+
+配置 `DASHSCOPE_API_KEY` 后重启应用层即可获得向量检索、Query 改写、重排、VLM 图片理解等全部能力；
+完整的部署模式、资源要求矩阵与 full 模式（独立 Qdrant / Redis）升级路径，见
+[`kb-rag-deploy/README.md`](kb-rag-deploy/README.md)。
+
+## 文档导航
+
+| 文档 | 内容 |
+| --- | --- |
+| [`kb-rag-deploy/README.md`](kb-rag-deploy/README.md) | 部署总入口：部署模式、环境变量、ik 分词、备份恢复、各里程碑功能说明 |
+| [`kb-rag-deploy/docs/ARCHITECTURE.md`](kb-rag-deploy/docs/ARCHITECTURE.md) | 系统整体架构 |
+| [`kb-rag-deploy/docs/FLOWS.md`](kb-rag-deploy/docs/FLOWS.md) | 全量核心流程图（状态机、双写补偿、索引重建、评测、备份恢复等） |
+| `kb-rag-deploy/docs/M1~M14-CONTRACTS.md` | 各里程碑接口契约（OpenAPI 契约见 `kb-rag-deploy/docs/openapi/`） |
+| [`docs/MCP接入指南.md`](docs/MCP接入指南.md) | MCP 客户端（Claude Desktop / Cursor 等）接入配置与工具目录 |
+| [`docs/记忆库接入指南.md`](docs/记忆库接入指南.md) | 记忆库 REST + MCP 接入、Memory Key 管理 |
+| [`docs/知识库需求文档.md`](docs/知识库需求文档.md) | 需求全集与设计取舍 |
+| [`docs/自测步骤.md`](docs/自测步骤.md) | 端到端自测清单 |
+| 各子目录 `README.md` / `CONTRIBUTING.md` / `SECURITY.md` | 子项目自身的架构细节、开发规范与安全上报渠道 |
 
 ## 安全说明
 
-`.env` 已在 `../.gitignore` 中忽略，任何真实密钥、口令均不入库；提交前请以
-`.env.example` 为模板，确保仅提交占位值。
+`.env` 已在 [`.gitignore`](.gitignore) 中忽略，任何真实密钥、口令均不入库；提交前请以
+`.env.example` 为模板，确保仅提交占位值。安全漏洞请通过各子目录的 `SECURITY.md` 渠道私下上报，不要开公开 issue。
+
+## License
+
+四个子项目均以 [Apache License 2.0](kb-rag-server/LICENSE) 许可发布。
