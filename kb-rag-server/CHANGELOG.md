@@ -8,6 +8,19 @@
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
 
+### 安全修复（M12/M17/M18 后修复：网页源按 id 寻址的入口缺少租户解析）
+
+- **缺陷**：`t_kb_web_source` 是从属表，经 `kb_id` 归属租户，不带 `tenant_id` 也不在 `KbTenantLineHandler.FENCED_TABLES` 里——这个设计没问题，问题是按 `source_id` / `kb_id` 直接寻址的四个入口压根不查根表 `t_kb_knowledge_base`，围栏在那几条语句上什么都没做。任何租户凭一个 `sourceId` 就能：触发别家网页源的抓取（`POST /web-sources/{sourceId}/sync`，还会连带走一遍文档上传管线往别家知识库写版本）、改它的 `sync_enabled` / `render_js` 开关（`PUT /web-sources/{sourceId}`）、**硬删**它的登记（`DELETE /web-sources/{sourceId}` → `hardDeleteById`，不可恢复）；凭一个 `kbId` 就能列出别家知识库登记的全部 URL 与同步状态（`GET /kb/{kbId}/web-sources`）。与 V21 记忆库、V22 站点凭据是同一类缺陷的第三处，本次补齐
+- **原先站在这四个入口前面的守卫是假的**，这是根因而不是细节：`KbScopeGuard#requireWebSourceAccess` 第一行就是 `if (AccessGuard.unrestrictedKbScope()) return;`，而 `kbScopeAll` 对租户的 SUPER_ADMIN、未配数据范围的 KB_ADMIN 都成立（常见配置）——这类账号连 `requireOwner` 都走不到；即便走到，`AccessGuard.requireKbAccess(kbId)` 校验的也只是"这个库在不在调用者角色配的数据范围里"，**从头到尾没有一处比对租户**。一个只覆盖数据范围的守卫比没有守卫更危险：它让 review 以为这条路径已经守住了。该方法与 `KbScopeGuard` 的 `WebSourceMapper` 依赖一并删除，避免被再次误用；类注释补上"这里检查的是数据范围、永远不是租户"的边界说明
+- 新增 `WebSourceGuard`（独立 bean，`io.kbrag.app.websource`），网页导入四个入口一律先解析到根表。两种形态：入口自带 `kb_id`（列表、登记）→ 直接解析根表，**从属表一条语句都不发**；入口只有 `source_id`（同步 / 改开关 / 删）→ 先定位、再解析根，定位那条 `select` 物理上无法避免（`source_id` 只存在于从属表）但只读、不改任何状态，判定发生在紧接着的根表那一跳，跨租户在那里读作"不存在"，后续的写语句与抓取一条都不发出
+- 检查放服务层不放 Controller（`WebSourceController` 的五处守卫调用全部删除，控制器只剩参数规整）：Controller 里的守卫只护得住有人记得加的那几条路径，而服务方法是所有调用方的必经之路。守卫做成独立 bean 而非 `WebSourceService` 的私有方法，是为了让这条义务可 grep、可单测、可被后续入口复用——与 `MemoryLibraryGuard` 同构
+- **判定顺序是契约的一部分**：租户（404）先于数据范围（403）。反过来会让跨租户资源答 403、不存在的资源答 404，这个状态码差异本身就告诉调用方"这个 id 在别的租户里存在"。`register` 的顺序因此也变了（原先 Controller 先判数据范围），跨租户从 403 收敛为 404——**这是本次唯一的对外行为变更**，且只影响跨租户这一种本就不该成功的调用
+- `syncNow` 的租户改由守卫解析出的库对象给出（`scoped.base().getTenantId()`），替代原先的二次反查：一次解析、一个租户、一次授权，避免"授权用的库"和"取凭据用的库"是两次查询的结果。定时同步链路（`scheduledSync` / `syncEnabledSources` / `sync(source, tenantId)`）**完全不走守卫，行为零变化**——那条线程没有控制台主体，需要看见全部租户的登记才能逐行反查各自的租户，这是 V22 建立的既有语义
+- 单测：`WebSourceServiceTest` 新增 4 例——跨租户的 `syncNow`/`updateSettings`/`remove` 全数 404 且无写语句、无抓取、无凭据解析、无文档写入；跨租户的 `list`/`register` 全数 404 且从属表零语句；租户判定先于数据范围（同租户范围外 403、跨租户 404）；手动同步的租户取自守卫解析的库。测试用**真实守卫 + mock mapper**，跨租户表达为"根表读作 null"，与围栏在控制台线程上的真实行为一致
+- **测试有效性经变异验证**：把守卫的根表解析改成不查根表后，4 个新用例全部转红且 18 个既有用例不受影响，确认它们钉住的是这条缺陷本身而非恰好为绿
+- **测试边界（诚实说明）**：与 V21/V22 同样的限制——跨租户过滤由 MyBatis-Plus 拦截器完成，项目无集成测试基建（无 `@SpringBootTest`/Testcontainers），单测无法真正发出带围栏的 SQL。能钉住的是"每个入口都经根表解析"+"解析失败时后续语句一条不发"，围栏本身的行为由 `KbTenantLineHandlerTest` 覆盖
+- 无 schema 变更、无新增配置键与环境变量；M12 静态抓取、M17 `render_js` 渲染、M18 登录墙检测与同 host 401 跳过四段链路行为不变
+
 ### 安全修复（M18 后修复：站点凭据多租户隔离）
 
 - `[schema]` Flyway `V22__web_credential_tenant.sql`：`t_kb_web_credential` 增 `tenant_id`（NOT NULL DEFAULT `'tnt_default0000000'`，存量行由列 DEFAULT 划入默认租户、升级零迁移），`uk_host(host)` 收缩为 `uk_tenant_host(tenant_id, host)`。**修复的缺陷有两面**：管理面任何租户持 `system:config` 的账号能列出、改写、删除、停用其他租户为某 host 配的登录凭据（secret 不回传，但改删停用是实打实的破坏面）；抓取面凭据按 host 全局唯一、抓取也按 host 查找，B 租户只要给自己的 WebSource 登记一个同 host 的 URL，夜里的同步就会把 A 租户的密码发到那个请求上——不需要任何额外权限，也不留越权痕迹

@@ -1,7 +1,7 @@
 # kb-rag 架构文档
 
 
-> 版本：v1.7（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14 + 企业化 M15/M16 + 网页抓取增强 M17/M18 + 记忆库 M19 + MCP 协议层 M20 + 记忆库租户隔离修复 V21 + 站点凭据租户隔离修复 V22，2026-08-11；v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
+> 版本：v1.8（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14 + 企业化 M15/M16 + 网页抓取增强 M17/M18 + 记忆库 M19 + MCP 协议层 M20 + 记忆库租户隔离修复 V21 + 站点凭据租户隔离修复 V22 + 网页源租户解析修复，2026-08-11；v1.7 基线为 V22，v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
 > 日期：2026-08-11
 > 作者：RichardFyoung / Claude
 >
@@ -229,7 +229,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V11（M9 后修复） | `t_kb_auth_token`（管理台登录 Token 落库，仅存 SHA-256 哈希，24h TTL 语义不变） |
 | V12（M10） | `t_kb_retrieval_feedback`（检索反馈，带幂等键）/ `t_kb_search_insight`（检索洞察埋点，只增不改） |
 | V13（M11） | `t_kb_document` 加 `publish_status` / `review_note` / `effective_at` / `expires_at` / `trashed` / `trashed_at`；`t_kb_knowledge_base` 加 `review_required` |
-| V14（M12） | `t_kb_web_source`（网页来源登记：URL/content_hash/四态同步状态/派生文档关联） |
+| V14（M12） | `t_kb_web_source`（网页来源登记：URL/content_hash/四态同步状态/派生文档关联）。**刻意不带 `tenant_id`**：从属表经 `kb_id` 归属租户，其隔离由 `WebSourceGuard` 在每个入口解析根表完成，不靠行级围栏（见 §7.2 与 M16 契约 §1.3.2） |
 | V15（M14） | `t_kb_ext_source`（外部对象存储源登记：端点/桶/前缀/凭证，secret_key 从不回读、库内 name 唯一）/ `t_kb_ext_source_item`（逐对象同步结果：object_key_hash 去重、etag 未变检查、四态 last_status，弱绑定于派生文档） |
 | V16（M15） | `t_kb_role` / `t_kb_permission` / `t_kb_user_role` / `t_kb_role_permission` / `t_kb_role_kb`（角色→知识库数据范围）；`t_kb_admin_user` 增 `user_id`/`display_name`/`email`/`source`/`status`，`password_hash` 改可空；内置 5 角色与 18 权限码随迁移落库，存量账号提为 SUPER_ADMIN |
 | V17（M16） | `t_kb_tenant`（内置默认租户种子化）/ `t_kb_doc_acl` / `t_kb_operation_audit`（含 username 冗余列）；6 张根聚合表增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户）；`t_kb_document` 增 `visibility`、`t_kb_user_role` 增 `granted_by`、`t_kb_retrieval_feedback` 增 `channel`/`end_user_id` |
@@ -355,6 +355,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 - **三条独立鉴权链**：管理台 Bearer Token（`AuthInterceptor`，Token 哈希落库 `t_kb_auth_token`、防爆破锁定、首登随机密码强制改密；M15 起叠加 `PermissionInterceptor` 功能权限 + 知识库数据范围两层授权）、对外 API Key（`ApiKeyAuthFilter` 独立过滤器链、哈希存储、app_scope 授权范围、令牌桶限流）、记忆库 Memory Key（M19，`MemoryKeyAuthFilter`：`Bearer kb-mk-*` 只作用于 `/api/v1/memory/**`，一把 Key 绑定一个记忆库、库内再按 user_id 隔离，隔离是查询谓词、越权一律 404；限流复用 `ApiRateLimiter`）——三面凭据形态、失败面、限流口径互不干扰。
 - **记忆库的第三层隔离是租户**（V21 修复）：Key 绑定库（应用级）与 `user_id`（实体级）只覆盖开放端，管理端的 `memory:read`/`memory:write` 只回答"这个账号能不能碰记忆库"，回答不了"能碰哪些"。补法与知识库同构：`t_kb_memory_library` 加 `tenant_id` 并进围栏，五张从属表不加列、经 `library_id` 归属；关键是 `MemoryLibraryGuard` —— 管理端带 `libraryId` 的 21 个入口**一律先解析库**（包括按 rule_id / node_id / key_id 直接寻址的那些），否则从属语句压根不经过带 `tenant_id` 的那张表，围栏形同虚设；余下 2 个（库列表、建库）无 libraryId，由围栏本体覆盖（SELECT 拼条件 / INSERT 注入）。开放端不受影响：那条链上没有控制台主体，`ignoreTable` 整条跳过，这是必须保留的既有语义（一拼租户条件，Key 会把自己的库过滤掉）。
 - **站点凭据的租户隔离要两套机制，因为它有两类读者**（V22 修复）：控制台增删改查靠行级围栏（`t_kb_web_credential` 进 `FENCED_TABLES`），夜间网页同步靠 `WebCredentialService#resolveFor(tenantId, host)` 的显式租户谓词——同步跑在 `@Scheduled` 线程上，没有控制台主体，围栏在那条线程整条跳过，光进名单等于抓取面零防护。租户由 `WebSource.kb_id` 反查知识库得到；库被删的孤儿登记解析不出租户，按"无凭据"匿名抓取，**绝不退化成按 host 查**。连带两处语义收缩：同 host 凭据从全局唯一变租户内唯一（两个租户各在同一 wiki 上放一个只读账号是正常业务），"一次 401 就停掉该站点本轮抓取"的去重键从 `host` 变为 `(租户, host)`（锁的是账号，而两个租户在同一 host 上是两个账号，按 host 记会让一家的过期密码掐掉所有人的当晚抓取）。详见 M16 契约 §1.3 与 §1.3.1。
+- **从属表的隔离是"每个入口先解析根"，不是"表在不在围栏名单里"**（V22 后修复，M12/M17/M18 网页源）：`t_kb_web_source` 不带 `tenant_id`、也不在 `FENCED_TABLES` 里，这个设计是对的（经 `kb_id` 归属租户，加列只会造第二个可以不一致的事实源）；错的是四个入口——按 `sourceId` 的手动同步 / 改开关 / 硬删、按 `kbId` 的列表——压根不查 `t_kb_knowledge_base`，围栏在那几条语句上什么都没做。新增 `WebSourceGuard` 让四个入口一律先解析到根表（跨租户读作"不存在"→ **404**），与记忆库的 `MemoryLibraryGuard` 同构。**根因值得单独记住**：原先站在这些入口前面的 `KbScopeGuard#requireWebSourceAccess` 回答的是"库在不在调用者的数据范围里"，一行租户判断都没有，且第一行的 `unrestrictedKbScope()` 短路对租户 SUPER_ADMIN、未配数据范围的 KB_ADMIN 直接放行——**只覆盖数据范围的守卫比没有守卫更危险，它让 review 以为这条路径已经守住了**，该方法已随本次修复删除。判定顺序也是契约的一部分：租户（404）先于数据范围（403），反过来会用状态码差异泄露"这个 id 在别的租户里存在"。详见 M16 契约 §1.3.2。
 - **MCP 是第二种 transport，不是第二种身份**（M20）：`/api/v1/knowledge/mcp` 与 `/api/v1/memory/mcp` 刻意落在上述后两条过滤器链的 URL 前缀之下，凭证仍是既有 `kb-sk-*` / `kb-mk-*`，鉴权、授权范围、限流、审计与 REST 完全同一条管线，零过滤器改动、无新增凭据面；协议层错误（JSON-RPC error / `isError`）全部在 HTTP 200 的 body 里，401/429 信封同 REST（见 §3.9）。
 - **Prompt 注入四防线**：①生成/judge prompt 固定分隔符包裹资料原文；②LLM 切分输出强校验（非法降级按长度切）；③路由白名单交集裁决；④改写结果仅作检索词。
 - 解析侧基线：magic number 校验、zip-slip/炸弹、XXE（defusedxml）、SSRF（解析期零出站）；前端零 `dangerouslySetInnerHTML`；聊天导入默认脱敏（手机号/身份证/银行卡 16-19 位）；审计 query 无条件脱敏；MinIO 私有桶 + 限时预签名 URL。

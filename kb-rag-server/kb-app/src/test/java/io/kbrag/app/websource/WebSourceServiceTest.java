@@ -5,9 +5,11 @@ import io.kbrag.app.document.UploadOutcome;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.app.metrics.KbMetrics;
 import io.kbrag.app.support.MybatisLambdaCache;
+import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.HashUtil;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.context.UserContextHolder;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.entity.WebSource;
@@ -15,18 +17,22 @@ import io.kbrag.domain.enums.WebSourceFetchStatus;
 import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.mapper.WebSourceMapper;
 import io.kbrag.domain.model.FetchCredential;
+import io.kbrag.domain.model.UserPrincipal;
 import io.kbrag.domain.port.WebPageFetcher;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.UrlGuard;
 import io.kbrag.domain.service.WebAuthException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -55,6 +61,12 @@ import static org.mockito.Mockito.when;
  * owns the base it feeds, and the rejection fence counts per (tenant, host) rather than per host -
  * pinned below, because the thread this runs on has no principal and therefore no fence of its own.
  *
+ * <p>Its follow-up puts a tenant on the console side too. {@code t_kb_web_source} is a subordinate
+ * table with no {@code tenant_id} of its own, so the four entries addressing it by {@code source_id}
+ * or {@code kb_id} are isolated only while each resolves its base through the fenced root first.
+ * That is pinned here with the real {@code WebSourceGuard} over mocked mappers: a base of another
+ * tenant is a null row, precisely what the fence produces on a console thread.
+ *
  * @author owlzhangfq@gmail.com
  */
 class WebSourceServiceTest {
@@ -63,6 +75,8 @@ class WebSourceServiceTest {
     private static final String SOURCE_ID = "ws_1";
     private static final String TENANT_ID = "tnt_acme0000000001";
     private static final String OTHER_TENANT_ID = "tnt_globex000000001";
+    /** A base of another tenant: the fence reads it as missing, so {@code find} answers null. */
+    private static final String FOREIGN_KB_ID = "kb_theirs";
     private static final String URL = "https://example.com/docs/guide";
     private static final byte[] BODY = "<html><body>guide</body></html>".getBytes(StandardCharsets.UTF_8);
 
@@ -91,7 +105,10 @@ class WebSourceServiceTest {
         bizIdGenerator = mock(BizIdGenerator.class);
         properties = new KbProperties();
         meterRegistry = new SimpleMeterRegistry();
-        service = new WebSourceService(webSourceMapper, documentMapper, documentService,
+        // The real guard over the mocked mappers, so a base the tenant fence filters away is simply
+        // a null row here - which is exactly what the fence does on a console thread.
+        service = new WebSourceService(new WebSourceGuard(webSourceMapper, knowledgeBaseService),
+                webSourceMapper, documentMapper, documentService,
                 knowledgeBaseService, urlGuard, webPageFetcher, webCredentialService, bizIdGenerator,
                 properties, new KbMetrics(meterRegistry));
         when(urlGuard.validate(anyString())).thenAnswer(invocation ->
@@ -99,8 +116,12 @@ class WebSourceServiceTest {
         when(bizIdGenerator.webSourceId()).thenReturn(SOURCE_ID);
         // Every registration in this class belongs to one base of one tenant; the batch tests that
         // need a second tenant override find() for their own kb id.
-        when(knowledgeBaseService.require(KB_ID)).thenReturn(base(KB_ID, TENANT_ID));
         when(knowledgeBaseService.find(KB_ID)).thenReturn(base(KB_ID, TENANT_ID));
+    }
+
+    @AfterEach
+    void clearCaller() {
+        UserContextHolder.clear();
     }
 
     @Test
@@ -358,6 +379,79 @@ class WebSourceServiceTest {
     }
 
     @Test
+    void shouldSyncOnDemandWithTheTenantOfTheResolvedBase() {
+        // The manual sync now spends the credentials of the base the guard resolved, not of a base
+        // a second lookup happens to return. One resolution, one tenant, one authorisation.
+        WebSource source = boundSource();
+        source.setLastContentHash(HashUtil.sha256Hex(BODY));
+        when(webSourceMapper.selectOne(any())).thenReturn(source);
+        when(webPageFetcher.fetch(fetchOf(URL))).thenReturn(page());
+
+        assertEquals(WebSourceFetchStatus.UNCHANGED, service.syncNow(SOURCE_ID).getLastFetchStatus());
+
+        verify(webCredentialService).resolveFor(TENANT_ID, "example.com");
+    }
+
+    @Test
+    void shouldRefuseEverySourceEntryOfAnotherTenant() {
+        // The core of this fix. t_kb_web_source carries no tenant_id, so these three entries used to
+        // reach their subordinate statement by source_id alone and never touch the fenced root - a
+        // caller of any tenant could sync, re-switch or hard delete a registration it named by id.
+        // The base is now resolved first, and the fence reads another tenant's base as missing.
+        when(webSourceMapper.selectOne(any())).thenReturn(foreignSource());
+        when(knowledgeBaseService.find(FOREIGN_KB_ID)).thenReturn(null);
+
+        // 404 rather than 403 is the contract: answering "forbidden" would confirm to another
+        // tenant that the registration exists.
+        assertNotFound(() -> service.syncNow(SOURCE_ID));
+        assertNotFound(() -> service.updateSettings(SOURCE_ID, false, true));
+        assertNotFound(() -> service.remove(SOURCE_ID));
+
+        // Past the one lookup that locates the row, nothing happened: no switch was written, no row
+        // was deleted, no request left for the site and no document was fed.
+        verify(webSourceMapper, never()).updateById(any(WebSource.class));
+        verify(webSourceMapper, never()).hardDeleteById(any(Long.class));
+        verify(webPageFetcher, never()).fetch(any(WebPageFetcher.FetchRequest.class));
+        verify(webCredentialService, never()).resolveFor(anyString(), anyString());
+        verify(documentService, never()).upload(any(), any(), any());
+    }
+
+    @Test
+    void shouldRefuseTheKbAddressedEntriesOfAnotherTenant() {
+        // Listing and registering name a kb_id, so they skip the subordinate table entirely: the
+        // base is read through the fence and the call ends there. Listing by kb_id alone would have
+        // returned another tenant's registrations, URLs and sync state included.
+        when(knowledgeBaseService.find(FOREIGN_KB_ID)).thenReturn(null);
+
+        assertNotFound(() -> service.list(FOREIGN_KB_ID, 1, 20));
+        assertNotFound(() -> service.register(FOREIGN_KB_ID, URL, true, false));
+
+        verify(webSourceMapper, never()).selectPage(any(), any());
+        verify(webSourceMapper, never()).selectOne(any());
+        verify(webSourceMapper, never()).insert(any(WebSource.class));
+    }
+
+    @Test
+    void shouldAnswerTheTenantBeforeTheDataScope() {
+        // Two different questions, and only the order below keeps them from leaking into each other.
+        // Inside the own tenant a base the caller's roles do not name is a permission problem: 403,
+        // actionable. Outside the tenant the row must not exist at all: 404. Asking the data scope
+        // first would answer 403 for a foreign registration too - and that difference is exactly
+        // what tells a caller which ids exist in other tenants.
+        UserContextHolder.set(scopedCaller(Set.of("kb_other")));
+        when(webSourceMapper.selectOne(any())).thenReturn(boundSource());
+
+        BizException forbidden = assertThrows(BizException.class, () -> service.remove(SOURCE_ID));
+        assertEquals(ErrorCode.FORBIDDEN, forbidden.getErrorCode());
+
+        when(webSourceMapper.selectOne(any())).thenReturn(foreignSource());
+        when(knowledgeBaseService.find(FOREIGN_KB_ID)).thenReturn(null);
+        assertNotFound(() -> service.remove(SOURCE_ID));
+
+        verify(webSourceMapper, never()).hardDeleteById(any(Long.class));
+    }
+
+    @Test
     void shouldSwallowAFailureOfTheScheduledPass() {
         when(webSourceMapper.selectList(any())).thenThrow(new IllegalStateException("db down"));
 
@@ -411,6 +505,25 @@ class WebSourceServiceTest {
     /** Matcher for "a fetch request of this URL", credential and render flag ignored. */
     private static WebPageFetcher.FetchRequest fetchOf(String url) {
         return argThat(r -> r != null && r.url().equals(url));
+    }
+
+    private void assertNotFound(Executable call) {
+        BizException e = assertThrows(BizException.class, call);
+        assertEquals(ErrorCode.NOT_FOUND, e.getErrorCode());
+    }
+
+    /** A registration of a base of another tenant, as the locating statement returns it. */
+    private WebSource foreignSource() {
+        WebSource source = boundSource();
+        source.setId(9L);
+        source.setKbId(FOREIGN_KB_ID);
+        return source;
+    }
+
+    /** A console caller of this tenant whose roles name only the bases handed in. */
+    private UserPrincipal scopedCaller(Set<String> kbIds) {
+        return new UserPrincipal("usr_1", TENANT_ID, "alice", "Alice", null,
+                Set.of(), Set.of(), Set.of(), false, kbIds);
     }
 
     private KnowledgeBase base(String kbId, String tenantId) {

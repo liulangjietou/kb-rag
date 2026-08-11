@@ -17,7 +17,6 @@ import io.kbrag.domain.mapper.EvalDatasetMapper;
 import io.kbrag.domain.mapper.EvalRunMapper;
 import io.kbrag.domain.mapper.ExtSourceMapper;
 import io.kbrag.domain.mapper.RetrievalFeedbackMapper;
-import io.kbrag.domain.mapper.WebSourceMapper;
 import io.kbrag.domain.model.UserPrincipal;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,7 +56,7 @@ class KbScopeGuardTest {
         docAclMapper = mock(DocAclMapper.class);
         guard = new KbScopeGuard(documentMapper, mock(ChunkMapper.class), mock(AnnotationMapper.class),
                 mock(EvalDatasetMapper.class), mock(EvalCaseMapper.class), mock(EvalRunMapper.class),
-                mock(ExtSourceMapper.class), mock(WebSourceMapper.class),
+                mock(ExtSourceMapper.class),
                 mock(RetrievalFeedbackMapper.class), docAclMapper);
     }
 

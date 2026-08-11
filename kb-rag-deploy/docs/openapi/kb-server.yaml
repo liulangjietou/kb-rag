@@ -1749,7 +1749,8 @@ paths:
       description: 'M12-CONTRACTS.md §3.4：同步执行首次抓取，响应行携带抓取结果（last_fetch_status）；
         抓取失败不回滚登记（FAILED + last_error 落在行上）。同库同 URL（规范化后）重复登记返回
         INVALID_PARAM；非 http/https、内网/回环地址被 SSRF 防线拒绝（重定向逐跳复验）。抓取产物走
-        文档上传管线：同名加版本、content_hash 去重。'
+        文档上传管线：同名加版本、content_hash 去重。其他租户的 kbId 读作不存在 → 404（不是 403，
+        见 M16-CONTRACTS.md §1.3.2）。'
       requestBody:
         required: true
         content:
@@ -1784,6 +1785,8 @@ paths:
       tags:
       - web-source
       summary: 网页登记列表（按登记时间倒序分页）
+      description: '只返回调用者所属租户的登记：登记表本身不带租户列，先解析 kbId 归属的知识库，
+        其他租户的 kbId 读作不存在 → 404（见 M16-CONTRACTS.md §1.3.2）。'
       parameters:
       - name: page
         in: query
@@ -1822,7 +1825,8 @@ paths:
       summary: 手动触发一次同步
       description: 'M12-CONTRACTS.md §3.4：抓取结果不以请求错误形式暴露——响应永远 200，四态结果
         （SUCCESS/UNCHANGED/SKIPPED/FAILED）落在行的 last_fetch_status/last_error 上，与定时
-        同步记录方式一致。绑定文档被彻底删除后，下次同步用存储的文件名重新建档并重新绑定。'
+        同步记录方式一致。绑定文档被彻底删除后，下次同步用存储的文件名重新建档并重新绑定。
+        其他租户的 sourceId 读作不存在 → 404，抓取不会被触发（见 M16-CONTRACTS.md §1.3.2）。'
       responses:
         '200':
           description: 同步后的登记行
@@ -1843,7 +1847,8 @@ paths:
       tags:
       - web-source
       summary: 更新登记开关（定时同步 / JS 渲染，均可选）
-      description: 'M17-CONTRACTS.md §3.3：登记的可变开关——定时同步与 JS 渲染。两字段均可选，只更新传入的那个，翻开关不触发抓取。'
+      description: 'M17-CONTRACTS.md §3.3：登记的可变开关——定时同步与 JS 渲染。两字段均可选，只更新传入的那个，翻开关不触发抓取。
+        其他租户的 sourceId 读作不存在 → 404（见 M16-CONTRACTS.md §1.3.2）。'
       requestBody:
         required: true
         content:
@@ -1873,7 +1878,8 @@ paths:
       - web-source
       summary: 移除登记（弱绑定：已入库文档保留）
       description: 'M12-CONTRACTS.md §3.4：物理删除登记行（释放同库同 URL 的唯一约束，允许
-        重新登记）；它喂过的文档不受影响，删文档走回收站/purge 通道。'
+        重新登记）；它喂过的文档不受影响，删文档走回收站/purge 通道。其他租户的 sourceId
+        读作不存在 → 404，删除不会发生（见 M16-CONTRACTS.md §1.3.2）。'
       responses:
         '200':
           description: 已移除

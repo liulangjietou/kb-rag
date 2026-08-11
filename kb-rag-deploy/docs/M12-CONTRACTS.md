@@ -51,6 +51,7 @@
 - `POST /api/v1/web-sources/{sourceId}/sync`：手动同步，返回本次结果（status + doc_id + version 变化与否）。
 - `PUT /api/v1/web-sources/{sourceId}`：`{sync_enabled}`，只开关自动同步。
 - `DELETE /api/v1/web-sources/{sourceId}`：移除登记（硬删登记行；**不动文档**，文档去留走 M11 回收站流程）。
+- **租户解析（M16 引入租户层后补齐）**：上述五个端点一律先解析到根表 `t_kb_knowledge_base`、再碰登记表。`t_kb_web_source` 是从属表、不带 `tenant_id`，行级围栏够不着它，按 `sourceId` / `kbId` 直接寻址就等于零隔离（不是弱隔离——那几条语句上围栏什么都没做，也没有任何东西会报错）。守卫 `WebSourceGuard` 落在**服务层**而非 Controller，与 §0 的"fast-fail 只在 Controller"不冲突：那条讲的是参数校验，数据归属校验必须贴着数据，放 Controller 只护得住有人记得加的那几条路径。跨租户一律 **404 而非 403**（403 会用状态码差异泄露"这个 id 在别的租户里存在"），且写语句与抓取一条都不发出。详见 `M16-CONTRACTS.md` §1.3.2。
 - **单次同步语义**（登记即抓、手动 sync、定时任务三处共用同一方法）：
   1. UrlGuard 重验（登记后 DNS 可能已变，防 rebinding）→ fetch；
   2. `sha256(body)` == `last_content_hash` → 记 UNCHANGED，不触上传链路（连"planner 判重"都不进，省一次对象存储写）；
