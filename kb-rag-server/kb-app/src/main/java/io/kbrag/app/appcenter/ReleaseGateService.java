@@ -27,15 +27,15 @@ import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.RerankProvider;
 import io.kbrag.domain.service.GateMetricsRecomputer;
 import io.kbrag.domain.service.ReleaseGateJudge;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 /**
  * Runs the release gate and drives the release itself, requirement section 4.7 "evaluation gate".
@@ -52,13 +52,15 @@ import java.util.List;
  *
  * <p><b>Asynchronous with a synchronous shortcut.</b> A version with no data set bound is decided inline and
  * the caller gets its verdict immediately; a version with a data set enters {@code GATING} and the dual run
- * proceeds on its own executor, which is what the console's progress display exists for.
+ * proceeds on its own executor, which is what the console's progress display exists for. The executor is
+ * injected rather than reached through {@code @Async}: the gate is submitted from {@link #release}, this
+ * bean calling itself, where a proxied annotation runs inline and would park the whole dual run - two
+ * evaluation runs and the polling that waits for them - on the releasing HTTP thread.
  *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ReleaseGateService {
 
     private static final String CANDIDATE_LABEL = "候选配置";
@@ -74,6 +76,29 @@ public class ReleaseGateService {
     private final EmbeddingProvider embeddingProvider;
     private final RerankProvider rerankProvider;
     private final KbProperties properties;
+    private final Executor gateExecutor;
+
+    public ReleaseGateService(AppVersionService appVersionService,
+                              AppReleaseSnapshotService releaseSnapshotService,
+                              EvalRunService evalRunService,
+                              EvalResultMapper evalResultMapper,
+                              GateMetricsRecomputer gateMetricsRecomputer,
+                              ReleaseGateJudge releaseGateJudge,
+                              EmbeddingProvider embeddingProvider,
+                              RerankProvider rerankProvider,
+                              KbProperties properties,
+                              @Qualifier(AsyncConfig.GATE_EXECUTOR) Executor gateExecutor) {
+        this.appVersionService = appVersionService;
+        this.releaseSnapshotService = releaseSnapshotService;
+        this.evalRunService = evalRunService;
+        this.evalResultMapper = evalResultMapper;
+        this.gateMetricsRecomputer = gateMetricsRecomputer;
+        this.releaseGateJudge = releaseGateJudge;
+        this.embeddingProvider = embeddingProvider;
+        this.rerankProvider = rerankProvider;
+        this.properties = properties;
+        this.gateExecutor = gateExecutor;
+    }
 
     /**
      * Releases a version, running the gate first when one applies.
@@ -126,7 +151,7 @@ public class ReleaseGateService {
             return version;
         }
         appVersionService.markGating(version);
-        runGateAsync(appVersionId);
+        submitGate(appVersionId);
         return appVersionService.require(appVersionId);
     }
 
@@ -170,15 +195,16 @@ public class ReleaseGateService {
      *
      * @param appVersionId version business id
      */
-    @Async(AsyncConfig.GATE_EXECUTOR)
-    public void runGateAsync(String appVersionId) {
-        try {
-            runGate(appVersionId);
-        } catch (Exception e) {
-            log.error("release gate pass failed, errorCode={}, appVersionId={}",
-                    ErrorCode.INTERNAL_ERROR, appVersionId, e);
-            failGate(appVersionId);
-        }
+    private void submitGate(String appVersionId) {
+        gateExecutor.execute(() -> {
+            try {
+                runGate(appVersionId);
+            } catch (Exception e) {
+                log.error("release gate pass failed, errorCode={}, appVersionId={}",
+                        ErrorCode.INTERNAL_ERROR, appVersionId, e);
+                failGate(appVersionId);
+            }
+        });
     }
 
     /**

@@ -53,7 +53,10 @@ class ApiKeyServiceTest {
         apiKeyFactory = new ApiKeyFactory();
         properties = new KbProperties();
         when(bizIdGenerator.apiKeyId()).thenReturn(KEY_ID);
-        service = new ApiKeyService(apiKeyMapper, apiKeyFactory, appService, bizIdGenerator, properties);
+        // The audit executor runs inline so the last-used write this suite observes has already happened
+        // when authenticate returns; that it leaves the request thread in production is asserted separately.
+        service = new ApiKeyService(apiKeyMapper, apiKeyFactory, appService, bizIdGenerator, properties,
+                Runnable::run);
     }
 
     @Test
