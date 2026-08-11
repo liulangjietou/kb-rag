@@ -45,8 +45,11 @@ public class AsyncConfig {
     /** Bean name of the pool the timeout guarded retrieval stages run on. */
     public static final String RETRIEVAL_EXECUTOR = "retrievalTaskExecutor";
 
-    /** Bean name referenced by the {@code @Async} annotation of the evaluation run submission. */
+    /** Bean name of the pool one evaluation run's execution is submitted to. */
     public static final String EVAL_EXECUTOR = "evalTaskExecutor";
+
+    /** Bean name of the pool the cases of the running evaluations are spread over. */
+    public static final String EVAL_CASE_EXECUTOR = "evalCaseTaskExecutor";
 
     /** Bean name of the pool one release gate's dual run supervision occupies. */
     public static final String GATE_EXECUTOR = "gateTaskExecutor";
@@ -85,13 +88,20 @@ public class AsyncConfig {
 
     /**
      * One run submission can create up to 6 runs and each is handed to this pool independently, so a
-     * small size is enough: the actual per-case concurrency of one run is its own bounded pool sized
-     * by {@code kb.eval.concurrency}, created and torn down inside the run's own execution.
+     * small size is enough: a thread here only supervises one run, the cases themselves fan out again
+     * over {@link #evalCaseTaskExecutor}.
      */
     private static final int EVAL_CORE_POOL_SIZE = 2;
     private static final int EVAL_MAX_POOL_SIZE = 6;
     private static final int EVAL_QUEUE_CAPACITY = 50;
     private static final String EVAL_THREAD_PREFIX = "kb-eval-";
+
+    /**
+     * A case thread waits for the retrieval stages, so it must not share the pool the runs supervising
+     * it occupy: a case queued behind its own run would wait for a run that cannot finish.
+     */
+    private static final int EVAL_CASE_QUEUE_CAPACITY = 500;
+    private static final String EVAL_CASE_THREAD_PREFIX = "kb-eval-case-";
 
     /**
      * A gate thread spends its life waiting for two evaluation runs, so it must never share the pool those
@@ -197,6 +207,36 @@ public class AsyncConfig {
         executor.setMaxPoolSize(EVAL_MAX_POOL_SIZE);
         executor.setQueueCapacity(EVAL_QUEUE_CAPACITY);
         executor.setThreadNamePrefix(EVAL_THREAD_PREFIX);
+        executor.setTaskDecorator(requestIdPropagatingDecorator());
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * Creates the executor the cases of the running evaluations are spread over, sized from configuration.
+     *
+     * <p>Shared across the runs rather than created per run: the cases are what actually call the embedding,
+     * rerank and judge providers, and they reach them through the very retrieval pool the online search uses.
+     * A pool per run made the peak load the product of the two concurrencies - six runs of a submitted matrix
+     * fanning out at {@code kb.eval.concurrency} each - which an offline report has no business imposing on
+     * the served traffic. One pool makes the setting the ceiling it reads like.
+     *
+     * <p>The caller runs policy is the back pressure: a full queue makes the supervising run thread judge a
+     * case itself, which slows the producer down instead of failing a run whose data set is simply large. It
+     * cannot deadlock, because that thread is waiting on these very cases and never on itself.
+     *
+     * @param properties knowledge base configuration, source of the concurrency
+     * @return executor used by the evaluation case execution
+     */
+    @Bean(EVAL_CASE_EXECUTOR)
+    public Executor evalCaseTaskExecutor(KbProperties properties) {
+        int concurrency = Math.max(1, properties.getEval().getConcurrency());
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(concurrency);
+        executor.setMaxPoolSize(concurrency);
+        executor.setQueueCapacity(EVAL_CASE_QUEUE_CAPACITY);
+        executor.setThreadNamePrefix(EVAL_CASE_THREAD_PREFIX);
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         executor.setTaskDecorator(requestIdPropagatingDecorator());
         executor.initialize();
         return executor;

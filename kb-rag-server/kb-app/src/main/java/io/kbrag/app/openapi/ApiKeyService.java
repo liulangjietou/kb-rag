@@ -14,15 +14,15 @@ import io.kbrag.domain.enums.ApiKeyStatus;
 import io.kbrag.domain.mapper.ApiKeyMapper;
 import io.kbrag.domain.service.ApiKeyFactory;
 import io.kbrag.domain.service.BizIdGenerator;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 /**
  * API key management and authentication, requirement section 4.8.
@@ -36,7 +36,6 @@ import java.util.List;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ApiKeyService {
 
     private final ApiKeyMapper apiKeyMapper;
@@ -44,6 +43,21 @@ public class ApiKeyService {
     private final AppService appService;
     private final BizIdGenerator bizIdGenerator;
     private final KbProperties properties;
+    private final Executor auditExecutor;
+
+    public ApiKeyService(ApiKeyMapper apiKeyMapper,
+                         ApiKeyFactory apiKeyFactory,
+                         AppService appService,
+                         BizIdGenerator bizIdGenerator,
+                         KbProperties properties,
+                         @Qualifier(AsyncConfig.AUDIT_EXECUTOR) Executor auditExecutor) {
+        this.apiKeyMapper = apiKeyMapper;
+        this.apiKeyFactory = apiKeyFactory;
+        this.appService = appService;
+        this.bizIdGenerator = bizIdGenerator;
+        this.properties = properties;
+        this.auditExecutor = auditExecutor;
+    }
 
     /**
      * Mints a key.
@@ -201,18 +215,23 @@ public class ApiKeyService {
      * and the value it maintains is an operational hint, not an audit fact - the audit table is where the
      * facts live.
      *
+     * <p>Handed to the executor directly rather than through {@code @Async}, because its only caller is
+     * {@link #authenticate} on this same bean: a proxied annotation is bypassed there, and the update would
+     * run inline on the very request path it exists to stay off - once per authenticated open API call.
+     *
      * @param keyId key business id
      */
-    @Async(AsyncConfig.AUDIT_EXECUTOR)
-    public void touchAsync(String keyId) {
-        try {
-            apiKeyMapper.update(null, new LambdaUpdateWrapper<ApiKey>()
-                    .set(ApiKey::getLastUsedAt, LocalDateTime.now())
-                    .eq(ApiKey::getKeyId, keyId));
-        } catch (Exception e) {
-            log.error("api key last used timestamp not updated, errorCode={}, keyId={}",
-                    ErrorCode.INTERNAL_ERROR, keyId, e);
-        }
+    private void touchAsync(String keyId) {
+        auditExecutor.execute(() -> {
+            try {
+                apiKeyMapper.update(null, new LambdaUpdateWrapper<ApiKey>()
+                        .set(ApiKey::getLastUsedAt, LocalDateTime.now())
+                        .eq(ApiKey::getKeyId, keyId));
+            } catch (Exception e) {
+                log.error("api key last used timestamp not updated, errorCode={}, keyId={}",
+                        ErrorCode.INTERNAL_ERROR, keyId, e);
+            }
+        });
     }
 
     /**

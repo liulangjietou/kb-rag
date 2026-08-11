@@ -12,14 +12,14 @@ import io.kbrag.domain.enums.MemoryAppKeyStatus;
 import io.kbrag.domain.mapper.MemoryAppKeyMapper;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.MemoryKeyFactory;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 /**
  * Memory key management and authentication, the M19 contract.
@@ -41,7 +41,6 @@ import java.util.List;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class MemoryAppKeyService {
 
     private final MemoryLibraryGuard memoryLibraryGuard;
@@ -50,6 +49,21 @@ public class MemoryAppKeyService {
     private final BizIdGenerator bizIdGenerator;
     private final ApiRateLimiter apiRateLimiter;
     private final KbProperties properties;
+    private final Executor auditExecutor;
+
+    public MemoryAppKeyService(MemoryAppKeyMapper memoryAppKeyMapper,
+                               MemoryKeyFactory memoryKeyFactory,
+                               BizIdGenerator bizIdGenerator,
+                               ApiRateLimiter apiRateLimiter,
+                               KbProperties properties,
+                               @Qualifier(AsyncConfig.AUDIT_EXECUTOR) Executor auditExecutor) {
+        this.memoryAppKeyMapper = memoryAppKeyMapper;
+        this.memoryKeyFactory = memoryKeyFactory;
+        this.bizIdGenerator = bizIdGenerator;
+        this.apiRateLimiter = apiRateLimiter;
+        this.properties = properties;
+        this.auditExecutor = auditExecutor;
+    }
 
     /**
      * Mints a key bound to one library.
@@ -217,18 +231,23 @@ public class MemoryAppKeyService {
      * Records the last use of a key off the request path, asynchronous and best effort - an
      * operational hint, not an audit fact.
      *
+     * <p>Handed to the executor directly rather than through {@code @Async}: its only caller is
+     * {@link #authenticate} on this same bean, where a proxied annotation is bypassed and the update
+     * would run inline on the request path it exists to stay off.
+     *
      * @param keyId key business id
      */
-    @Async(AsyncConfig.AUDIT_EXECUTOR)
-    public void touchAsync(String keyId) {
-        try {
-            memoryAppKeyMapper.update(null, new LambdaUpdateWrapper<MemoryAppKey>()
-                    .set(MemoryAppKey::getLastUsedAt, LocalDateTime.now())
-                    .eq(MemoryAppKey::getKeyId, keyId));
-        } catch (Exception e) {
-            log.error("memory key last used timestamp not updated, errorCode={}, keyId={}",
-                    ErrorCode.INTERNAL_ERROR, keyId, e);
-        }
+    private void touchAsync(String keyId) {
+        auditExecutor.execute(() -> {
+            try {
+                memoryAppKeyMapper.update(null, new LambdaUpdateWrapper<MemoryAppKey>()
+                        .set(MemoryAppKey::getLastUsedAt, LocalDateTime.now())
+                        .eq(MemoryAppKey::getKeyId, keyId));
+            } catch (Exception e) {
+                log.error("memory key last used timestamp not updated, errorCode={}, keyId={}",
+                        ErrorCode.INTERNAL_ERROR, keyId, e);
+            }
+        });
     }
 
     /**
