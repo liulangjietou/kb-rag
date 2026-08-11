@@ -102,8 +102,10 @@ export const GRAPH_FUSION_MUTEX_HINT = '开启图路的知识库库内融合强�
 
 /**
  * index_config.split_strategy picker meta (M14 contract section 4). Five strategies exist
- * server-side; parent/child chunking is NOT one of them -- it is an orthogonal switch layered on
- * top of whichever strategy runs.
+ * server-side; parent/child chunking is NOT one of them -- it is its own switch. That switch is not
+ * orthogonal though: the two level splitter composes 定长切分 with itself rather than taking the
+ * configured strategy, so turning it on confines the picker to fixed_length and the server rejects
+ * every other combination as INVALID_PARAM.
  */
 export const SPLIT_STRATEGY_META: Record<SplitStrategy, TagMeta> = {
   fixed_length: { color: 'default', label: '定长切分' },
@@ -115,6 +117,10 @@ export const SPLIT_STRATEGY_META: Record<SplitStrategy, TagMeta> = {
 
 /** Shown wherever 「LLM 语义切分」 has to be greyed out for want of a chat model. */
 export const LLM_SPLIT_REQUIRES_CHAT_MODEL = 'LLM 语义切分需要已配置对话模型，请先在系统设置中配置';
+
+/** Shown wherever the picker has to be confined to 定长切分 because 父子分片 is on. */
+export const PARENT_CHILD_REQUIRES_FIXED_LENGTH =
+  '父子分片当前仅支持定长切分：父片与子片均由定长策略切出，请先关闭父子分片再选择其他切分方式';
 
 export const IK_DICT_TYPE_META: Record<IkDictType, { color: string; label: string }> = {
   EXT: { color: 'success', label: '扩展词' },

@@ -164,8 +164,9 @@ export interface PermissionCatalogueItem {
  * index_config.split_strategy: the splitter the indexing pipeline routes to (M14 contract
  * section 4). Five strategies exist server-side, one per TextSplitter STRATEGY_CODE:
  * `separator` cuts on a literal or regex block delimiter, `heading` cuts on a Markdown heading
- * depth, `page` keeps one chunk per source page. Parent/child is orthogonal: it is its own
- * switch, applied on top of whichever strategy runs.
+ * depth, `page` keeps one chunk per source page. Parent/child is its own switch rather than a
+ * sixth strategy, but it is not orthogonal: the two level splitter composes `fixed_length` with
+ * itself instead of running the configured strategy, so the server rejects every other pairing.
  *
  * `llm_semantic` requires a configured chat model; saving it without one is rejected server-side
  * with INVALID_PARAM ("the LLM semantic split strategy requires a configured chat model").

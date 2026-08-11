@@ -7,6 +7,12 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 修复（M14 切分策略装配缺陷）
+
+- **separator / heading / page 三个切分策略此前保存不进去**（`docs/M14-CONTRACTS.md` §4）：`SplitStrategy` 枚举只登记了 `fixed_length`/`llm_semantic`，而 `KnowledgeBaseService#requireSplitStrategyUsable` 以该枚举为配置写入的唯一白名单，于是 M14 交付的三个策略在控制台一保存就报 `unknown split strategy: page`——实现类注册着、前端表单也齐着，整批是死代码。枚举补齐五项后策略方可选用；新增单测钉住"每个可保存的策略码都必须路由到同名实现"，避免再出现配置得上、跑的是定长。
+- **按页切分绕过清洗与脱敏**（同上）：`PageSplitter` 直接消费 `parsed.json` 的 `pages[].text`，那是解析原文——页眉页脚/水印/正则替换/脱敏四步清洗与图片占位符替换全部作用在合并后的 markdown 上，从未作用在它上面，导致按页切分的知识库把未脱敏的手机号等 PII 直接写进索引，且每个分片的 `image_urls` 恒空。现改为 parser 逐页返回该页 markdown 切片、`PagedContentAssembler` 逐页清洗后拼回整篇并记录页区间（`PageRange`），`PageSplitter` 按区间下刀，与其余策略消费同一份正文；无清洗规则时逐页拼接结果与 parser 的 markdown 逐字符相等，故对非分页策略零影响。页区间随预览产物落 `page_ranges`，确认入库按存档区间切、不重算。
+- **父子分片 + LLM 语义切分是假组合**（同上）：`ParentChildSplitter` 注入的是 `TextSplitter` 接口、被 `@Primary` 解析成定长实现，两级切分从来只跑定长，而分片指纹照配置记 `llm_semantic`——配置读起来是一回事、索引出来是另一回事。校验层收窄为"开启父子分片时仅允许 `fixed_length`"，同时把该依赖显式声明为 `FixedLengthTextSplitter`，让类型系统而非装配顺序来表达这个约束。
+
 ### 新增（M20）
 
 - MCP 协议层（`docs/M20-CONTRACTS.md`）：知识库应用与记忆库各暴露一个 MCP Streamable HTTP 端点（`POST /api/v1/knowledge/mcp`、`POST /api/v1/memory/mcp`），任何 MCP 兼容客户端配一个 URL 加一把既有 Key 即可直接调用。手写无状态 JSON-RPC 2.0 引擎（`McpServerEngine`，支持 initialize / ping / tools/list / tools/call / notifications/*，协议版本 2025-03-26 兼容 2024-11-05，不支持批量数组），**零新增依赖**。工具集：knowledge_search / knowledge_chat（仅非流式，stream=true 报 INVALID_PARAM 指路 REST SSE）与 memory_add / memory_search / memory_list / memory_update / memory_delete / memory_get_profile，参数与返回结构同 REST 孪生端点（复用 DTO，`McpArgumentBinder` 补 jakarta Validator 显式校验）。

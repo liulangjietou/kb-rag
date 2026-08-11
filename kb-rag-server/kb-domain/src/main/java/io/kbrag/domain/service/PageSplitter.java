@@ -1,7 +1,7 @@
 package io.kbrag.domain.service;
 
 import io.kbrag.domain.constant.ChunkMetadataKeys;
-import io.kbrag.domain.model.ParsedDocument;
+import io.kbrag.domain.model.PageRange;
 import io.kbrag.domain.model.SplitChunk;
 import io.kbrag.domain.model.SplitParams;
 import io.kbrag.domain.port.TokenEstimator;
@@ -19,11 +19,16 @@ import java.util.Map;
  * Page splitting strategy, the M14 contract section 4: cuts the document on the page boundaries the
  * parser reported rather than on anything found in the markdown.
  *
- * <p>Not a {@link TextSplitter} because it does not work off a flat string: page boundaries live in
- * the parse artifact, so the pipeline hands this strategy the {@link ParsedDocument} directly. A
- * format without a page concept - a plain text or an html file - yields a single page holding the
- * whole document, so the strategy always produces at least the fixed length behaviour rather than
- * nothing.
+ * <p>Not a {@link TextSplitter} because it needs one input more than a flat string: the boundaries
+ * {@link PagedContentAssembler} recorded while it assembled the cleaned document. The pipeline
+ * therefore hands this strategy both, which is what lets it cut exactly the text every other strategy
+ * is cut from - cleaned, masked and with the image proxies already spliced in. Reading the parse
+ * artifact's raw page text instead, as this strategy did until the boundaries existed, bypassed all
+ * three: personal data reached the index unmasked and no chunk could ever be linked to an image.
+ *
+ * <p>A format without a page concept - a plain text or an html file - reports no boundaries, so the
+ * whole document becomes a single page and the strategy still produces the fixed length behaviour
+ * rather than nothing.
  *
  * <p>Every chunk carries its one based {@link ChunkMetadataKeys#PAGE_NO} so the retrieval side can
  * filter by page. A page whose text alone exceeds the token budget is re-split by
@@ -40,31 +45,39 @@ public class PageSplitter {
     /** Strategy code persisted in the split fingerprint. */
     public static final String STRATEGY_CODE = "page";
 
-    /** Page number of the synthetic single page a format without pages collapses to. */
+    /** Page number of the synthetic single page a format without boundaries collapses to. */
     private static final int SINGLE_PAGE_NO = 1;
 
     private final FixedLengthTextSplitter fixedLengthTextSplitter;
     private final TokenEstimator tokenEstimator;
 
     /**
-     * Cuts the parsed document into one chunk per page, falling back to the whole markdown when the
-     * format carried no pages.
+     * Cuts the cleaned markdown into one chunk per page.
      *
-     * @param parsed   parse artifact, may be {@code null} when none was readable
-     * @param markdown merged markdown, used as the single page of a format without pages
-     * @param params   split parameters
+     * @param markdown   cleaned markdown with the image proxies spliced in
+     * @param pageRanges page boundaries inside {@code markdown}, empty makes the whole text one page
+     * @param params     split parameters
      * @return ordered chunks, each tagged with its page number
      */
-    public List<SplitChunk> split(ParsedDocument parsed, String markdown, SplitParams params) {
-        List<ParsedDocument.ParsedPage> pages = parsed == null ? List.of() : parsed.pagesOrEmpty();
+    public List<SplitChunk> split(String markdown, List<PageRange> pageRanges, SplitParams params) {
         List<SplitChunk> chunks = new ArrayList<>();
-        int seq = 0;
-        if (CollectionUtils.isEmpty(pages)) {
-            emitPage(SINGLE_PAGE_NO, markdown, params, chunks, seq);
+        if (markdown == null || markdown.isBlank()) {
             return chunks;
         }
-        for (ParsedDocument.ParsedPage page : pages) {
-            seq = emitPage(page.getPageNo(), page.getText(), params, chunks, seq);
+        if (CollectionUtils.isEmpty(pageRanges)) {
+            emitPage(SINGLE_PAGE_NO, markdown, params, chunks, 0);
+            return chunks;
+        }
+        int seq = 0;
+        for (PageRange range : pageRanges) {
+            if (range.getStart() < 0 || range.getEnd() > markdown.length()
+                    || range.getStart() >= range.getEnd()) {
+                log.info("page range outside the cleaned markdown, pageNo={}, start={}, end={}, length={}",
+                        range.getPageNo(), range.getStart(), range.getEnd(), markdown.length());
+                continue;
+            }
+            seq = emitPage(range.getPageNo(), markdown.substring(range.getStart(), range.getEnd()),
+                    params, chunks, seq);
         }
         return chunks;
     }

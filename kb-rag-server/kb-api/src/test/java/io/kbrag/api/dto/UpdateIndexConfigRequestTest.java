@@ -90,6 +90,56 @@ class UpdateIndexConfigRequestTest {
         assertEquals(true, config.isMultimodalEnabled());
     }
 
+    @Test
+    void shouldAcceptTheStrategiesThatShipWithAnImplementation() {
+        // The M14 strategies were rejected on this path while their splitters sat registered in the
+        // container, which made the console forms and the beans dead weight.
+        assertEquals("page", strategyRequest("page", null).toIndexConfig(new KbIndexConfig())
+                .getSplitStrategy());
+        assertEquals("heading", strategyRequest("heading", null).toIndexConfig(new KbIndexConfig())
+                .getSplitStrategy());
+        assertEquals("separator", strategyRequest("separator", null).toIndexConfig(new KbIndexConfig())
+                .getSplitStrategy());
+    }
+
+    @Test
+    void shouldRejectLlmSemanticOnATwoLevelBase() {
+        // The two level splitter composes fixed length with itself and is not parameterised by the
+        // configured strategy, so this combination recorded llm_semantic in the split fingerprint while
+        // fixed length actually ran - a configuration that reads as one thing and indexes as another.
+        BizException thrown = assertThrows(BizException.class,
+                () -> strategyRequest("llm_semantic", parentChild()).toIndexConfig(new KbIndexConfig()));
+
+        assertEquals(ErrorCode.INVALID_PARAM, thrown.getErrorCode());
+    }
+
+    @Test
+    void shouldRejectThePageStrategyOnATwoLevelBase() {
+        // The page strategy cuts on a boundary the parent pass cannot honour without losing it.
+        assertEquals(ErrorCode.INVALID_PARAM, assertThrows(BizException.class,
+                () -> strategyRequest("page", parentChild()).toIndexConfig(new KbIndexConfig()))
+                .getErrorCode());
+    }
+
+    @Test
+    void shouldStillAcceptFixedLengthOnATwoLevelBase() {
+        KbIndexConfig config = strategyRequest("fixed_length", parentChild())
+                .toIndexConfig(new KbIndexConfig());
+
+        assertEquals(true, config.parentChildOrDisabled().isEnabled());
+        assertEquals("fixed_length", config.getSplitStrategy());
+    }
+
+    private UpdateIndexConfigRequest.ParentChildRequest parentChild() {
+        return new UpdateIndexConfigRequest.ParentChildRequest(true, 1200, 300, 50);
+    }
+
+    private UpdateIndexConfigRequest strategyRequest(String strategy,
+                                                     UpdateIndexConfigRequest.ParentChildRequest parentChild) {
+        return new UpdateIndexConfigRequest(strategy, 600, 100, parentChild, null, null,
+                null, null, null, null, null, null, null, null, null);
+    }
+
     private ChatAggregationParams aggregation(int windowMinutes, int maxMessages, int windowOverlap) {
         ChatAggregationParams params = new ChatAggregationParams();
         params.setWindowMinutes(windowMinutes);

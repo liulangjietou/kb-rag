@@ -19,6 +19,13 @@ import java.util.List;
  * guarantees a child boundary is always a boundary the single level splitter would also have chosen,
  * so switching parent child on or off cannot change how sentences are broken.
  *
+ * <p><b>Fixed length is a hard dependency, not a default.</b> The strategy is named in the type rather
+ * than autowired as a {@code TextSplitter} that {@code @Primary} happens to resolve: with the
+ * interface, a base configured for another strategy read as if the combination worked while the two
+ * passes silently ran fixed length anyway, and the split fingerprint recorded the strategy that never
+ * executed. The configuration gate refuses that combination now, and this field is what makes the two
+ * statements impossible to drift apart.
+ *
  * <p>Parents carry no overlap on purpose. Overlapping parents would duplicate text in the answer the
  * caller receives, and the overlap that matters for recall is the one between children, which is the
  * level the engines actually score.
@@ -30,10 +37,9 @@ import java.util.List;
  * <p><b>Child offsets inside their parent, M9 requirement section 4.5.</b> The second pass runs on the
  * parent text, so the offsets the strategy reports are already relative to the parent - no reverse
  * lookup is performed anywhere. They are nevertheless verified here before they leave: the parent slice
- * has to be character for character the child text, and a strategy that rewrites its input (the LLM
- * semantic one) reports none at all. A mismatch drops the offsets rather than storing a plausible looking
- * pair, because a wrong offset would cut the wrong sentence out of an answer while a missing one only
- * falls back to returning the whole parent.
+ * has to be character for character the child text. A mismatch drops the offsets rather than storing a
+ * plausible looking pair, because a wrong offset would cut the wrong sentence out of an answer while a
+ * missing one only falls back to returning the whole parent.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -45,7 +51,7 @@ public class ParentChildSplitter {
     /** Strategy code persisted in the split fingerprint. */
     public static final String STRATEGY_CODE = "parent_child";
 
-    private final TextSplitter textSplitter;
+    private final FixedLengthTextSplitter fixedLengthTextSplitter;
 
     /**
      * Splits a text into parents and their children.
@@ -61,11 +67,11 @@ public class ParentChildSplitter {
             throw new IllegalArgumentException("child_max_tokens must not exceed parent_max_tokens");
         }
 
-        List<SplitChunk> parents = textSplitter.split(text, parentParams);
+        List<SplitChunk> parents = fixedLengthTextSplitter.split(text, parentParams);
         List<ParentChunk> result = new ArrayList<>(parents.size());
         int childSeq = 0;
         for (SplitChunk parent : parents) {
-            List<SplitChunk> rawChildren = textSplitter.split(parent.getContent(), childParams);
+            List<SplitChunk> rawChildren = fixedLengthTextSplitter.split(parent.getContent(), childParams);
             List<SplitChunk> children = new ArrayList<>(rawChildren.size());
             for (SplitChunk child : rawChildren) {
                 boolean consistent = sliceMatches(parent.getContent(), child.getContent(),
