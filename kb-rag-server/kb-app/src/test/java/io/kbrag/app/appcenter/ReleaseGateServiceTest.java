@@ -32,8 +32,15 @@ import org.mockito.InOrder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -65,6 +72,8 @@ class ReleaseGateServiceTest {
     private static final String BASELINE_RUN = "evr_baseline";
     private static final String KB_ID = "kb_1";
     private static final String SNAPSHOT_INDEX = "kb_1_none_s1";
+    private static final String GATE_PROBE_THREAD = "gate-probe";
+    private static final int HAND_OFF_TIMEOUT_SECONDS = 5;
 
     /** Frozen snapshot every successful release in this class is expected to install. */
     private static final AppReleaseSnapshotService.ReleaseSnapshot RELEASE_SNAPSHOT =
@@ -92,9 +101,22 @@ class ReleaseGateServiceTest {
         properties = new KbProperties();
         properties.getGate().setMinCases(2);
         when(releaseSnapshotService.freeze(any(), any())).thenReturn(RELEASE_SNAPSHOT);
-        service = new ReleaseGateService(appVersionService, releaseSnapshotService, evalRunService,
+        service = newService(Runnable::run);
+    }
+
+    /**
+     * Builds the service over the executor the gate is submitted to.
+     *
+     * <p>Inline for the suite, so a {@code release} that starts a gate has finished it by the time the call
+     * returns and the verdict can simply be asserted; the hand-off itself is measured separately.
+     *
+     * @param gateExecutor pool one gate's dual run supervision is submitted to
+     * @return service under test
+     */
+    private ReleaseGateService newService(Executor gateExecutor) {
+        return new ReleaseGateService(appVersionService, releaseSnapshotService, evalRunService,
                 evalResultMapper, new GateMetricsRecomputer(), new ReleaseGateJudge(), embeddingProvider,
-                rerankProvider, properties);
+                rerankProvider, properties, gateExecutor);
     }
 
     @Test
@@ -279,6 +301,46 @@ class ReleaseGateServiceTest {
         assertEquals(0.5d, report.candidate().hitRate(), 1e-9d);
         assertEquals(0.5d, report.baseline().hitRate(), 1e-9d);
         assertEquals(List.of("c1", "c2"), report.caseIds());
+    }
+
+    /**
+     * A release that starts a gate must hand it over and return, leaving the console a {@code GATING}
+     * version to poll rather than a request blocked for the whole dual run.
+     *
+     * <p>Regression guard for the {@code @Async} self invocation this replaced: {@code release} called the
+     * annotated method on its own bean, which the proxy never intercepts, so both evaluation runs and the
+     * polling loop that waits for them ran on the releasing HTTP thread while the gate pool stood idle.
+     */
+    @Test
+    void shouldRunTheGateOnTheGateExecutorRatherThanTheReleasingThread() throws InterruptedException {
+        AppVersion version = versionOf(AppVersionStatus.TESTING, DATASET_ID);
+        stubDualRun(version, baselineVersion());
+        when(evalResultMapper.selectList(any()))
+                .thenReturn(List.of(result("c1", true, 1, 1), result("c2", true, 1, 1)))
+                .thenReturn(List.of(result("c1", true, 1, 1), result("c2", true, 1, 1)));
+
+        CountDownLatch gated = new CountDownLatch(1);
+        AtomicReference<String> gateThread = new AtomicReference<>();
+        when(evalRunService.submit(eq(DATASET_ID), anyInt(), anyList(), eq(false))).thenAnswer(invocation -> {
+            // The dual run is submitted from runGate and nowhere else, so this is the gate's own thread.
+            gateThread.set(Thread.currentThread().getName());
+            gated.countDown();
+            return List.of(runOf(CANDIDATE_RUN, RunStatus.SUCCESS), runOf(BASELINE_RUN, RunStatus.SUCCESS));
+        });
+
+        ExecutorService gatePool = Executors.newSingleThreadExecutor(task -> new Thread(task, GATE_PROBE_THREAD));
+        try {
+            ReleaseGateService asyncService = newService(gatePool);
+
+            asyncService.release(VERSION_ID, false, "admin");
+
+            assertTrue(gated.await(HAND_OFF_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                    "the gate never reached its executor");
+            assertEquals(GATE_PROBE_THREAD, gateThread.get());
+            assertNotEquals(Thread.currentThread().getName(), gateThread.get());
+        } finally {
+            gatePool.shutdownNow();
+        }
     }
 
     @Test

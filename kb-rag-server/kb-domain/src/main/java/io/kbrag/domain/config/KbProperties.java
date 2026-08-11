@@ -1272,7 +1272,10 @@ public class KbProperties {
          */
         private long offlineTimeoutMs = 10000L;
 
-        /** Cases judged concurrently by one evaluation run. */
+        /**
+         * Cases judged concurrently across every running evaluation. A global ceiling and not a per run
+         * one, because the cases reach the model providers through the pool the online search shares.
+         */
         private int concurrency = 4;
 
         /** Aggregate coverage threshold a span must reach across the top K to count as a hit. */

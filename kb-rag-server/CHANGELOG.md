@@ -7,12 +7,23 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+
 ### 修复（M14 切分策略装配缺陷）
 
 - **separator / heading / page 三个切分策略此前保存不进去**（`docs/M14-CONTRACTS.md` §4）：`SplitStrategy` 枚举只登记了 `fixed_length`/`llm_semantic`，而 `KnowledgeBaseService#requireSplitStrategyUsable` 以该枚举为配置写入的唯一白名单，于是 M14 交付的三个策略在控制台一保存就报 `unknown split strategy: page`——实现类注册着、前端表单也齐着，整批是死代码。枚举补齐五项后策略方可选用；新增单测钉住"每个可保存的策略码都必须路由到同名实现"，避免再出现配置得上、跑的是定长。
 - **按页切分绕过清洗与脱敏**（同上）：`PageSplitter` 直接消费 `parsed.json` 的 `pages[].text`，那是解析原文——页眉页脚/水印/正则替换/脱敏四步清洗与图片占位符替换全部作用在合并后的 markdown 上，从未作用在它上面，导致按页切分的知识库把未脱敏的手机号等 PII 直接写进索引，且每个分片的 `image_urls` 恒空。现改为 parser 逐页返回该页 markdown 切片、`PagedContentAssembler` 逐页清洗后拼回整篇并记录页区间（`PageRange`），`PageSplitter` 按区间下刀，与其余策略消费同一份正文；无清洗规则时逐页拼接结果与 parser 的 markdown 逐字符相等，故对非分页策略零影响。页区间随预览产物落 `page_ranges`，确认入库按存档区间切、不重算。
 - **解析响应的 `pages[].markdown` 没接进来**（同上）：`HttpDocumentParserClient#toParsedDocument` 逐字段手写映射，新增字段不读就等于不存在。上一条修复因此在真实解析路径上形同虚设——每一次全新解析拿到的页 markdown 都是 null，逐页清洗回退到纯文本，占位符依旧无从谈起。两侧单测各自用手工 fixture，恰好把这条 HTTP 缝隙盖住了。补映射并新增 `HttpDocumentParserClientTest`：起本地 HTTP server 用真实响应体钉住 `pages[]` 的全部字段，含旧版 parser 不返回该字段时回退纯文本。
 - **父子分片 + LLM 语义切分是假组合**（同上）：`ParentChildSplitter` 注入的是 `TextSplitter` 接口、被 `@Primary` 解析成定长实现，两级切分从来只跑定长，而分片指纹照配置记 `llm_semantic`——配置读起来是一回事、索引出来是另一回事。校验层收窄为"开启父子分片时仅允许 `fixed_length`"，同时把该依赖显式声明为 `FixedLengthTextSplitter`，让类型系统而非装配顺序来表达这个约束。
+### 安全修复（M19 后修复：记忆库多租户隔离）
+
+- `[schema]` Flyway `V21__memory_library_tenant.sql`：`t_kb_memory_library` 增 `tenant_id`（NOT NULL DEFAULT `'tnt_default0000000'`，存量行由列 DEFAULT 划入默认租户、升级零迁移）+ `idx_tenant`。**修复的缺陷**：V20 建六张记忆库表时漏了 M16 的租户层，`memory:read`/`memory:write` 只回答「这个账号能不能碰记忆库」、回答不了「能碰哪些」，于是多租户部署下任何租户持 `memory:read` 的账号能列出全部署的记忆库，持 `memory:write` 能改删其他租户的库、规则、记忆节点与 Memory Key
+- 只有根聚合表加列：五张从属表（片段规则 / 画像规则 / 节点 / 画像 / Key）经 `library_id` 归属租户，与 M16 §1.1 取舍①同构——六张表全加列不叫隔离叫散弹枪，从属查询永远先过根表的租户行过滤，再多一列只是第二个可以不一致的事实源
+- `KbTenantLineHandler.FENCED_TABLES` 增 `t_kb_memory_library`：库列表、详情、同名校验、建库 INSERT 的 `tenant_id` 注入随 MyBatis-Plus 行级围栏自动生效（与 `t_kb_knowledge_base` 完全同构）
+- 新增 `MemoryLibraryGuard`，管理端**带 `libraryId` 的 21 个入口一律先解析库**。这一条是修复的关键：从属表不带 `tenant_id`，按 `rule_id` / `node_id` / `key_id` 直接寻址的入口（改删片段规则、改删画像规则、删记忆节点、Memory Key 的启停/轮换/删除）压根不查根表，只加列 + 进围栏对它们形同虚设。守卫做成独立 bean 而非 `MemoryAdminService` 的方法——`MemoryAppKeyService` 需要同一个检查且是前者的依赖，反向边就是循环；检查放服务层不放 Controller，Controller 里的守卫只护得住有人记得加的那几条路径
+- 余下 2 个入口（库列表 `GET /`、建库 `POST /`）没有 `libraryId`，由围栏本体覆盖：列表靠 SELECT 拼租户条件，建库靠 `TenantLineInnerInterceptor` 往 INSERT 补 `tenant_id`（服务层从不 `setTenantId`，与 `KnowledgeBaseService` 同构，依赖 MyBatis-Plus 默认 `NOT_NULL` 字段策略）。**这两条是记忆库域唯一没有第二道防线的路径**，任何绕开围栏的写法（自定义 mapper SQL、`@InterceptorIgnore`）会直接抹掉它们的隔离
+- **开放端行为零变化**：`MemoryKeyAuthFilter` 那条链上没有控制台主体，租户围栏整条跳过（既有语义，刻意保留——在那条线程上拼租户条件会把 Key 自己绑定的库过滤掉）；`MemoryAppKeyService.authenticate` 相应不过守卫
+- **行为变更一处**：记忆库同名校验从全局唯一收缩为租户内唯一（两个租户各建一个「客服记忆库」是正常业务）
+- 单测：`MemoryAdminServiceTest` / `MemoryAppKeyServiceTest` 各 2 例覆盖跨租户读写入口全数 404 且从属表一条语句都不发，`KbTenantLineHandlerTest` 钉住围栏名单与「无主体整条跳过」的开放端语义
 
 ### 新增（M20）
 

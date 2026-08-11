@@ -28,6 +28,7 @@ class KbTenantLineHandlerTest {
     private static final String USERS_TABLE = "t_kb_admin_user";
     private static final String ROLES_TABLE = "t_kb_role";
     private static final String BASES_TABLE = "t_kb_knowledge_base";
+    private static final String MEMORY_LIBRARIES_TABLE = "t_kb_memory_library";
 
     private final KbTenantLineHandler handler = new KbTenantLineHandler();
 
@@ -39,9 +40,12 @@ class KbTenantLineHandlerTest {
     @Test
     void shouldSkipEveryTableWhenThereIsNoConsolePrincipal() {
         // The open API, the background tasks and the startup runners locate rows by exact business
-        // id; the tenant a clause would need is simply not on those threads.
+        // id; the tenant a clause would need is simply not on those threads. For the memory open
+        // API this is load bearing rather than incidental: a memory key is bound to exactly one
+        // library, and a tenant clause on that thread would filter its own library away.
         assertTrue(handler.ignoreTable(BASES_TABLE));
         assertTrue(handler.ignoreTable(USERS_TABLE));
+        assertTrue(handler.ignoreTable(MEMORY_LIBRARIES_TABLE));
     }
 
     @Test
@@ -52,6 +56,13 @@ class KbTenantLineHandlerTest {
         // tenant_id column on every table for no additional isolation.
         assertTrue(handler.ignoreTable("t_kb_document"));
         assertTrue(handler.ignoreTable("t_kb_chunk"));
+        // The five subordinate memory tables reach their tenant through their library, which the
+        // console entries resolve first - see MemoryLibraryGuard.
+        assertTrue(handler.ignoreTable("t_kb_memory_fragment_rule"));
+        assertTrue(handler.ignoreTable("t_kb_memory_profile_rule"));
+        assertTrue(handler.ignoreTable("t_kb_memory_node"));
+        assertTrue(handler.ignoreTable("t_kb_memory_profile"));
+        assertTrue(handler.ignoreTable("t_kb_memory_app_key"));
     }
 
     @Test
@@ -61,6 +72,7 @@ class KbTenantLineHandlerTest {
         assertFalse(handler.ignoreTable(BASES_TABLE));
         assertFalse(handler.ignoreTable(USERS_TABLE));
         assertFalse(handler.ignoreTable(ROLES_TABLE));
+        assertFalse(handler.ignoreTable(MEMORY_LIBRARIES_TABLE));
         assertEquals(TENANT_ID, ((StringValue) handler.getTenantId()).getValue());
     }
 
@@ -73,6 +85,7 @@ class KbTenantLineHandlerTest {
         assertTrue(handler.ignoreTable(USERS_TABLE));
         assertTrue(handler.ignoreTable(ROLES_TABLE));
         assertFalse(handler.ignoreTable(BASES_TABLE));
+        assertFalse(handler.ignoreTable(MEMORY_LIBRARIES_TABLE));
     }
 
     @Test

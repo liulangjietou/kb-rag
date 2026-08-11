@@ -12,14 +12,14 @@ import io.kbrag.domain.enums.MemoryAppKeyStatus;
 import io.kbrag.domain.mapper.MemoryAppKeyMapper;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.MemoryKeyFactory;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 /**
  * Memory key management and authentication, the M19 contract.
@@ -30,29 +30,52 @@ import java.util.List;
  * authentication resolves the library and hands it to the principal instead of carrying a scope
  * list.
  *
+ * <p><b>The console entries resolve their library through {@link MemoryLibraryGuard} first</b>: the
+ * key table carries no {@code tenant_id}, so a statement filtering on {@code library_id} and
+ * {@code key_id} alone sits outside the tenant fence and would let a caller of another tenant
+ * disable, rotate or delete a key it named by id. {@link #authenticate(String)} is deliberately not
+ * guarded - it runs on the open API thread, where there is no console caller and the key's own
+ * binding is the isolation.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class MemoryAppKeyService {
 
+    private final MemoryLibraryGuard memoryLibraryGuard;
     private final MemoryAppKeyMapper memoryAppKeyMapper;
     private final MemoryKeyFactory memoryKeyFactory;
     private final BizIdGenerator bizIdGenerator;
     private final ApiRateLimiter apiRateLimiter;
     private final KbProperties properties;
+    private final Executor auditExecutor;
+
+    public MemoryAppKeyService(MemoryAppKeyMapper memoryAppKeyMapper,
+                               MemoryKeyFactory memoryKeyFactory,
+                               BizIdGenerator bizIdGenerator,
+                               ApiRateLimiter apiRateLimiter,
+                               KbProperties properties,
+                               @Qualifier(AsyncConfig.AUDIT_EXECUTOR) Executor auditExecutor) {
+        this.memoryAppKeyMapper = memoryAppKeyMapper;
+        this.memoryKeyFactory = memoryKeyFactory;
+        this.bizIdGenerator = bizIdGenerator;
+        this.apiRateLimiter = apiRateLimiter;
+        this.properties = properties;
+        this.auditExecutor = auditExecutor;
+    }
 
     /**
      * Mints a key bound to one library.
      *
-     * @param libraryId library the key will authorise, existence checked by the caller
+     * @param libraryId library the key will authorise
      * @param name      purpose note, e.g. the consuming agent's name
      * @param qpsLimit  token bucket rate, {@code null} or non positive takes the deployment default
      * @return stored row plus the plaintext, shown once and never stored
      */
     @Transactional(rollbackFor = Exception.class)
     public IssuedKey issue(String libraryId, String name, Integer qpsLimit) {
+        memoryLibraryGuard.requireLibrary(libraryId);
         MemoryKeyFactory.GeneratedKey generated = memoryKeyFactory.generate();
         MemoryAppKey key = new MemoryAppKey();
         key.setKeyId(bizIdGenerator.memoryAppKeyId());
@@ -76,6 +99,7 @@ public class MemoryAppKeyService {
      * @return keys, digests included - callers must never serialise the rows directly
      */
     public List<MemoryAppKey> listByLibrary(String libraryId) {
+        memoryLibraryGuard.requireLibrary(libraryId);
         return memoryAppKeyMapper.selectList(new LambdaQueryWrapper<MemoryAppKey>()
                 .eq(MemoryAppKey::getLibraryId, libraryId)
                 .orderByDesc(MemoryAppKey::getId));
@@ -89,6 +113,7 @@ public class MemoryAppKeyService {
      * @return key row
      */
     public MemoryAppKey require(String libraryId, String keyId) {
+        memoryLibraryGuard.requireLibrary(libraryId);
         MemoryAppKey key = memoryAppKeyMapper.selectOne(new LambdaQueryWrapper<MemoryAppKey>()
                 .eq(MemoryAppKey::getLibraryId, libraryId)
                 .eq(MemoryAppKey::getKeyId, keyId)
@@ -158,6 +183,9 @@ public class MemoryAppKeyService {
     /**
      * Soft deletes every key of one library, the cleanup of a library deletion.
      *
+     * <p>The library check rides along in {@link #listByLibrary(String)} rather than being written
+     * again here; establishing ownership once covers the whole loop.
+     *
      * @param libraryId library business id
      */
     @Transactional(rollbackFor = Exception.class)
@@ -203,18 +231,23 @@ public class MemoryAppKeyService {
      * Records the last use of a key off the request path, asynchronous and best effort - an
      * operational hint, not an audit fact.
      *
+     * <p>Handed to the executor directly rather than through {@code @Async}: its only caller is
+     * {@link #authenticate} on this same bean, where a proxied annotation is bypassed and the update
+     * would run inline on the request path it exists to stay off.
+     *
      * @param keyId key business id
      */
-    @Async(AsyncConfig.AUDIT_EXECUTOR)
-    public void touchAsync(String keyId) {
-        try {
-            memoryAppKeyMapper.update(null, new LambdaUpdateWrapper<MemoryAppKey>()
-                    .set(MemoryAppKey::getLastUsedAt, LocalDateTime.now())
-                    .eq(MemoryAppKey::getKeyId, keyId));
-        } catch (Exception e) {
-            log.error("memory key last used timestamp not updated, errorCode={}, keyId={}",
-                    ErrorCode.INTERNAL_ERROR, keyId, e);
-        }
+    private void touchAsync(String keyId) {
+        auditExecutor.execute(() -> {
+            try {
+                memoryAppKeyMapper.update(null, new LambdaUpdateWrapper<MemoryAppKey>()
+                        .set(MemoryAppKey::getLastUsedAt, LocalDateTime.now())
+                        .eq(MemoryAppKey::getKeyId, keyId));
+            } catch (Exception e) {
+                log.error("memory key last used timestamp not updated, errorCode={}, keyId={}",
+                        ErrorCode.INTERNAL_ERROR, keyId, e);
+            }
+        });
     }
 
     /**

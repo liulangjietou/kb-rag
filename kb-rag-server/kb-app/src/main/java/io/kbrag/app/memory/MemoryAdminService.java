@@ -40,6 +40,18 @@ import java.util.Set;
  * every statement filters on the library id taken from the URL path, and a row that does not
  * belong to that library answers 404, never 403.
  *
+ * <p><b>Every entry taking a library id resolves it through {@link MemoryLibraryGuard} first</b>,
+ * including the ones that address a rule or a node directly. Those could locate their row from the
+ * library id in the path alone, but only the library table carries a {@code tenant_id}: skipping the
+ * lookup would leave the subordinate statement outside the tenant fence, which is exactly how a
+ * caller of another tenant used to edit rules and keys it named by id.
+ *
+ * <p>The two entries without a library id - {@link #pageLibraries} and {@link #createLibrary} - are
+ * covered by the fence directly rather than by the guard: it trims the listing to the caller's tenant
+ * and stamps the tenant onto the insert. They are the only memory statements with no second line of
+ * defence, so anything that would take them off the fence (a hand written mapper query, an
+ * {@code @InterceptorIgnore}) removes their isolation outright.
+ *
  * <p>Cascading deletions are deliberately not one transaction. They fan out over MySQL and
  * Elasticsearch, and holding a connection across the ES round trip is the same pool hazard the add
  * path avoids around LLM calls. Instead the parent row is removed <em>last</em>, so a cascade that
@@ -67,6 +79,7 @@ public class MemoryAdminService {
     /** Lifetime of the seeded default rule. */
     private static final int BUILTIN_EXPIRE_DAYS = 180;
 
+    private final MemoryLibraryGuard memoryLibraryGuard;
     private final MemoryLibraryMapper memoryLibraryMapper;
     private final MemoryFragmentRuleMapper memoryFragmentRuleMapper;
     private final MemoryProfileRuleMapper memoryProfileRuleMapper;
@@ -184,18 +197,14 @@ public class MemoryAdminService {
     }
 
     /**
-     * Loads a library or answers 404.
+     * Loads a library visible to the caller, or answers 404. Every entry taking a library id starts
+     * here, see the class comment.
      *
      * @param libraryId library business id
      * @return live library row
      */
-    public MemoryLibrary requireLibrary(String libraryId) {
-        MemoryLibrary library = memoryLibraryMapper.selectOne(new LambdaQueryWrapper<MemoryLibrary>()
-                .eq(MemoryLibrary::getLibraryId, libraryId));
-        if (library == null) {
-            throw BizException.notFound("记忆库不存在");
-        }
-        return library;
+    private MemoryLibrary requireLibrary(String libraryId) {
+        return memoryLibraryGuard.requireLibrary(libraryId);
     }
 
     // ------------------------------------------------------------------ fragment rules
@@ -416,6 +425,7 @@ public class MemoryAdminService {
      * @param nodeId    node business id
      */
     public void deleteNode(String libraryId, String nodeId) {
+        requireLibrary(libraryId);
         MemoryNode node = memoryNodeMapper.selectOne(new LambdaQueryWrapper<MemoryNode>()
                 .eq(MemoryNode::getLibraryId, libraryId)
                 .eq(MemoryNode::getNodeId, nodeId));
@@ -486,6 +496,9 @@ public class MemoryAdminService {
     }
 
     private MemoryFragmentRule requireFragmentRule(String libraryId, String ruleId) {
+        // Resolving the library first is the tenant check, see the class comment; the rule table
+        // itself carries no tenant_id and would answer a caller of any tenant.
+        requireLibrary(libraryId);
         MemoryFragmentRule rule = memoryFragmentRuleMapper.selectOne(
                 new LambdaQueryWrapper<MemoryFragmentRule>()
                         .eq(MemoryFragmentRule::getLibraryId, libraryId)
@@ -497,6 +510,7 @@ public class MemoryAdminService {
     }
 
     private MemoryProfileRule requireProfileRule(String libraryId, String ruleId) {
+        requireLibrary(libraryId);
         MemoryProfileRule rule = memoryProfileRuleMapper.selectOne(
                 new LambdaQueryWrapper<MemoryProfileRule>()
                         .eq(MemoryProfileRule::getLibraryId, libraryId)
