@@ -39,10 +39,9 @@ import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.EvalHitJudge;
 import io.kbrag.domain.service.EvalMetricsCalculator;
 import io.kbrag.domain.service.OverlapRatioCalculator;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -50,9 +49,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
 
 /**
  * Evaluation run submission, execution and comparison, requirement section 4.6.
@@ -69,11 +68,16 @@ import java.util.concurrent.Future;
  * configured is never silently downgraded to a BM25 result labelled as something else; its run is
  * created {@code FAILED} with an explicit reason and never executes, requirement section 3.1.
  *
+ * <p><b>The executors are injected, not annotated.</b> A submission hands its runs over from
+ * {@link #createOne}, which is this very bean calling itself - the shape a proxied {@code @Async}
+ * silently runs inline, leaving the whole matrix on the submitting request thread and the pool idle.
+ * Handing the task to the executor directly is the same choice, and for the same reason, that
+ * {@code IndexCleanupService} made.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class EvalRunService {
 
     private static final int MIN_CONFIGS = 1;
@@ -95,6 +99,44 @@ public class EvalRunService {
     private final OverlapRatioCalculator overlapRatioCalculator;
     private final BizIdGenerator bizIdGenerator;
     private final KbProperties properties;
+    private final Executor evalExecutor;
+    private final Executor evalCaseExecutor;
+
+    public EvalRunService(EvalDatasetService evalDatasetService,
+                          EvalRunMapper evalRunMapper,
+                          EvalResultMapper evalResultMapper,
+                          EvalCaseMapper evalCaseMapper,
+                          RetrievalService retrievalService,
+                          EmbeddingProvider embeddingProvider,
+                          RerankProvider rerankProvider,
+                          ChatProvider chatProvider,
+                          EvalJudgeService evalJudgeService,
+                          CorpusFingerprintFactory corpusFingerprintFactory,
+                          EvalHitJudge evalHitJudge,
+                          EvalMetricsCalculator evalMetricsCalculator,
+                          OverlapRatioCalculator overlapRatioCalculator,
+                          BizIdGenerator bizIdGenerator,
+                          KbProperties properties,
+                          @Qualifier(AsyncConfig.EVAL_EXECUTOR) Executor evalExecutor,
+                          @Qualifier(AsyncConfig.EVAL_CASE_EXECUTOR) Executor evalCaseExecutor) {
+        this.evalDatasetService = evalDatasetService;
+        this.evalRunMapper = evalRunMapper;
+        this.evalResultMapper = evalResultMapper;
+        this.evalCaseMapper = evalCaseMapper;
+        this.retrievalService = retrievalService;
+        this.embeddingProvider = embeddingProvider;
+        this.rerankProvider = rerankProvider;
+        this.chatProvider = chatProvider;
+        this.evalJudgeService = evalJudgeService;
+        this.corpusFingerprintFactory = corpusFingerprintFactory;
+        this.evalHitJudge = evalHitJudge;
+        this.evalMetricsCalculator = evalMetricsCalculator;
+        this.overlapRatioCalculator = overlapRatioCalculator;
+        this.bizIdGenerator = bizIdGenerator;
+        this.properties = properties;
+        this.evalExecutor = evalExecutor;
+        this.evalCaseExecutor = evalCaseExecutor;
+    }
 
     /**
      * Creates one run per configuration of the matrix, kicking off execution for every one that is not
@@ -291,19 +333,29 @@ public class EvalRunService {
         }
         run.setStatus(RunStatus.PENDING);
         evalRunMapper.insert(run);
-        executeAsync(run.getRunId(), judgeEnabled);
+        submitExecution(run.getRunId(), judgeEnabled);
         return run;
     }
 
     /**
      * Queues one run's execution off the submitting request.
      *
+     * <p>The run row is already {@code PENDING} in the database when this returns, so a submission that
+     * never reaches its executor thread is visible as a run that stayed pending rather than as one that
+     * was never created - which is what the release gate's wait budget is there to time out on.
+     *
      * @param runId        run business id
      * @param judgeEnabled {@code true} runs the LLM-as-judge stage
      */
-    @Async(AsyncConfig.EVAL_EXECUTOR)
-    public void executeAsync(String runId, boolean judgeEnabled) {
-        execute(runId, judgeEnabled);
+    private void submitExecution(String runId, boolean judgeEnabled) {
+        evalExecutor.execute(() -> {
+            try {
+                execute(runId, judgeEnabled);
+            } catch (Exception e) {
+                log.error("evaluation run execution could not start, errorCode={}, runId={}",
+                        ErrorCode.INTERNAL_ERROR, runId, e);
+            }
+        });
     }
 
     /**
@@ -355,28 +407,40 @@ public class EvalRunService {
         }
     }
 
+    /**
+     * Judges every case of one run on the shared, container managed case pool.
+     *
+     * <p>A pool created here per run would be invisible to the deployment - unnamed threads in a dump, no
+     * request id carried into them, and a concurrency ceiling that multiplied by however many runs happened
+     * to be executing. Every case is submitted before any is collected, so they overlap: joining inside the
+     * submission loop would judge them one at a time.
+     *
+     * @param kbId         knowledge base business id
+     * @param cases        the run's effective cases
+     * @param config       retrieval configuration under test
+     * @param k            metrics {@code K}
+     * @param judgeEnabled {@code true} runs the LLM-as-judge stage
+     * @return one outcome per case, in the order the cases were given
+     */
     private List<CaseOutcome> judgeAll(String kbId, List<EvalCase> cases, EvalRetrievalConfig config, int k,
                                        boolean judgeEnabled) {
-        if (cases.isEmpty()) {
+        if (CollectionUtils.isEmpty(cases)) {
             return List.of();
         }
-        int concurrency = Math.max(1, properties.getEval().getConcurrency());
-        ExecutorService pool = Executors.newFixedThreadPool(Math.min(concurrency, cases.size()));
-        try {
-            List<Future<CaseOutcome>> futures = new ArrayList<>(cases.size());
-            for (EvalCase evalCase : cases) {
-                futures.add(pool.submit(() -> judgeOneCase(kbId, evalCase, config, k, judgeEnabled)));
-            }
-            List<CaseOutcome> outcomes = new ArrayList<>(cases.size());
-            for (Future<CaseOutcome> future : futures) {
-                outcomes.add(future.get());
-            }
-            return outcomes;
-        } catch (Exception e) {
-            throw new IllegalStateException("evaluation case execution failed", e);
-        } finally {
-            pool.shutdown();
+        List<CompletableFuture<CaseOutcome>> futures = new ArrayList<>(cases.size());
+        for (EvalCase evalCase : cases) {
+            futures.add(CompletableFuture.supplyAsync(
+                    () -> judgeOneCase(kbId, evalCase, config, k, judgeEnabled), evalCaseExecutor));
         }
+        List<CaseOutcome> outcomes = new ArrayList<>(cases.size());
+        try {
+            for (CompletableFuture<CaseOutcome> future : futures) {
+                outcomes.add(future.join());
+            }
+        } catch (CompletionException e) {
+            throw new IllegalStateException("evaluation case execution failed", e.getCause());
+        }
+        return outcomes;
     }
 
     private CaseOutcome judgeOneCase(String kbId, EvalCase evalCase, EvalRetrievalConfig config, int k,
