@@ -54,6 +54,12 @@ import java.util.Set;
  * the nightly one - runs on a thread that has no context: there the row level fence is off, and an
  * unqualified lookup by host would hand one tenant's password to another tenant's request.
  *
+ * <p><b>Every console entry resolves through {@link WebSourceGuard} first</b> (V22 follow-up).
+ * {@code t_kb_web_source} carries no {@code tenant_id} - it is a subordinate of the base - so an
+ * entry going straight to it by {@code source_id} or {@code kb_id} meets no tenant clause at all.
+ * The scheduled pass below is the deliberate exception: it has no principal, resolves the tenant of
+ * each row itself and must see every tenant's registrations to do so.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
@@ -82,6 +88,7 @@ public class WebSourceService {
     /** URL hash prefix appended to the file name so two URLs with alike paths never merge. */
     private static final int FILE_NAME_HASH_LENGTH = 8;
 
+    private final WebSourceGuard webSourceGuard;
     private final WebSourceMapper webSourceMapper;
     private final DocumentMapper documentMapper;
     private final DocumentService documentService;
@@ -106,7 +113,7 @@ public class WebSourceService {
      * @return registration row including the outcome of the first fetch
      */
     public WebSource register(String kbId, String url, boolean syncEnabled, boolean renderJs) {
-        KnowledgeBase base = knowledgeBaseService.require(kbId);
+        KnowledgeBase base = webSourceGuard.requireBase(kbId);
         String normalized = urlGuard.validate(url).toString();
         String urlHash = HashUtil.sha256Hex(normalized);
         Long existing = webSourceMapper.selectCount(new LambdaQueryWrapper<WebSource>()
@@ -134,12 +141,17 @@ public class WebSourceService {
     /**
      * Lists the registrations of a knowledge base, most recently registered first.
      *
+     * <p>The base is resolved first and the listing statement is only reached for a base the caller
+     * may see: {@code kb_id} alone selects rows of any tenant, since the registration table holds no
+     * tenant of its own to filter on.
+     *
      * @param kbId knowledge base business id
      * @param page one based page number
      * @param size page size
      * @return page of registrations
      */
     public IPage<WebSource> list(String kbId, long page, long size) {
+        webSourceGuard.requireBase(kbId);
         return webSourceMapper.selectPage(new Page<>(page, size), new LambdaQueryWrapper<WebSource>()
                 .eq(WebSource::getKbId, kbId)
                 .orderByDesc(WebSource::getId));
@@ -148,13 +160,17 @@ public class WebSourceService {
     /**
      * Runs one sync of one source on demand.
      *
+     * <p>The tenant comes from the base the guard just resolved rather than from a second lookup:
+     * that base is the one this call was authorised against, and it is the tenant whose credentials
+     * this fetch may spend.
+     *
      * @param sourceId registration business id
      * @return registration row carrying the outcome
      */
     public WebSource syncNow(String sourceId) {
-        WebSource source = require(sourceId);
-        sync(source, tenantOf(source));
-        return source;
+        WebSourceGuard.ScopedWebSource scoped = webSourceGuard.requireSource(sourceId);
+        sync(scoped.source(), scoped.base().getTenantId());
+        return scoped.source();
     }
 
     /**
@@ -168,7 +184,7 @@ public class WebSourceService {
      * @return updated registration row
      */
     public WebSource updateSettings(String sourceId, Boolean syncEnabled, Boolean renderJs) {
-        WebSource source = require(sourceId);
+        WebSource source = webSourceGuard.requireSource(sourceId).source();
         if (syncEnabled != null) {
             source.setSyncEnabled(syncEnabled ? SYNC_ON : SYNC_OFF);
         }
@@ -190,7 +206,7 @@ public class WebSourceService {
      * @param sourceId registration business id
      */
     public void remove(String sourceId) {
-        WebSource source = require(sourceId);
+        WebSource source = webSourceGuard.requireSource(sourceId).source();
         webSourceMapper.hardDeleteById(source.getId());
         log.info("web source removed, sourceId={}, kbId={}, docId={}",
                 sourceId, source.getKbId(), source.getDocId());
@@ -361,15 +377,6 @@ public class WebSourceService {
         webSourceMapper.updateById(source);
         // The one funnel every outcome passes, which is what makes it the M13 sync counter's spot.
         kbMetrics.recordWebSourceSync(status);
-    }
-
-    private WebSource require(String sourceId) {
-        WebSource source = webSourceMapper.selectOne(new LambdaQueryWrapper<WebSource>()
-                .eq(WebSource::getSourceId, sourceId));
-        if (source == null) {
-            throw BizException.notFound("URL 登记不存在：" + sourceId);
-        }
-        return source;
     }
 
     /**

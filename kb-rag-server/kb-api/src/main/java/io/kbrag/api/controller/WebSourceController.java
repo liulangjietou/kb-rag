@@ -5,8 +5,6 @@ import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.RegisterWebSourceRequest;
 import io.kbrag.api.dto.UpdateWebSourceRequest;
 import io.kbrag.api.dto.WebSourceResponse;
-import io.kbrag.app.auth.AccessGuard;
-import io.kbrag.app.auth.KbScopeGuard;
 import io.kbrag.app.websource.WebSourceService;
 import io.kbrag.common.api.Result;
 import io.kbrag.domain.constant.PermissionCodes;
@@ -29,6 +27,11 @@ import org.springframework.web.bind.annotation.RestController;
  * the operator who just typed a URL wants to know right now whether it worked, not after the next
  * scheduled pass.
  *
+ * <p>No ownership or scope check is written here on purpose - every entry below resolves its
+ * registration or its base through {@code WebSourceGuard} inside the service. A check placed in a
+ * controller only guards the paths somebody remembered to guard, and {@code t_kb_web_source} is a
+ * subordinate table that the row level fence cannot cover on its own.
+ *
  * @author owlzhangfq@gmail.com
  */
 @RestController
@@ -40,7 +43,6 @@ public class WebSourceController {
     private static final int MAX_PAGE_SIZE = 200;
 
     private final WebSourceService webSourceService;
-    private final KbScopeGuard kbScopeGuard;
 
     /**
      * Registers a URL and runs its first fetch immediately.
@@ -53,7 +55,6 @@ public class WebSourceController {
     @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<WebSourceResponse> register(@PathVariable String kbId,
                                               @Valid @RequestBody RegisterWebSourceRequest request) {
-        AccessGuard.requireKbAccess(kbId);
         boolean syncEnabled = request.syncEnabled() == null || request.syncEnabled();
         boolean renderJs = request.renderJs() != null && request.renderJs();
         return Result.success(WebSourceResponse.from(
@@ -74,7 +75,6 @@ public class WebSourceController {
             @PathVariable String kbId,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
-        AccessGuard.requireKbAccess(kbId);
         return Result.success(PageResponse.from(
                 webSourceService.list(kbId, normalizePage(page), normalizeSize(size)),
                 WebSourceResponse::from));
@@ -89,7 +89,6 @@ public class WebSourceController {
     @PostMapping("/api/v1/web-sources/{sourceId}/sync")
     @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<WebSourceResponse> sync(@PathVariable String sourceId) {
-        kbScopeGuard.requireWebSourceAccess(sourceId);
         return Result.success(WebSourceResponse.from(webSourceService.syncNow(sourceId)));
     }
 
@@ -105,7 +104,6 @@ public class WebSourceController {
     @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<WebSourceResponse> update(@PathVariable String sourceId,
                                             @Valid @RequestBody UpdateWebSourceRequest request) {
-        kbScopeGuard.requireWebSourceAccess(sourceId);
         return Result.success(WebSourceResponse.from(
                 webSourceService.updateSettings(sourceId, request.syncEnabled(), request.renderJs())));
     }
@@ -119,7 +117,6 @@ public class WebSourceController {
     @DeleteMapping("/api/v1/web-sources/{sourceId}")
     @RequiresPermission(PermissionCodes.DOC_WRITE)
     public Result<Void> remove(@PathVariable String sourceId) {
-        kbScopeGuard.requireWebSourceAccess(sourceId);
         webSourceService.remove(sourceId);
         return Result.success(null);
     }

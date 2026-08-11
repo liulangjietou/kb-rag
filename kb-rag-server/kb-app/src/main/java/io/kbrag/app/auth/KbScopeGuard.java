@@ -12,7 +12,6 @@ import io.kbrag.domain.entity.EvalDataset;
 import io.kbrag.domain.entity.EvalRun;
 import io.kbrag.domain.entity.ExtSource;
 import io.kbrag.domain.entity.RetrievalFeedback;
-import io.kbrag.domain.entity.WebSource;
 import io.kbrag.domain.enums.DocVisibility;
 import io.kbrag.domain.mapper.AnnotationMapper;
 import io.kbrag.domain.mapper.ChunkMapper;
@@ -23,7 +22,6 @@ import io.kbrag.domain.mapper.EvalDatasetMapper;
 import io.kbrag.domain.mapper.EvalRunMapper;
 import io.kbrag.domain.mapper.ExtSourceMapper;
 import io.kbrag.domain.mapper.RetrievalFeedbackMapper;
-import io.kbrag.domain.mapper.WebSourceMapper;
 import io.kbrag.domain.model.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.collections4.CollectionUtils;
@@ -48,6 +46,14 @@ import java.util.stream.Collectors;
  * <p>A missing row is reported as not found rather than forbidden. The row genuinely is not there, and
  * answering "forbidden" would send an operator looking for a permission problem that does not exist.
  *
+ * <p><b>What is checked here is the data scope, never the tenant.</b> The two are different questions
+ * and only the second one is an isolation boundary: {@code kb_scope_all} - a tenant's SUPER_ADMIN, a
+ * KB_ADMIN with no scope configured - short circuits every method below, and even without it
+ * {@link AccessGuard#requireKbAccess(String)} only asks whether the caller's roles name that base.
+ * Neither compares a tenant. A resource of a subordinate table therefore needs its own resolution
+ * through the fenced root table before it gets here; {@code WebSourceGuard} is what that looks like,
+ * and {@code requireWebSourceAccess} used to stand here pretending to be it.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Component
@@ -61,7 +67,6 @@ public class KbScopeGuard {
     private final EvalCaseMapper evalCaseMapper;
     private final EvalRunMapper evalRunMapper;
     private final ExtSourceMapper extSourceMapper;
-    private final WebSourceMapper webSourceMapper;
     private final RetrievalFeedbackMapper retrievalFeedbackMapper;
     private final DocAclMapper docAclMapper;
 
@@ -225,22 +230,6 @@ public class KbScopeGuard {
                 .eq(ExtSource::getSourceId, sourceId)
                 .last("limit 1"));
         requireOwner(source == null ? null : source.getKbId(), "external data source", sourceId);
-    }
-
-    /**
-     * Asserts the knowledge base owning a web data source is inside the caller's scope.
-     *
-     * @param sourceId source business id
-     */
-    public void requireWebSourceAccess(String sourceId) {
-        if (AccessGuard.unrestrictedKbScope()) {
-            return;
-        }
-        WebSource source = webSourceMapper.selectOne(new LambdaQueryWrapper<WebSource>()
-                .select(WebSource::getKbId)
-                .eq(WebSource::getSourceId, sourceId)
-                .last("limit 1"));
-        requireOwner(source == null ? null : source.getKbId(), "web data source", sourceId);
     }
 
     /**
