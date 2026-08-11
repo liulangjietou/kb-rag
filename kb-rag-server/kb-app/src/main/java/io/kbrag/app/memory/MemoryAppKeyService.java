@@ -30,6 +30,13 @@ import java.util.List;
  * authentication resolves the library and hands it to the principal instead of carrying a scope
  * list.
  *
+ * <p><b>The console entries resolve their library through {@link MemoryLibraryGuard} first</b>: the
+ * key table carries no {@code tenant_id}, so a statement filtering on {@code library_id} and
+ * {@code key_id} alone sits outside the tenant fence and would let a caller of another tenant
+ * disable, rotate or delete a key it named by id. {@link #authenticate(String)} is deliberately not
+ * guarded - it runs on the open API thread, where there is no console caller and the key's own
+ * binding is the isolation.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
@@ -37,6 +44,7 @@ import java.util.List;
 @RequiredArgsConstructor
 public class MemoryAppKeyService {
 
+    private final MemoryLibraryGuard memoryLibraryGuard;
     private final MemoryAppKeyMapper memoryAppKeyMapper;
     private final MemoryKeyFactory memoryKeyFactory;
     private final BizIdGenerator bizIdGenerator;
@@ -46,13 +54,14 @@ public class MemoryAppKeyService {
     /**
      * Mints a key bound to one library.
      *
-     * @param libraryId library the key will authorise, existence checked by the caller
+     * @param libraryId library the key will authorise
      * @param name      purpose note, e.g. the consuming agent's name
      * @param qpsLimit  token bucket rate, {@code null} or non positive takes the deployment default
      * @return stored row plus the plaintext, shown once and never stored
      */
     @Transactional(rollbackFor = Exception.class)
     public IssuedKey issue(String libraryId, String name, Integer qpsLimit) {
+        memoryLibraryGuard.requireLibrary(libraryId);
         MemoryKeyFactory.GeneratedKey generated = memoryKeyFactory.generate();
         MemoryAppKey key = new MemoryAppKey();
         key.setKeyId(bizIdGenerator.memoryAppKeyId());
@@ -76,6 +85,7 @@ public class MemoryAppKeyService {
      * @return keys, digests included - callers must never serialise the rows directly
      */
     public List<MemoryAppKey> listByLibrary(String libraryId) {
+        memoryLibraryGuard.requireLibrary(libraryId);
         return memoryAppKeyMapper.selectList(new LambdaQueryWrapper<MemoryAppKey>()
                 .eq(MemoryAppKey::getLibraryId, libraryId)
                 .orderByDesc(MemoryAppKey::getId));
@@ -89,6 +99,7 @@ public class MemoryAppKeyService {
      * @return key row
      */
     public MemoryAppKey require(String libraryId, String keyId) {
+        memoryLibraryGuard.requireLibrary(libraryId);
         MemoryAppKey key = memoryAppKeyMapper.selectOne(new LambdaQueryWrapper<MemoryAppKey>()
                 .eq(MemoryAppKey::getLibraryId, libraryId)
                 .eq(MemoryAppKey::getKeyId, keyId)
@@ -157,6 +168,9 @@ public class MemoryAppKeyService {
 
     /**
      * Soft deletes every key of one library, the cleanup of a library deletion.
+     *
+     * <p>The library check rides along in {@link #listByLibrary(String)} rather than being written
+     * again here; establishing ownership once covers the whole loop.
      *
      * @param libraryId library business id
      */

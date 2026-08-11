@@ -7,6 +7,17 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 安全修复（M19 后修复：记忆库多租户隔离）
+
+- `[schema]` Flyway `V21__memory_library_tenant.sql`：`t_kb_memory_library` 增 `tenant_id`（NOT NULL DEFAULT `'tnt_default0000000'`，存量行由列 DEFAULT 划入默认租户、升级零迁移）+ `idx_tenant`。**修复的缺陷**：V20 建六张记忆库表时漏了 M16 的租户层，`memory:read`/`memory:write` 只回答「这个账号能不能碰记忆库」、回答不了「能碰哪些」，于是多租户部署下任何租户持 `memory:read` 的账号能列出全部署的记忆库，持 `memory:write` 能改删其他租户的库、规则、记忆节点与 Memory Key
+- 只有根聚合表加列：五张从属表（片段规则 / 画像规则 / 节点 / 画像 / Key）经 `library_id` 归属租户，与 M16 §1.1 取舍①同构——六张表全加列不叫隔离叫散弹枪，从属查询永远先过根表的租户行过滤，再多一列只是第二个可以不一致的事实源
+- `KbTenantLineHandler.FENCED_TABLES` 增 `t_kb_memory_library`：库列表、详情、同名校验、建库 INSERT 的 `tenant_id` 注入随 MyBatis-Plus 行级围栏自动生效（与 `t_kb_knowledge_base` 完全同构）
+- 新增 `MemoryLibraryGuard`，管理端**带 `libraryId` 的 21 个入口一律先解析库**。这一条是修复的关键：从属表不带 `tenant_id`，按 `rule_id` / `node_id` / `key_id` 直接寻址的入口（改删片段规则、改删画像规则、删记忆节点、Memory Key 的启停/轮换/删除）压根不查根表，只加列 + 进围栏对它们形同虚设。守卫做成独立 bean 而非 `MemoryAdminService` 的方法——`MemoryAppKeyService` 需要同一个检查且是前者的依赖，反向边就是循环；检查放服务层不放 Controller，Controller 里的守卫只护得住有人记得加的那几条路径
+- 余下 2 个入口（库列表 `GET /`、建库 `POST /`）没有 `libraryId`，由围栏本体覆盖：列表靠 SELECT 拼租户条件，建库靠 `TenantLineInnerInterceptor` 往 INSERT 补 `tenant_id`（服务层从不 `setTenantId`，与 `KnowledgeBaseService` 同构，依赖 MyBatis-Plus 默认 `NOT_NULL` 字段策略）。**这两条是记忆库域唯一没有第二道防线的路径**，任何绕开围栏的写法（自定义 mapper SQL、`@InterceptorIgnore`）会直接抹掉它们的隔离
+- **开放端行为零变化**：`MemoryKeyAuthFilter` 那条链上没有控制台主体，租户围栏整条跳过（既有语义，刻意保留——在那条线程上拼租户条件会把 Key 自己绑定的库过滤掉）；`MemoryAppKeyService.authenticate` 相应不过守卫
+- **行为变更一处**：记忆库同名校验从全局唯一收缩为租户内唯一（两个租户各建一个「客服记忆库」是正常业务）
+- 单测：`MemoryAdminServiceTest` / `MemoryAppKeyServiceTest` 各 2 例覆盖跨租户读写入口全数 404 且从属表一条语句都不发，`KbTenantLineHandlerTest` 钉住围栏名单与「无主体整条跳过」的开放端语义
+
 ### 新增（M20）
 
 - MCP 协议层（`docs/M20-CONTRACTS.md`）：知识库应用与记忆库各暴露一个 MCP Streamable HTTP 端点（`POST /api/v1/knowledge/mcp`、`POST /api/v1/memory/mcp`），任何 MCP 兼容客户端配一个 URL 加一把既有 Key 即可直接调用。手写无状态 JSON-RPC 2.0 引擎（`McpServerEngine`，支持 initialize / ping / tools/list / tools/call / notifications/*，协议版本 2025-03-26 兼容 2024-11-05，不支持批量数组），**零新增依赖**。工具集：knowledge_search / knowledge_chat（仅非流式，stream=true 报 INVALID_PARAM 指路 REST SSE）与 memory_add / memory_search / memory_list / memory_update / memory_delete / memory_get_profile，参数与返回结构同 REST 孪生端点（复用 DTO，`McpArgumentBinder` 补 jakarta Validator 显式校验）。

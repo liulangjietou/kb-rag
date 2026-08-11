@@ -14,7 +14,7 @@ import java.util.Set;
 /**
  * Fences every root aggregate query to the tenant of the console caller, the M16 contract section 1.3.
  *
- * <p>Only the six root aggregate tables are fenced; every subordinate table reaches its tenant through
+ * <p>Only the root aggregate tables are fenced; every subordinate table reaches its tenant through
  * its root and is skipped here. Requests without a console principal - the open API, the background
  * task threads, the startup runners - are skipped entirely: they locate rows by exact business id, and
  * the tenant a clause would need is simply not on those threads.
@@ -22,18 +22,24 @@ import java.util.Set;
  * <p>One deliberate exception: a caller holding {@code tenant:manage} - the platform operator of the
  * default tenant - sees users and roles across tenants. That is what lets the user management screen
  * create the first account of a fresh tenant and move accounts between tenants; without it the operator
- * could create a tenant nobody can ever log in to. The other four root tables stay fenced even for the
- * operator: daily work on bases, keys, datasets and apps is pinned to the own tenant.
+ * could create a tenant nobody can ever log in to. The remaining root tables stay fenced even for the
+ * operator: daily work on bases, keys, datasets, apps and memory libraries is pinned to the own tenant.
  *
  * @author owlzhangfq@gmail.com
  */
 @Component
 public class KbTenantLineHandler implements TenantLineHandler {
 
-    /** Root aggregate tables carrying a tenant_id column, everything else is reached through them. */
+    /**
+     * Root aggregate tables carrying a tenant_id column, everything else is reached through them.
+     *
+     * <p>{@code t_kb_memory_library} joined in V21: it is the root of the memory domain, and the five
+     * subordinate memory tables - fragment rules, profile rules, nodes, profiles, keys - reach their
+     * tenant through their library, so fencing this one table isolates all six.
+     */
     private static final Set<String> FENCED_TABLES = Set.of(
             "t_kb_admin_user", "t_kb_role", "t_kb_knowledge_base",
-            "t_kb_api_key", "t_kb_eval_dataset", "t_kb_app");
+            "t_kb_api_key", "t_kb_eval_dataset", "t_kb_app", "t_kb_memory_library");
 
     /** Tables the platform operator may query across tenants, see the class comment. */
     private static final Set<String> OPERATOR_UNFENCED_TABLES = Set.of("t_kb_admin_user", "t_kb_role");
