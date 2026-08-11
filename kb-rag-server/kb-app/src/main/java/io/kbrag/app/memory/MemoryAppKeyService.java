@@ -51,12 +51,14 @@ public class MemoryAppKeyService {
     private final KbProperties properties;
     private final Executor auditExecutor;
 
-    public MemoryAppKeyService(MemoryAppKeyMapper memoryAppKeyMapper,
+    public MemoryAppKeyService(MemoryLibraryGuard memoryLibraryGuard,
+                               MemoryAppKeyMapper memoryAppKeyMapper,
                                MemoryKeyFactory memoryKeyFactory,
                                BizIdGenerator bizIdGenerator,
                                ApiRateLimiter apiRateLimiter,
                                KbProperties properties,
                                @Qualifier(AsyncConfig.AUDIT_EXECUTOR) Executor auditExecutor) {
+        this.memoryLibraryGuard = memoryLibraryGuard;
         this.memoryAppKeyMapper = memoryAppKeyMapper;
         this.memoryKeyFactory = memoryKeyFactory;
         this.bizIdGenerator = bizIdGenerator;
