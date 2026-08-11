@@ -9,6 +9,7 @@ import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.HashUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.Document;
+import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.entity.WebSource;
 import io.kbrag.domain.enums.WebSourceFetchStatus;
 import io.kbrag.domain.mapper.DocumentMapper;
@@ -48,7 +49,11 @@ import static org.mockito.Mockito.when;
  * the one upload chain, an unchanged page must write nothing, a trashed document must stay
  * untouched, a purged one must be rebuilt and rebound, and no sync failure may ever escape onto
  * the scheduler thread or the register call. M18 adds the credential hand-off and the one rule the
- * batch pass owns: after one authentication rejection of a host, no more requests go there.
+ * batch pass owns: after one authentication rejection of a site, no more requests go there.
+ *
+ * <p>V22 puts a tenant on both of those. A fetch may only spend the credentials of the tenant that
+ * owns the base it feeds, and the rejection fence counts per (tenant, host) rather than per host -
+ * pinned below, because the thread this runs on has no principal and therefore no fence of its own.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -56,6 +61,8 @@ class WebSourceServiceTest {
 
     private static final String KB_ID = "kb_1";
     private static final String SOURCE_ID = "ws_1";
+    private static final String TENANT_ID = "tnt_acme0000000001";
+    private static final String OTHER_TENANT_ID = "tnt_globex000000001";
     private static final String URL = "https://example.com/docs/guide";
     private static final byte[] BODY = "<html><body>guide</body></html>".getBytes(StandardCharsets.UTF_8);
 
@@ -90,6 +97,10 @@ class WebSourceServiceTest {
         when(urlGuard.validate(anyString())).thenAnswer(invocation ->
                 URI.create(invocation.getArgument(0, String.class)));
         when(bizIdGenerator.webSourceId()).thenReturn(SOURCE_ID);
+        // Every registration in this class belongs to one base of one tenant; the batch tests that
+        // need a second tenant override find() for their own kb id.
+        when(knowledgeBaseService.require(KB_ID)).thenReturn(base(KB_ID, TENANT_ID));
+        when(knowledgeBaseService.find(KB_ID)).thenReturn(base(KB_ID, TENANT_ID));
     }
 
     @Test
@@ -141,7 +152,7 @@ class WebSourceServiceTest {
         source.setLastContentHash(HashUtil.sha256Hex(BODY));
         when(webPageFetcher.fetch(fetchOf(URL))).thenReturn(page());
 
-        service.sync(source);
+        service.sync(source, TENANT_ID);
 
         assertEquals(WebSourceFetchStatus.UNCHANGED, source.getLastFetchStatus());
         assertNull(source.getLastError());
@@ -156,7 +167,7 @@ class WebSourceServiceTest {
         when(webPageFetcher.fetch(fetchOf(URL))).thenReturn(page());
         when(documentMapper.selectOne(any())).thenReturn(trashedDocument());
 
-        service.sync(source);
+        service.sync(source, TENANT_ID);
 
         assertEquals(WebSourceFetchStatus.SKIPPED, source.getLastFetchStatus());
         assertNotNull(source.getLastError());
@@ -172,7 +183,7 @@ class WebSourceServiceTest {
         when(documentMapper.selectOne(any())).thenReturn(null);
         when(documentService.upload(KB_ID, source.getFileName(), BODY)).thenReturn(outcome("doc_new"));
 
-        service.sync(source);
+        service.sync(source, TENANT_ID);
 
         assertEquals(WebSourceFetchStatus.SUCCESS, source.getLastFetchStatus());
         assertEquals("doc_new", source.getDocId());
@@ -184,7 +195,7 @@ class WebSourceServiceTest {
         WebSource source = boundSource();
         when(webPageFetcher.fetch(fetchOf(URL))).thenThrow(new IllegalStateException("x".repeat(600)));
 
-        assertDoesNotThrow(() -> service.sync(source));
+        assertDoesNotThrow(() -> service.sync(source, TENANT_ID));
 
         assertEquals(WebSourceFetchStatus.FAILED, source.getLastFetchStatus());
         // The cause must fit the 512 char column instead of failing the status write itself.
@@ -256,16 +267,94 @@ class WebSourceServiceTest {
         WebSource source = boundSource();
         source.setLastContentHash(HashUtil.sha256Hex(BODY));
         FetchCredential credential = new FetchCredential("example.com", "Authorization", "Basic dTpw");
-        when(webCredentialService.resolveFor("example.com")).thenReturn(credential);
+        when(webCredentialService.resolveFor(TENANT_ID, "example.com")).thenReturn(credential);
         when(webPageFetcher.fetch(any(WebPageFetcher.FetchRequest.class))).thenReturn(page());
 
-        service.sync(source);
+        service.sync(source, TENANT_ID);
 
         ArgumentCaptor<WebPageFetcher.FetchRequest> captor =
                 ArgumentCaptor.forClass(WebPageFetcher.FetchRequest.class);
         verify(webPageFetcher).fetch(captor.capture());
         assertEquals(credential, captor.getValue().credential());
-        verify(webCredentialService, times(1)).resolveFor("example.com");
+        verify(webCredentialService, times(1)).resolveFor(TENANT_ID, "example.com");
+    }
+
+    @Test
+    void shouldAskForCredentialsOfTheTenantThatOwnsTheBase() {
+        // The core of the V22 fix, on the path that actually runs unattended. The scheduled pass
+        // carries no principal, so nothing downstream can work out whose credentials this fetch may
+        // spend - the tenant has to be resolved here, from the base the registration feeds, and
+        // handed over explicitly. Two bases of two tenants registering the same wiki is the whole
+        // point: each must reach its own row, and neither may reach the other's.
+        WebSource mine = boundSource();
+        WebSource theirs = boundSource();
+        theirs.setSourceId("ws_2");
+        theirs.setKbId("kb_2");
+        theirs.setUrl(URL + "/theirs");
+        when(knowledgeBaseService.find("kb_2")).thenReturn(base("kb_2", OTHER_TENANT_ID));
+        when(webSourceMapper.selectList(any())).thenReturn(List.of(mine, theirs));
+        when(webPageFetcher.fetch(any(WebPageFetcher.FetchRequest.class))).thenReturn(page());
+        when(documentMapper.selectOne(any())).thenReturn(null);
+        when(documentService.upload(any(), any(), any())).thenReturn(outcome("doc_2"));
+
+        service.syncEnabledSources();
+
+        // Same host, two tenants, two different lookups - and never a lookup without a tenant.
+        verify(webCredentialService).resolveFor(TENANT_ID, "example.com");
+        verify(webCredentialService).resolveFor(OTHER_TENANT_ID, "example.com");
+        verify(webCredentialService, never()).resolveFor(eq(null), anyString());
+    }
+
+    @Test
+    void shouldSyncWithoutACredentialWhenTheBaseOfARegistrationIsGone() {
+        // Deleting a base leaves its registrations behind, so the pass does meet orphans. An orphan
+        // has no tenant, and "no tenant" must mean "no credential" - the one thing it may never do
+        // is fall back to whichever tenant holds that host.
+        WebSource orphan = boundSource();
+        orphan.setKbId("kb_deleted");
+        when(knowledgeBaseService.find("kb_deleted")).thenReturn(null);
+        when(webSourceMapper.selectList(any())).thenReturn(List.of(orphan));
+        when(webPageFetcher.fetch(any(WebPageFetcher.FetchRequest.class))).thenReturn(page());
+        when(documentMapper.selectOne(any())).thenReturn(null);
+        when(documentService.upload(any(), any(), any()))
+                .thenThrow(new IllegalStateException("knowledge base not found"));
+
+        assertDoesNotThrow(() -> service.syncEnabledSources());
+
+        verify(webCredentialService).resolveFor(null, "example.com");
+        assertEquals(WebSourceFetchStatus.FAILED, orphan.getLastFetchStatus());
+    }
+
+    @Test
+    void shouldFenceAnAuthenticationRejectionPerTenantRatherThanPerHost() {
+        // One tenant's stale password must not cancel another tenant's fetches of the same wiki.
+        // The lock the fence protects against is per account, and since V22 two tenants on one host
+        // are two accounts - keying the fence by host alone would punish a tenant for a credential
+        // it does not own and cannot see.
+        properties.getWebImport().setSyncBatchSize(3);
+        WebSource rejected = boundSource();
+        WebSource sameTenantSameHost = boundSource();
+        sameTenantSameHost.setSourceId("ws_2");
+        sameTenantSameHost.setUrl(URL + "/sibling");
+        WebSource otherTenantSameHost = boundSource();
+        otherTenantSameHost.setSourceId("ws_3");
+        otherTenantSameHost.setKbId("kb_2");
+        otherTenantSameHost.setUrl(URL + "/theirs");
+        when(knowledgeBaseService.find("kb_2")).thenReturn(base("kb_2", OTHER_TENANT_ID));
+        when(webSourceMapper.selectList(any()))
+                .thenReturn(List.of(rejected, sameTenantSameHost, otherTenantSameHost));
+        when(webPageFetcher.fetch(fetchOf(URL))).thenThrow(new WebAuthException("401"));
+        when(webPageFetcher.fetch(fetchOf(URL + "/theirs"))).thenReturn(page());
+        when(documentMapper.selectOne(any())).thenReturn(null);
+        when(documentService.upload(any(), any(), any())).thenReturn(outcome("doc_2"));
+
+        assertEquals(3, service.syncEnabledSources());
+
+        // The sibling of the same tenant is skipped without a request, as before.
+        assertEquals(WebSourceFetchStatus.FAILED, sameTenantSameHost.getLastFetchStatus());
+        verify(webPageFetcher, never()).fetch(fetchOf(URL + "/sibling"));
+        // The other tenant's registration of the same host proceeds untouched.
+        assertEquals(WebSourceFetchStatus.SUCCESS, otherTenantSameHost.getLastFetchStatus());
     }
 
     @Test
@@ -314,7 +403,7 @@ class WebSourceServiceTest {
         when(webPageFetcher.fetch(argThat(r -> r != null && r.url().equals(URL) && r.renderJs())))
                 .thenReturn(page());
 
-        service.sync(source);
+        service.sync(source, TENANT_ID);
 
         assertEquals(WebSourceFetchStatus.UNCHANGED, source.getLastFetchStatus());
     }
@@ -322,6 +411,13 @@ class WebSourceServiceTest {
     /** Matcher for "a fetch request of this URL", credential and render flag ignored. */
     private static WebPageFetcher.FetchRequest fetchOf(String url) {
         return argThat(r -> r != null && r.url().equals(url));
+    }
+
+    private KnowledgeBase base(String kbId, String tenantId) {
+        KnowledgeBase base = new KnowledgeBase();
+        base.setKbId(kbId);
+        base.setTenantId(tenantId);
+        return base;
     }
 
     private WebSource boundSource() {

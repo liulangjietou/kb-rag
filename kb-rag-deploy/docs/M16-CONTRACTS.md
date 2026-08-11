@@ -52,7 +52,18 @@
 
 - MyBatis-Plus `TenantLineInnerInterceptor` 注册在分页插件**之前**（官方要求，租户条件必须进 count 语句）；`TenantLineHandler.getTenantId()` 取 `UserContextHolder` 的租户，无控制台主体（开放 API、后台任务线程）时**整条跳过拼接** —— 后台任务按业务 id 精确定位行，API Key 已被应用版本限定范围，再拼租户条件需要的上下文根本不在线程里。跳过发生在 `ignoreTable()`（无主体一律返回 true），不是靠 `getTenantId()` 返回 null：后者永远返回一个合法值（无主体时回落默认租户），只为兜住"某条路径绕过 ignoreTable 还来问租户"的情况。
 - **忽略清单**（`ignoreTable`）：除 §1.2 六张根聚合表外全部忽略。从属表靠父表裁剪；`t_kb_tenant`、`t_kb_permission`、`t_kb_auth_token`、两张登录/操作审计表、META 表、flyway 表天然全局。
-  > 后续里程碑新增的根聚合表要一并入列，这是本节的持续义务而不是一次性清单：M19 的 `t_kb_memory_library` 漏了这一步，多租户下记忆库全员可见可改，由 Flyway V21 补齐（见 M19 契约 §1.4）。判据是"该表是不是某个域的根、有没有从属表经它归属租户"——是，就加列 + 入围栏 + 让该域每个入口先解析根。
+  > 后续里程碑新增的根聚合表要一并入列，这是本节的持续义务而不是一次性清单：M19 的 `t_kb_memory_library` 漏了这一步，多租户下记忆库全员可见可改，由 Flyway V21 补齐（见 M19 契约 §1.4）；M18 的 `t_kb_web_credential` 同样漏了，由 Flyway V22 补齐（见下条）。判据是"该表是不是某个域的根、有没有从属表经它归属租户"——是，就加列 + 入围栏 + 让该域每个入口先解析根。
+- **入围栏≠隔离完成：被后台线程读的表必须自己写租户谓词**（V22 的教训，本节第一段那条"无主体整条跳过"的直接推论）。围栏只在有控制台主体的线程上拼条件，所以一张表如果同时被控制台和 `@Scheduled` / 开放 API 线程读，进名单只解决了控制台那一半，另一半是**零防护**。`t_kb_web_credential` 正是这种表：控制台增删改查靠围栏，夜里的网页同步（`WebSourceService#syncEnabledSources`）在无主体线程上按 host 查凭据，围栏整条跳过。因此 `WebCredentialService#resolveFor(tenantId, host)` 把租户做成**必填入参**（租户由 `WebSource.kb_id` 反查 `t_kb_knowledge_base.tenant_id` 得到，拿不到就返回"无凭据"、绝不退化成按 host 查）。
+  > 这一条比 V21 那条更要紧，因为它的失败形态是静默的：只给表加 `tenant_id` 列、只把表名加进围栏，控制台看起来隔离好了，抓取仍在跨租户取用凭据，而且比修复前更难发现——修复前是"共享一份全局凭据"这个明面上的错，加列之后变成"看起来已隔离、实际仍串号"。**判据**：新表进围栏时先问"除了控制台，还有谁读这张表"，有后台读者就必须同时给出一条显式带租户的查询入口。
+
+### 1.3.1 围栏名单现状（代码事实源：`KbTenantLineHandler.FENCED_TABLES`）
+
+| 表 | 入列版本 | 是否有后台读者 | 后台侧隔离手段 |
+|---|---|---|---|
+| `t_kb_admin_user` / `t_kb_role` | V17 | 否 | —（运营商例外见下条） |
+| `t_kb_knowledge_base` / `t_kb_api_key` / `t_kb_eval_dataset` / `t_kb_app` | V17 | 否 | — |
+| `t_kb_memory_library` | V21 | 开放端（`kb-mk-*`） | Key 绑库 + `user_id` 查询谓词，刻意不拼租户 |
+| `t_kb_web_credential` | V22 | 网页同步 `@Scheduled` | `resolveFor(tenantId, host)` 显式租户谓词 |
 - 平台超管跨租户：**默认租户的 SUPER_ADMIN** 是唯一能看到租户管理页的人；其余一切读写都被钉死在自己租户内，包括默认租户超管的日常操作 —— 跨租户视角只存在于 `TenantController`，不存在"切换租户"的全局态，全局态是每一个越权 bug 的温床。
 - **唯一的栅栏例外**：持 `tenant:manage` 者对 `t_kb_admin_user`、`t_kb_role` 两表不拼租户条件 —— 否则运营商无法为新租户建首个账号、授其角色、移户，建出来的租户永远没人能登录。其余四张根表即使运营商也钉死本租户：库、Key、数据集、应用的日常操作不需要跨租户视角。配套约束：角色授予校验角色与用户同租户（绑定表自身无 tenant 列，栅栏拦不住这类泄漏）；username 全局唯一校验走 `@InterceptorIgnore(tenantLine)` 的跨租户查询；移户（`PUT /users/{userId}/tenant`，`tenant:manage`）清空旧角色绑定并吊销会话。
 

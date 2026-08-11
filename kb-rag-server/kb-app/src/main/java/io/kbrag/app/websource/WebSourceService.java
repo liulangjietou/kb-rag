@@ -12,6 +12,7 @@ import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.HashUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.Document;
+import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.entity.WebSource;
 import io.kbrag.domain.enums.WebSourceFetchStatus;
 import io.kbrag.domain.mapper.DocumentMapper;
@@ -46,6 +47,12 @@ import java.util.Set;
  * <p><b>One sync never throws.</b> Its outcome - SUCCESS, UNCHANGED, SKIPPED or FAILED - is written
  * onto the registration row where both the operator and the next pass can read it; a page that is
  * down today is simply retried tomorrow.
+ *
+ * <p><b>Every fetch carries the tenant of the base it feeds</b> (V22). A registration reaches its
+ * tenant through {@code kb_id}, and that tenant decides which site credential the fetch may spend.
+ * It is passed explicitly rather than read from the context because the pass that needs it most -
+ * the nightly one - runs on a thread that has no context: there the row level fence is off, and an
+ * unqualified lookup by host would hand one tenant's password to another tenant's request.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -99,7 +106,7 @@ public class WebSourceService {
      * @return registration row including the outcome of the first fetch
      */
     public WebSource register(String kbId, String url, boolean syncEnabled, boolean renderJs) {
-        knowledgeBaseService.require(kbId);
+        KnowledgeBase base = knowledgeBaseService.require(kbId);
         String normalized = urlGuard.validate(url).toString();
         String urlHash = HashUtil.sha256Hex(normalized);
         Long existing = webSourceMapper.selectCount(new LambdaQueryWrapper<WebSource>()
@@ -118,7 +125,9 @@ public class WebSourceService {
         webSourceMapper.insert(source);
         log.info("web source registered, sourceId={}, kbId={}, url={}, renderJs={}",
                 source.getSourceId(), kbId, normalized, renderJs);
-        sync(source);
+        // The base was just loaded to validate the registration; its tenant is the one whose
+        // credentials this URL may spend, so it rides along instead of being looked up again.
+        sync(source, base.getTenantId());
         return source;
     }
 
@@ -144,7 +153,7 @@ public class WebSourceService {
      */
     public WebSource syncNow(String sourceId) {
         WebSource source = require(sourceId);
-        sync(source);
+        sync(source, tenantOf(source));
         return source;
     }
 
@@ -226,21 +235,28 @@ public class WebSourceService {
         if (CollectionUtils.isEmpty(batch)) {
             return 0;
         }
-        // One authentication rejection stops the whole host for this pass. Confluence-like sites
+        // One authentication rejection stops the whole site for this pass. Confluence-like sites
         // CAPTCHA-lock an account after a few failed logins; a pass hammering fifty URLs of one
         // wiki with a rotated password would lock it for good, so the first rejection is the last
         // request this pass sends there.
-        Set<String> rejectedHosts = new HashSet<>();
+        //
+        // A "site" here is (tenant, host), not the host: since V22 two tenants can each hold their
+        // own account on one wiki, and a rejection of one says nothing about the other - different
+        // credential, different account, different lock. Keying this by host alone would let one
+        // tenant's stale password cancel every other tenant's fetches of that wiki for the night.
+        Set<String> rejectedSites = new HashSet<>();
         for (WebSource source : batch) {
-            String host = hostOf(source.getUrl());
-            if (host != null && rejectedHosts.contains(host)) {
+            String tenantId = tenantOf(source);
+            String site = siteOf(tenantId, hostOf(source.getUrl()));
+            if (site != null && rejectedSites.contains(site)) {
                 source.setLastFetchAt(LocalDateTime.now());
-                record(source, WebSourceFetchStatus.FAILED, "同 host 本轮已出现认证失败，跳过以防账号被锁定");
+                record(source, WebSourceFetchStatus.FAILED,
+                        "本租户同 host 本轮已出现认证失败，跳过以防账号被锁定");
                 continue;
             }
-            boolean authRejected = sync(source);
-            if (authRejected && host != null) {
-                rejectedHosts.add(host);
+            boolean authRejected = sync(source, tenantId);
+            if (authRejected && site != null) {
+                rejectedSites.add(site);
             }
         }
         return batch.size();
@@ -256,24 +272,54 @@ public class WebSourceService {
     }
 
     /**
+     * Key of the "one rejection stops the site" fence, {@code null} when either half is unknown.
+     *
+     * <p>Returning {@code null} keeps such a row out of the fence entirely rather than filing every
+     * unknown under one shared bucket, where an unparseable URL of one tenant would start skipping
+     * unrelated rows of another.
+     */
+    private static String siteOf(String tenantId, String host) {
+        return tenantId == null || host == null ? null : tenantId + "|" + host;
+    }
+
+    /**
+     * Tenant that owns a registration, reached through the base it feeds; {@code null} when the base
+     * is gone.
+     *
+     * <p>Deleting a base does not delete its registrations, so the scheduled pass does meet rows
+     * whose {@code kb_id} no longer resolves. Such a row gets no credential and fails on the upload
+     * a moment later - the same outcome an orphan row has always had. What must not happen is
+     * falling back to a host-only lookup: that is precisely how one tenant's password reached
+     * another tenant's fetch before V22.
+     */
+    private String tenantOf(WebSource source) {
+        KnowledgeBase base = knowledgeBaseService.find(source.getKbId());
+        return base == null ? null : base.getTenantId();
+    }
+
+    /**
      * Runs one sync of one source and records its outcome on the row. Never throws.
      *
      * <p>The five steps of the contract: re-validate the URL (DNS may have moved since
      * registration), fetch, short-circuit on an unchanged body, skip while the bound document sits
      * in the recycle bin, otherwise feed the body to the upload chain and rebind.
      *
-     * @param source registration row, mutated in place with the outcome
+     * @param source   registration row, mutated in place with the outcome
+     * @param tenantId tenant of the base this registration feeds, {@code null} when that base is
+     *                 gone; it decides whose credentials this fetch may spend
      * @return {@code true} when the failure was an authentication rejection - the signal the batch
-     *         pass uses to stop fetching the same host, see {@link #syncEnabledSources()}
+     *         pass uses to stop fetching the same site, see {@link #syncEnabledSources()}
      */
-    public boolean sync(WebSource source) {
+    public boolean sync(WebSource source, String tenantId) {
         source.setLastFetchAt(LocalDateTime.now());
         try {
             URI uri = urlGuard.validate(source.getUrl());
             boolean renderJs = source.getRenderJs() != null && source.getRenderJs() == RENDER_ON;
             // The credential is resolved here, per fetch, so a rotation applies to the very next
-            // sync; the fetcher only ever sees the ready-to-inject header form.
-            FetchCredential credential = webCredentialService.resolveFor(uri.getHost());
+            // sync; the fetcher only ever sees the ready-to-inject header form. The tenant travels
+            // with the call because this runs on the scheduled thread as often as not, and there
+            // the row level fence is off - see WebCredentialService#resolveFor.
+            FetchCredential credential = webCredentialService.resolveFor(tenantId, uri.getHost());
             WebPageFetcher.FetchedPage page = webPageFetcher.fetch(
                     new WebPageFetcher.FetchRequest(uri.toString(), renderJs, credential));
             String contentHash = HashUtil.sha256Hex(page.body());

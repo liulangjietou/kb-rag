@@ -25,6 +25,11 @@ import java.util.Set;
  * could create a tenant nobody can ever log in to. The remaining root tables stay fenced even for the
  * operator: daily work on bases, keys, datasets, apps and memory libraries is pinned to the own tenant.
  *
+ * <p><b>The fence covers console threads and nothing else.</b> That is by design, but it means a
+ * table whose rows are also read by a background thread is only half isolated by joining the list
+ * below - the other half has to be a tenant predicate the code writes itself. {@code
+ * t_kb_web_credential} is exactly that case, see the note on the fenced table set.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Component
@@ -36,10 +41,19 @@ public class KbTenantLineHandler implements TenantLineHandler {
      * <p>{@code t_kb_memory_library} joined in V21: it is the root of the memory domain, and the five
      * subordinate memory tables - fragment rules, profile rules, nodes, profiles, keys - reach their
      * tenant through their library, so fencing this one table isolates all six.
+     *
+     * <p>{@code t_kb_web_credential} joined in V22, and it is the one entry here that does <b>not</b>
+     * complete its own isolation. Membership fences the console screen - list, create, edit, delete.
+     * The fetch side reads the same table from the scheduled sync thread, which carries no principal,
+     * so {@link #ignoreTable} skips it and the clause never appears; that path is isolated only
+     * because {@code WebCredentialService#resolveFor} takes the tenant as an argument and puts it in
+     * the query by hand. Dropping that argument would silently restore the cross tenant leak this
+     * table was added here to fix, and no test of this class would notice.
      */
     private static final Set<String> FENCED_TABLES = Set.of(
             "t_kb_admin_user", "t_kb_role", "t_kb_knowledge_base",
-            "t_kb_api_key", "t_kb_eval_dataset", "t_kb_app", "t_kb_memory_library");
+            "t_kb_api_key", "t_kb_eval_dataset", "t_kb_app", "t_kb_memory_library",
+            "t_kb_web_credential");
 
     /** Tables the platform operator may query across tenants, see the class comment. */
     private static final Set<String> OPERATOR_UNFENCED_TABLES = Set.of("t_kb_admin_user", "t_kb_role");

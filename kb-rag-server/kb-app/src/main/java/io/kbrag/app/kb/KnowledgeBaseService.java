@@ -159,15 +159,30 @@ public class KnowledgeBaseService {
     }
 
     /**
+     * Loads a knowledge base, {@code null} when there is none under that id.
+     *
+     * <p>On a console thread the tenant fence applies, so another tenant's base reads as a missing
+     * one - which is the intended answer everywhere this is called. The scheduled threads carry no
+     * principal and see every tenant's bases, which is what lets the sync pass work out who a
+     * registration belongs to.
+     *
+     * @param kbId business id
+     * @return knowledge base or {@code null}
+     */
+    public KnowledgeBase find(String kbId) {
+        return knowledgeBaseMapper.selectOne(new LambdaQueryWrapper<KnowledgeBase>()
+                .eq(KnowledgeBase::getKbId, kbId)
+                .last("limit 1"));
+    }
+
+    /**
      * Loads a knowledge base or fails.
      *
      * @param kbId business id
      * @return knowledge base
      */
     public KnowledgeBase require(String kbId) {
-        KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectOne(new LambdaQueryWrapper<KnowledgeBase>()
-                .eq(KnowledgeBase::getKbId, kbId)
-                .last("limit 1"));
+        KnowledgeBase knowledgeBase = find(kbId);
         if (knowledgeBase == null) {
             throw BizException.notFound("knowledge base not found");
         }

@@ -17,10 +17,21 @@ import java.util.Locale;
 /**
  * Site credential management of the web import, the M18 contract.
  *
- * <p>One credential per host, resolved at fetch time by {@link #resolveFor(String)}: the sync pass
- * asks with the host of the URL it is about to fetch and receives the injectable header form, or
- * {@code null} when the site has no (enabled) credential - the anonymous fetch of M12 stays the
- * default and the common case.
+ * <p>One credential per host <i>per tenant</i>, resolved at fetch time by
+ * {@link #resolveFor(String, String)}: the sync pass asks with the tenant of the base it is syncing
+ * for and the host of the URL it is about to fetch, and receives the injectable header form, or
+ * {@code null} when that tenant has no (enabled) credential for the site - the anonymous fetch of
+ * M12 stays the default and the common case.
+ *
+ * <p><b>Two different mechanisms isolate the two sides of this service, and only one of them is
+ * automatic.</b> The console side - {@link #list()}, {@link #create}, {@link #update},
+ * {@link #remove} - never mentions a tenant: {@code t_kb_web_credential} is in
+ * {@code KbTenantLineHandler.FENCED_TABLES} since V22, so every statement those methods issue is
+ * fenced to the caller's tenant, a foreign credential simply is not there, and the duplicate-host
+ * check narrows to "this tenant already has one" on its own. The fetch side gets no such help: it
+ * runs on the scheduled sync thread, which carries no console principal, and the fence skips that
+ * thread entirely by design. Which is why {@link #resolveFor(String, String)} takes a tenant and
+ * writes the predicate itself, and why it refuses to query at all when it is not given one.
  *
  * <p><b>The secret never leaves this service in readable form.</b> List and update responses carry
  * everything but the secret; an update with a blank secret keeps the stored one, which is what lets
@@ -43,10 +54,10 @@ public class WebCredentialService {
     private final BizIdGenerator bizIdGenerator;
 
     /**
-     * Lists every credential, newest first. Secrets ride along inside the entity but the API layer
-     * maps them out; nothing here re-reads per row.
+     * Lists the calling tenant's credentials, newest first. Secrets ride along inside the entity but
+     * the API layer maps them out; nothing here re-reads per row.
      *
-     * @return all credential rows
+     * @return the credential rows of the caller's tenant
      */
     public List<WebCredential> list() {
         return webCredentialMapper.selectList(new LambdaQueryWrapper<WebCredential>()
@@ -54,7 +65,13 @@ public class WebCredentialService {
     }
 
     /**
-     * Creates a credential for a host.
+     * Creates a credential for a host, within the caller's tenant.
+     *
+     * <p>Neither the duplicate check nor the insert names a tenant: the fence adds the predicate to
+     * the count and the column to the INSERT (the service never calls {@code setTenantId}, same as
+     * {@code KnowledgeBaseService#create}). So "one credential per host" reads as "per host of this
+     * tenant" since V22, which is the point - the other tenant's row for the same wiki is none of
+     * this caller's business and must not block them from creating their own.
      *
      * @param host       exact host, lower cased on storage
      * @param authType   authentication scheme
@@ -124,7 +141,7 @@ public class WebCredentialService {
 
     /**
      * Removes a credential for good. Hard delete: a deleted secret should be gone, and a soft
-     * flagged row would hold {@code uk_host} hostage.
+     * flagged row would hold {@code uk_tenant_host} hostage.
      *
      * @param credentialId business id
      */
@@ -135,16 +152,26 @@ public class WebCredentialService {
     }
 
     /**
-     * Resolves the injectable credential of a host, {@code null} when the site has none enabled.
+     * Resolves the injectable credential one tenant holds for a host, {@code null} when it has none
+     * enabled there.
      *
-     * @param host host of the URL about to be fetched
+     * <p>The tenant is a parameter rather than something read from the context on purpose: the only
+     * caller is the sync pass, and on the scheduled thread there is no context to read. It is also
+     * the entire isolation of the fetch side - the row level fence covers console threads and skips
+     * this one - so a missing tenant must mean "no credential", never "any credential of this
+     * host". That is the one defensive check of this chain, and it is here rather than in the
+     * caller because here is where forgetting it costs a password.
+     *
+     * @param tenantId tenant of the knowledge base being synced
+     * @param host     host of the URL about to be fetched
      * @return resolved credential or {@code null}
      */
-    public FetchCredential resolveFor(String host) {
-        if (host == null || host.isBlank()) {
+    public FetchCredential resolveFor(String tenantId, String host) {
+        if (tenantId == null || tenantId.isBlank() || host == null || host.isBlank()) {
             return null;
         }
         WebCredential credential = webCredentialMapper.selectOne(new LambdaQueryWrapper<WebCredential>()
+                .eq(WebCredential::getTenantId, tenantId)
                 .eq(WebCredential::getHost, host.toLowerCase(Locale.ROOT))
                 .eq(WebCredential::getEnabled, ENABLED));
         return credential == null ? null : FetchCredential.of(credential);

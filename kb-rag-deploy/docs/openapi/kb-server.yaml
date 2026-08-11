@@ -1872,10 +1872,11 @@ paths:
       - web-credential
       summary: 站点凭据列表（M18，需 system:config）
       description: 'M18：网页导入的站点级凭据，按 host 挂、精确匹配。任何响应都不含 secret 字段——
-        密码只进不出，接口层面不存在该字段。'
+        密码只进不出，接口层面不存在该字段。V22 起只返回调用者所属租户的凭据，其他租户为同一
+        host 配的凭据既不可见也不可改删。'
       responses:
         '200':
-          description: 全部凭据，新建在前
+          description: 本租户的全部凭据，新建在前
           content:
             application/json:
               schema:
@@ -1884,9 +1885,11 @@ paths:
       tags:
       - web-credential
       summary: 为一个 host 创建凭据（M18，需 system:config）
-      description: 'M18：host 全局唯一、精确匹配（不做子域通配）。BASIC 需 username+secret，抓取时
+      description: 'M18：host 在租户内唯一、精确匹配（不做子域通配）——V22 起由全局唯一收缩而来，
+        两个租户各自为同一站点配一份自己的凭据是正常业务。BASIC 需 username+secret，抓取时
         预置 Authorization: Basic 头；HEADER 需 header_name+secret（值原样注入），覆盖 Bearer token
-        与 Cookie。抓取只对该 host 的请求注入认证头，重定向跨 host 即剥离。'
+        与 Cookie。抓取只对该 host 的请求注入认证头，且只取所属知识库同租户的凭据，重定向跨 host
+        即剥离。'
       requestBody:
         required: true
         content:

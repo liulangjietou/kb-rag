@@ -15,6 +15,12 @@ import lombok.ToString;
  * suffix - so a credential of {@code wiki.example.com} can never be coaxed onto
  * {@code evil.example.com}.
  *
+ * <p>Above the host sits the tenant, added by V22. A credential is site level configuration
+ * <i>of one tenant</i>, never of the deployment: two tenants each holding their own read only
+ * account on the same wiki is ordinary business, and neither may see, edit or spend the other's.
+ * That makes {@code (tenant_id, host)} the identity of a credential and the only key any lookup
+ * may use - a lookup by host alone hands one tenant's password to another tenant's fetch.
+ *
  * <p>The secret is stored in clear, the same recorded decision (D17) as the S3 secret of
  * {@link ExtSource}: single administrator console deployed inside an isolated network. The read
  * API never returns the column, and {@code @ToString} excludes it from every log line.
@@ -32,6 +38,10 @@ public class WebCredential extends BaseEntity {
     /** Business identifier exposed through the API. */
     @TableField("credential_id")
     private String credentialId;
+
+    /** Owning tenant business id, defaulted to the built in tenant by the V22 migration. */
+    @TableField("tenant_id")
+    private String tenantId;
 
     /** Exact host the credential applies to, including a non default port when the URL carries one. */
     @TableField("host")
