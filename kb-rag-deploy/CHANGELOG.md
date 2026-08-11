@@ -6,6 +6,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **M14 切分策略装配缺陷的文档回补**（`docs/M14-CONTRACTS.md` §4 v1.1 修订条）：三处"文档写了、代码没那么跑"的偏差按铁律在同 PR 内改文档。①M14 交付的 separator/heading/page 三策略因漏登记进 `SplitStrategy` 枚举，在配置写入路径被拒、整批是死代码；②`page` 策略契约初版写的"从 parsed.json 取分页文本"会绕过清洗四步与图片占位符替换（PII 未脱敏入索引、分片 `image_urls` 恒空），改为消费逐页清洗后的正文 + 页区间；③父子分片可组合策略由 fixed_length/llm_semantic 收窄为仅 fixed_length，与 `M4b-CONTRACTS.md` §4 统一。同步修订：需求文档升 v1.19（§4.3 父子分片"正交"结论按实现纠正）、`M3-CONTRACTS.md`（parse 响应与预览产物形状、§7.2 管线次序补逐页清洗）、`M1-CONTRACTS.md`、`ARCHITECTURE.md` 升 v1.6、`FLOWS.md` 升 v1.5、`CONTRACT-ALIGNMENT-2026-07-27.md` 加现状后记。
+- OpenAPI 升版：`kb-server.yaml` → `0.21.0-m14-fix`（`DocumentPreview` 增 `page_ranges`、`ParsePreviewPage` 增 `markdown`、新增 `ParsePreviewPageRange` schema、`SplitStrategy` 描述改父子组合口径）；`kb-parser.yaml` → `0.14.0-m14`（`ParsePage` 增 `markdown` 切片字段）。**均为纯新增字段**，存量调用方与既有产物不受影响（缺字段时消费方回退旧行为）。
+
 ### Added
 
 - **MCP 协议层（M20，`docs/M20-CONTRACTS.md`）**：知识库应用与记忆库各暴露一个 MCP Streamable HTTP 端点（`POST /api/v1/knowledge/mcp`、`POST /api/v1/memory/mcp`，JSON-RPC 2.0 单请求单 JSON 响应，协议版本 2025-03-26 兼容 2024-11-05），任何 MCP 兼容客户端（Claude Desktop / Cursor / Cline 等）配一个 URL 加一把既有 Key（kb-sk-* / kb-mk-*）即可直接调用。鉴权/限流/审计与 REST 开放端点同一条过滤器链；工具集 knowledge_search / knowledge_chat（仅非流式）与 memory 六工具，参数与返回结构同 REST 孪生端点。**无新增容器、依赖、环境变量与配置键**，纯新增、存量端点与行为零变化。控制台新增「MCP 调试」一级菜单；调用方文档见主仓 `docs/MCP接入指南.md`。

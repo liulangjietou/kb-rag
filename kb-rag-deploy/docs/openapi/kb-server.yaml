@@ -216,8 +216,25 @@ info:
 
     HTTP 恒 200（通知为 202 无 body）。全部纯新增（详见 M20-CONTRACTS.md）。
 
+
+    0.21.0-m14-fix 增量：M14 切分策略装配缺陷修复（详见 M14-CONTRACTS.md §4 v1.1 修订条）。
+
+    ①`SplitStrategy` 补齐 separator/heading/page——此前枚举只有两个成员而配置写入以它为唯一
+
+    白名单，三个已交付策略保存即 INVALID_PARAM（上文 0.9.0-m4b 段"两个成员"是当时事实，现为五个）；
+
+    ②`DocumentPreview` 增 `page_ranges`、`ParsePreviewPage` 增 `markdown`——按页切分改为消费
+
+    逐页清洗并插回图片代理后的正文（此前读解析原文，绕过脱敏且分片图片恒空）；
+
+    ③`parent_child_enabled=true` 时可选策略由 fixed_length/llm_semantic 收窄为仅 fixed_length。
+
+    ③为口径收窄（此前接受的 llm_semantic 组合实际跑的就是 fixed_length，行为不变、不再撒谎），
+
+    其余为纯新增字段。
+
     '
-  version: 0.20.0-m20
+  version: 0.21.0-m14-fix
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -1437,7 +1454,7 @@ paths:
       summary: 查看解析预览
       description: 'M3-CONTRACTS.md §3.4：仅当文档 `process_status=PENDING_CONFIRM` （知识库开启
         `index_config.parse_preview_required` 时，清洗完成后管线暂停于此状态） 时有实际预览产物；预览内容（markdown、按页信息、图片预签名
-        URL 与 VLM 文本代理、 warnings）读自 MinIO 预览产物。 '
+        URL 与 VLM 文本代理、页区间 page_ranges、warnings）读自 MinIO 预览产物。 '
       responses:
         '200':
           description: OK
@@ -6781,9 +6798,15 @@ components:
 
         （M14，配 split_heading_level，全文无标题回落 fixed_length）；page=按解析产物分页边界切分
 
-        （M14，无 pages 的格式整文一页）。separator/heading/page 与 parent_child 互斥（INVALID_PARAM）；
+        （M14，无 pages 的格式整文一页；切的是逐页清洗并插回图片代理后的正文，与其他策略同一份，
 
-        超长段统一回落 fixed_length 二次切分。未知取值一律 INVALID_PARAM（校验先于写入）。'
+        页区间随预览产物落 page_ranges）。**parent_child_enabled=true 时仅允许 fixed_length**，
+
+        含 llm_semantic 在内的其余取值一律 INVALID_PARAM——两级切分是定长策略与自身组合，
+
+        并不按本字段取策略；超长段统一回落 fixed_length 二次切分。未知取值一律 INVALID_PARAM
+
+        （校验先于写入，取值集合即本枚举）。'
       enum:
       - fixed_length
       - llm_semantic
@@ -7054,6 +7077,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PreviewImage'
+        page_ranges:
+          type: array
+          description: |
+            M14 新增（M14-CONTRACTS.md §4）。每页在上面 markdown 中的区间，仅
+            split_strategy=page 的知识库非空。存档而非确认时重算：确认入库切的就是
+            本产物的文本，边界若在确认时重算，预览之后改过的清洗规则会挪动操作员
+            从未看到的切点。为空时按页切分退化为整文一页（无分页格式的既有行为）。
+          items:
+            $ref: '#/components/schemas/ParsePreviewPageRange'
+          default: []
         warnings:
           type: array
           items:
@@ -7066,9 +7099,28 @@ components:
           type: integer
         text:
           type: string
+        markdown:
+          type: string
+          nullable: true
+          description: |
+            M14 新增。该页对应的 markdown 切片（含页标题与图片占位符行），逐页清洗
+            的输入；早于本字段的解析产物为 null，消费方回退 text。
         scanned:
           type: boolean
           default: false
+    ParsePreviewPageRange:
+      type: object
+      description: M14-CONTRACTS.md §4：一页在清洗后 markdown 中的位置，按页切分据此下刀
+      properties:
+        page_no:
+          type: integer
+          minimum: 1
+        start:
+          type: integer
+          description: 起始下标（含）
+        end:
+          type: integer
+          description: 结束下标（不含）
     DocumentPreviewResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'

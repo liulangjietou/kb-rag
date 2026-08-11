@@ -1,7 +1,7 @@
 # kb-rag 流程图文档
 
-> 版本：v1.4（基线与 `ARCHITECTURE.md` 相同 = M1-M20 及其后修复的状态；v1.3 基线为 M19，v1.2 基线为 M13）
-> 日期：2026-08-03
+> 版本：v1.5（基线与 `ARCHITECTURE.md` 相同 = M1-M20 及其后修复的状态，含 2026-08-11 切分策略装配缺陷修复；v1.4 基线为 M20，v1.3 基线为 M19，v1.2 基线为 M13）
+> 日期：2026-08-11
 > 作者：RichardFyoung / Claude
 >
 > 图使用 Mermaid 绘制（GitHub / 主流 IDE 原生渲染）。每张图标注对应的核心类与契约出处，与代码不一致时以代码为准并须在同一 PR 内修订本文档（项目铁律②）。
@@ -33,10 +33,10 @@ sequenceDiagram
     S--)P: submit(versionId) [事务提交后]
     P->>P: 指纹判定(VersionFingerprintFactory)<br/>全匹配则 VersionArtifactReuser 复用 chunk 跳过解析切分
     P->>PA: POST /api/v1/parse (X-Request-Id 透传)
-    PA-->>P: markdown + pages(scanned/ocr_source) + images + warnings
+    PA-->>P: markdown + pages(text/markdown 切片, scanned/ocr_source) + images + warnings
     P->>P: 清洗/脱敏 (DocumentCleaner/TextDesensitizer)
     P->>V: 扫描页/内嵌图 → 文本代理 (零 Key 跳过)
-    P->>P: 占位符插回原位 → SplitterRouter 切分<br/>(父子开启时两级切分, 子片偏移随切分产出 V10)
+    P->>P: 占位符插回原位 → SplitterRouter 切分<br/>(按页切分改由 PageSplitter 按页区间下刀, 吃同一份清洗后正文)<br/>(父子开启时两级切分且仅限定长策略, 子片偏移随切分产出 V10)
     P->>P: ChunkEmbedder 嵌入 (零 Key 全部 SKIPPED)
     P->>DB: chunk 写事实源
     P->>DB: t_kb_chunk_index_sync 先写 PENDING
