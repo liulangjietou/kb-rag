@@ -12,6 +12,7 @@ import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.MemoryKeyFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -24,8 +25,9 @@ import static org.mockito.Mockito.when;
 
 /**
  * Covers the memory key trust boundary: authentication tells "mistyped" apart from "withdrawn",
- * the principal carries the one bound library, and rotation swaps the digest while dropping the
- * stale rate limit bucket.
+ * the principal carries the one bound library, rotation swaps the digest while dropping the stale
+ * rate limit bucket, and the console entries refuse a library outside the caller's tenant while
+ * authentication stays free of that lookup.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -35,6 +37,7 @@ class MemoryAppKeyServiceTest {
     private static final String KEY_ID = "mkey_1";
     private static final String PLAINTEXT = "kb-mk-0123456789abcdef0123456789abcdef0123456789abcdef";
 
+    private MemoryLibraryGuard memoryLibraryGuard;
     private MemoryAppKeyMapper memoryAppKeyMapper;
     private MemoryKeyFactory memoryKeyFactory;
     private ApiRateLimiter apiRateLimiter;
@@ -43,12 +46,13 @@ class MemoryAppKeyServiceTest {
     @BeforeEach
     void setUp() {
         MybatisLambdaCache.register(MemoryAppKey.class);
+        memoryLibraryGuard = mock(MemoryLibraryGuard.class);
         memoryAppKeyMapper = mock(MemoryAppKeyMapper.class);
         memoryKeyFactory = mock(MemoryKeyFactory.class);
         apiRateLimiter = mock(ApiRateLimiter.class);
         KbProperties properties = new KbProperties();
-        service = new MemoryAppKeyService(memoryAppKeyMapper, memoryKeyFactory,
-                mock(BizIdGenerator.class), apiRateLimiter, properties, Runnable::run);
+        service = new MemoryAppKeyService(memoryLibraryGuard, memoryAppKeyMapper, memoryKeyFactory,
+                mock(BizIdGenerator.class), apiRateLimiter, properties);
     }
 
     @Test
@@ -116,6 +120,49 @@ class MemoryAppKeyServiceTest {
         assertThrows(BizException.class, () -> service.updateStatus(LIBRARY_ID, KEY_ID,
                 MemoryAppKeyStatus.DISABLED));
         verify(apiRateLimiter, never()).forget(anyString());
+    }
+
+    @Test
+    void shouldRefuseEveryConsoleEntryOfALibraryOutsideTheTenant() {
+        // The key table carries no tenant_id, so a statement on (library_id, key_id) alone sits
+        // outside the fence: without the library lookup a foreign tenant could disable, rotate or
+        // delete a key by knowing the two ids from an audit line or a screenshot.
+        when(memoryLibraryGuard.requireLibrary(LIBRARY_ID))
+                .thenThrow(BizException.notFound("记忆库不存在"));
+
+        // 404 rather than 403, same reasoning as the library entries: a 403 would confirm the
+        // library exists to a tenant that may not see it.
+        assertNotFound(() -> service.issue(LIBRARY_ID, "agent", 10));
+        assertNotFound(() -> service.listByLibrary(LIBRARY_ID));
+        assertNotFound(() -> service.updateStatus(LIBRARY_ID, KEY_ID, MemoryAppKeyStatus.DISABLED));
+        assertNotFound(() -> service.rotate(LIBRARY_ID, KEY_ID));
+        assertNotFound(() -> service.delete(LIBRARY_ID, KEY_ID));
+        assertNotFound(() -> service.deleteByLibrary(LIBRARY_ID));
+
+        verify(memoryAppKeyMapper, never()).selectOne(any());
+        verify(memoryAppKeyMapper, never()).insert(any(MemoryAppKey.class));
+        verify(memoryAppKeyMapper, never()).updateById(any(MemoryAppKey.class));
+        verify(memoryAppKeyMapper, never()).deleteById(any(Long.class));
+        verify(apiRateLimiter, never()).forget(anyString());
+    }
+
+    @Test
+    void shouldAuthenticateWithoutResolvingTheLibrary() {
+        // The open API thread has no console caller, so the fence is skipped there anyway; the
+        // isolation of that surface is the key's own binding to one library. Adding a library
+        // lookup here would cost a query per call and protect nothing.
+        when(memoryKeyFactory.looksLikeKey(PLAINTEXT)).thenReturn(true);
+        when(memoryKeyFactory.hash(PLAINTEXT)).thenReturn("digest");
+        when(memoryAppKeyMapper.selectOne(any())).thenReturn(keyRow());
+
+        service.authenticate(PLAINTEXT);
+
+        verify(memoryLibraryGuard, never()).requireLibrary(anyString());
+    }
+
+    private void assertNotFound(Executable call) {
+        BizException e = assertThrows(BizException.class, call);
+        assertEquals(ErrorCode.NOT_FOUND, e.getErrorCode());
     }
 
     private MemoryAppKey keyRow() {

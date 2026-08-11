@@ -48,6 +48,11 @@ import java.util.List;
  * comes from the URL path and every service call filters on it, so a rule or key of another
  * library answers 404.
  *
+ * <p>The permission codes answer "may this account touch memory libraries at all"; <em>which</em>
+ * libraries it may touch is the tenant fence on {@code t_kb_memory_library}, enforced service side
+ * through {@code MemoryLibraryGuard}. No ownership check is written here on purpose - one placed in
+ * a controller only guards the paths somebody remembered to guard.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
@@ -377,7 +382,6 @@ public class MemoryLibraryController {
     @GetMapping("/{libraryId}/keys")
     @RequiresPermission(PermissionCodes.MEMORY_READ)
     public Result<List<MemoryAppKeyResponse>> listKeys(@PathVariable String libraryId) {
-        memoryAdminService.requireLibrary(libraryId);
         return Result.success(memoryAppKeyService.listByLibrary(libraryId).stream()
                 .map(MemoryAppKeyResponse::from).toList());
     }
@@ -395,7 +399,6 @@ public class MemoryLibraryController {
             targetId = "#result.data.key.keyId")
     public Result<MemoryAppKeyIssuedResponse> issueKey(@PathVariable String libraryId,
                                                        @Valid @RequestBody MemoryAppKeyCreateRequest request) {
-        memoryAdminService.requireLibrary(libraryId);
         return Result.success(MemoryAppKeyIssuedResponse.from(
                 memoryAppKeyService.issue(libraryId, request.name(), request.qpsLimit())));
     }

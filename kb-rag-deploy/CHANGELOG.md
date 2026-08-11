@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **记忆库多租户隔离（M19 后修复，`docs/M19-CONTRACTS.md` §1.4）**：M19 的六张记忆库表漏了 M16 的租户层——`memory:read`/`memory:write` 只回答「这个账号能不能碰记忆库」、回答不了「能碰哪些」，多租户部署下任何租户持 `memory:read` 的账号能列出全部署的记忆库，持 `memory:write` 能改删其他租户的库、规则、记忆与 Memory Key。Flyway `V21__memory_library_tenant.sql` 给 `t_kb_memory_library` 补 `tenant_id`（存量行由列 DEFAULT 划入内置默认租户，**升级零迁移、单租户部署行为不变**）并入行级围栏；五张从属表不加列、经 `library_id` 归属租户；管理端带 `libraryId` 的 21 个入口一律先解析库（`MemoryLibraryGuard`），否则按 `rule_id`/`node_id`/`key_id` 直接寻址的入口不经过带租户列的那张表、围栏形同虚设；余下 2 个（库列表、建库）无 `libraryId`，由围栏本体直接覆盖。**开放端（`Bearer kb-mk-*`）行为零变化**：那条过滤器链上没有控制台主体，围栏整条跳过，隔离仍由 Key 绑库 + `user_id` 两层查询谓词完成。**唯一行为变更**：记忆库同名校验从全局唯一收缩为租户内唯一。`ARCHITECTURE.md` 升 v1.6、`FLOWS.md` 升 v1.5。
+
 ### Added
 
 - **MCP 协议层（M20，`docs/M20-CONTRACTS.md`）**：知识库应用与记忆库各暴露一个 MCP Streamable HTTP 端点（`POST /api/v1/knowledge/mcp`、`POST /api/v1/memory/mcp`，JSON-RPC 2.0 单请求单 JSON 响应，协议版本 2025-03-26 兼容 2024-11-05），任何 MCP 兼容客户端（Claude Desktop / Cursor / Cline 等）配一个 URL 加一把既有 Key（kb-sk-* / kb-mk-*）即可直接调用。鉴权/限流/审计与 REST 开放端点同一条过滤器链；工具集 knowledge_search / knowledge_chat（仅非流式）与 memory 六工具，参数与返回结构同 REST 孪生端点。**无新增容器、依赖、环境变量与配置键**，纯新增、存量端点与行为零变化。控制台新增「MCP 调试」一级菜单；调用方文档见主仓 `docs/MCP接入指南.md`。

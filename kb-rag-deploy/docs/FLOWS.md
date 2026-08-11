@@ -1,7 +1,7 @@
 # kb-rag 流程图文档
 
-> 版本：v1.4（基线与 `ARCHITECTURE.md` 相同 = M1-M20 及其后修复的状态；v1.3 基线为 M19，v1.2 基线为 M13）
-> 日期：2026-08-03
+> 版本：v1.5（基线与 `ARCHITECTURE.md` 相同 = M1-M20 及其后修复的状态，含记忆库租户隔离修复 V21；v1.4 基线为 M20，v1.3 基线为 M19，v1.2 基线为 M13）
+> 日期：2026-08-11
 > 作者：RichardFyoung / Claude
 >
 > 图使用 Mermaid 绘制（GitHub / 主流 IDE 原生渲染）。每张图标注对应的核心类与契约出处，与代码不一致时以代码为准并须在同一 PR 内修订本文档（项目铁律②）。
@@ -400,6 +400,9 @@ flowchart LR
 ## 14. 记忆库：写入抽取与检索（M19）
 
 对应：`MemoryKeyAuthFilter` / `MemoryApiService` / `MemoryExtractionService` / `EsMemoryStore`（契约 M19 §3/§5/§6）。
+
+> 下面两张图画的都是**开放端**（`Bearer kb-mk-*`）。那条链上没有控制台主体，租户围栏整条跳过，隔离由 Key 绑定的唯一记忆库 + `user_id` 两层查询谓词完成 —— 这是刻意的，拼租户条件反而会把 Key 自己的库过滤掉。
+> **管理端**（`/api/v1/memory-libraries`，控制台主体在线程上）多一层租户围栏：`t_kb_memory_library` 带 `tenant_id` 进 `FENCED_TABLES`，带 `libraryId` 的 21 个入口一律先经 `MemoryLibraryGuard` 解析库再碰从属表 —— 从属表不带租户列，跳过这一步等于没有围栏；库列表与建库两个入口无 `libraryId`，由围栏本体直接覆盖（契约 M19 §1.4，Flyway V21）。
 
 ### 14.1 AddMemory 写入与抽取时序
 

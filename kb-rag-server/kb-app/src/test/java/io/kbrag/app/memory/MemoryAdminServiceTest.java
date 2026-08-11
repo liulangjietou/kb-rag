@@ -1,6 +1,7 @@
 package io.kbrag.app.memory;
 
 import io.kbrag.app.support.MybatisLambdaCache;
+import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.MemoryFragmentRule;
 import io.kbrag.domain.entity.MemoryLibrary;
@@ -18,6 +19,7 @@ import io.kbrag.domain.port.MemoryStore;
 import io.kbrag.domain.service.BizIdGenerator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
@@ -38,7 +40,9 @@ import static org.mockito.Mockito.when;
 /**
  * Covers the console-side invariants of the memory library: the built in rule seeded at creation
  * and shielded from deletion, the 50-rule and 50-field Bailian ceilings, the per-type instruction
- * gate, and the leaf-first cascade that keeps a failed deletion retryable.
+ * gate, the leaf-first cascade that keeps a failed deletion retryable, and the tenant boundary -
+ * every entry resolves its library first, so a library the fence filters away ends the call before
+ * any subordinate statement runs.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -73,7 +77,10 @@ class MemoryAdminServiceTest {
         when(bizIdGenerator.memoryLibraryId()).thenReturn(LIBRARY_ID);
         when(bizIdGenerator.memoryFragmentRuleId()).thenReturn(RULE_ID);
         when(bizIdGenerator.memoryProfileRuleId()).thenReturn("mpr_1");
-        service = new MemoryAdminService(memoryLibraryMapper, memoryFragmentRuleMapper,
+        // The real guard over the mocked mapper, so a library the tenant fence filters away is
+        // simply a null row here - which is exactly what the fence does on a console thread.
+        service = new MemoryAdminService(new MemoryLibraryGuard(memoryLibraryMapper),
+                memoryLibraryMapper, memoryFragmentRuleMapper,
                 memoryProfileRuleMapper, memoryNodeMapper, memoryProfileMapper,
                 memoryAppKeyService, mock(MemoryProfileService.class), mock(MemoryApiService.class),
                 memoryStore, bizIdGenerator);
@@ -129,6 +136,7 @@ class MemoryAdminServiceTest {
     void shouldRefuseToDeleteTheBuiltinFragmentRule() {
         MemoryFragmentRule builtin = fragmentRuleRow();
         builtin.setBuiltin(1);
+        when(memoryLibraryMapper.selectOne(any())).thenReturn(libraryRow());
         when(memoryFragmentRuleMapper.selectOne(any())).thenReturn(builtin);
 
         assertThrows(BizException.class, () -> service.deleteFragmentRule(LIBRARY_ID, RULE_ID));
@@ -138,6 +146,7 @@ class MemoryAdminServiceTest {
 
     @Test
     void shouldCascadeTheRuleMemoriesWhenDeletingACustomRule() {
+        when(memoryLibraryMapper.selectOne(any())).thenReturn(libraryRow());
         when(memoryFragmentRuleMapper.selectOne(any())).thenReturn(fragmentRuleRow());
 
         service.deleteFragmentRule(LIBRARY_ID, RULE_ID);
@@ -193,10 +202,58 @@ class MemoryAdminServiceTest {
 
     @Test
     void shouldAnswerNotFoundForANodeOutsideTheLibrary() {
+        when(memoryLibraryMapper.selectOne(any())).thenReturn(libraryRow());
         when(memoryNodeMapper.selectOne(any())).thenReturn(null);
 
         assertThrows(BizException.class, () -> service.deleteNode(LIBRARY_ID, "mnode_missing"));
         verify(memoryStore, never()).delete(anyString());
+    }
+
+    @Test
+    void shouldRefuseEveryRuleAndNodeEntryOfALibraryOutsideTheTenant() {
+        // The tenant fence trims the library statement to the caller's tenant, so a library of
+        // another tenant comes back null. These five entries address a rule or a node directly and
+        // used to reach their subordinate statement without ever touching the library table - which
+        // is precisely how a foreign tenant could edit rules and delete memories it named by id.
+        when(memoryLibraryMapper.selectOne(any())).thenReturn(null);
+
+        // 404 rather than 403 is the contract: answering "forbidden" would confirm to another
+        // tenant that the library exists.
+        assertNotFound(() -> service.updateFragmentRule(LIBRARY_ID, RULE_ID, defaultRuleCommand("改名")));
+        assertNotFound(() -> service.deleteFragmentRule(LIBRARY_ID, RULE_ID));
+        assertNotFound(() -> service.updateProfileRule(LIBRARY_ID, "mpr_1",
+                new MemoryAdminService.ProfileRuleCommand("画像", null,
+                        List.of(new MemoryProfileField("称呼", null, null)))));
+        assertNotFound(() -> service.deleteProfileRule(LIBRARY_ID, "mpr_1"));
+        assertNotFound(() -> service.deleteNode(LIBRARY_ID, "mnode_1"));
+
+        // Nothing was read from or written to the subordinate tables: the call ends at the library.
+        verify(memoryFragmentRuleMapper, never()).selectOne(any());
+        verify(memoryProfileRuleMapper, never()).selectOne(any());
+        verify(memoryNodeMapper, never()).selectOne(any());
+        verify(memoryProfileMapper, never()).hardDeleteByRuleId(anyString());
+        verify(memoryStore, never()).delete(anyString());
+        verify(memoryStore, never()).deleteByRule(anyString(), anyString());
+    }
+
+    @Test
+    void shouldRefuseEveryReadEntryOfALibraryOutsideTheTenant() {
+        when(memoryLibraryMapper.selectOne(any())).thenReturn(null);
+
+        assertNotFound(() -> service.libraryDetail(LIBRARY_ID));
+        assertNotFound(() -> service.listFragmentRules(LIBRARY_ID));
+        assertNotFound(() -> service.listProfileRules(LIBRARY_ID));
+        assertNotFound(() -> service.pageEntities(LIBRARY_ID, null, 1, 20));
+        assertNotFound(() -> service.pageNodes(LIBRARY_ID, "u1", null, 1, 20));
+        assertNotFound(() -> service.profiles(LIBRARY_ID, "u1", null));
+        assertNotFound(() -> service.deleteLibrary(LIBRARY_ID));
+
+        verify(memoryLibraryMapper, never()).deleteById(any(Long.class));
+    }
+
+    private void assertNotFound(Executable call) {
+        BizException e = assertThrows(BizException.class, call);
+        assertEquals(ErrorCode.NOT_FOUND, e.getErrorCode());
     }
 
     private void stubZeroedStatistics() {

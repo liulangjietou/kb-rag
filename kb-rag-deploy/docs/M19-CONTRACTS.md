@@ -7,14 +7,15 @@
 
 - **本期做**：①记忆库/记忆片段规则/画像规则/记忆节点/用户画像/Memory Key 六实体的管理 API 与控制台页面；②开放 API 六端点（Add/Search/List/Update/Delete/GetUserProfile），语义与百炼 AddMemory 等一一对应；③LLM 抽取（片段 + 画像）、auto_update 记忆演化（PRO 版抽取对旧记忆窗口内合并去重）、过期策略（按规则天数，查询期过滤）；④检索：向量 + BM25 混合，可选意图识别 / 查询改写 / 重排三开关；⑤Memory Key 独立鉴权过滤器链（签发/禁用/轮换/删除，QPS 令牌桶）。
 - **本期不做**：短期记忆（原始对话轮次按 session 存取——调用方自维护会话上下文，属有意边界）；过期节点物理清扫任务（查询期过滤已保证不可见，列表页管理视角刻意可见）；记忆节点的引擎双写补偿任务（MySQL 是事实源，ES 副本随写随建，失败面见 §2.2）；多实例分布式限流（沿用 M4c 进程内令牌桶的单实例口径）。
-- **隔离红线（本期核心不变式）**：两层隔离**都是查询谓词而不是约定**——①一把 Memory Key 只绑定一个记忆库（应用级隔离），请求无需也无法指定 library_id；②库内按 `user_id`（记忆实体）隔离。每条语句都带 `library_id` 过滤、实体级语句再加 `user_id`；交集之外的节点对调用方等于不存在，所以越权一律 **404 而不是 403**。
-- **兼容红线**：纯新增——V20 六张新表 + 两个权限码、新 Controller/过滤器/端口，存量端点与行为零变化；`WebMvcConfig.PUBLIC_PATHS` 增 `/api/v1/memory/**`（该面鉴权由 MemoryKeyAuthFilter 承担，不走管理台拦截器）；无新增环境变量与配置键（嵌入/重排/对话模型全部复用既有 Provider 配置，零 Key 降级语义见 §3.4）。
+- **隔离红线（本期核心不变式）**：三层隔离**都是查询谓词而不是约定**——①**租户**（M16 行级围栏，见 §1.4，V21 补课）；②一把 Memory Key 只绑定一个记忆库（应用级隔离），请求无需也无法指定 library_id；③库内按 `user_id`（记忆实体）隔离。每条语句都带 `library_id` 过滤、实体级语句再加 `user_id`；交集之外的节点对调用方等于不存在，所以越权一律 **404 而不是 403**。
+  三层各管一段，不可互相替代：租户层管"哪个组织的库"（只对管理端成立），Key 绑定管"哪个应用的库"，`user_id` 管"哪个终端用户的记忆"。
+- **兼容红线**：纯新增——V20 六张新表 + 两个权限码、新 Controller/过滤器/端口，存量端点与行为零变化；V21 补租户列同样零迁移（存量库由列 DEFAULT 落入默认租户，单租户部署行为不变）；`WebMvcConfig.PUBLIC_PATHS` 增 `/api/v1/memory/**`（该面鉴权由 MemoryKeyAuthFilter 承担，不走管理台拦截器）；无新增环境变量与配置键（嵌入/重排/对话模型全部复用既有 Provider 配置，零 Key 降级语义见 §3.4）。
 
 ## 1. 数据模型（Flyway V20，6 张新表 + 权限种子）
 
 | 表 | 要点 |
 |---|---|
-| `t_kb_memory_library` | 记忆库（`ml*`）；同名校验在服务层（逻辑删除下唯一索引会挡住重建） |
+| `t_kb_memory_library` | 记忆库（`ml*`）；`tenant_id`（V21 补，见 §1.4）；同名校验在服务层（逻辑删除下唯一索引会挡住重建），随租户列落地后同名判定收缩为**租户内**唯一 —— 两个租户各建一个「客服记忆库」是正常业务，全局唯一会让后建的那个租户建不出来 |
 | `t_kb_memory_fragment_rule` | 记忆片段规则（`mfr*`）；`instruction_type`（DEFAULT 内置指令 / CUSTOM 自定义，CUSTOM 时 `instruction` 必填）、`auto_update`（1 时抽取合并更新旧记忆而非只追加）、`expire_days`（7/30/180，NULL 永不过期——存天数不存枚举串，写入时算 `expire_at`，语义在一列闭合）、`extract_version`（PRO 带旧记忆合并去重 / LITE 单次直抽）、`builtin`（建库预置「默认项目」规则，可编辑不可删除）；每库上限 50 条由服务层守 |
 | `t_kb_memory_profile_rule` | 画像规则（`mpr*`）；`fields` 整体存 JSON 数组 `[{name,description,initial_value}]`（上限 50 个）——字段只随规则整体编辑读取，没有按字段查询的入口，不拆子表 |
 | `t_kb_memory_node` | 记忆节点（`mn*`）；`source`（EXTRACTED / CUSTOM）、`meta_data`（调用方 JSON 原样存取）、`expire_at`（过期不再被检索）；唯一高频查询路径是（库，实体）翻页，索引 `idx_library_user` |
@@ -22,6 +23,20 @@
 | `t_kb_memory_app_key` | Memory Key（行 ID `mak*`，明文 `kb-mk-*`）；与 `t_kb_api_key` 同一决策：只存 SHA-256 摘要 + 展示前缀，明文仅签发响应回传一次；`qps_limit` 令牌桶上限、`status` 禁用即刻生效、`last_used_at` 异步更新 |
 
 权限种子：`memory:read`（看库/规则/记忆/调试检索）与 `memory:write`（建删库、改规则、管 Key）插入 `t_kb_permission`（module=MEMORY），并授予 `role_superadmin000` 与 `role_kbadmin00000`（沿 V16 授权口径）。
+
+### 1.4 租户隔离（Flyway V21，M19 后修复）
+
+**缺陷**：V20 建六张表时漏了 M16 的租户层。权限码只回答"这个账号能不能碰记忆库"，回答不了"能碰哪些"，于是多租户部署下任何租户持 `memory:read` 的账号能列出全部署的记忆库，持 `memory:write` 能改删其他租户的库、规则、记忆与 Memory Key。开放端不受影响（Key 绑库天然隔离），受影响的是管理端 23 个端点。
+
+**补法与 M16 §1.1 取舍①同构**：
+
+1. **只有 `t_kb_memory_library` 加 `tenant_id`**（VARCHAR(64) NOT NULL DEFAULT `'tnt_default0000000'` + `idx_tenant`，存量行由列 DEFAULT 划入默认租户、升级零迁移）。它是 memory 域的根聚合表，五张从属表（片段规则 / 画像规则 / 节点 / 画像 / Key）经 `library_id` 归属租户 —— 六张表全加列不叫隔离叫散弹枪，从属查询永远先过根表的租户行过滤。
+2. **`KbTenantLineHandler.FENCED_TABLES` 增 `t_kb_memory_library`**，根表由 MyBatis-Plus 行级围栏自动拼租户条件（列表、详情、同名校验、建库 INSERT 的 tenant_id 注入全部随之生效，与 `t_kb_knowledge_base` 完全同构）。
+3. **`MemoryLibraryGuard`：管理端带 `libraryId` 的 21 个入口先解析库**。这一条才是关键，单加列 + 进围栏是不够的：从属表不带 `tenant_id`，按 `rule_id` / `node_id` / `key_id` 直接寻址的入口（改删片段规则、改删画像规则、删节点、Key 的启停/轮换/删除）压根不查根表，围栏对它们形同虚设。守卫是一个独立 bean 而不是 `MemoryAdminService` 的方法 —— `MemoryAppKeyService` 需要同一个检查且是前者的依赖，反向边就是循环；同 `KbScopeGuard` 的形状与理由。检查放服务层不放 Controller：Controller 里的守卫只能护住有人记得加的那几条路径。
+   剩下 2 个入口（库列表 `GET /`、建库 `POST /`）没有 `libraryId`，由围栏本体直接覆盖 —— 列表靠 SELECT 拼租户条件，建库靠 `TenantLineInnerInterceptor` 往 INSERT 补 `tenant_id`（服务层从不 `setTenantId`，与 `KnowledgeBaseService` 同构）。**这两条是全域唯一没有第二道防线的路径**：给 `MemoryLibraryMapper` 写一条绕开围栏的自定义 SQL、或挂 `@InterceptorIgnore`，它们的隔离就直接没了。
+4. **开放端语义原样保留**：`MemoryKeyAuthFilter` 那条链上没有控制台主体，`ignoreTable` 整条跳过。这不是顺带的，是必须的 —— 那条线程上拼租户条件会把 Key 自己的库过滤掉，接口直接全灭。`MemoryAppKeyService.authenticate` 因此刻意不过守卫。
+
+**受影响的语义**：记忆库同名校验从全局唯一收缩为租户内唯一（见 §1 表格）。其余行为零变化。
 
 ## 2. 端口与实现（六边形）
 
@@ -63,6 +78,7 @@
 
 ### 3.5 管理 API（`MemoryLibraryController` → `MemoryAdminService`/`MemoryProfileService`/`MemoryAppKeyService`，23 端点）
 - 基路径 `/api/v1/memory-libraries`，全部 `@RequiresPermission(MEMORY_READ/WRITE)`，写操作 `@AuditedOperation(module=MEMORY)`。
+- **带 `libraryId` 的 21 个入口一律先经 `MemoryLibraryGuard.requireLibrary(libraryId)`**（§1.4），路径上的 `libraryId` 是唯一的归属事实源；库不在本租户 → 404，调用在触到任何从属语句之前就结束。另 2 个（库列表、建库）无 `libraryId`，由行级围栏直接覆盖。
 - 库 CRUD（5）：建库自动预置内置「默认项目」片段规则；删库级联清 Key/规则/节点/画像 + `deleteByLibrary` 清 ES（刻意非事务，与 add 同理）。
 - 片段规则（4）/ 画像规则（4）：每库各限 50 条；builtin 规则可编辑不可删除；删片段规则级联删其节点与 ES 副本；画像行物理删除（软删行会占住规则×实体唯一键）。
 - 记忆数据（4）：`GET /{id}/entities`（实体分页）、`GET /{id}/nodes`（节点分页，含过期）、`DELETE /{id}/nodes/{nodeId}`、`GET /{id}/profiles`。
@@ -90,7 +106,8 @@
 
 - `MemoryAdminServiceTest` / `MemoryApiServiceTest`（kb-app）：库/规则 CRUD 上限与级联、add 双入口与 auto_update 演化、search 意图 veto/降级/hydrate 跳过已删行、越权 404。
 - domain 纯函数测试：`MemoryExtractionParser`（UPDATE 目标窗口校验、非法输出跳过）、`MemoryKeyFactory`（前缀/摘要/展示形态）、`MemoryPromptAssembler`。
-- 全量 `mvn -B -ntp verify` 1118 测试通过；web `npm run lint` 新增代码零告警。
+- 租户隔离（V21 随修补入，§1.4）：`MemoryAdminServiceTest` 两例覆盖库不在本租户时读写入口全数 404 且**从属表一条语句都不发**（`selectOne` 全部 `never()`）；`MemoryAppKeyServiceTest` 两例覆盖 Key 五个管理入口同样被拒、且 `authenticate` 不经守卫（开放端语义不被改坏）；`KbTenantLineHandlerTest` 钉住 `t_kb_memory_library` 进围栏、五张从属表不进、无控制台主体时整条跳过。
+- 全量 `mvn -B -ntp verify` 1134 测试通过；web `npm run lint` 新增代码零告警。
 
 ## 8. 验收
 
@@ -100,3 +117,4 @@
 4. 零 Key 部署：add 直写（custom_content）成功、search 走 BM25 单路仍有结果；配 Key 后新写入带向量、混合检索生效。
 5. Key 禁用后调用 → 401 `API_KEY_DISABLED`；轮换后旧密钥立即 401；把 `qps_limit` 设 1 连打 → 429 `RATE_LIMITED`。
 6. 无 `memory:read` 的角色登录 → 菜单不可见、直贴 `/memory` 原地 403；`memory:write` 缺失时列表页只读。
+7. 租户隔离（§1.4）：建租户 B 的管理员账号（持 `memory:read`+`memory:write`）→ 登录后记忆库列表看不到租户 A 的库；拿租户 A 的 `libraryId` 直贴详情页 404；带上 A 的 `ruleId`/`nodeId`/`memoryKeyId` 直调改删接口同样 404。升级既有单租户部署：全部存量库落入默认租户，控制台行为与升级前无差。开放端回归：A 的 Memory Key 调 add/search 照常成功（那条链不拼租户条件）。
