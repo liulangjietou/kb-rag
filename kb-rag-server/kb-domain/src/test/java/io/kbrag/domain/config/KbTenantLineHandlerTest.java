@@ -29,6 +29,7 @@ class KbTenantLineHandlerTest {
     private static final String ROLES_TABLE = "t_kb_role";
     private static final String BASES_TABLE = "t_kb_knowledge_base";
     private static final String MEMORY_LIBRARIES_TABLE = "t_kb_memory_library";
+    private static final String WEB_CREDENTIALS_TABLE = "t_kb_web_credential";
 
     private final KbTenantLineHandler handler = new KbTenantLineHandler();
 
@@ -46,6 +47,10 @@ class KbTenantLineHandlerTest {
         assertTrue(handler.ignoreTable(BASES_TABLE));
         assertTrue(handler.ignoreTable(USERS_TABLE));
         assertTrue(handler.ignoreTable(MEMORY_LIBRARIES_TABLE));
+        // Site credentials are read by the nightly web sync, which is one of those threads. This
+        // assertion is the reason WebCredentialService#resolveFor takes a tenant argument: from
+        // here on the fence contributes nothing, and a lookup by host alone would cross tenants.
+        assertTrue(handler.ignoreTable(WEB_CREDENTIALS_TABLE));
     }
 
     @Test
@@ -73,6 +78,9 @@ class KbTenantLineHandlerTest {
         assertFalse(handler.ignoreTable(USERS_TABLE));
         assertFalse(handler.ignoreTable(ROLES_TABLE));
         assertFalse(handler.ignoreTable(MEMORY_LIBRARIES_TABLE));
+        // The whole isolation of the credential console screen: list, create, edit and delete never
+        // name a tenant, so every one of their statements depends on this returning false.
+        assertFalse(handler.ignoreTable(WEB_CREDENTIALS_TABLE));
         assertEquals(TENANT_ID, ((StringValue) handler.getTenantId()).getValue());
     }
 
@@ -86,6 +94,9 @@ class KbTenantLineHandlerTest {
         assertTrue(handler.ignoreTable(ROLES_TABLE));
         assertFalse(handler.ignoreTable(BASES_TABLE));
         assertFalse(handler.ignoreTable(MEMORY_LIBRARIES_TABLE));
+        // Credentials are daily work, not tenant administration: even the platform operator only
+        // ever sees the ones of their own tenant.
+        assertFalse(handler.ignoreTable(WEB_CREDENTIALS_TABLE));
     }
 
     @Test

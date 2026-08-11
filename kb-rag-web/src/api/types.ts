@@ -2159,8 +2159,8 @@ export interface UpdateWebSourceRequest {
 export type WebAuthType = 'BASIC' | 'HEADER';
 
 /**
- * GET /api/v1/web-credentials 响应行（M18）：按 host 挂的站点凭据。响应里没有 secret 字段——
- * 不是省略，是接口层面就不存在，密码只进不出。
+ * GET /api/v1/web-credentials 响应行（M18）：按 host 挂的站点凭据，V22 起归属租户。响应里没有
+ * secret 字段——不是省略，是接口层面就不存在，密码只进不出；租户同理不回传，列表本身已按租户裁剪。
  */
 export interface WebCredentialEntry {
   credential_id: string;

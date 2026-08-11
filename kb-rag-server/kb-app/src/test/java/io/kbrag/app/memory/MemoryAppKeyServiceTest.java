@@ -52,7 +52,7 @@ class MemoryAppKeyServiceTest {
         apiRateLimiter = mock(ApiRateLimiter.class);
         KbProperties properties = new KbProperties();
         service = new MemoryAppKeyService(memoryLibraryGuard, memoryAppKeyMapper, memoryKeyFactory,
-                mock(BizIdGenerator.class), apiRateLimiter, properties);
+                mock(BizIdGenerator.class), apiRateLimiter, properties, Runnable::run);
     }
 
     @Test

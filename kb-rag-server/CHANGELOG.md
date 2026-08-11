@@ -8,6 +8,19 @@
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
 
+### 安全修复（M18 后修复：站点凭据多租户隔离）
+
+- `[schema]` Flyway `V22__web_credential_tenant.sql`：`t_kb_web_credential` 增 `tenant_id`（NOT NULL DEFAULT `'tnt_default0000000'`，存量行由列 DEFAULT 划入默认租户、升级零迁移），`uk_host(host)` 收缩为 `uk_tenant_host(tenant_id, host)`。**修复的缺陷有两面**：管理面任何租户持 `system:config` 的账号能列出、改写、删除、停用其他租户为某 host 配的登录凭据（secret 不回传，但改删停用是实打实的破坏面）；抓取面凭据按 host 全局唯一、抓取也按 host 查找，B 租户只要给自己的 WebSource 登记一个同 host 的 URL，夜里的同步就会把 A 租户的密码发到那个请求上——不需要任何额外权限，也不留越权痕迹
+- 不额外建 `idx_tenant`：`uk_tenant_host` 的最左前缀就是 `tenant_id`，列表页与抓取查询都走它（V17 的几张根表两个索引都建了，那是冗余，本次不照抄）
+- `KbTenantLineHandler.FENCED_TABLES` 增 `t_kb_web_credential`：列表、同 host 重复校验、按 `credential_id` 改删的 SELECT、建凭据 INSERT 的 `tenant_id` 注入随行级围栏自动生效，服务层四个管理方法一个字都不用提租户
+- **本次与 V21 的关键不同：入围栏只解决了一半**。抓取侧 `WebSourceService#syncEnabledSources` 跑在 `@Scheduled` 线程上，那条线程没有控制台主体，`ignoreTable` 一律返回 true、围栏整条跳过。因此 `WebCredentialService#resolveFor` 改签名为 `resolveFor(tenantId, host)`，租户做成必填入参并显式进查询条件；给不出租户时直接返回"无凭据"、**一条 SQL 都不发**，绝不退化成按 host 查。只加列不改这个签名，抓取会继续跨租户命中凭据，且从"共享一份全局凭据"这个明面上的错变成"看起来已隔离、实际仍串号"的静默错误
+- 租户来源：`WebSource.kb_id` 反查 `t_kb_knowledge_base.tenant_id`（`KnowledgeBaseService` 新增不抛异常的 `find`，`require` 复用它）。控制台线程上这次反查本身也过围栏，跨租户的库读作"不存在"；定时线程上无围栏、可解析全部租户，正是同步需要的语义。知识库删除不级联删网页登记，孤儿登记解析不出租户 → 无凭据匿名抓取 → 随后 upload 失败记 FAILED，与修复前孤儿行的结局一致
+- `WebSourceService#sync` 签名同步改为 `sync(source, tenantId)`，三个调用方各自给出租户：`register` 复用刚校验过的库对象（零额外查询）、`syncNow` 与批量同步经 `kb_id` 反查
+- **行为变更两处**：① 同 host 凭据从全局唯一收缩为租户内唯一（两个租户各在同一 wiki 上放一个只读账号是正常业务）；② "一次认证失败就停掉该站点本轮抓取"（防 Confluence CAPTCHA 锁号）的去重键从 `host` 变为 `(租户, host)` —— 锁的是账号，两个租户在同一 host 上是两个账号，按 host 记会让一家的过期密码白白掐掉其他租户当晚的抓取
+- 回归覆盖 M12 静态抓取、M17 `render_js` 渲染、M18 登录墙检测与同 host 401 跳过三段链路，行为除上述两处外不变
+- 单测：`WebCredentialServiceTest` 钉住抓取查询必须带租户谓词（捕获 wrapper 断言 `tenant_id` 进 SQL 且绑定值正确）、无租户时一条语句都不发、围栏过滤后管理端改删一律 404 且不落写操作；`WebSourceServiceTest` 钉住同 host 两租户各取各的凭据、孤儿登记无凭据抓取、认证失败围栏按租户而非按 host 生效；`KbTenantLineHandlerTest` 钉住新表在有主体时入栏、无主体时跳过（后者正是抓取侧必须显式带租户的原因）
+- **测试边界（诚实说明）**：管理端的跨租户拒绝由 MyBatis-Plus 拦截器完成，项目无集成测试基建（无 `@SpringBootTest`/Testcontainers），单测无法真正发出带围栏的 SQL。因此管理端能钉住的是「围栏名单包含本表」+「服务层没有绕过围栏的第二条路径」；抓取端是纯服务层代码，被直接钉死
+
 ### 修复（M14 切分策略装配缺陷）
 
 - **separator / heading / page 三个切分策略此前保存不进去**（`docs/M14-CONTRACTS.md` §4）：`SplitStrategy` 枚举只登记了 `fixed_length`/`llm_semantic`，而 `KnowledgeBaseService#requireSplitStrategyUsable` 以该枚举为配置写入的唯一白名单，于是 M14 交付的三个策略在控制台一保存就报 `unknown split strategy: page`——实现类注册着、前端表单也齐着，整批是死代码。枚举补齐五项后策略方可选用；新增单测钉住"每个可保存的策略码都必须路由到同名实现"，避免再出现配置得上、跑的是定长。

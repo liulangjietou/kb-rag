@@ -7,13 +7,14 @@ import type {
 } from './types';
 
 /**
- * GET /api/v1/web-credentials（M18）：全部站点凭据，新建在前。任何响应都不含 secret。
+ * GET /api/v1/web-credentials（M18）：本租户的站点凭据，新建在前。任何响应都不含 secret。
+ * V22 起只回本租户的行——别的租户为同一 host 配的凭据既看不到也改不了。
  */
 export function listWebCredentials(): Promise<WebCredentialEntry[]> {
   return apiGet<WebCredentialEntry[]>('/web-credentials');
 }
 
-/** POST /api/v1/web-credentials（M18）：为一个 host 建凭据，host 全局唯一。 */
+/** POST /api/v1/web-credentials（M18）：为一个 host 建凭据，host 在本租户内唯一（V22 起）。 */
 export function createWebCredential(payload: CreateWebCredentialRequest): Promise<WebCredentialEntry> {
   return apiPost<WebCredentialEntry>('/web-credentials', payload);
 }
