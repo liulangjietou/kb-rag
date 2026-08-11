@@ -181,6 +181,10 @@ public class HttpDocumentParserClient implements DocumentParserClient {
             pages.add(ParsedDocument.ParsedPage.builder()
                     .pageNo(page.path(FIELD_PAGE_NO).asInt())
                     .text(page.path(FIELD_TEXT).asText())
+                    // The page splitting strategy is cut from this, not from the plain text: dropping it
+                    // here would leave every page markdown null, silently fall the strategy back to the
+                    // text and take the image placeholders with it.
+                    .markdown(page.path(FIELD_MARKDOWN).asText(null))
                     .scanned(page.path(FIELD_SCANNED).asBoolean(false))
                     .ocrSource(page.path(FIELD_OCR_SOURCE).asText(null))
                     .build());

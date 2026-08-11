@@ -11,7 +11,6 @@ import io.kbrag.domain.model.MetadataRule;
 import io.kbrag.domain.model.ParentChildParams;
 import io.kbrag.domain.service.FixedLengthTextSplitter;
 import io.kbrag.domain.service.HeadingTextSplitter;
-import io.kbrag.domain.service.LlmSemanticTextSplitter;
 import io.kbrag.domain.service.SeparatorTextSplitter;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
@@ -215,20 +214,25 @@ public record UpdateIndexConfigRequest(
      * Rejects the split strategy combinations the annotations cannot express, the M14 contract section 4:
      * the only fast-fail gate for the new strategies, so every splitter can trust the parameters it reads.
      *
-     * <p>A two level base is confined to {@code fixed_length} and {@code llm_semantic}: the three new
-     * strategies cut on a boundary the parent child pass cannot honour without losing that boundary, so
-     * the combination is refused rather than silently degraded. The separator and heading parameters are
-     * range checked here so a splitter never meets a length or a depth it would have to clamp.
+     * <p><b>A two level base is confined to {@code fixed_length}.</b> The two level splitter composes
+     * that strategy with itself, which is what guarantees a child boundary is one the single level split
+     * would also have chosen. It is not parameterised by the configured strategy, so every other code
+     * would have been recorded in the split fingerprint while fixed length actually ran - a
+     * configuration that reads as one thing and indexes as another. {@code llm_semantic} was accepted
+     * here until that divergence was found; the other strategies cut on a boundary the parent pass
+     * cannot honour anyway. The combination is refused rather than silently degraded.
+     *
+     * <p>The separator and heading parameters are range checked here so a splitter never meets a length
+     * or a depth it would have to clamp.
      *
      * @param config configuration being written
      */
     private void validateSplitStrategy(KbIndexConfig config) {
         String strategy = config.getSplitStrategy();
         if (config.parentChildOrDisabled().isEnabled()
-                && !FixedLengthTextSplitter.STRATEGY_CODE.equals(strategy)
-                && !LlmSemanticTextSplitter.STRATEGY_CODE.equals(strategy)) {
-            throw BizException.invalidParam("parent_child splitting supports only fixed_length and "
-                    + "llm_semantic strategies, not " + strategy);
+                && !FixedLengthTextSplitter.STRATEGY_CODE.equals(strategy)) {
+            throw BizException.invalidParam("parent_child splitting supports only the fixed_length "
+                    + "strategy, not " + strategy);
         }
         if (SeparatorTextSplitter.STRATEGY_CODE.equals(strategy)) {
             validateSeparator(config);

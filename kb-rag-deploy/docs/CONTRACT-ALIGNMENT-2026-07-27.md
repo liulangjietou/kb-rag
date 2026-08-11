@@ -94,6 +94,13 @@ Author: owlzhangfq@gmail.com
 界面按枚举给两个选项（不做自由输入——非法值会被 `requireSplitStrategyUsable` 拦成
 INVALID_PARAM），未配置对话模型时 `llm_semantic` 禁选。
 
+> **2026-08-11 后记（本报告为 07-27 快照，正文不改，此处标注现状）**：本节两处结论已被推翻。
+> ①枚举现有五个成员——M14 交付了 separator/heading/page 三个策略却漏登记进枚举，于是本节描述的
+> `requireSplitStrategyUsable` 恰好成了拦路的那道闸：实现类与前端表单都在，配置就是保存不进去，
+> 三个策略整整一批是死代码；②`parent_child` 仍不属于该枚举，但**并不正交**——两级切分是定长策略与
+> 自身组合，不按 `split_strategy` 取策略，故开启父子分片时该字段仅允许 `fixed_length`。
+> 详见 `M14-CONTRACTS.md` §4（v1.1 修订条）与需求文档 v1.19 变更记录。
+
 ### 4.2 生成模型 / 门禁阈值无编辑入口 → 已加
 
 `chat_model` 为选填输入，留空即跟随服务端默认（经 `ChatProviderFactory` 按名解析）；`gate` 为

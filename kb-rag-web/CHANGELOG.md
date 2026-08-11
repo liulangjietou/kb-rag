@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+**M14 · 切分策略装配缺陷（前端侧）**（`docs/M14-CONTRACTS.md` §4）
+- 索引配置抽屉的切分策略下拉此前五项齐全但后三项（分隔符/标题层级/按页）保存必失败——服务端枚举漏登记，选中即报 `unknown split strategy`。服务端补齐后本页无需改动即可用，此处仅记录该表单从"摆设"恢复为可用。
+- 父子分片开启时下拉收敛为仅「定长切分」可选，其余置灰并给出 Alert 说明（`IndexConfigDrawer.tsx`）：服务端已把该组合收窄为仅 `fixed_length`，此前前端把两者当作正交、不做任何联动，用户填完整个表单才会在保存时撞上一句英文 INVALID_PARAM。`statusMeta.ts` 新增 `PARENT_CHILD_REQUIRES_FIXED_LENGTH` 文案，并纠正 `types.ts` / `statusMeta.ts` 里"父子分片与切分策略正交"的注释——两级切分实为定长策略与自身组合，从不按所选策略切父片。
+- 「按页切分」说明文案错别字「兑底」→「兜底」。
+
 ### Added
 
 **M20 · MCP 调试页面**（`docs/M20-CONTRACTS.md`）

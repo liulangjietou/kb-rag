@@ -8,7 +8,12 @@
 
 ### Fixed
 
+
 - **网页导入站点凭据的多租户隔离（M18 后修复，`docs/M16-CONTRACTS.md` §1.3/§1.3.1）**：M18 的 `t_kb_web_credential` 漏了 M16 的租户层，缺陷有两面——管理面任何租户持 `system:config` 的账号能改删停用其他租户为某 host 配的登录凭据（secret 不回传，改删停用仍是实打实的破坏面）；抓取面凭据按 host 全局唯一、抓取也按 host 查找，另一租户只要给自己的网页源登记一个同 host 的 URL，夜里的同步就会把别家的密码发到那个请求上。Flyway `V22__web_credential_tenant.sql` 补 `tenant_id`（存量行由列 DEFAULT 划入内置默认租户，**升级零迁移、单租户部署行为不变**）并把 `uk_host` 收缩为 `uk_tenant_host`。**与 V21 的关键不同：入围栏只解决管理面**——抓取跑在 `@Scheduled` 线程上，那条链没有控制台主体、围栏整条跳过，因此 `WebCredentialService#resolveFor(tenantId, host)` 把租户做成必填入参并显式进查询，给不出租户就返回"无凭据"、一条 SQL 都不发；租户由网页源的 `kb_id` 反查知识库得到。**行为变更两处**：同 host 凭据由全局唯一收缩为租户内唯一；"一次认证失败停掉该站点本轮抓取"（防 Confluence 锁号）的去重键由 `host` 变为 `(租户, host)`。**无新增环境变量与配置键**，M12 静态抓取 / M17 JS 渲染 / M18 登录墙检测三段链路行为不变。`ARCHITECTURE.md` 升 v1.7、OpenAPI 凭据端点描述同步订正。
+
+
+- **M14 切分策略装配缺陷的文档回补**（`docs/M14-CONTRACTS.md` §4 v1.1 修订条）：三处"文档写了、代码没那么跑"的偏差按铁律在同 PR 内改文档。①M14 交付的 separator/heading/page 三策略因漏登记进 `SplitStrategy` 枚举，在配置写入路径被拒、整批是死代码；②`page` 策略契约初版写的"从 parsed.json 取分页文本"会绕过清洗四步与图片占位符替换（PII 未脱敏入索引、分片 `image_urls` 恒空），改为消费逐页清洗后的正文 + 页区间；③父子分片可组合策略由 fixed_length/llm_semantic 收窄为仅 fixed_length，与 `M4b-CONTRACTS.md` §4 统一。同步修订：需求文档升 v1.19（§4.3 父子分片"正交"结论按实现纠正）、`M3-CONTRACTS.md`（parse 响应与预览产物形状、§7.2 管线次序补逐页清洗）、`M1-CONTRACTS.md`、`ARCHITECTURE.md` 升 v1.6、`FLOWS.md` 升 v1.5、`CONTRACT-ALIGNMENT-2026-07-27.md` 加现状后记。
+- OpenAPI 升版：`kb-server.yaml` → `0.21.0-m14-fix`（`DocumentPreview` 增 `page_ranges`、`ParsePreviewPage` 增 `markdown`、新增 `ParsePreviewPageRange` schema、`SplitStrategy` 描述改父子组合口径）；`kb-parser.yaml` → `0.14.0-m14`（`ParsePage` 增 `markdown` 切片字段）。**均为纯新增字段**，存量调用方与既有产物不受影响（缺字段时消费方回退旧行为）。
 - **记忆库多租户隔离（M19 后修复，`docs/M19-CONTRACTS.md` §1.4）**：M19 的六张记忆库表漏了 M16 的租户层——`memory:read`/`memory:write` 只回答「这个账号能不能碰记忆库」、回答不了「能碰哪些」，多租户部署下任何租户持 `memory:read` 的账号能列出全部署的记忆库，持 `memory:write` 能改删其他租户的库、规则、记忆与 Memory Key。Flyway `V21__memory_library_tenant.sql` 给 `t_kb_memory_library` 补 `tenant_id`（存量行由列 DEFAULT 划入内置默认租户，**升级零迁移、单租户部署行为不变**）并入行级围栏；五张从属表不加列、经 `library_id` 归属租户；管理端带 `libraryId` 的 21 个入口一律先解析库（`MemoryLibraryGuard`），否则按 `rule_id`/`node_id`/`key_id` 直接寻址的入口不经过带租户列的那张表、围栏形同虚设；余下 2 个（库列表、建库）无 `libraryId`，由围栏本体直接覆盖。**开放端（`Bearer kb-mk-*`）行为零变化**：那条过滤器链上没有控制台主体，围栏整条跳过，隔离仍由 Key 绑库 + `user_id` 两层查询谓词完成。**唯一行为变更**：记忆库同名校验从全局唯一收缩为租户内唯一。`ARCHITECTURE.md` 升 v1.6、`FLOWS.md` 升 v1.5。
 
 ### Added

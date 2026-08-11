@@ -226,7 +226,14 @@ class DocxParser(BaseParser):
             )
 
             markdown = "\n\n".join(part for part in markdown_parts if part)
-            pages = [PageContent(page_no=_SINGLE_PAGE_NO, text="\n".join(plain_text_parts), scanned=False)]
+            pages = [
+                PageContent(
+                    page_no=_SINGLE_PAGE_NO,
+                    text="\n".join(plain_text_parts),
+                    markdown=markdown,
+                    scanned=False,
+                )
+            ]
             return ParseData(
                 markdown=markdown, pages=pages, images=collector.images, warnings=collector.warnings
             )

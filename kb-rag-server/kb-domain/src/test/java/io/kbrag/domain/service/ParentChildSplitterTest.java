@@ -13,6 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Covers the two level splitter: that both levels come from the same strategy, that children stay
@@ -21,6 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @author owlzhangfq@gmail.com
  */
 class ParentChildSplitterTest {
+
+    /** Source text of the offset consistency cases, short enough to fit one parent and one child. */
+    private static final String SOURCE = "原始文本原始文本";
 
     private final ParentChildSplitter splitter =
             new ParentChildSplitter(new FixedLengthTextSplitter(new SimpleTokenEstimator()));
@@ -114,12 +121,13 @@ class ParentChildSplitterTest {
 
     @Test
     void shouldDropOffsetsWhenTheParentSliceDiffersFromTheChildText() {
-        // A strategy that rewrites its input - the LLM semantic one - reports a position that no longer
-        // describes the text it returned. Storing it would cut the wrong sentence out of every answer.
+        // The consistency gate against a regression in the offsets the fixed length strategy reports:
+        // an offset that no longer describes the text returned would cut the wrong sentence out of every
+        // answer, which is worse than returning the whole parent.
         ParentChildSplitter rewriting = new ParentChildSplitter(
-                fakeSplitter(new SplitChunk(0, "改写后的文本", 6, null, 0, 6)));
+                fakeSplitter(SOURCE, new SplitChunk(0, "改写后的文本", 6, null, 0, 6)));
 
-        SplitChunk child = rewriting.split("原始文本原始文本", params(true, 200, 60, 10))
+        SplitChunk child = rewriting.split(SOURCE, params(true, 200, 60, 10))
                 .get(0).getChildren().get(0);
 
         assertNull(child.getStartOffset());
@@ -129,9 +137,9 @@ class ParentChildSplitterTest {
     @Test
     void shouldDropOffsetsThatReachOutsideTheParentText() {
         ParentChildSplitter overreaching = new ParentChildSplitter(
-                fakeSplitter(new SplitChunk(0, "原始文本原始文本", 8, null, 0, 99)));
+                fakeSplitter(SOURCE, new SplitChunk(0, SOURCE, 8, null, 0, 99)));
 
-        SplitChunk child = overreaching.split("原始文本原始文本", params(true, 200, 60, 10))
+        SplitChunk child = overreaching.split(SOURCE, params(true, 200, 60, 10))
                 .get(0).getChildren().get(0);
 
         assertNull(child.getStartOffset());
@@ -139,31 +147,19 @@ class ParentChildSplitterTest {
     }
 
     /**
-     * A strategy whose parent pass returns the input untouched and whose child pass returns exactly the
+     * A stub whose parent pass returns the input untouched and whose child pass returns exactly the
      * chunk the test wants to describe, offsets included.
      *
+     * @param text  text both passes receive
      * @param child chunk returned by the child pass
      * @return splitter stub
      */
-    private TextSplitter fakeSplitter(SplitChunk child) {
-        return new TextSplitter() {
-
-            private boolean parentPassDone;
-
-            @Override
-            public String strategy() {
-                return "fake";
-            }
-
-            @Override
-            public List<SplitChunk> split(String text, SplitParams params) {
-                if (!parentPassDone) {
-                    parentPassDone = true;
-                    return List.of(new SplitChunk(0, text, text.length(), null, 0, text.length()));
-                }
-                return List.of(child);
-            }
-        };
+    private FixedLengthTextSplitter fakeSplitter(String text, SplitChunk child) {
+        FixedLengthTextSplitter stub = mock(FixedLengthTextSplitter.class);
+        when(stub.split(anyString(), any(SplitParams.class))).thenReturn(
+                List.of(new SplitChunk(0, text, text.length(), null, 0, text.length())),
+                List.of(child));
+        return stub;
     }
 
     private ParentChildParams params(boolean enabled, int parentMax, int childMax, int childOverlap) {

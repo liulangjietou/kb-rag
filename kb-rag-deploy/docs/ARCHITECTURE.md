@@ -1,5 +1,6 @@
 # kb-rag 架构文档
 
+
 > 版本：v1.7（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14 + 企业化 M15/M16 + 网页抓取增强 M17/M18 + 记忆库 M19 + MCP 协议层 M20 + 记忆库租户隔离修复 V21 + 站点凭据租户隔离修复 V22，2026-08-11；v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
 > 日期：2026-08-11
 > 作者：RichardFyoung / Claude
@@ -174,7 +175,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 - **上传事务只持久化事实**（MinIO 原件 + document/version 行），管线经 `TransactionSynchronization.afterCommit` 提交异步执行——异步 worker 用独立连接读版本行，事务内触发会产生提交竞态（M1 联调发现的真实缺陷，全仓仅 `DocumentService` 与 `EngineChunkCleaner` 两处使用该手法）。
 - `IndexPipelineService` 是管线主编排，五个 `@Async(INDEX_EXECUTOR)` 入口：`submit`（新上传）/ `submit(versionId, reuse)`（指纹复用）/ `submitRestore`（归档版重建）/ `submitRebuild`（配置重建）/ `submitConfirm`（预览确认后续跑）。
-- 阶段：解析（parser HTTP）→ 清洗/脱敏（`DocumentCleaner`/`TextDesensitizer`）→ 图片资产与 VLM 文本代理插回（`ImageAssetService`/`ImagePlaceholderResolver`，单图失败不失败整篇）→ 切分（`SplitterRouter` 策略路由，未知 code 回落定长；父子两级切分 `ParentChildSplitter`）→ 嵌入（`ChunkEmbedder`，零 Key 全部 SKIPPED）→ 双写（`ChunkIndexWriter`：**先写 PENDING 同步行、再调引擎、再更新状态**——补偿扫描的唯一证据链）。
+- 阶段：解析（parser HTTP）→ 清洗/脱敏（`DocumentCleaner`/`TextDesensitizer`；按页切分的库走 `PagedContentAssembler` 逐页清洗后拼回并记录页区间）→ 图片资产与 VLM 文本代理插回（`ImageAssetService`/`ImagePlaceholderResolver`，单图失败不失败整篇）→ 切分（`SplitterRouter` 策略路由，未知 code 回落定长；`page` 策略由管线直接分流到 `PageSplitter`，因它还需要页区间；父子两级切分 `ParentChildSplitter`，仅与定长策略组合）→ 嵌入（`ChunkEmbedder`，零 Key 全部 SKIPPED）→ 双写（`ChunkIndexWriter`：**先写 PENDING 同步行、再调引擎、再更新状态**——补偿扫描的唯一证据链）。
 - **指纹复用**：`VersionFingerprintFactory` 产出 content_hash/解析指纹/分片指纹/嵌入版本，`VersionArtifactReuser` 在全匹配时复制上一构建的 chunk 行（新 ID、重写父链），跳过解析与切分。
 - **版本机制**：`DocumentVersionPlanner` 一次回答重复判定/版本号（major.minor）/可否复用；`DocumentVersionActivator` 激活时旧 active 退回 READY（支持秒级回滚）；`VersionRetentionService` 异步清理超保留窗口（默认 3）的旧版 chunk（保留原件与解析产物）；`AppVersionPinChecker` 保护被快照引用的版本不被清理。
 - **标注跨版本（M4a + M9）**：`AnnotationInheritanceService` 按 chunk_text_hash 精确继承禁用类标注（新版本不自动继承其他标注）；M9 起 `AnnotationMigrationAdvisor`（domain 纯函数）以归一化字符 3-gram **Dice 系数**（对称指标——刻意不用评测的非对称重叠率）为待复核标注懒计算迁移建议（阈值 `kb.annotation.migration-min-score=0.35`、top 3、候选限同文档当前激活版本、短文本不推荐），`POST /api/v1/annotations/{id}/migrate` 人工逐条确认（仅禁用/编辑两类，幂等；刻意不做自动与批量迁移——误迁移代价大于逐条确认成本）。
@@ -271,7 +272,7 @@ Python 3.11+ / FastAPI + Uvicorn / pydantic 2。解析实现：**PyMuPDF**（pdf
 | 端点 | 用途 |
 |---|---|
 | `GET /health` | 存活探针 |
-| `POST /api/v1/parse` | multipart `file` + `file_ext`（pdf/docx/txt/md/xlsx/csv/html/htm，html 为 M12 增量）→ markdown + 按页文本（`scanned`/`ocr_source` 标记）+ 图片 base64（`kind=embedded|page_render`）+ `warnings[]` |
+| `POST /api/v1/parse` | multipart `file` + `file_ext`（pdf/docx/txt/md/xlsx/csv/html/htm，html 为 M12 增量）→ markdown + 按页文本与该页 markdown 切片（`scanned`/`ocr_source` 标记，`markdown` 为 M14 增量）+ 图片 base64（`kind=embedded|page_render`）+ `warnings[]` |
 | `POST /api/v1/parse/chat` | multipart `file` + `file_ext`（csv/xlsx/txt/html）+ 可选 `mapping_profile`/`profile_yaml` → 统一 ChatMessage 会话结构 + `skipped` 统计 |
 
 ### 4.3 模块结构

@@ -142,11 +142,19 @@ class PdfParser(BaseParser):
                         document, page, page_no, collector, seen_xrefs
                     )
 
-                pages.append(PageContent(page_no=page_no, text=text, scanned=scanned, ocr_source=ocr_source))
                 page_markdown = f"## Page {page_no}\n\n{text}"
                 if placeholder_lines:
                     page_markdown += "\n\n" + "\n".join(placeholder_lines)
                 markdown_parts.append(page_markdown)
+                pages.append(
+                    PageContent(
+                        page_no=page_no,
+                        text=text,
+                        markdown=page_markdown,
+                        scanned=scanned,
+                        ocr_source=ocr_source,
+                    )
+                )
 
             return ParseData(
                 markdown="\n\n".join(markdown_parts),

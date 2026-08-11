@@ -50,6 +50,18 @@ public class ParsePreview {
     @Builder.Default
     private List<PreviewPlacement> placements = new ArrayList<>();
 
+    /**
+     * Where each page starts inside {@link #markdown}, empty for every strategy but {@code page}.
+     *
+     * <p>Stored for the same reason as the placements: the confirmation cuts the text of this artifact,
+     * so the boundaries it is cut on have to be the ones that were computed when the text was produced.
+     * Recomputing them at confirmation time would need the parse artifact and the cleaning rules again,
+     * and a rule changed in between would move a boundary the operator never saw.
+     */
+    @JsonProperty("page_ranges")
+    @Builder.Default
+    private List<PageRange> pageRanges = new ArrayList<>();
+
     /** Non fatal findings of the parse and image stages. */
     @JsonProperty("warnings")
     @Builder.Default
@@ -93,6 +105,19 @@ public class ParsePreview {
      */
     public List<String> warningsOrEmpty() {
         return warnings == null ? List.of() : warnings;
+    }
+
+    /**
+     * Page boundaries, never {@code null}.
+     *
+     * <p>Empty in an artifact stored before the field existed, or stored while the knowledge base used
+     * another strategy; the page splitter then treats the whole preview as a single page, which is the
+     * behaviour a format without pages already has.
+     *
+     * @return page boundaries inside the preview text
+     */
+    public List<PageRange> pageRangesOrEmpty() {
+        return pageRanges == null ? List.of() : pageRanges;
     }
 
     /**

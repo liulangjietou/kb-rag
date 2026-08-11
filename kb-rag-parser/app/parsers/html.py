@@ -142,6 +142,6 @@ class HtmlParser(BaseParser):
 
         return ParseData(
             markdown=markdown,
-            pages=[PageContent(page_no=1, text=markdown)],
+            pages=[PageContent(page_no=1, text=markdown, markdown=markdown)],
             images=[],
         )

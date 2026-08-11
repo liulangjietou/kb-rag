@@ -106,7 +106,7 @@ public interface FulltextStore { /* upsert/delete/searchBm25(alias, text, filter
 
 ## 6. kb-rag-parser API
 
-- `POST /api/v1/parse`：multipart `file` + form `file_ext`；支持 pdf(pymupdf)/docx(python-docx)/txt/md/xlsx(openpyxl)/csv；返回 `{code:"OK", data:{markdown, pages:[{page_no,text}], images:[]}, message, request_id}`；失败 code=PARSE_FAILED + message
+- `POST /api/v1/parse`：multipart `file` + form `file_ext`；支持 pdf(pymupdf)/docx(python-docx)/txt/md/xlsx(openpyxl)/csv；返回 `{code:"OK", data:{markdown, pages:[{page_no,text}], images:[]}, message, request_id}`；失败 code=PARSE_FAILED + message（`pages[]` 后续里程碑扩展 `scanned`/`ocr_source` 见 M3/M8、`markdown` 切片见 M14）
 - `GET /health` → {status:"UP"}
 - 安全（§4.2 解析安全约束）：defusedxml 处理一切 XML；禁止出站网络（不实现任何 URL 拉取）；zip 解包路径校验+总量/文件数上限；文件大小上限 100MB；worker 超时 300s
 - 结构：app/main.py、app/parsers/{pdf,docx,text,excel}.py 策略注册表、tests/ 用 pytest 覆盖每格式一个样例

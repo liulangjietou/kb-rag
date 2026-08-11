@@ -12,7 +12,7 @@
 |---|---|---|
 | F1 | 外部数据源连接器 | 连接器 SPI + S3/OSS 实现：登记 bucket/prefix → 扫描对象 → 走既有上传链路入库，ETag 增量同步 |
 | F2 | 配置化元数据抽取 | KB 级 metadata_rules（常量/正则/词表三类），切分后逐 chunk 抽取入 metadata 并镜像引擎，检索侧 custom 等值过滤 |
-| F3 | 切分策略扩展 | 新增 `separator`（分隔符/正则）、`heading`（markdown 标题层级）、`page`（解析页边界）三个 TextSplitter 策略 |
+| F3 | 切分策略扩展 | 新增 `separator`（分隔符/正则）、`heading`（markdown 标题层级）、`page`（解析页边界）三个策略，并同步进 `SplitStrategy` 枚举——枚举是配置写入的唯一白名单，漏登记的策略码会被 `KnowledgeBaseService` 拒成 INVALID_PARAM，实现再全也是死代码 |
 | F4 | Rerank 混合模式 | `rerank_mode=hybrid`：语义重排分与归一化 BM25 分线性加权决定排序 |
 | F5 | 视觉理解整页索引 | KB 级 multimodal 开关：IMAGE chunk（含扫描页整页渲染）额外产多模态向量，检索新增第三召回路 |
 | F6 | 以图搜图入口 | 管理台检索调试页支持图片查询；multimodal 开启时图片直接嵌入多模态空间检索，否则回落 VLM 转写 |
@@ -85,10 +85,11 @@
 |---|---|---|
 | `separator` | `split_separator`（1-64 字符，默认 `\n\n`）、`split_separator_is_regex`（默认 false） | 按字面量/正则分隔符切段后贪心装包到 `chunk_max_tokens`（复用 FixedLengthTextSplitter 的装包语义）；正则编译失败 INVALID_PARAM（Controller 单点）；分隔符不保留 |
 | `heading` | `split_heading_level`（1-6，默认 2） | 按 markdown `^#{1,level} ` 标题行开新段，标题行归属其后内容；全文无标题 → 整文回落 fixed_length |
-| `page` | 无新参数 | 按解析产物 `pages[]` 边界切分（管线级特例：从 parsed.json 取分页文本，非 markdown 正则）；无 pages 的格式（txt/html 单页）→ 整文一页 |
+| `page` | 无新参数 | 按解析产物 `pages[]` 边界切分（管线级特例：不走 markdown 正则，而是消费**逐页清洗后的页 markdown** + 页区间，见下）；无 pages 的格式（txt/html 单页）→ 整文一页 |
 
+- **`page` 策略消费的是清洗后的正文（v1.1 修订）**：初版契约写的"从 parsed.json 取分页文本"已作废——`pages[].text` 是解析原文，既不含图片占位符行，也从未经过清洗四步，照此实现会让按页切分的知识库把未脱敏的 PII 直接写进索引、且每个分片的 `image_urls` 恒空。现行链路：parser 侧 `pages[].markdown` 返回该页对应的 markdown 切片（含 `## Page N` 标题与 `[[IMAGE:id]]` 占位符行，旧产物为 null 时回退 `text`）→ server 侧 `PagedContentAssembler` 逐页跑清洗四步（页眉页脚用**全文档**检出的行集，水印/正则/脱敏逐页应用）与占位符替换，再按 `\n\n` 拼回整篇并记录每页区间 `PageRange{page_no,start,end}` → `PageSplitter` 按区间切。**无清洗规则时逐页拼接结果与 parser 的 `markdown` 逐字符相等**，即按页切分与定长切分吃的是同一份正文；区间随预览产物落 `page_ranges`，确认入库时按存档区间切，不重算；
 - **超长兜底统一**：三个策略产出的任何超过 `chunk_max_tokens` 的段落，回落 fixed_length 二次切分（LLM 语义切分已有同款先例）；
-- **父子分片组合限制**：`parent_child_enabled=true` 时 `split_strategy` 仅允许 `fixed_length`/`llm_semantic`（现状），三个新策略 + 父子 → INVALID_PARAM（Controller 单点）——页/标题边界与"父长子短两级预算"语义天然冲突，不做貌合神离的组合；
+- **父子分片组合限制（v1.1 收窄）**：`parent_child_enabled=true` 时 `split_strategy` **仅允许 `fixed_length`**，其余一律 INVALID_PARAM（Controller 单点）。初版写的"允许 `fixed_length`/`llm_semantic`"是失实的：`ParentChildSplitter` 是把定长策略与自身组合两遍，并不按 `split_strategy` 取策略，配 `llm_semantic` 时实际跑的是定长，而分片指纹记的却是 `llm_semantic`——配置读起来是一回事、索引出来是另一回事。此处与 M4b-CONTRACTS.md §4「父子 + LLM_SEMANTIC 本期不支持」口径统一；页/标题边界与"父长子短两级预算"语义天然冲突，同样不做貌合神离的组合；
 - 新策略均不产 title/summary/keywords 元数据（那是 LLM 策略的伴生物）；`page` 策略 chunk metadata 增 `page_no`（进 ChunkMetadataKeys 声明，镜像引擎可过滤）。
 
 ## 5. F4 Rerank 混合模式
@@ -129,7 +130,7 @@
 ## 8. kb-rag-web 汇总
 
 - **外部数据源 tab**（知识库详情，先例 WebSourcesTab）：源列表（名称/bucket/prefix/最近同步 Tag/自动同步 Switch/操作：立即同步、测试连接、编辑、删除 Popconfirm"仅移除登记，已入库文档不受影响"）、新建/编辑抽屉（secret 占位提示"留空保留原值"）、对象明细抽屉（items 分页表）。
-- **IndexConfigDrawer**：切分策略下拉增三项（SPLIT_STRATEGY_META），条件字段（separator 输入 + 正则开关 / heading level 选择）；父子开关与新策略互斥禁用；"元数据抽取"分组（规则列表编辑：key/类型/值-模式-词表，≤10 条）；"多模态索引"开关（mm provider 未配置时禁用 + Alert）。
+- **IndexConfigDrawer**：切分策略下拉增三项（SPLIT_STRATEGY_META），条件字段（separator 输入 + 正则开关 / heading level 选择）；父子开关打开时下拉仅 `fixed_length` 可选、其余置灰并给 Alert（与服务端 v1.1 收窄一致，避免填完整表单才在保存时撞 INVALID_PARAM）；"元数据抽取"分组（规则列表编辑：key/类型/值-模式-词表，≤10 条）；"多模态索引"开关（mm provider 未配置时禁用 + Alert）。
 - **检索调试页**：rerank 模式选择（semantic/hybrid + w_semantic 滑杆，阈值语义说明文案）、图片上传。
 - api 层：`extSource.ts`（七函数）；types.ts 增 ExtSource/ExtSourceItem/MetadataRule/RerankMode 等类型与 META 表。
 
@@ -143,7 +144,7 @@
 
 - **F1**：ConnectorRouter 未知类型拒；同步语义（etag 未变→UNCHANGED 不触 upload、变了→upload 回填、trashed→SKIPPED、对象消失→SKIPPED 不动文档、单对象失败不中断、超上限→PARTIAL）；派生文件名稳定性/不撞名；secret 脱敏与"空=保留"；定时 disabled 短路。S3 列举/取回 mock MinIO client。
 - **F2**：key 规范与保留键冲突拒；三类规则各正/负例（regex 捕获组/无捕获组/未命中不写键、keyword 子集/空不写键、constant 截断）；保留键冲突让位；规则进指纹；custom 过滤映射 ext_ 前缀、非法 key 拒。
-- **F3**：separator 字面量/正则/编译失败拒/分隔符不保留；heading 各 level 边界/无标题回落；page 多页/无 pages 单页；三策略超长回落 fixed_length；父子组合拒；page_no 入 metadata。
+- **F3**：separator 字面量/正则/编译失败拒/分隔符不保留；heading 各 level 边界/无标题回落；page 多页/无 pages 单页；三策略超长回落 fixed_length；父子组合仅 fixed_length 放行（llm_semantic/page 均拒）；page_no 入 metadata。**枚举与实现的对应关系单测化**：每个可保存的策略码都必须路由到同名实现（防"配置得上、跑的是定长"），page 策略消费清洗后正文（脱敏生效、图片可关联、无规则时与 parser markdown 逐字符相等），各策略分片指纹两两不等。
 - **F4**：hybrid 排序分公式（含无 bm25 分按 0、min-max 单点集退化）；阈值仍作用语义分；rerank 降级时 hybrid 行为同现状；参数五层优先级。
 - **F5**：开关+provider 齐备才产 mm 向量；zero-key SKIPPED；registry/同步行落 mm 索引名；weighted 模式 mm 路跳过记 degraded；provider 失败降级不影响主路；开关进指纹。
 - **F6**：mm 可用走 embedImages、不可用回落 VLM 转写；images 约束校验复用单点（超张数/超体积拒）；query 仍必填。
@@ -153,7 +154,7 @@
 
 1. 登记本地 MinIO bucket（放 pdf/docx/图片各一）→ 异步同步后文档全部 INDEXED 可检索；改对象重传 → sync 产生新版本；删对象 → sync 后文档仍在（SKIPPED）；secret 列表恒 `******`。
 2. 配置 metadata_rules（合同编号 regex + 产品词表）→ 重建后 chunk metadata 可见抽取值 → 检索 `custom:{contract_no:...}` 精确命中。
-3. 四种新旧切分策略各建一库导同一文档，切片边界符合各自语义；父子 + separator 组合被拒。
+3. 五种新旧切分策略（fixed_length/llm_semantic/separator/heading/page）各建一库导同一文档，切片边界符合各自语义；按页切分的库导一份带图带手机号的 PDF，分片正文里手机号已脱敏、含图页分片能看到图片缩略图；父子开关打开时下拉只剩定长切分。
 4. hybrid 模式下关键词强匹配文档排序上升；阈值过滤行为与 semantic 模式一致。
 5. 开启 multimodal 的库上传扫描件与图片 → 文本 query 可命中图片 chunk（mm 路 RRF 融合可在 debug 页看到 retrieval_source）。
 6. 检索调试页传图 → mm 库直接图搜图命中原图 chunk；非 mm 库回落 VLM 转写仍有结果；开放 API images 同口径。
