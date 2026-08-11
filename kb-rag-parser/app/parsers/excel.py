@@ -74,10 +74,9 @@ class ExcelParser(BaseParser):
             for page_no, sheet in enumerate(workbook.worksheets, start=1):
                 rows = [list(row) for row in sheet.iter_rows(values_only=True)]
                 plain_text = "\n".join(_row_to_plain_line(row) for row in rows)
-                pages.append(PageContent(page_no=page_no, text=plain_text))
-                markdown_parts.append(
-                    f"## Sheet: {sheet.title}\n\n{_rows_to_markdown_table(rows)}"
-                )
+                sheet_markdown = f"## Sheet: {sheet.title}\n\n{_rows_to_markdown_table(rows)}"
+                pages.append(PageContent(page_no=page_no, text=plain_text, markdown=sheet_markdown))
+                markdown_parts.append(sheet_markdown)
             return ParseData(markdown="\n\n".join(markdown_parts), pages=pages, images=[])
         except Exception as exc:
             logger.error(
@@ -108,7 +107,11 @@ class CsvParser(BaseParser):
 
         plain_text = "\n".join(_row_to_plain_line(row) for row in rows)
         markdown = _rows_to_markdown_table(rows)
-        return ParseData(markdown=markdown, pages=[PageContent(page_no=1, text=plain_text)], images=[])
+        return ParseData(
+            markdown=markdown,
+            pages=[PageContent(page_no=1, text=plain_text, markdown=markdown)],
+            images=[],
+        )
 
     @staticmethod
     def _sniff_dialect(text: str) -> Optional[type]:

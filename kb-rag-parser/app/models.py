@@ -25,6 +25,15 @@ class PageContent(BaseModel):
 
     page_no: int = Field(..., description="1-based page number")
     text: str = Field(..., description="Extracted plain text of this page")
+    markdown: Optional[str] = Field(
+        None,
+        description="This page's slice of ParseData.markdown, carrying its "
+        "heading and its [[IMAGE:{image_id}]] placeholder lines (M14-CONTRACTS.md "
+        "§F3). The page-splitting strategy cuts this instead of `text` so it "
+        "consumes the same cleaned, proxied markdown as every other strategy; "
+        "null in an artifact written before this field existed, where the "
+        "consumer falls back to `text`.",
+    )
     scanned: bool = Field(
         False,
         description="True when this page has no usable text layer (extracted "

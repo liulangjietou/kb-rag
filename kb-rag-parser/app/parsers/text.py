@@ -34,4 +34,8 @@ class TextParser(BaseParser):
             )
             raise ParseError(f"failed to decode text file: {exc}") from exc
 
-        return ParseData(markdown=text, pages=[PageContent(page_no=1, text=text)], images=[])
+        return ParseData(
+            markdown=text,
+            pages=[PageContent(page_no=1, text=text, markdown=text)],
+            images=[],
+        )
