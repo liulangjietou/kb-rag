@@ -251,9 +251,13 @@ tags:
 - name: operation-audit
   description: 操作审计「谁」维度：管理台写操作留痕查询（M16，docs/M16-CONTRACTS.md §3.7）
 - name: knowledge-base
-  description: 知识库管理
+  description: '知识库管理。路径里的 kbId 是调用方声明的作用域、不是被证实的：本组端点（含文档列表、
+    批量删除/重建、批量确认、全库重建与状态）一律先经行级围栏读回该库，其他租户的 kbId 读作不存在
+    → 404，后续按 kb_id 过滤的语句一条都不发出（见 M16-CONTRACTS.md §1.3.2）。'
 - name: document
-  description: 文档上传、状态查询、分片查看、重建索引
+  description: '文档上传、状态查询、分片查看、重建索引。本组按 docId / chunkId / annotationId
+    直接寻址的端点一律先解析归属知识库：其他租户的 id 读作不存在 → 404（不是 403，见 M16-CONTRACTS.md
+    §1.3.2）。'
 - name: search
   description: 检索调试
 - name: dict
@@ -267,15 +271,23 @@ tags:
 - name: demo
   description: Demo 一键导入（M3，docs/M3-CONTRACTS.md §3.7）
 - name: eval
-  description: 评测体系：评测集/case/证据复核/评测运行与报告（M4b，docs/M4b-CONTRACTS.md）
+  description: '评测体系：评测集/case/证据复核/评测运行与报告（M4b，docs/M4b-CONTRACTS.md）。
+    本组按 datasetId / caseId / runId / feedbackId 直接寻址的端点一律先解析到评测集（该表自身在
+    行级围栏内，case 与 run 经它两跳）：其他租户的 id 读作不存在 → 404（见 M16-CONTRACTS.md §1.3.2）。'
 - name: insight
-  description: 检索洞察：零命中/降级记录明细与内容缺口报表（M10，docs/M10-CONTRACTS.md §2.2）
+  description: '检索洞察：零命中/降级记录明细与内容缺口报表（M10，docs/M10-CONTRACTS.md §2.2）。
+    洞察行存的是原始 query 文本，两个端点都先解析路径里的知识库：其他租户的 kbId 读作不存在 → 404
+    （见 M16-CONTRACTS.md §1.3.2）。'
 - name: governance
-  description: 内容治理：审核发布/有效期/回收站（M11，docs/M11-CONTRACTS.md §2.2）
+  description: '内容治理：审核发布/有效期/回收站（M11，docs/M11-CONTRACTS.md §2.2）。本组端点
+    全部按 docId 直接寻址，一律先解析归属知识库：其他租户的 docId 读作不存在 → 404，审核、改密级、
+    回收站与彻底删除均不会发生（见 M16-CONTRACTS.md §1.3.2）。'
 - name: web-source
   description: 数据接入：URL 登记导入与增量同步（M12，docs/M12-CONTRACTS.md §3.4）
 - name: ext-source
-  description: 外部数据源连接器：S3/OSS 兼容对象存储登记、扫描与增量同步（M14，docs/M14-CONTRACTS.md §2）
+  description: '外部数据源连接器：S3/OSS 兼容对象存储登记、扫描与增量同步（M14，docs/M14-CONTRACTS.md
+    §2）。按 sourceId 寻址的端点一律先解析归属知识库，按 kbId 的列表端点先解析该库：其他租户的 id
+    读作不存在 → 404，更新、硬删与连接测试的外发请求一条都不发出（见 M16-CONTRACTS.md §1.3.2）。'
 - name: app-center
   description: 应用中心：应用/版本/发布门禁与控制台 chat 预览（M4c，docs/M4c-CONTRACTS.md §2）
 - name: api-key
@@ -1179,7 +1191,8 @@ paths:
       tags:
       - knowledge-base
       summary: 按当前索引配置重建文档索引
-      description: 'M2-CONTRACTS.md §4：body 可选 `doc_ids`，缺省时重建该知识库下全部
+      description: '跨租户的 kbId 在解析该库时读作不存在 → 404，一个索引任务都不会被提交（M16-CONTRACTS.md
+        §1.3.2）。M2-CONTRACTS.md §4：body 可选 `doc_ids`，缺省时重建该知识库下全部
 
         config_stale=1 的文档。每篇文档一个 REBUILD 任务：从 MinIO 解析产物
 
@@ -1297,7 +1310,9 @@ paths:
       tags:
       - document
       summary: 批量将文档移入回收站
-      description: '控制台文档列表勾选后的批量删除。`doc_ids` 必填——重建与确认缺省成全量是安全的，
+      description: '作用域校验先问"这个库是不是你的"（跨租户 kbId → 404，M16-CONTRACTS.md §1.3.2），
+        再问"这些文档在不在这个库里"——只问后者的话，报一个别家的 kbId 配上该库下的 docId 就完全对得上。
+        控制台文档列表勾选后的批量删除。`doc_ids` 必填——重建与确认缺省成全量是安全的，
 
         批量删除缺省成"整库"则是会造成损失的默认值。列表中混入不属于该知识库的文档时整批
 
@@ -1368,6 +1383,8 @@ paths:
       tags:
       - document
       summary: 文档可见性与授权角色（DOC_REVIEW，M16）
+      description: 路径里的 kbId 先经行级围栏解析，跨租户读作不存在 → 404；密级与授权角色不会被读到
+        （M16-CONTRACTS.md §1.3.2）。
       responses:
         '200':
           description: OK
@@ -1665,7 +1682,8 @@ paths:
       summary: 彻底删除（仅限回收站内文档，不可逆）
       description: 'M11-CONTRACTS.md §2.2：M11 前 DELETE 的不可逆删除迁移到这里：连同
         全部版本/分片/两个检索引擎副本一并删除。仅对回收站内文档有效（两段式防误删），
-        否则返回 INVALID_PARAM。超过保留期的回收站文档由定时任务自动执行同一逻辑。'
+        否则返回 INVALID_PARAM。超过保留期的回收站文档由定时任务自动执行同一逻辑。
+        其他租户的 docId 读作不存在 → 404，删除不会发生（见 M16-CONTRACTS.md §1.3.2）。'
       responses:
         '200':
           description: 已彻底删除
@@ -2160,7 +2178,8 @@ paths:
       - ext-source
       summary: 编辑源（secret 传空=保留旧值）
       description: 'M14-CONTRACTS.md §2.3：可改 name/endpoint/region/bucket/prefix/access_key/
-        secret_key(空=保留)/sync_enabled。'
+        secret_key(空=保留)/sync_enabled。其他租户的 sourceId 读作不存在 → 404，endpoint 与
+        AK/SK 不会被覆写（见 M16-CONTRACTS.md §1.3.2）。'
       requestBody:
         required: true
         content:
@@ -2208,7 +2227,8 @@ paths:
       tags:
       - ext-source
       summary: 移除源（硬删源行与对象明细，不动文档）
-      description: 'M14-CONTRACTS.md §2.3：硬删源行 + items 行；它喂过的文档保留在知识库。'
+      description: 'M14-CONTRACTS.md §2.3：硬删源行 + items 行；它喂过的文档保留在知识库。
+        其他租户的 sourceId 读作不存在 → 404，删除不会发生（该删除不可恢复，见 M16-CONTRACTS.md §1.3.2）。'
       responses:
         '200':
           description: 已移除
@@ -2229,7 +2249,9 @@ paths:
       tags:
       - ext-source
       summary: 连通性测试（同步执行）
-      description: 'M14-CONTRACTS.md §2.3：同步探测连通性与凭证，返回 HealthStatus，不触碰任何对象。'
+      description: 'M14-CONTRACTS.md §2.3：同步探测连通性与凭证，返回 HealthStatus，不触碰任何对象。
+        其他租户的 sourceId 读作不存在 → 404，且判定排在探测之前：不会拿别家凭据发出任何外网请求
+        （见 M16-CONTRACTS.md §1.3.2）。'
       responses:
         '200':
           description: 探测结果
@@ -2714,6 +2736,8 @@ paths:
   /api/v1/documents/{docId}/versions/{versionId}/activate:
     post:
       summary: Activate a version, rebuilding it first when its chunks were archived
+      description: '其他租户的 docId 读作不存在 → 404，且判定排在激活之前：文档不会被回滚到旧版本、
+        索引不会被重跑（见 M16-CONTRACTS.md §1.3.2）。'
       tags:
       - document
       parameters: *id002
@@ -3437,6 +3461,8 @@ paths:
       tags:
       - eval
       summary: run 命中明细（下钻）
+      description: '其他租户的 runId 读作不存在 → 404：评测明细（查询、命中分片与判分）不会返回
+        （见 M16-CONTRACTS.md §1.3.2）。'
       parameters:
       - name: hit
         in: query
@@ -3662,7 +3688,8 @@ paths:
       tags:
       - app-center
       summary: 版本详情
-      description: 含门禁结论
+      description: '含门禁结论。其他租户的 appVersionId 读作不存在 → 404，配置快照（关联知识库、
+        模型配置）不会返回；与"版本不存在"共用同一错误码与同一文案（见 M16-CONTRACTS.md §1.3.2）。'
       responses:
         '200':
           description: OK
@@ -3680,7 +3707,9 @@ paths:
       - app-center
       summary: 绑定或清空门禁评测集
       description: 仅 DRAFT/TESTING 态可修改；评测集所属知识库须属于该版本 kb_refs 集合（并集判断，
-        M5 起不再要求与单一知识库一致），否则 400
+        M5 起不再要求与单一知识库一致），否则 400。判定顺序为版本租户（404）→ 评测集数据范围（403）
+        → 版本状态（400）：先判评测集会让跨租户的版本答 403，用状态码差异泄露"这个 id 在别的租户里
+        存在"（见 M16-CONTRACTS.md §1.3.2）
       requestBody:
         required: true
         content:
@@ -3705,7 +3734,8 @@ paths:
       tags:
       - app-center
       summary: 草稿提交测试（DRAFT -> TESTING）
-      description: 补全并冻结配置快照（先知识库、再部署默认），冻结后不再回落任何实时默认值
+      description: 补全并冻结配置快照（先知识库、再部署默认），冻结后不再回落任何实时默认值。
+        其他租户的 appVersionId 读作不存在 → 404，快照不会被写入（见 M16-CONTRACTS.md §1.3.2）
       responses:
         '200':
           description: 更新成功
@@ -3733,7 +3763,9 @@ paths:
         M6-CONTRACTS.md §0.3）；任一库快照失败则发布中止、版本停留在门禁结论状态可重试，已建的本次
         快照索引会被回滚删除。此后经该 RELEASED 版本（含 rollback 重新发布的历史版本）发起的对外
         search/chat 调用固定检索这份快照索引与固化可见集，不受快照建立之后的新文档/新版本影响；
-        管理台调试与 TESTING 灰度调用仍走实时别名与当前激活集合。'
+        管理台调试与 TESTING 灰度调用仍走实时别名与当前激活集合。
+        其他租户的 appVersionId 读作不存在 → 404，且判定发生在门禁之前：双跑不会被提交、索引快照
+        不会被冻结、状态不会被切（见 M16-CONTRACTS.md §1.3.2）。'
       parameters:
       - name: force
         in: query
@@ -3764,7 +3796,8 @@ paths:
         SUPERSEDED，发布/回滚均为原子状态切换。回滚后的检索恢复该版本自己发布时冻结的索引快照与
         版本可见集（历史知识状态），不会重新对当前语料建快照；被 SUPERSEDED 的版本只要其快照仍存在
         即持续视为"被引用"，归档清理会跳过其固化可见集覆盖的文档版本，直到快照按保留策略被清理
-        （M6-CONTRACTS.md §0.8/§0.9）
+        （M6-CONTRACTS.md §0.8/§0.9）。其他租户的 appVersionId 读作不存在 → 404，状态切换不会
+        发生（见 M16-CONTRACTS.md §1.3.2）
       responses:
         '200':
           description: 回滚成功

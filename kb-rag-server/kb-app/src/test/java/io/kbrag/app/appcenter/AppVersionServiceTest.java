@@ -1,11 +1,13 @@
 package io.kbrag.app.appcenter;
 
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.eval.EvalDatasetService;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.entity.App;
 import io.kbrag.domain.entity.AppVersion;
 import io.kbrag.domain.entity.EvalDataset;
 import io.kbrag.domain.entity.KnowledgeBase;
@@ -18,6 +20,7 @@ import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.GraphFusionPolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
@@ -28,7 +31,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -36,6 +42,12 @@ import static org.mockito.Mockito.when;
  * Covers the version state machine and the configuration freeze of requirement section 4.7: the snapshot is
  * completed when a draft leaves the draft state, a promotion retires the previous released version in the same
  * transaction, and the call resolution tells a missing version apart from an unpublished one.
+ *
+ * <p>It also pins the tenant resolution of the version domain. {@code t_kb_app_version} is a subordinate
+ * table with no {@code tenant_id} of its own, so every entry addressing a version by {@code appVersionId} is
+ * isolated only while it resolves the owning application through the fenced root first. That is pinned here
+ * with the real {@link AppVersionGuard} over a mocked {@link AppService}: an application of another tenant is
+ * a null row, precisely what the fence produces on a console thread.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -45,10 +57,15 @@ class AppVersionServiceTest {
     private static final String KB_ID = "kb_1";
     private static final String KB_ID_2 = "kb_2";
     private static final String VERSION_ID = "av_1";
+    /** An application of another tenant: the fence reads it as missing, so {@code find} answers null. */
+    private static final String FOREIGN_APP_ID = "app_theirs";
+    private static final String DATASET_ID = "evds_1";
 
     private AppVersionMapper appVersionMapper;
+    private AppService appService;
     private KnowledgeBaseService knowledgeBaseService;
     private EvalDatasetService evalDatasetService;
+    private KbResourceGuard kbResourceGuard;
     private BizIdGenerator bizIdGenerator;
     private KbProperties properties;
     private AppVersionService service;
@@ -56,13 +73,21 @@ class AppVersionServiceTest {
     @BeforeEach
     void setUp() {
         appVersionMapper = mock(AppVersionMapper.class);
+        appService = mock(AppService.class);
         knowledgeBaseService = mock(KnowledgeBaseService.class);
         evalDatasetService = mock(EvalDatasetService.class);
+        kbResourceGuard = mock(KbResourceGuard.class);
         bizIdGenerator = mock(BizIdGenerator.class);
         properties = new KbProperties();
         when(bizIdGenerator.appVersionId()).thenReturn(VERSION_ID);
-        service = new AppVersionService(appVersionMapper, knowledgeBaseService, evalDatasetService,
+        // The real guard over the mocked application service, so an application the tenant fence filters
+        // away is simply a null row here - which is exactly what the fence does on a console thread.
+        service = new AppVersionService(new AppVersionGuard(appVersionMapper, appService),
+                appVersionMapper, knowledgeBaseService, evalDatasetService, kbResourceGuard,
                 bizIdGenerator, new GraphFusionPolicy(), properties);
+        // Every version in this class belongs to the one application of the caller's own tenant; the tenant
+        // tests point their version at a foreign application instead.
+        when(appService.find(APP_ID)).thenReturn(new App());
     }
 
     @Test
@@ -411,6 +436,82 @@ class AppVersionServiceTest {
         // The dual run stays single base evaluation; requiring the data set to cover every linked base would
         // make the gate impossible to satisfy for a multi base application.
         assertEquals("evds_second", service.setGateDataset(VERSION_ID, "evds_second").getGateDatasetId());
+    }
+
+    @Test
+    void shouldRefuseTheVersionAddressedEntriesOfAnotherTenant() {
+        // Every console entry of this domain names an app_version_id and nothing else, so without the
+        // resolution of the owning application the fence never sees a statement it may trim. A tenant
+        // holding app:release could otherwise release or roll back another tenant's application, and
+        // app:read alone returned its configuration snapshot - linked bases and model parameters included.
+        when(appVersionMapper.selectOne(any())).thenReturn(foreignVersion(AppVersionStatus.SUPERSEDED));
+        when(appService.find(FOREIGN_APP_ID)).thenReturn(null);
+
+        assertNotFound(() -> service.require(VERSION_ID));
+        assertNotFound(() -> service.submitTest(VERSION_ID));
+        assertNotFound(() -> service.setGateDataset(VERSION_ID, DATASET_ID));
+        assertNotFound(() -> service.promote(VERSION_ID, true, "admin"));
+        assertNotFound(() -> service.rollback(VERSION_ID));
+
+        // Past the one lookup that locates the row, nothing happened: no state was written and no data set
+        // was read, so a rejected caller cannot even learn whether the version had a gate binding.
+        verify(appVersionMapper, never()).updateById(any(AppVersion.class));
+        verify(evalDatasetService, never()).require(anyString());
+    }
+
+    @Test
+    void shouldReportAForeignVersionExactlyAsAMissingOne() {
+        // The two must be indistinguishable. Reporting the second hop as APP_NOT_FOUND would leak the same
+        // fact in a different shape: the difference between the codes tells the caller their guess is real.
+        when(appVersionMapper.selectOne(any())).thenReturn(null);
+        BizException missing = assertThrows(BizException.class, () -> service.require(VERSION_ID));
+
+        when(appVersionMapper.selectOne(any())).thenReturn(foreignVersion(AppVersionStatus.RELEASED));
+        when(appService.find(FOREIGN_APP_ID)).thenReturn(null);
+        BizException foreign = assertThrows(BizException.class, () -> service.require(VERSION_ID));
+
+        assertEquals(missing.getErrorCode(), foreign.getErrorCode());
+        assertEquals(missing.getMessage(), foreign.getMessage());
+        // Neither message names the application the version belongs to.
+        assertFalse(foreign.getMessage().contains(FOREIGN_APP_ID));
+    }
+
+    @Test
+    void shouldAnswerTheTenantBeforeTheDataScope() {
+        // Two different questions, and only this order keeps them from leaking into each other. Inside the
+        // own tenant a data set the caller's roles do not name is a permission problem: 403, actionable.
+        // Outside the tenant the version must not exist at all: 404. Asking the data scope first - which is
+        // where this check used to sit, in the controller - answers 403 for a foreign version too, and that
+        // difference is exactly what tells a caller which ids exist in other tenants.
+        AppVersion draft = versionOf("V1.0", AppVersionStatus.DRAFT);
+        when(appVersionMapper.selectOne(any())).thenReturn(draft);
+        org.mockito.Mockito.doThrow(BizException.forbidden("knowledge base outside your data scope"))
+                .when(kbResourceGuard).requireDatasetAccess(DATASET_ID);
+
+        BizException forbidden = assertThrows(BizException.class,
+                () -> service.setGateDataset(VERSION_ID, DATASET_ID));
+        assertEquals(ErrorCode.FORBIDDEN, forbidden.getErrorCode());
+
+        when(appVersionMapper.selectOne(any())).thenReturn(foreignVersion(AppVersionStatus.DRAFT));
+        when(appService.find(FOREIGN_APP_ID)).thenReturn(null);
+        assertNotFound(() -> service.setGateDataset(VERSION_ID, DATASET_ID));
+
+        // The foreign call never reached the data scope check at all: one invocation, from the first half.
+        verify(kbResourceGuard, times(1)).requireDatasetAccess(DATASET_ID);
+        verify(appVersionMapper, never()).updateById(any(AppVersion.class));
+    }
+
+    private void assertNotFound(Executable call) {
+        BizException e = assertThrows(BizException.class, call);
+        assertEquals(ErrorCode.VERSION_NOT_FOUND, e.getErrorCode());
+        assertEquals(404, e.getErrorCode().getHttpStatus());
+    }
+
+    /** A version whose application the fence filters away, the console shape of a cross tenant call. */
+    private AppVersion foreignVersion(AppVersionStatus status) {
+        AppVersion row = versionOf("V1.0", status);
+        row.setAppId(FOREIGN_APP_ID);
+        return row;
     }
 
     private AppVersion versionOf(String version, AppVersionStatus status) {

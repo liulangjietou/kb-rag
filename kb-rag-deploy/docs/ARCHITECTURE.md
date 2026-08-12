@@ -1,8 +1,8 @@
 # kb-rag 架构文档
 
 
-> 版本：v1.8（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14 + 企业化 M15/M16 + 网页抓取增强 M17/M18 + 记忆库 M19 + MCP 协议层 M20 + 记忆库租户隔离修复 V21 + 站点凭据租户隔离修复 V22 + 网页源租户解析修复，2026-08-11；v1.7 基线为 V22，v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
-> 日期：2026-08-11
+> 版本：v2.1（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14 + 企业化 M15/M16 + 网页抓取增强 M17/M18 + 记忆库 M19 + MCP 协议层 M20 + 记忆库租户隔离修复 V21 + 站点凭据租户隔离修复 V22 + 网页源租户解析修复 + 异步池形状与状态机修复 + 应用版本租户解析修复 + 按资源自身 id 寻址入口的租户解析修复 + 按 kbId 寻址的列表与批量入口租户解析修复，2026-08-12；v2.0 基线为按资源自身 id 寻址入口的租户解析修复，v1.9 基线为异步池与应用版本租户解析修复，v1.8 基线为网页源租户解析修复，v1.7 基线为 V22，v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
+> 日期：2026-08-12
 > 作者：RichardFyoung / Claude
 >
 > **文档定位**：本文描述系统的实际实现架构（以代码为准），与以下文档互补——
@@ -60,7 +60,7 @@
 
 - **MySQL `t_kb_chunk` 是唯一事实源**；Qdrant 与 ES 均为派生索引，可从 MySQL 幂等重建。
 - 双写状态按"分片 × 物理索引"粒度记录在 `t_kb_chunk_index_sync`，由定时补偿任务重放（§3.7）。
-- **无消息队列、无强制 Redis**：异步全部为 Spring `@Async` + 进程内线程池；跨存储一致性 = 同步状态表 + 定时补偿。限流计数与上传 Token 为进程内实现，明确记录为单实例部署的降级方案（多实例扩展是未来边界，不影响功能正确性）；管理台登录 Token 自 M9 后修复起落库 `t_kb_auth_token`（V11，仅存 SHA-256 哈希，单实例重启不再踢掉全部会话）。
+- **无消息队列、无强制 Redis**：异步全部落在进程内线程池上（多数经 Spring `@Async`；**自调用的提交点显式注入 Executor 手工 `execute`**——`@Async` 代理拦不住同 bean 自调用，标了也是内联跑，评测提交与门禁提交都属这一类，见 §3.7）；跨存储一致性 = 同步状态表 + 定时补偿。限流计数与上传 Token 为进程内实现，明确记录为单实例部署的降级方案（多实例扩展是未来边界，不影响功能正确性）；管理台登录 Token 自 M9 后修复起落库 `t_kb_auth_token`（V11，仅存 SHA-256 哈希，单实例重启不再踢掉全部会话）。
 
 ---
 
@@ -192,20 +192,31 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 线程池（`AsyncConfig`，统一 `TaskDecorator` 透传 requestId 到 worker 线程）：
 
+**池形状只有一条规则：要么队列为 0，要么 core == max。** `ThreadPoolTaskExecutor` 只有在队列**满**之后才扩容到 max，所以"深队列 + 更大的 max"这个组合里的 max 永远到不了——写下的上限是个不会发生的数字，而后面每个读代码的人都会信它。这条已经踩过两次（索引池 `core=2,max=4` 挂 200 深队列常年只有 2；评测池 `core=2,max=6` 挂 50 深队列常年只有 2，而它自己的 javadoc 写着"6 个 run 并行"）。检索池与流式池的 0 队列是刻意的例外：没有队列可填，扩容到 max 是**第一件**发生的事，正是它们要的"先吸收突发、再拒绝"。其余每个池的 core 就是真实并发，只有一个数字要读，`AsyncConfigTest` 用反射遍历全部 `@Bean` 钉住这条规则，防止出现第三次。
+
 | 池 | core/max/queue | 用途与设计理由 |
 |---|---|---|
-| `indexTaskExecutor` | 2/4/200 | 索引管线；刻意小 + 有界队列，防饿死控制台 |
+| `indexTaskExecutor` | `kb.index.concurrency`(4)/同/200 | 索引管线；刻意小 + 有界队列，防饿死控制台 |
 | `retrievalTaskExecutor` | 4/16/**0** | 检索超时保护；队列为 0，宁可快速降级不排队 |
-| `evalTaskExecutor` | 2/6/50 | 评测 run（case 级并发另由 `kb.eval.concurrency` 控制） |
-| `gateTaskExecutor` | 1/4/20 | 门禁双跑监督；**必须与评测池分离**，否则 gate 排在自己等待的 run 前面死锁 |
-| `auditTaskExecutor` | 1/4/2000 | 审计异步写；异常只记日志绝不上抛 |
-| `chatStreamTaskExecutor` | — | SSE 流式生成 |
+| `evalTaskExecutor` | M4b/M4c 异步化后修复起 6/6/50 | 评测 run 监督；6 = 一次提交的配置矩阵上限，低于它会把控制台呈现为"一个动作"的矩阵悄悄串行化。case 级并发另由 `kb.eval.concurrency` 控制 |
+| `evalCaseTaskExecutor` | `kb.eval.concurrency`(4)/同/500 | 全部在跑评测的 case **全局**上限（非每 run）；CallerRuns 回压 |
+| `gateTaskExecutor` | M4b/M4c 异步化后修复起 4/4/20 | 门禁双跑监督；**必须与评测池分离**，否则 gate 排在自己等待的 run 前面死锁。排队的 gate 不是"晚点跑"而是"发布卡住"——版本整段等待期都停在 `GATING` |
+| `auditTaskExecutor` | 1/1/2000 | 审计异步写；异常只记日志绝不上抛（1 是它一直以来的真实并发，原 max=4 在 2000 深队列后从未达到） |
+| `chatStreamTaskExecutor` | 2/16/**0** | SSE 流式生成；排队的流 = 客户端盯着没有首 token 的连接 |
+| `extSourceTaskExecutor` | 1/1/100 | 外部源扫描；慢出站 I/O，突发排队而非并行扫桶 |
+| `graphTaskExecutor` | `kb.graph.task-concurrency`(2)/同/50 | 图谱抽取，单任务小时级；与 `extract-concurrency` 相乘才是对话模型峰值 |
+| `embedTaskExecutor` | `kb.embedding.concurrency`(4)/同/500 | 嵌入请求**全局**上限；CallerRuns 回压 |
+
+**拒绝策略与提交处的义务**（M4b/M4c 异步化后修复起）：评测池与门禁池保留默认 `AbortPolicy`，不换 CallerRuns——把整条评测 run 拽回提交它的 HTTP 请求线程，恰恰是 PR #32 修掉的那个形态。代价是 `execute()` 会抛 `RejectedExecutionException`，而两处提交都发生在"状态已经落库之后"，所以兜底必须写在提交处：`EvalRunService` 把被拒的 run 就地改判 `FAILED` 并写明原因（否则留下一行没人推进的 `PENDING`，且同批前面的配置已落库，成半截提交）；`ReleaseGateService` 把被拒的门禁交给 `failGate` 记为 `LOG_ONLY/RUN_FAILED`（否则版本永久停在 `GATING`，而 `release` 入口恰好拒绝从 `GATING` 再次发布——自锁只能改库）。
+
+**requestId 装饰器保存并恢复、而不是无条件 clear**（M4b/M4c 异步化后修复起）：`evalCaseTaskExecutor` 与 `embedTaskExecutor` 用 CallerRuns，队列满时任务回跑在提交者线程上，finally 里的 `MDC.remove` 会清掉**提交者自己**的 requestId——那条 run / 那次索引从队列填满的那一刻起后半段全部断链。改为记下运行前绑定的值再放回：worker 线程上本就没有绑定，恢复 null 即等于原本想做的 clear。
 
 定时任务（`@Scheduled`，`SchedulingConfig` 单独持有 `@EnableScheduling` 便于单测排除）：
 
 | 任务 | 触发 | 职责 |
 |---|---|---|
 | `IndexSyncCompensationService` | fixedDelay 30s | 扫 FAILED + 超时 PENDING 同步行，按物理索引分组幂等重放 |
+| `EvalRunCompensationService` | fixedDelay 5min | 扫超过 `kb.eval.stuck-timeout-minutes`(120) 没动过的 PENDING/RUNNING 评测 run，改判 FAILED；**只改判不重跑**（`execute` 插 case 行前不清旧行，重跑会翻倍污染指标），且走 wrapper update 不走 `updateById`（不碰乐观锁版本，被早收的慢 run 自己那次写入仍能落地） |
 | `AlertEvaluator` | fixedDelay 60s | 任务连续失败 / 降级率 / 双写积压三类触发 + 静默期 |
 | `ApiAuditArchiveService` | cron 03:30 | 审计日志归档 MinIO → 分批物理删除 |
 | `AppSnapshotRetentionService` | cron 04:15 | SUPERSEDED 版本快照按保留数清理（RELEASED 永不清理） |
@@ -221,7 +232,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V3（M3） | `t_kb_image_asset`；文档加 `source_key`（聊天逻辑文档标识） |
 | V4（M4a） | `t_kb_annotation`（幂等键 + inherit_status） |
 | V5（M4b） | `t_kb_eval_dataset` / `t_kb_eval_case` / `t_kb_eval_run` / `t_kb_eval_result` |
-| V6（M4c） | `t_kb_app` / `t_kb_app_version`（`released_slot` 生成列唯一约束）/ `t_kb_api_key` / `t_kb_api_audit_log` |
+| V6（M4c） | `t_kb_app` / `t_kb_app_version`（`released_slot` 生成列唯一约束）/ `t_kb_api_key` / `t_kb_api_audit_log`。`t_kb_app_version` **刻意不带 `tenant_id`**：从属表经 `app_id` 归属租户，其隔离由 `AppVersionGuard` 在 `AppVersionService#require` 背后解析根表完成，不靠行级围栏（见 §7.2 与 M16 契约 §1.3.2） |
 | V7（M6） | 应用版本加 `visible_version_ids` + `index_snapshots` |
 | V8（M7） | `t_kb_task` 加 `skipped_count`（图抽取跳过计数） |
 | V9（M8） | `t_kb_source_mapping`（映射档案，启动播种内置模板、只补缺不覆盖） |
@@ -356,7 +367,9 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 - **记忆库的第三层隔离是租户**（V21 修复）：Key 绑定库（应用级）与 `user_id`（实体级）只覆盖开放端，管理端的 `memory:read`/`memory:write` 只回答"这个账号能不能碰记忆库"，回答不了"能碰哪些"。补法与知识库同构：`t_kb_memory_library` 加 `tenant_id` 并进围栏，五张从属表不加列、经 `library_id` 归属；关键是 `MemoryLibraryGuard` —— 管理端带 `libraryId` 的 21 个入口**一律先解析库**（包括按 rule_id / node_id / key_id 直接寻址的那些），否则从属语句压根不经过带 `tenant_id` 的那张表，围栏形同虚设；余下 2 个（库列表、建库）无 libraryId，由围栏本体覆盖（SELECT 拼条件 / INSERT 注入）。开放端不受影响：那条链上没有控制台主体，`ignoreTable` 整条跳过，这是必须保留的既有语义（一拼租户条件，Key 会把自己的库过滤掉）。
 - **站点凭据的租户隔离要两套机制，因为它有两类读者**（V22 修复）：控制台增删改查靠行级围栏（`t_kb_web_credential` 进 `FENCED_TABLES`），夜间网页同步靠 `WebCredentialService#resolveFor(tenantId, host)` 的显式租户谓词——同步跑在 `@Scheduled` 线程上，没有控制台主体，围栏在那条线程整条跳过，光进名单等于抓取面零防护。租户由 `WebSource.kb_id` 反查知识库得到；库被删的孤儿登记解析不出租户，按"无凭据"匿名抓取，**绝不退化成按 host 查**。连带两处语义收缩：同 host 凭据从全局唯一变租户内唯一（两个租户各在同一 wiki 上放一个只读账号是正常业务），"一次 401 就停掉该站点本轮抓取"的去重键从 `host` 变为 `(租户, host)`（锁的是账号，而两个租户在同一 host 上是两个账号，按 host 记会让一家的过期密码掐掉所有人的当晚抓取）。详见 M16 契约 §1.3 与 §1.3.1。
 - **从属表的隔离是"每个入口先解析根"，不是"表在不在围栏名单里"**（V22 后修复，M12/M17/M18 网页源）：`t_kb_web_source` 不带 `tenant_id`、也不在 `FENCED_TABLES` 里，这个设计是对的（经 `kb_id` 归属租户，加列只会造第二个可以不一致的事实源）；错的是四个入口——按 `sourceId` 的手动同步 / 改开关 / 硬删、按 `kbId` 的列表——压根不查 `t_kb_knowledge_base`，围栏在那几条语句上什么都没做。新增 `WebSourceGuard` 让四个入口一律先解析到根表（跨租户读作"不存在"→ **404**），与记忆库的 `MemoryLibraryGuard` 同构。**根因值得单独记住**：原先站在这些入口前面的 `KbScopeGuard#requireWebSourceAccess` 回答的是"库在不在调用者的数据范围里"，一行租户判断都没有，且第一行的 `unrestrictedKbScope()` 短路对租户 SUPER_ADMIN、未配数据范围的 KB_ADMIN 直接放行——**只覆盖数据范围的守卫比没有守卫更危险，它让 review 以为这条路径已经守住了**，该方法已随本次修复删除。判定顺序也是契约的一部分：租户（404）先于数据范围（403），反过来会用状态码差异泄露"这个 id 在别的租户里存在"。详见 M16 契约 §1.3.2。
-  > **后续普查发现这不是孤例，是一族**：同类的另外 8 个方法（document / chunk / annotation / dataset / case / run / ext-source / feedback）逐字同构，站在 34 个控制台入口前面，包括覆写外部数据源 AK/SK、用别家凭据发外网探测请求、硬删登记、清除别家文档、把别家文档回滚到旧版本。M16 后修复把 `KbScopeGuard` 整体重命名为 `KbResourceGuard` 并让 9 个方法一律先解析围栏根表。**顺带钉住一条更普适的教训**：`requireDatasetAccess` 查的 `t_kb_eval_dataset` 本来就在围栏名单里，短路却让那条语句根本不执行——围栏只保护它实际发出的语句，任何提前 `return` 都会连同已写好的围栏一起跳过，而这种失败在方法体里看不出来，因为围栏是拦截器。
+  > **后续普查发现这不是孤例，是一族**：同类的另外 8 个方法（document / chunk / annotation / dataset / case / run / ext-source / feedback）逐字同构，站在 43 个控制台端点前面，包括覆写外部数据源 AK/SK、用别家凭据发外网探测请求、硬删登记、清除别家文档、把别家文档回滚到旧版本。M16 后修复把 `KbScopeGuard` 整体重命名为 `KbResourceGuard` 并让 9 个方法一律先解析围栏根表。**顺带钉住一条更普适的教训**：`requireDatasetAccess` 查的 `t_kb_eval_dataset` 本来就在围栏名单里，短路却让那条语句根本不执行——围栏只保护它实际发出的语句，任何提前 `return` 都会连同已写好的围栏一起跳过，而这种失败在方法体里看不出来，因为围栏是拦截器。
+  > **另一半是「入口自带 `kb_id` 却仍未解析」**：这类最容易被误判为安全，因为路径里那个 `kbId` 看着就是作用域本身——可它是**调用方声明的**作用域，不是被证实的。文档列表、回收站、检索洞察与统计、批量删除与重建、批量确认、全库重建与状态、文档密级读写共 15 个入口原先只有 Controller 里那行数据范围调用，链路上一次 `t_kb_knowledge_base` 查询都没有，报一个别家的 `kbId` 就能把按 `kb_id` 过滤的语句照常跑完。修复一律落在服务层方法首行（服务方法是所有调用方的必经之路），并把 28 处 Controller 的数据范围调用换成 `KbResourceGuard#requireKb`，**判定顺序由此在全域统一**。文档密级那两条另有一层教训：原先只校验「文档挂在这个 `kbId` 下」，跨租户调用方把别家的 `kbId` 与该库下的 `docId` 一起传进来完全对得上——**「从属行属于这个父」和「这个父属于你」是两个问题**。判据：这条链路上有没有一次对根表的查询？没有 → 未守，`kbId` 在路径里也一样。
+- **收口点越靠近数据，新入口自动继承的概率越高**（M4c 后修复，应用版本）：`t_kb_app_version` 同样是不带 `tenant_id` 的从属表（经 `app_id` 归属 `t_kb_app`），而 `/app-versions/{vid}` 的五个端点只有功能权限码——任何租户持 `app:release` 就能**发布或回滚别家的应用版本**，直接改变别人对外 API 被服务的内容；持 `app:read` 就能读它的配置快照；发布还会在门禁执行器上对别家知识库启动同语料双跑，花掉他们的检索与模型调用。补法与前三处同构，但守卫落点不同：`AppVersionGuard` 放在 `AppVersionService#require` **背后**而不是各入口前面，因为那个方法是 11 处调用方的唯一入口（本服务自调用 5、`ReleaseGateService` 5、控制台预览 1），放入口必漏。**404 收口要连措辞一起收**：跨租户与"版本不存在"共用同一错误码同一文案、文案不含 `appId`，第二跳报成 `APP_NOT_FOUND` 就等于用错误码差异告诉调用方"你猜的 id 是真的、只是在别人那里"。对外 `search`/`chat` 走 `resolveForCall` 不经该方法、由 API Key 的 `app_scope` 把关，门禁执行器与预览流线程无控制台主体、围栏本就整条跳过，两者行为均零变化。详见 M16 契约 §1.3.2。
 - **MCP 是第二种 transport，不是第二种身份**（M20）：`/api/v1/knowledge/mcp` 与 `/api/v1/memory/mcp` 刻意落在上述后两条过滤器链的 URL 前缀之下，凭证仍是既有 `kb-sk-*` / `kb-mk-*`，鉴权、授权范围、限流、审计与 REST 完全同一条管线，零过滤器改动、无新增凭据面；协议层错误（JSON-RPC error / `isError`）全部在 HTTP 200 的 body 里，401/429 信封同 REST（见 §3.9）。
 - **Prompt 注入四防线**：①生成/judge prompt 固定分隔符包裹资料原文；②LLM 切分输出强校验（非法降级按长度切）；③路由白名单交集裁决；④改写结果仅作检索词。
 - 解析侧基线：magic number 校验、zip-slip/炸弹、XXE（defusedxml）、SSRF（解析期零出站）；前端零 `dangerouslySetInnerHTML`；聊天导入默认脱敏（手机号/身份证/银行卡 16-19 位）；审计 query 无条件脱敏；MinIO 私有桶 + 限时预签名 URL。

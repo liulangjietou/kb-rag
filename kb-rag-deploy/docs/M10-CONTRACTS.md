@@ -28,6 +28,8 @@
 - `POST /api/v1/retrieval-feedback/{feedbackId}/dismiss`：`status=DISMISSED`；仅 NEW 可忽略
 - 状态机：`NEW → CONVERTED | DISMISSED`，终态不可再变（重复调用 → INVALID_PARAM）
 
+> **租户解析义务（M16 后修复补齐）**：`t_kb_retrieval_feedback` 是经 `kb_id` 归属租户的从属表，不带 `tenant_id` 也不进行级围栏。上面四个端点原先只过 `KbScopeGuard#requireFeedbackAccess` 或 `AccessGuard.requireKbAccess(kbId)`，两者都只回答数据范围、一行租户判断都没有：凭一个 `kbId` 能列出别家知识库的全部反馈（**其中带原始 query 文本**），凭一个 `feedbackId` 能转/忽略别家的反馈行，`POST` 还能往别家的反馈队列里塞行。现由 `KbResourceGuard` 与 `RetrievalFeedbackService#require`/`#list`/`#record` 一律先解析根表 `t_kb_knowledge_base`，跨租户读作"不存在" → **404**；`kbId` 入口改用 `requireKb`，把租户判定摆回数据范围判定之前（原先顺序反了，403 与 404 的差异会泄露"这个 id 在别的租户里存在"）。**开放端反馈（`Bearer kb-sk-*`）不受影响**：那条链由 `request_id` 反查洞察行、再经 `ApiKeyPrincipal#requireAccessTo` 校验 Key 的授权范围，是既有语义。详见 `M16-CONTRACTS.md` §1.3.2。
+
 ### 2.2 检索洞察（SearchInsightService，kb-app 新包 insight）
 - **记录点在 API 边界而非 RetrievalService 内部**：评测运行、门禁双跑复用同一检索链路，若埋在链路内会把离线跑污染进报表——
   - 管理台调试：`SearchController` 检索成功返回后异步记录（source=CONSOLE）
@@ -36,6 +38,8 @@
 - `GET /api/v1/kb/{kbId}/search-insights?zero_hit=&from=&to=&page=&size=`：分页明细，最新优先
 - `GET /api/v1/kb/{kbId}/search-insights/stats?from=&to=`：聚合报表 `{total, zero_hit_count, zero_hit_rate, degraded_count, top_zero_hit_queries:[{query_digest, count, last_at}]}`——Top 分组按 `query_hash` group by 取 count 前 10，query_digest 取组内最新一条；时间窗缺省近 7 天
 - 保留期清理：`@Scheduled` 每日删除 `kb.insight.retention-days`（默认 90，INSIGHT_RETENTION_DAYS）之前的行，单批 ≤5000 防长事务（沿用审计归档惯例，无 MinIO 归档）
+
+> **租户解析义务（M16 后修复补齐）**：`t_kb_search_insight` 是经 `kb_id` 归属租户的从属表，不带 `tenant_id` 也不进行级围栏。上面两个报表端点原先只过 `AccessGuard.requireKbAccess(kbId)`，那只回答"这个库在不在调用者角色配的数据范围里"，而 `kb_scope_all` 对五个内置角色恒为真——**报一个别家的 `kbId`，后续按 `kb_id` 过滤的语句照常执行**，别家用户搜过什么（洞察行存的是原始 query 文本）连同零命中与降级分布一并读出。现由 `SearchInsightService#list`/`#stats` 首行 `knowledgeBaseService.require(kbId)` 先解析根表，跨租户读作"不存在" → **404**；Controller 那行也换成 `KbResourceGuard#requireKb`，把租户判定摆回数据范围判定之前。**记录侧不受影响**：`recordAsync` 跑在无控制台主体的线程上，知识库由调用链传入，是既有语义。详见 `M16-CONTRACTS.md` §1.3.2。
 
 ### 2.3 配置键（application.yml 接环境占位符，KbProperties 承载）
 - `kb.insight.retention-days=90`（INSIGHT_RETENTION_DAYS）
