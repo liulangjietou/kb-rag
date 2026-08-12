@@ -30,6 +30,16 @@ import java.util.concurrent.ThreadPoolExecutor;
  * over their own pool. The embedding pool is therefore a global ceiling rather than a per document one -
  * see {@link #embedTaskExecutor}.
  *
+ * <p><b>One shape rule governs every pool below: either the queue is empty, or core equals max.</b> A
+ * {@link ThreadPoolTaskExecutor} only grows past its core size once the queue is <em>full</em>, so a pool
+ * with both a deep queue and a larger max never reaches that max and its declared ceiling is a lie the
+ * next reader believes - the old indexing {@code core=2, max=4} behind a 200 deep queue never left 2, and
+ * a batch upload of fifty files was processed two at a time. The two unqueued pools (retrieval and chat
+ * stream) are the deliberate exception: with no queue to fill, growth to max is the <em>first</em> thing
+ * that happens, which is exactly the "absorb the burst, then reject" shape they want. Everywhere else the
+ * core size is the concurrency that actually happens, and there is only one number to read.
+ * {@code AsyncConfigTest} pins this rule so the third occurrence cannot ship.
+ *
  * <p>The task decorator carries the request id into the worker thread so an upload or a search can be
  * traced end to end in the logs.
  *
@@ -69,15 +79,7 @@ public class AsyncConfig {
     /** Bean name of the pool the embedding batches of one document are spread over. */
     public static final String EMBED_EXECUTOR = "embedTaskExecutor";
 
-    /**
-     * Queue depth of the task pools whose size comes from configuration.
-     *
-     * <p>Those pools set core and max to the same number on purpose. A {@link ThreadPoolTaskExecutor}
-     * only grows past its core size once the queue is <em>full</em>, so any queue deep enough to be
-     * useful makes the max unreachable: the old indexing {@code core=2, max=4} behind a 200 deep queue
-     * never left 2, and a batch upload of fifty files was processed two at a time. One number, and it is
-     * the concurrency that actually happens.
-     */
+    /** Queue depth of the indexing pool, see the shape rule in the class comment. */
     private static final int QUEUE_CAPACITY = 200;
     private static final String THREAD_PREFIX = "kb-index-";
 
@@ -87,12 +89,13 @@ public class AsyncConfig {
     private static final String RETRIEVAL_THREAD_PREFIX = "kb-retrieval-";
 
     /**
-     * One run submission can create up to 6 runs and each is handed to this pool independently, so a
-     * small size is enough: a thread here only supervises one run, the cases themselves fan out again
-     * over {@link #evalCaseTaskExecutor}.
+     * One run submission can create up to 6 runs and each is handed to this pool independently, so the
+     * size is that same 6: a thread here only supervises one run, and the cases themselves fan out again
+     * over {@link #evalCaseTaskExecutor}, which is where the ceiling on model calls actually lives. Sizing
+     * this pool below the largest submission would serialise a matrix the console presents as one action -
+     * and it did, silently, while {@code core=2, max=6} behind a 50 deep queue read like 6.
      */
-    private static final int EVAL_CORE_POOL_SIZE = 2;
-    private static final int EVAL_MAX_POOL_SIZE = 6;
+    private static final int EVAL_POOL_SIZE = 6;
     private static final int EVAL_QUEUE_CAPACITY = 50;
     private static final String EVAL_THREAD_PREFIX = "kb-eval-";
 
@@ -106,14 +109,22 @@ public class AsyncConfig {
     /**
      * A gate thread spends its life waiting for two evaluation runs, so it must never share the pool those
      * runs execute on: a gate queued behind its own work would wait for a run that cannot start.
+     *
+     * <p>Four and not one, because a queued gate is not a delayed gate but a stalled release: the version
+     * sits in {@code GATING} the whole time it waits, and the console shows a release in progress that has
+     * not begun. The threads are cheap - they only poll - and the work they wait on is already capped by
+     * the evaluation pool.
      */
-    private static final int GATE_CORE_POOL_SIZE = 1;
-    private static final int GATE_MAX_POOL_SIZE = 4;
+    private static final int GATE_POOL_SIZE = 4;
     private static final int GATE_QUEUE_CAPACITY = 20;
     private static final String GATE_THREAD_PREFIX = "kb-gate-";
 
-    private static final int AUDIT_CORE_POOL_SIZE = 1;
-    private static final int AUDIT_MAX_POOL_SIZE = 4;
+    /**
+     * One thread, which is what this pool has always effectively had: an audit row is a single write and
+     * the queue in front of it is the burst absorber. The former {@code max=4} was never reached behind a
+     * 2000 deep queue, so naming the real number here changes nothing but what the next reader believes.
+     */
+    private static final int AUDIT_POOL_SIZE = 1;
     private static final int AUDIT_QUEUE_CAPACITY = 2000;
     private static final String AUDIT_THREAD_PREFIX = "kb-audit-";
 
@@ -130,10 +141,11 @@ public class AsyncConfig {
     /**
      * One scan lists and fetches many objects over slow outbound I/O, so the pool is small and the
      * queue generous: a registration or a manual sync only hands over a task and returns, and a
-     * burst of triggers should wait in line rather than fan out into parallel bucket scans.
+     * burst of triggers should wait in line rather than fan out into parallel bucket scans. One thread is
+     * what that description means and what the pool already did - the former {@code max=2} sat behind a 100
+     * deep queue and was never reached.
      */
-    private static final int EXT_SOURCE_CORE_POOL_SIZE = 1;
-    private static final int EXT_SOURCE_MAX_POOL_SIZE = 2;
+    private static final int EXT_SOURCE_POOL_SIZE = 1;
     private static final int EXT_SOURCE_QUEUE_CAPACITY = 100;
     private static final String EXT_SOURCE_THREAD_PREFIX = "kb-ext-source-";
 
@@ -198,13 +210,19 @@ public class AsyncConfig {
     /**
      * Creates the executor that runs one evaluation run's execution off the submitting request.
      *
+     * <p>The default abort policy is kept rather than replaced by a caller runs one: a rejected run must
+     * not be dragged back onto the submitting HTTP request, which is the exact shape the {@code @Async}
+     * self invocation used to produce. The rejection is handled where the run row is, in
+     * {@code EvalRunService}, which turns it into a {@code FAILED} run with a reason instead of leaving a
+     * {@code PENDING} row nothing will ever pick up.
+     *
      * @return executor used by the evaluation run submission
      */
     @Bean(EVAL_EXECUTOR)
     public Executor evalTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(EVAL_CORE_POOL_SIZE);
-        executor.setMaxPoolSize(EVAL_MAX_POOL_SIZE);
+        executor.setCorePoolSize(EVAL_POOL_SIZE);
+        executor.setMaxPoolSize(EVAL_POOL_SIZE);
         executor.setQueueCapacity(EVAL_QUEUE_CAPACITY);
         executor.setThreadNamePrefix(EVAL_THREAD_PREFIX);
         executor.setTaskDecorator(requestIdPropagatingDecorator());
@@ -245,13 +263,18 @@ public class AsyncConfig {
     /**
      * Creates the executor one release gate's dual run supervision runs on.
      *
+     * <p>Abort on rejection, for the same reason as the evaluation pool and with the same obligation on
+     * the submitter: {@code ReleaseGateService} marked the version {@code GATING} before handing the gate
+     * over, and a rejection it swallowed would leave that version gating forever - a state its own release
+     * guard refuses to release out of.
+     *
      * @return executor used by the release gate
      */
     @Bean(GATE_EXECUTOR)
     public Executor gateTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(GATE_CORE_POOL_SIZE);
-        executor.setMaxPoolSize(GATE_MAX_POOL_SIZE);
+        executor.setCorePoolSize(GATE_POOL_SIZE);
+        executor.setMaxPoolSize(GATE_POOL_SIZE);
         executor.setQueueCapacity(GATE_QUEUE_CAPACITY);
         executor.setThreadNamePrefix(GATE_THREAD_PREFIX);
         executor.setTaskDecorator(requestIdPropagatingDecorator());
@@ -270,8 +293,8 @@ public class AsyncConfig {
     @Bean(AUDIT_EXECUTOR)
     public Executor auditTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(AUDIT_CORE_POOL_SIZE);
-        executor.setMaxPoolSize(AUDIT_MAX_POOL_SIZE);
+        executor.setCorePoolSize(AUDIT_POOL_SIZE);
+        executor.setMaxPoolSize(AUDIT_POOL_SIZE);
         executor.setQueueCapacity(AUDIT_QUEUE_CAPACITY);
         executor.setThreadNamePrefix(AUDIT_THREAD_PREFIX);
         executor.setTaskDecorator(requestIdPropagatingDecorator());
@@ -304,8 +327,8 @@ public class AsyncConfig {
     @Bean(EXT_SOURCE_EXECUTOR)
     public Executor extSourceTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(EXT_SOURCE_CORE_POOL_SIZE);
-        executor.setMaxPoolSize(EXT_SOURCE_MAX_POOL_SIZE);
+        executor.setCorePoolSize(EXT_SOURCE_POOL_SIZE);
+        executor.setMaxPoolSize(EXT_SOURCE_POOL_SIZE);
         executor.setQueueCapacity(EXT_SOURCE_QUEUE_CAPACITY);
         executor.setThreadNamePrefix(EXT_SOURCE_THREAD_PREFIX);
         executor.setTaskDecorator(requestIdPropagatingDecorator());
@@ -362,17 +385,39 @@ public class AsyncConfig {
         return executor;
     }
 
-    private TaskDecorator requestIdPropagatingDecorator() {
+    /**
+     * Carries the submitter's request id onto the thread the task ends up running on.
+     *
+     * <p><b>It restores rather than clears, because the task does not always run on a worker thread.</b>
+     * Two pools here use a caller runs policy, so a full queue makes the task run on the very thread that
+     * submitted it - an indexing thread, or an evaluation run supervising its own cases. Clearing
+     * unconditionally in the finally block wiped that thread's own request id on the way out, and every
+     * line it logged afterwards lost the correlation id halfway through the work. Saving what was bound
+     * before and putting it back covers both cases: on a worker thread nothing was bound, so restoring
+     * null is the clear that was always intended.
+     *
+     * <p>Package private so {@code AsyncConfigTest} can exercise both hand-off shapes directly rather than
+     * having to fill a 500 deep queue to reach the second one.
+     *
+     * @return decorator applied to every pool of this configuration
+     */
+    TaskDecorator requestIdPropagatingDecorator() {
         return runnable -> {
-            String requestId = RequestIdHolder.get();
+            // Read on the submitting thread: TaskDecorator#decorate runs at submission time.
+            String submittedRequestId = RequestIdHolder.get();
             return () -> {
+                String previous = RequestIdHolder.get();
+                if (submittedRequestId != null) {
+                    MDC.put(RequestIdHolder.MDC_KEY, submittedRequestId);
+                }
                 try {
-                    if (requestId != null) {
-                        MDC.put(RequestIdHolder.MDC_KEY, requestId);
-                    }
                     runnable.run();
                 } finally {
-                    RequestIdHolder.clear();
+                    if (previous == null) {
+                        RequestIdHolder.clear();
+                    } else {
+                        MDC.put(RequestIdHolder.MDC_KEY, previous);
+                    }
                 }
             };
         };

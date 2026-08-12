@@ -73,19 +73,22 @@
 |---|---|---|---|
 | 记忆库五张从属表（片段/画像规则、节点、画像、Key） | `library_id` → `t_kb_memory_library` | `MemoryLibraryGuard`（管理端 21 个入口） | V21 |
 | `t_kb_web_source` | `kb_id` → `t_kb_knowledge_base` | `WebSourceGuard`（网页导入 4 个入口） | V22 后修复 |
-| `t_kb_document` / `t_kb_chunk` / `t_kb_annotation` / `t_kb_ext_source` / `t_kb_retrieval_feedback` | `kb_id` → `t_kb_knowledge_base` | `KbResourceGuard`（按自身 id 寻址的 34 个入口） | M16 后修复 |
+| `t_kb_app_version` | `app_id` → `t_kb_app` | `AppVersionGuard`（`AppVersionService#require` 背后，覆盖应用版本 5 个入口） | M4c 后修复 |
+| `t_kb_document` / `t_kb_chunk` / `t_kb_annotation` / `t_kb_ext_source` / `t_kb_retrieval_feedback` | `kb_id` → `t_kb_knowledge_base` | `KbResourceGuard`（按自身 id 寻址的 43 个端点） | M16 后修复 |
 | `t_kb_eval_case` / `t_kb_eval_run` | `dataset_id` → `t_kb_eval_dataset`（该表自身在围栏内） | `KbResourceGuard` + `EvalRunService#requireRun` / `EvalDatasetService#requireCase` | M16 后修复 |
-| `t_kb_app_version` | `app_id` → `t_kb_app` | `AppVersionService#require`（`/app-versions/{id}` 五个入口） | M16 后修复 |
 | `t_kb_api_audit_log` | `key_id` → `t_kb_api_key` | `ApiAuditService#visibleKeyIds`（列表与统计，见下） | M16 后修复 |
 
+- **`t_kb_app_version` 是同一个模子里的第四处**：五个端点（`GET /app-versions/{vid}`、`PUT .../gate-dataset`、`POST .../submit-test`、`POST .../release`、`POST .../rollback`）只有 `@RequiresPermission` 功能权限码，`AppVersionService#require` 是从属表上的裸 `selectOne`、从不查 `t_kb_app`。任何租户持 `app:release` 就能发布 / 回滚别家的应用版本 —— 这一条直接改变别人对外 API 被服务的内容；持 `app:read` 就能读它的配置快照（关联知识库与模型配置）。**发布是其中最贵的入口**：它还会在门禁执行器上对别家知识库启动同语料双跑，花掉他们的检索与模型调用额度，并冻结索引快照。
+- **守卫可以落在服务方法背后，而不是每个入口前面**：`AppVersionGuard` 被 `AppVersionService#require` 独占调用，因为该方法是 11 处调用方的唯一入口（本服务自调用 5 处、`ReleaseGateService` 5 处、控制台预览 1 处）。这与"检查放服务层不放 Controller"是同一条原则的更强形态 —— 收口点越靠近数据，新入口自动继承的概率越高。做成独立 bean 的理由不变：可 grep、可单测、可复用。
+- **跨租户与不存在必须是同一个回答**：`AppVersionGuard` 两处失败都抛 `VERSION_NOT_FOUND` + 同一句文案，文案不含 `appId`。第二跳报成 `APP_NOT_FOUND` 会用错误码差异告诉调用方"你猜的 id 是真的、只是在别人那里" —— 这是 404 收口在措辞上的延伸，光返回 404 不够。
 - **`t_kb_web_source` 不进围栏名单是对的，漏的是解析**：它是 M12 建的从属表，经 `kb_id` 归属租户，给它加 `tenant_id` 就是造第二个可以不一致的事实源。真正的缺陷是四个入口（`POST /web-sources/{sourceId}/sync`、`PUT /web-sources/{sourceId}`、`DELETE /web-sources/{sourceId}`、`GET /kb/{kbId}/web-sources`）压根不查 `t_kb_knowledge_base` —— 任何租户凭一个 `sourceId` 就能触发别家网页源的抓取、改它的同步开关、硬删它的登记（`hardDeleteById`，不可恢复），凭一个 `kbId` 就能列出别家知识库登记的全部 URL 与同步状态。
 - **数据范围守卫不是租户守卫，这是本次缺陷的根因**：`KbScopeGuard` / `AccessGuard.requireKbAccess` 回答的是"这个库在不在调用者角色配的数据范围里"，从头到尾没有一处比对租户；而且每个方法第一行的 `unrestrictedKbScope()` 短路对 `kb_scope_all` 的账号（租户的 SUPER_ADMIN、未配数据范围的 KB_ADMIN，都是常见配置）直接放行。已被删除的 `KbScopeGuard#requireWebSourceAccess` 就站在这四个入口前面，看起来像守卫、实际一行租户判断都没有 —— **一个只覆盖数据范围的守卫比没有守卫更危险，它让 review 以为这条路径已经守住了**。
-- **同族的另外 8 个方法在 M16 后修复中一并补齐**（`KbScopeGuard` 已重命名为 `KbResourceGuard`）：`requireWebSourceAccess` 只是这一族里第一个被发现的成员，document / chunk / annotation / dataset / case / run / ext-source / feedback 八个方法逐字同构，站在 34 个控制台入口前面。9 个方法一律改成"先解析围栏根表（404）、再判数据范围（403）"，短路整体删除。**类名一起换掉是修复的一部分**：`ScopeGuard` 诚实地描述了它当时做的事，而那件事不是隔离边界，留着这个名字下一个 review 还会误读。
+- **同族的另外 8 个方法在 M16 后修复中一并补齐**（`KbScopeGuard` 已重命名为 `KbResourceGuard`）：`requireWebSourceAccess` 只是这一族里第一个被发现的成员，document / chunk / annotation / dataset / case / run / ext-source / feedback 八个方法逐字同构，站在 43 个控制台端点前面。9 个方法一律改成"先解析围栏根表（404）、再判数据范围（403）"，短路整体删除。**类名一起换掉是修复的一部分**：`ScopeGuard` 诚实地描述了它当时做的事，而那件事不是隔离边界，留着这个名字下一个 review 还会误读。
   > **短路吞掉的不只是数据范围判定，这条比缺陷本身更值得记住**：`requireDatasetAccess` 查的 `t_kb_eval_dataset` 本来就在围栏名单里、围栏会自动给它拼租户条件——但方法第一行的 `return` 让那条语句压根不执行。**围栏只保护它实际发出的语句**；任何"提前 return"都会连同已经写好的围栏一起跳过，而这种失败在代码上看不出来，因为围栏是拦截器、不在方法体里。
 - **「入口自带 `kb_id`」不等于已解析**：这类入口最容易被误判为安全，因为路径里那个 `kbId` 看着就是作用域本身。但它是**调用方声明的**作用域，不是被证实的——不查根表就没有任何东西证实过它属于调用者的租户，而按 `kb_id` 过滤的那条从属表语句会照常执行。M16 后修复补齐了 15 个这样的入口（文档列表 / 回收站 / 检索洞察与统计 / 批量删除与重建 / 批量确认 / 全库重建与状态 / 文档密级读写），落点一律在服务层方法首行。**判据**：这条链路上有没有一次对 `t_kb_knowledge_base` 的查询？没有 → 未守，`kbId` 在路径里也一样。
 - **解析义务的形态**：入口自带 `kb_id`（列表、登记）→ 直接解析根表，从属表一条语句都不发；入口只有从属表自己的 id（按 `source_id` 同步/改/删）→ **先定位、再解析根**，定位那条 `select` 物理上无法避免（`source_id` 只存在于从属表），但它只读、不改任何状态，判定发生在紧接着的根表那一跳，跨租户在那里读作"不存在"，后续的写语句与抓取一条都不发出。两种形态都以 **404** 收场（与 §1.3 记忆库同口径），不是 403。
-- **租户判定必须排在数据范围判定之前**：先问数据范围会让跨租户的资源答 403、不存在的资源答 404，这个差别本身就告诉调用方"这个 id 在别的租户里存在"。`WebSourceGuard` 的顺序是租户（404）→ 数据范围（403），单测钉住。
-- **过滤型入口的第三种形态：没有任何 id 可解析**。`GET /api-audit-logs` 的 `key_id` 是**可选**过滤参数，不传就没有任何东西可以解析——而"没有 id"在这里等于"全部署所有租户的调用流水"。这类入口要反过来做：先经围栏读出调用者租户下的根表 id 集合（`t_kb_api_key`），再用它约束从属表的 `in`。**空集合必须答空，绝不能退化成"不加过滤"**——那会把缺陷原样保留，而且看起来像已经修了。判据：可选过滤参数缺省时，这条语句的作用域是什么？答案是"全表"就是未守。
+- **租户判定必须排在数据范围判定之前**：先问数据范围会让跨租户的资源答 403、不存在的资源答 404，这个差别本身就告诉调用方"这个 id 在别的租户里存在"。`WebSourceGuard` 的顺序是租户（404）→ 数据范围（403），单测钉住。`PUT /app-versions/{vid}/gate-dataset` 是这条规则的第二个落点：它携带第二个资源（`datasetId`），原先在 Controller 里先判该资源的数据范围，跨租户的版本会先撞上评测集的 403；`kbScopeGuard.requireDatasetAccess` 已移入 `AppVersionService#setGateDataset` 并排在版本解析之后。**入口带第二个资源时，主体资源的租户判定仍然排第一** —— 顺序看的是资源的角色，不是参数在签名里的位置。
+- **过滤型入口的第三种形态：没有任何 id 可解析**。前两种形态（路径带从属资源 id、路径带 `kbId`）都有一个东西可以拿去解析根表；`GET /api-audit-logs` 的 `key_id` 是**可选**过滤参数，缺省时无从解析——而"没有 id"在这里恰恰等于"全部署所有租户的调用流水"。这类入口要反过来做：先经围栏读出调用者租户下的根表 id 集合（`t_kb_api_key`），再用它约束从属表的 `in`。**空集合必须答空，绝不能退化成"不加过滤"**——那会把缺陷原样保留，而且比修复前更难发现，因为代码看起来已经解析过了。判据：可选过滤参数缺省时，这条语句的作用域是什么？答案是"全表"就是未守。
 - **判据（新增入口时自查）**：这个入口的路径参数是根表的 id 吗？不是 → 它必须过本域的守卫。守卫做成独立 bean、检查放服务层不放 Controller —— Controller 里的守卫只护得住有人记得加的那几条路径，而服务方法是所有调用方的必经之路。
 
 - 平台超管跨租户：**默认租户的 SUPER_ADMIN** 是唯一能看到租户管理页的人；其余一切读写都被钉死在自己租户内，包括默认租户超管的日常操作 —— 跨租户视角只存在于 `TenantController`，不存在"切换租户"的全局态，全局态是每一个越权 bug 的温床。

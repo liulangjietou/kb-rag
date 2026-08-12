@@ -1,6 +1,8 @@
 package io.kbrag.app.openapi;
 
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import io.kbrag.app.appcenter.AppService;
+import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
@@ -15,6 +17,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -23,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -37,6 +45,8 @@ class ApiKeyServiceTest {
 
     private static final String KEY_ID = "ak_1";
     private static final String APP_ID = "app_1";
+    private static final String AUDIT_PROBE_THREAD = "audit-probe";
+    private static final int HAND_OFF_TIMEOUT_SECONDS = 5;
 
     private ApiKeyMapper apiKeyMapper;
     private AppService appService;
@@ -52,9 +62,11 @@ class ApiKeyServiceTest {
         bizIdGenerator = mock(BizIdGenerator.class);
         apiKeyFactory = new ApiKeyFactory();
         properties = new KbProperties();
+        MybatisLambdaCache.register(ApiKey.class);
         when(bizIdGenerator.apiKeyId()).thenReturn(KEY_ID);
         // The audit executor runs inline so the last-used write this suite observes has already happened
-        // when authenticate returns; that it leaves the request thread in production is asserted separately.
+        // when authenticate returns; that it leaves the request thread in production is asserted by
+        // shouldWriteTheLastUsedTimestampOffTheAuthenticatingThread, which gives it a named pool instead.
         service = new ApiKeyService(apiKeyMapper, apiKeyFactory, appService, bizIdGenerator, properties,
                 Runnable::run);
     }
@@ -107,6 +119,43 @@ class ApiKeyServiceTest {
         assertEquals(KEY_ID, principal.getKeyId());
         assertEquals(5, principal.getQpsLimit());
         assertTrue(principal.unrestricted());
+    }
+
+    /**
+     * The last-used write must leave the authenticating request thread.
+     *
+     * <p>It runs once per authenticated open API call and is a row update on a table every call writes to,
+     * so inline it is a database round trip in front of every search - which is the entire reason the
+     * executor is there. Nothing about the produced row differs between the two, so the assertion has to be
+     * about the thread, exactly as for the evaluation and gate hand-offs.
+     */
+    @Test
+    void shouldWriteTheLastUsedTimestampOffTheAuthenticatingThread() throws InterruptedException {
+        ApiKeyService.IssuedKey issued = service.create("agent", 5, List.of());
+
+        CountDownLatch written = new CountDownLatch(1);
+        AtomicReference<String> writingThread = new AtomicReference<>();
+        when(apiKeyMapper.update(isNull(), any(LambdaUpdateWrapper.class))).thenAnswer(invocation -> {
+            writingThread.set(Thread.currentThread().getName());
+            written.countDown();
+            return 1;
+        });
+
+        ExecutorService auditPool = Executors.newSingleThreadExecutor(task -> new Thread(task, AUDIT_PROBE_THREAD));
+        try {
+            ApiKeyService asyncService = new ApiKeyService(apiKeyMapper, apiKeyFactory, appService,
+                    bizIdGenerator, properties, auditPool);
+            when(apiKeyMapper.selectOne(any())).thenReturn(issued.key());
+
+            asyncService.authenticate(issued.plaintext());
+
+            assertTrue(written.await(HAND_OFF_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                    "the last-used write never reached the audit executor");
+            assertEquals(AUDIT_PROBE_THREAD, writingThread.get());
+            assertNotEquals(Thread.currentThread().getName(), writingThread.get());
+        } finally {
+            auditPool.shutdownNow();
+        }
     }
 
     @Test

@@ -57,6 +57,8 @@
 - `POST /api/v1/ext-sources/{sourceId}/test`：连通性测试（同步执行，返回 HealthStatus）。
 - `DELETE /api/v1/ext-sources/{sourceId}`：硬删源行 + items 行；**不动文档**。
 
+> **租户解析义务（M16 后修复补齐）**：`t_kb_ext_source` 是经 `kb_id` 归属租户的从属表，不带 `tenant_id` 也不进行级围栏——这个设计是对的，漏的是解析。上面按 `sourceId` 寻址的四个端点与按 `kbId` 的列表端点原先只过 `KbScopeGuard#requireExtSourceAccess`，那个方法一行租户判断都没有、且首行 `kb_scope_all` 短路对常见账号恒成立，等价于无守卫：任何租户凭一个 `sourceId` 就能覆写别家的 endpoint 与 AK/SK、拿别家凭据向别家对象存储发外网探测请求、**硬删**它的登记与对象明细（不可恢复）。现由 `KbResourceGuard#requireExtSourceAccess` 与 `ExtSourceService#require`/`#list` 两处一律先解析根表 `t_kb_knowledge_base`，跨租户读作"不存在" → **404**（与"资源不存在"共用同一错误码与同一文案，文案不含 `kbId`）；判定排在更新、硬删与探测之前，那些语句与外发请求一条都不发出。**异步首同步与夜间定时同步不受影响**：那两条线程无控制台主体、围栏整条跳过，是 M16 对后台线程的既有语义。详见 `M16-CONTRACTS.md` §1.3.2。
+
 ### 2.4 配置键（KbProperties.ExtSource）
 `kb.ext-source.sync-cron=0 0 3 * * *`（EXT_SOURCE_SYNC_CRON）、`sync-enabled=true`、`sync-batch-size=10`（每轮源数）、`max-objects-per-source=500`、`fetch-timeout-ms=30000`。定时任务与 M12 同模式：disabled 短路、单源失败不中断批次。
 

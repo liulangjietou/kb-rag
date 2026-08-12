@@ -322,9 +322,20 @@ kb:
     # Blank keeps the judge on the generation/rewrite chat model; set to grade with an independent model.
     judge-model: ${EVAL_JUDGE_MODEL:}
     offline-timeout-ms: ${EVAL_OFFLINE_TIMEOUT_MS:10000}
+    # Cases judged concurrently across EVERY running evaluation, not per run: the cases reach the model
+    # providers through the pool the online search shares, so a per run ceiling would multiply into
+    # whatever number of runs happened to be executing. A six configuration matrix therefore judges four
+    # cases at a time in total, not four per configuration - raise this, not the run pool, to go faster.
     concurrency: ${EVAL_CONCURRENCY:4}
     overlap-threshold: ${EVAL_OVERLAP_THRESHOLD:0.5}
     degraded-retry: ${EVAL_DEGRADED_RETRY:2}
+    # Sweeps runs left PENDING/RUNNING by a process that died mid execution. The timeout has to sit above
+    # the longest run a deployment really produces: an executing run touches its row only at start and at
+    # finish, so a healthy long run is indistinguishable from an abandoned one until this much has passed.
+    stuck-scan-enabled: ${EVAL_STUCK_SCAN_ENABLED:true}
+    stuck-scan-interval-ms: ${EVAL_STUCK_SCAN_INTERVAL_MS:300000}
+    stuck-timeout-minutes: ${EVAL_STUCK_TIMEOUT_MINUTES:120}
+    stuck-scan-batch-size: ${EVAL_STUCK_SCAN_BATCH_SIZE:200}
   gate:
     # Below this many effective cases the dual run comparison is recorded instead of decided on.
     min-cases: ${GATE_MIN_CASES:50}

@@ -1,6 +1,7 @@
 package io.kbrag.app.appcenter;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.eval.EvalDatasetService;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.ErrorCode;
@@ -61,10 +62,11 @@ public class AppVersionService {
     /** Index of the first declared knowledge base, whose defaults complete an unset parameter. */
     private static final int PRIMARY = 0;
 
+    private final AppVersionGuard appVersionGuard;
     private final AppVersionMapper appVersionMapper;
-    private final AppService appService;
     private final KnowledgeBaseService knowledgeBaseService;
     private final EvalDatasetService evalDatasetService;
+    private final KbResourceGuard kbResourceGuard;
     private final BizIdGenerator bizIdGenerator;
     private final GraphFusionPolicy graphFusionPolicy;
     private final KbProperties properties;
@@ -113,6 +115,11 @@ public class AppVersionService {
      * data set it ran against is part of the evidence behind the verdict, and swapping it would leave a
      * report that cannot be reproduced.
      *
+     * <p><b>Tenant first, data scope second.</b> The version is resolved before the data set is authorised,
+     * not after: this is the only entry of the domain that carries a second resource, and checking that one
+     * first would answer a caller naming another tenant's version with the data set's 403 instead of the
+     * version's 404. That difference is what tells them the id they guessed exists somewhere.
+     *
      * @param appVersionId version business id
      * @param datasetId    data set to bind, blank or {@code null} clears the binding
      * @return updated version
@@ -120,6 +127,11 @@ public class AppVersionService {
     @Transactional(rollbackFor = Exception.class)
     public AppVersion setGateDataset(String appVersionId, String datasetId) {
         AppVersion version = require(appVersionId);
+        if (datasetId != null && !datasetId.isBlank()) {
+            // Binding reaches into an evaluation data set, so the caller has to be allowed the knowledge base
+            // that data set belongs to. Clearing names nothing and needs no such check.
+            kbResourceGuard.requireDatasetAccess(datasetId);
+        }
         if (version.getStatus() != AppVersionStatus.DRAFT && version.getStatus() != AppVersionStatus.TESTING) {
             throw BizException.invalidParam("仅草稿或测试版可修改门禁评测集，当前状态 " + version.getStatus());
         }
@@ -152,25 +164,26 @@ public class AppVersionService {
     }
 
     /**
-     * Loads a version or fails.
+     * Loads a version the caller may act on, or fails.
+     *
+     * <p><b>The one door every {@code appVersionId} goes through.</b> The lookup is delegated to
+     * {@link AppVersionGuard} rather than issued here, because {@code t_kb_app_version} is a subordinate
+     * table: it reaches its tenant through {@code app_id} and the fence never touches a statement that
+     * only names {@code app_version_id}. Resolving through the guard is what turns the fence on
+     * {@code t_kb_app} into isolation for this table, and putting it behind this method rather than at
+     * each entry is deliberate - this service calls itself from five places and {@link ReleaseGateService}
+     * from five more, so a check placed at the entries would guard only the ones somebody remembered.
+     *
+     * <p>The entries that address a version through its application - {@link #listByApp},
+     * {@link #requireNewest}, {@link #currentReleased}, {@link #resolveForCall} - need none of this: they
+     * name an {@code app_id} their caller already resolved against the fenced root.
      *
      * @param appVersionId version business id
      * @return version
+     * @throws BizException not found when the version does not exist or belongs to another tenant
      */
     public AppVersion require(String appVersionId) {
-        AppVersion version = appVersionMapper.selectOne(new LambdaQueryWrapper<AppVersion>()
-                .eq(AppVersion::getAppVersionId, appVersionId)
-                .last("limit 1"));
-        if (version == null) {
-            throw new BizException(ErrorCode.VERSION_NOT_FOUND, "application version not found");
-        }
-        // t_kb_app_version 是从属表，经 app_id 归属租户，本身不带 tenant_id 也不在围栏名单里。
-        // 上面那条 select 因此对任何租户都能命中，判定发生在这一跳：应用读自围栏内的根表，
-        // 别家的应用读作不存在，于是它的版本也不存在——发布、回滚、改门禁全部止步于此。
-        if (appService.find(version.getAppId()) == null) {
-            throw new BizException(ErrorCode.VERSION_NOT_FOUND, "application version not found");
-        }
-        return version;
+        return appVersionGuard.require(appVersionId);
     }
 
     /**

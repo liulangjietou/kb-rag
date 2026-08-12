@@ -1283,6 +1283,25 @@ public class KbProperties {
 
         /** Automatic retries of a case that came back degraded. */
         private int degradedRetry = 2;
+
+        /** {@code false} disables the abandoned run scan entirely, used by tests and read only replicas. */
+        private boolean stuckScanEnabled = true;
+
+        /** Delay between two abandoned run scans in milliseconds. */
+        private long stuckScanIntervalMs = 300000L;
+
+        /**
+         * A run whose row has not moved for this long is treated as abandoned and failed.
+         *
+         * <p>Deliberately far above any realistic run: an executing run touches its row exactly twice, when
+         * it starts and when it ends, so the only evidence of liveness is the absence of a very old
+         * timestamp. Set below the longest run a deployment actually produces, this stops being a
+         * compensation and starts being a killer of healthy runs.
+         */
+        private int stuckTimeoutMinutes = 120;
+
+        /** Maximum rows one abandoned run scan picks up. */
+        private int stuckScanBatchSize = 200;
     }
 
     /**

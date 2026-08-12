@@ -8,14 +8,15 @@
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
 
-### 安全修复（M16 后修复：普查新发现的两处——应用版本与开放 API 调用审计）
+### 安全修复（M16 后修复：开放 API 调用审计查询不带租户）
 
-- 这两处不在既有缺陷清单里，是这轮全域普查按同一判据（"链路上有没有一次对根表的查询"）扫出来的。
-- **`t_kb_app_version`（应用版本）**：`AppVersionService#require:159` 是裸 `selectOne`，而该表是 `t_kb_app`（围栏根表）的从属表。`/api/v1/app-versions/{appVersionId}` 下五个端点全部经它，其中 `POST /{appVersionId}/release` 与 `/rollback` **能改别家租户线上应用正在跑的版本**——发布一个未经其运维审核的配置，或把它回滚到旧版本；`PUT /{appVersionId}/gate-dataset` 能改别家的发布门禁基线；`GET /{appVersionId}` 能读别家应用的完整配置快照（含关联知识库、提示词、路由参数）。修复：`require` 补一跳 `appService.find(version.getAppId())`，跨租户读作"版本不存在"（`VERSION_NOT_FOUND`，与不存在的 id 同码同文案）
-- **`t_kb_api_audit_log`（开放 API 调用审计）**：`GET /api/v1/api-audit-logs` 与 `/stats` 只按可选的 `key_id` 过滤，**`key_id` 不传就是全部署所有租户的调用流水**（key_id、app_id、endpoint、query 摘要、耗时、错误码）。该表是 `t_kb_api_key`（围栏根表）的从属表，自己不带 `tenant_id`。修复：查询前先经围栏解析出调用者租户下的 key 集合，用它约束 `in`；一把都不剩就答空页，而不是"不加过滤"——**这是这类修复最容易写错的地方，空集合退化成无条件查询会把缺陷原样保留**。别家的 `key_id` 在这里解析为空，读起来与一个不存在的 key 完全一致
-- 审计表不加 `tenant_id` 列而是解析根表，遵循 M16 契约 §1.1 取舍①（从属表经根归属租户，加列只会造第二个可以不一致的事实源）；`in` 列表的长度由一个租户持有的 key 数量决定，那是控制台管理的个位到两位数
-- 单测新增 3 例：`AppVersionServiceTest`（跨租户时 require / submit-test / rollback / gate-dataset 全数拒绝且无写语句）、`ApiAuditServiceTest`（围栏裁完无 key 时答空且**一条审计语句都不发**；别家 key_id 与不存在的 key 同解）
-- 无 schema 变更、无新增配置键与环境变量；开放 API 的写入侧（`record`/`recordAsync`）跑在无主体线程上，不经这两处改动
+- 普查按同一判据（"链路上有没有一次对根表的查询"）扫出来的一处，不在既有缺陷清单里。**同批扫出的应用版本那处已由 PR #38 以 `AppVersionGuard` 修复**，本条只剩审计查询
+- **缺陷**：`GET /api/v1/api-audit-logs` 与 `/stats` 只按可选的 `key_id` 过滤，**`key_id` 不传就是全部署所有租户的调用流水**（key_id、app_id、endpoint、query 摘要、耗时、错误码）。`t_kb_api_audit_log` 是 `t_kb_api_key`（围栏根表）的从属表，自己不带 `tenant_id`，那条语句里没有任何东西能分出租户
+- **这是解析义务的第三种形态：没有任何 id 可解析**。前两种形态（路径带从属资源 id、路径带 `kbId`）都有一个东西可以拿去解析根表；这里的 `key_id` 是**可选**过滤参数，缺省时无从解析，而"没有 id"恰恰等于"全表"。修法要反过来：先经围栏读出调用者租户下的 key 集合，再用它约束从属表的 `in`
+- **空集合必须答空，绝不能退化成"不加过滤"**——那会把缺陷原样保留，而且比修复前更难发现，因为代码看起来已经解析过了。别家的 `key_id` 在这里解析为空，读起来与一个不存在的 key 完全一致
+- 审计表**不加 `tenant_id` 列**而是解析根表，遵循 M16 契约 §1.1 取舍①（从属表经根归属租户，加列只会造第二个可以不一致的事实源）；`in` 列表的长度由一个租户持有的 key 数量决定，那是控制台管理的个位到两位数
+- 单测新增 2 例：围栏裁完无 key 时答空且**一条审计语句都不发**；别家 `key_id` 与不存在的 key 同解。既有的统计用例需要补一把可见 key 才通过，那本身就是新语义生效的证据
+- 无 schema 变更、无新增配置键与环境变量；写入侧（`record`/`recordAsync`）跑在无主体线程上，不经本次改动
 
 ### 安全修复（M16 后修复：按 `kbId` 寻址的列表与批量入口不解析根表）
 
@@ -27,19 +28,48 @@
 - 单测新增 6 例：`DocumentServiceTest`（list / reindexAll / requireAllInKb 三个入口一并拒绝且从属表零语句）、`DocumentPreviewServiceTenantTest`（新建）、`DocumentGovernanceServiceTest`（回收站）、`RebuildServiceTest`（重建与状态，且不提交任何索引任务）、`SearchInsightServiceTest`（列表与统计）、`DocumentAclServiceTest`（密级读写，且不落 ACL 写操作）
 - 无 schema 变更、无新增配置键与环境变量；开放 API 与定时任务链路不经这些方法，行为不变
 
-### 安全修复（M16 后修复：`KbScopeGuard` 全族假守卫，34 个按资源自身 id 寻址的入口零租户隔离）
+### 安全修复（M16 后修复：`KbScopeGuard` 全族假守卫，43 个按资源自身 id 寻址的入口零租户隔离）
 
-- **缺陷**：PR #36 删掉的 `KbScopeGuard#requireWebSourceAccess` 不是孤例，是一族里的一个。同类的另外 8 个方法（document / chunk / annotation / dataset / case / run / ext-source / feedback）逐字同构：第一行 `if (AccessGuard.unrestrictedKbScope()) return;`，随后 `AccessGuard.requireKbAccess(kbId)`——**一行租户判断都没有**。而 `V16__rbac.sql:163-169` 五个内置角色一律 `kb_scope_all=1`、`TenantService#copyBuiltinRoles` 建租户时照抄，所以第一行那个短路在真实部署里对租户 SUPER_ADMIN 与未配数据范围的 KB_ADMIN 恒成立：**这些守卫的开销为零、判定恒为放行**。站在它们后面的 34 个控制台入口因此全都是跨租户可达的，其中破坏面最大的几条：`PUT /ext-sources/{sourceId}`（覆写别家的 endpoint 与 AK/SK）、`POST /ext-sources/{sourceId}/test`（拿别家凭据向别家对象存储发外网请求）、`DELETE /ext-sources/{sourceId}`（`hardDeleteById`，不可恢复）、`/documents/{docId}/purge`（彻底清除别家文档）、`/documents/{docId}/versions/{versionId}/activate`（把别家文档回滚到旧版本并重跑索引）
+- **缺陷**：PR #36 删掉的 `KbScopeGuard#requireWebSourceAccess` 不是孤例，是一族里的一个。同类的另外 8 个方法（document / chunk / annotation / dataset / case / run / ext-source / feedback）逐字同构：第一行 `if (AccessGuard.unrestrictedKbScope()) return;`，随后 `AccessGuard.requireKbAccess(kbId)`——**一行租户判断都没有**。而 `V16__rbac.sql:163-169` 五个内置角色一律 `kb_scope_all=1`、`TenantService#copyBuiltinRoles` 建租户时照抄，所以第一行那个短路在真实部署里对租户 SUPER_ADMIN 与未配数据范围的 KB_ADMIN 恒成立：**这些守卫的开销为零、判定恒为放行**。站在它们后面的 43 个控制台端点因此全都是跨租户可达的（44 处调用点，`convert` 一个端点调两次），其中破坏面最大的几条：`PUT /ext-sources/{sourceId}`（覆写别家的 endpoint 与 AK/SK）、`POST /ext-sources/{sourceId}/test`（拿别家凭据向别家对象存储发外网请求）、`DELETE /ext-sources/{sourceId}`（`hardDeleteById`，不可恢复）、`/documents/{docId}/purge`（彻底清除别家文档）、`/documents/{docId}/versions/{versionId}/activate`（把别家文档回滚到旧版本并重跑索引）
 - **短路吞掉的不只是数据范围判定**：`requireDatasetAccess` 查的 `t_kb_eval_dataset` 本来就在 `FENCED_TABLES` 里、围栏会自动拼租户条件——但短路让那条语句压根不执行。**一个 `return` 把已经写好的围栏一起跳过了**，这是"只覆盖数据范围的守卫比没有守卫更危险"的第二种表现形式
 - 类重命名 `KbScopeGuard` → **`KbResourceGuard`**（`io.kbrag.app.auth`），9 个方法全部改成"先解析围栏根表、再判数据范围"，短路整体删除。名字本身是根因的一部分：`ScopeGuard` 诚实地描述了它当时做的事，而那件事不是隔离边界，留着这个名字下一个 review 还会误读。11 个 Controller 的调用点随之改名，编译期收口
 - 解析形态按资源分两类：`t_kb_eval_dataset` 自己就是围栏根（case 与 run 经它两跳，run 走 `dataset_id` 而不是行上那个 `kb_id`——同一条链路只留一个事实源）；其余六种从属资源经 `kb_id` 反查 `t_kb_knowledge_base`。成本是每次多一条主键点查，且这条点查发生在任何写语句、内容读取、外发请求之前
 - 服务层同步补齐，覆盖"不经 Controller 守卫"的所有调用方（这是 `EvalDatasetService#updateCase` 早就用对的形态）：`EvalRunService#requireRun` 补 `evalDatasetService.require(run.getDatasetId())`（原先裸 `selectOne`，与同类的 `requireCase` 相比属漏改）、`ExtSourceService#require` 与 `RetrievalFeedbackService#require` 补根表反查、`ExtSourceService#list` 与 `RetrievalFeedbackService#list`/`record` 补 `knowledgeBaseService.require(kbId)`
 - 两个 Controller 的 `AccessGuard.requireKbAccess(kbId)` 换成 `kbResourceGuard.requireKb(kbId)`（`GET /kb/{kbId}/ext-sources`、`GET /kb/{kbId}/retrieval-feedback`、`POST /retrieval-feedback`）：原先那行只判数据范围，且排在服务层的租户判定之前，**顺序反了会用 403/404 的差异泄露"这个 id 在别的租户里存在"**
 - **对外行为变更只有一处**：跨租户访问从 403（或成功）收敛为 404，且只影响本就不该成功的调用。同租户、数据范围外仍是 403，单测钉住这两者的顺序
-- 单测：`KbResourceGuardTest` 重写（23 例）——六种从属资源各一条跨租户 404、`kb_scope_all` 不再短路、两个判定都会失败时答 404 而非 403、同租户范围外答 403、无主体线程放行、从属行不存在时不发根表查询；新增 `ExtSourceTenantIsolationTest`（4 例）钉住跨租户时 `updateById`/`hardDeleteById`/`hardDeleteBySourceId`/连接器解析一条都不发出；`EvalRunServiceTest`、`RetrievalFeedbackServiceTest` 各补跨租户用例
-- **测试有效性经变异验证**：把守卫的根表解析去掉后 `KbResourceGuardTest` 7 个用例转红（六种从属资源的跨租户用例 + `kb_scope_all` 不短路用例），确认它们钉住的是这条缺陷本身而非恰好为绿
+- 单测新增 30 例、删除旧守卫的 8 例，`mvn test` 全绿（kb-app 711 → 733，kb-api 37 不变）：`KbResourceGuardTest` 重写（23 例）——六种从属资源各一条跨租户 404、`kb_scope_all` 不再短路、两个判定都会失败时答 404 而非 403、同租户范围外答 403、无主体线程放行、从属行不存在时不发根表查询、run 经 `dataset_id` 而非行上 `kb_id` 解析；新增 `ExtSourceTenantIsolationTest`（4 例）钉住跨租户时 `updateById`/`hardDeleteById`/`hardDeleteBySourceId`/连接器解析一条都不发出；`EvalRunServiceTest`、`RetrievalFeedbackServiceTest`、`RetrievalFeedbackOpenApiTest` 补 3 例
+- **测试有效性经两组变异验证，共 14 例转红**：①把守卫的根表解析抽掉（`findFencedBase` 恒返回非空）→ `KbResourceGuardTest` **8 例**转红——document / chunk / annotation / ext-source / feedback 五种从属资源的跨租户用例 + `requireKb` + `kb_scope_all` 不短路 + 两判定皆失败答 404；dataset / case / run 三条**不受影响**，因为它们的租户解析走的是 `t_kb_eval_dataset` 自己的围栏、不经这一跳，这正是两类解析形态的分界。②把服务层三处根表反查抽掉（`ExtSourceService#require`/`#list`、`RetrievalFeedbackService#require`/`#list`/`#record`、`EvalRunService#requireRun`）→ **6 例**转红，分布在 `ExtSourceTenantIsolationTest`(3)、`RetrievalFeedbackServiceTest`(2)、`EvalRunServiceTest`(1)。两组变异均已还原
 - **测试边界（诚实说明）**：与 V21/V22/PR #36 同样的限制——跨租户过滤由 MyBatis-Plus 拦截器完成，项目无集成测试基建（无 `@SpringBootTest`/Testcontainers），单测无法真正发出带围栏的 SQL。跨租户在测试里表达为"根表读作 null"，能钉住的是"每个入口都经根表解析"+"解析失败时后续语句一条不发"，围栏本身由 `KbTenantLineHandlerTest` 覆盖
 - 无 schema 变更、无新增配置键与环境变量
+
+### 修复（M4b/M4c 异步化后修复：线程池形状、拒绝后的状态自锁与 requestId 断链）
+
+前一次修复把 `EvalRunService` / `ReleaseGateService` 的 `@Async` 自调用改成显式注入 Executor 手工 `execute`，那个修复本身是对的。但它让四条此前"看起来异步、实际同步"的路径第一次真的进队列——**永不排队就永不拒绝**，于是下面四个问题同时从理论变成现实。
+
+- **池的 max 是个到不了的数字**。`ThreadPoolTaskExecutor` 只有队列**满**之后才扩容到 max，所以"深队列 + 更大的 max"里的 max 永远不发生。`evalTaskExecutor` `core=2/max=6/queue=50`，稳态并发恒为 2，而它上方的 javadoc 写着"一次提交最多 6 个 run、各自独立交给这个池"；`gateTaskExecutor` `core=1/max=4/queue=20` 同病。这条 `AsyncConfig` 自己在 `QUEUE_CAPACITY` 的注释里写过（索引池 `core=2,max=4` 挂 200 深队列常年只有 2），却没有落到后加的池上。现改为 `evalTaskExecutor` 6/6/50、`gateTaskExecutor` 4/4/20：**6 是一次配置矩阵的上限**，低于它会把控制台呈现为"一个动作"的提交悄悄串行化；**排队的 gate 不是晚点跑而是发布卡住**，版本整段等待期都停在 `GATING`。`auditTaskExecutor` 1/4/2000 与 `extSourceTaskExecutor` 1/2/100 是同一类谎话，但按**当前真实并发**收敛为 1/1（行为零变化，只是不再骗人）。检索池与流式池的 0 队列是刻意例外——没有队列可填，扩容到 max 是第一件发生的事
+- **规则本身做成了测试**：`AsyncConfigTest` 用反射遍历 `AsyncConfig` 全部 `@Bean`，断言"要么 queue==0，要么 core==max"，并要求至少发现 10 个池（防止反射失效后空跑成绿）。这条已经踩过两次，遍历而非逐 bean 断言，是为了不出现第三次
+- **被拒绝后的状态机自锁**。两处提交的 `try/catch` 都写在 lambda **内部**，`execute()` 本身没有保护，而两处都是"状态已经落库之后"才提交。评测侧：run 行已 insert 成 `PENDING`，被拒后永不执行，且同批前面几个配置的行也已落库、已在跑，成半截提交的孤儿行；门禁侧更严重，`markGating` 先执行、`submitGate` 后执行，被拒则版本永久停在 `GATING`——而 `release` 入口的守卫恰好拒绝从 `GATING` 再次发布，**自锁只能改库**。两个池都保留默认 `AbortPolicy` 不换 CallerRuns（把整条评测 run 拽回提交它的 HTTP 请求线程，恰恰是上一次修复干掉的形态），兜底改写在提交处：`EvalRunService` 把被拒的 run 就地改判 `FAILED` 并写明原因、不上抛（上抛会让同批已创建的配置无人交代）；`ReleaseGateService` 把被拒的门禁交给既有的 `failGate`，记为 `LOG_ONLY/RUN_FAILED`，与"门禁抛异常"同一个可重试出口
+- **门禁 30 分钟超时预算第一次变得可触达**。修复前 `submit` 内联跑完才返回，`awaitCompletion` 首轮即见终态，超时形同虚设；现在双跑真进队列，池被占满时会排队等待。超时返回非终态 run → `succeeded=false` → 裁决 `LOG_ONLY/RUN_FAILED`：不自动发布、强制发布仍可用、版本可重试，这是正确的答案，但它是一条修复前不存在、且零覆盖的路径。补 `shouldRecordLogOnlyWhenTheDualRunOutlastsItsBudget` 钉住它，并额外断言**不读未完成 run 的 case 行**——半截写入的 per case 行不是一次比较，拿它算指标会把"没结论"变成"有信心的错数"。超时日志同时带上预算值与未完成 run 的状态
+- **requestId 在 CallerRuns 上断链**。装饰器的 finally 无条件 `RequestIdHolder.clear()`（即 `MDC.remove`）。`evalCaseTaskExecutor` 与 `embedTaskExecutor` 用 CallerRuns 做回压，队列满时任务回跑在**提交者**线程上，跑完清掉的是提交者自己的 requestId——那条评测 run / 那次索引从队列填满的一刻起，后半段日志全部失去关联 id。改为记下运行前绑定的值再放回：worker 线程上本就没有绑定，恢复 null 即等于原本想做的 clear。装饰器降为包级可见以便直接单测两种交接形态（否则要填满 500 深队列才能碰到第二种）
+- **新增 `EvalRunCompensationService`**（fixedDelay 5min，`kb.eval.stuck-*` 四个键）：提交时的拒绝兜底只覆盖了"没崩溃"那一种孤儿，进程中途死掉留下的 `PENDING`/`RUNNING` 行没有任何线程会再碰——控制台永远显示"评测进行中"，backlog 指标永远算它一份。扫描超过 `stuck-timeout-minutes`（默认 120）没动过的行改判 `FAILED`。两个刻意选择：**只改判不重跑**（`execute` 插 case 行前不清旧行，重跑会让 per case 行翻倍、污染包括门禁在内的所有基于它的指标）；**走 wrapper update 不走 `updateById`**（后者会 bump 乐观锁版本，把一个被早收的慢 run 自己那次写入静默吞掉，留下一堆挂在 FAILED run 下的结果行），where 里带状态谓词，选中到写入之间自己终态了的 run 原样不动
+- **`kb.eval.concurrency` 的语义变更补文档**（上一次修复的静默行为变更）：它从"每个 run 的 case 并发"变成"全部在跑评测的 case **全局**并发"，默认吞吐较修复前净降约 6 倍。`application.yml` 补注释说明"六配置矩阵总共判 4 个 case、不是每配置 4 个，要提速调这个不是调 run 池"，`ARCHITECTURE.md` §3.7 线程池表补上 `evalCaseTaskExecutor` / `embedTaskExecutor` 的全局上限语义与全部池的真实 core/max/queue
+- 单测：新增 `AsyncConfigTest`（3 例：池形状规则 + 装饰器两种交接形态）、`EvalRunCompensationServiceTest`（6 例）；`EvalRunServiceTest` 新增 3 例（被拒 run 改判 FAILED 且带 finishedAt、整批被拒不留半截、**每个 case 提交完才 join**）；`ReleaseGateServiceTest` 新增 2 例（门禁被拒落可重试裁决、双跑超预算）；`ApiKeyServiceTest` 补上注释里声称"asserted separately"但全仓不存在的那条断言——last-used 写入必须离开鉴权请求线程
+- **`judgeAll` 的并发性此前没被钉住**：原用例是单 case + 单线程池，把 `join` 挪进提交循环照样绿（产出的行逐字节相同，输出无从分辨）。新用例用 2 个 case + 2 线程池，两个 case 互相等待对方到场才返回，串行化的提交循环会把自己等进超时并让 run 失败
+- **测试有效性经变异验证**：装饰器改回无条件 clear、eval 池改回 `core=2`、去掉两处拒绝兜底、`join` 挪进提交循环、补偿扫描改用 `updateById` —— 五组变异逐一施加后，只有对应的新用例转红（共 8 例），既有用例全程不受影响
+- 无 schema 变更；新增配置键 4 个（`kb.eval.stuck-scan-enabled` / `stuck-scan-interval-ms` / `stuck-timeout-minutes` / `stuck-scan-batch-size`，均带默认值，不配即生效）
+### 安全修复（M4c 后修复：应用版本按 id 寻址的入口缺少租户解析）
+
+- **缺陷**：`t_kb_app_version` 是从属表，经 `app_id` 归属租户，不带 `tenant_id` 也不在 `KbTenantLineHandler.FENCED_TABLES` 里——这个设计没问题，问题是 `AppVersionService#require` 是 `t_kb_app_version` 上的裸 `selectOne`，从不解析根表 `t_kb_app`（`t_kb_app` 在围栏名单内，解析它即可获得租户围栏），围栏在那条语句上什么都没做。`/api/v1/app-versions/{appVersionId}` 的五个端点——详情、绑定门禁评测集、提交测试、发布、回滚——全部只有 `@RequiresPermission` 功能权限码，没有任何租户或数据范围守卫。后果：任意租户持 `app:release` 的账号凭一个 `appVersionId` 就能**发布 / 回滚别家租户的应用版本**（直接改变别人对外 API 被服务的内容），持 `app:read` 就能读它的配置快照——含关联的 `kbIds` 与模型配置。与 V21 记忆库、V22 站点凭据、网页源是同一类缺陷的第四处
+- **发布是其中最贵的一个入口**：`ReleaseGateService#release` 不只是切状态，它会在 `GATE_EXECUTOR` 上启动同语料双跑，对别家租户的知识库发起真实检索与模型调用（嵌入 / rerank / 生成），并在通过后冻结索引快照。修复后这条链在第一跳就断，`markGating` / `evalRunService.submit` / `releaseSnapshotService.freeze` / `promote` 一个都不发生
+- 新增 `AppVersionGuard`（独立 bean，`io.kbrag.app.appcenter`），形态与 `WebSourceGuard` / `MemoryLibraryGuard` 同构：先按 `app_version_id` 定位（这一跳物理上无法避免，该列只存在于从属表，且只读、不改状态），再用 `AppService#find` 解析根表 `t_kb_app`，跨租户在那里读作"不存在"。`AppService` 相应新增 `find`（返回 null 的形态，`require` 改为委托它），因为守卫需要自己措辞
+- **守卫落在 `AppVersionService#require` 背后而不是各入口前面**，这是本次的关键取舍：这个方法被本服务自调用 5 处（`setGateDataset` / `submitTest` / `promote` / `rollback`）、被 `ReleaseGateService` 调用 5 处（`release` / `promoteWithSnapshot` / `runGate` / `failGate`）、被 `KnowledgeApiService#previewVersion` 调用 1 处。放在入口处必然漏，放在这里则所有入口一致生效，且新入口自动继承
+- **跨租户与不存在必须是同一个回答**：两者都是 `VERSION_NOT_FOUND` + 同一句 `application version not found`。第二跳失败若报成 `APP_NOT_FOUND`，等于用错误码差异告诉调用方"你猜的这个 id 是真的、只是在别人那里"，404 文案也因此不带 `appId`
+- **判定顺序：租户（404）先于数据范围（403）**。`gate-dataset` 是本域唯一携带第二个资源的入口，原先 `AppVersionController` 先校验入参 `datasetId` 的数据范围、再进服务解析版本——跨租户的版本会先撞上评测集的 403。`kbScopeGuard.requireDatasetAccess` 因此从 Controller 移入 `AppVersionService#setGateDataset`，排在 `require` 之后；Controller 只剩参数传递，`KbScopeGuard` 依赖一并删除
+- **开放 API 与后台线程零影响**：对外 `search` / `chat` 走 `resolveForCall(appId, versionLiteral)`、不经 `require`，其 `appId` 由 `ApiKeyPrincipal#requireAccessTo` 的 Key 绑定授权范围把关，本次一行都没动。`GATE_EXECUTOR` 与预览流执行器上没有控制台主体，`ignoreTable` 整条跳过围栏、行为不变——那两条线程只会看到已被请求线程守住的 `appVersionId`，这是 M16 对后台线程的既有语义
+- 单测：`AppVersionServiceTest` 新增 3 例（真实 `AppVersionGuard` + mock `AppService`，跨租户表达为"根表读作 null"，与围栏在控制台线程上的真实行为一致）——跨租户的 `require`/`submitTest`/`setGateDataset`/`promote`/`rollback` 全数 404 且无 `updateById`、无评测集读取；跨租户与不存在的错误码和文案逐字相同且不含 `appId`；租户判定先于数据范围（同租户范围外 403、跨租户 404 且 `requireDatasetAccess` 根本没被调用）。`ReleaseGateServiceTest` 新增 1 例钉住发布链路：版本解析失败时不 `markGating`、不提交双跑、不冻快照、不 `promote`
+- **测试有效性经变异验证**：把守卫的根表解析短路掉后，`AppVersionServiceTest` 的 3 个新用例全部转红且 26 个既有用例不受影响。`ReleaseGateServiceTest` 那 1 例在变异下仍绿是符合预期的——它 mock 掉了 `AppVersionService`，钉的是"解析失败之后这条链什么都不做"，守卫本身由前 3 例覆盖
+- **测试边界（诚实说明）**：与 V21/V22 同样的限制——跨租户过滤由 MyBatis-Plus 拦截器完成，项目无集成测试基建（无 `@SpringBootTest`/Testcontainers），单测无法真正发出带围栏的 SQL。能钉住的是"每个入口都经根表解析"+"解析失败时后续语句一条不发"，围栏本身的行为由 `KbTenantLineHandlerTest` 覆盖
+- 无 schema 变更、无新增配置键与环境变量；版本状态机、门禁三态、快照冻结与回滚语义均不变
 
 ### 安全修复（M12/M17/M18 后修复：网页源按 id 寻址的入口缺少租户解析）
 
