@@ -8,6 +8,20 @@
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
 
+### 安全修复（M4c 后修复：应用版本按 id 寻址的入口缺少租户解析）
+
+- **缺陷**：`t_kb_app_version` 是从属表，经 `app_id` 归属租户，不带 `tenant_id` 也不在 `KbTenantLineHandler.FENCED_TABLES` 里——这个设计没问题，问题是 `AppVersionService#require` 是 `t_kb_app_version` 上的裸 `selectOne`，从不解析根表 `t_kb_app`（`t_kb_app` 在围栏名单内，解析它即可获得租户围栏），围栏在那条语句上什么都没做。`/api/v1/app-versions/{appVersionId}` 的五个端点——详情、绑定门禁评测集、提交测试、发布、回滚——全部只有 `@RequiresPermission` 功能权限码，没有任何租户或数据范围守卫。后果：任意租户持 `app:release` 的账号凭一个 `appVersionId` 就能**发布 / 回滚别家租户的应用版本**（直接改变别人对外 API 被服务的内容），持 `app:read` 就能读它的配置快照——含关联的 `kbIds` 与模型配置。与 V21 记忆库、V22 站点凭据、网页源是同一类缺陷的第四处
+- **发布是其中最贵的一个入口**：`ReleaseGateService#release` 不只是切状态，它会在 `GATE_EXECUTOR` 上启动同语料双跑，对别家租户的知识库发起真实检索与模型调用（嵌入 / rerank / 生成），并在通过后冻结索引快照。修复后这条链在第一跳就断，`markGating` / `evalRunService.submit` / `releaseSnapshotService.freeze` / `promote` 一个都不发生
+- 新增 `AppVersionGuard`（独立 bean，`io.kbrag.app.appcenter`），形态与 `WebSourceGuard` / `MemoryLibraryGuard` 同构：先按 `app_version_id` 定位（这一跳物理上无法避免，该列只存在于从属表，且只读、不改状态），再用 `AppService#find` 解析根表 `t_kb_app`，跨租户在那里读作"不存在"。`AppService` 相应新增 `find`（返回 null 的形态，`require` 改为委托它），因为守卫需要自己措辞
+- **守卫落在 `AppVersionService#require` 背后而不是各入口前面**，这是本次的关键取舍：这个方法被本服务自调用 5 处（`setGateDataset` / `submitTest` / `promote` / `rollback`）、被 `ReleaseGateService` 调用 5 处（`release` / `promoteWithSnapshot` / `runGate` / `failGate`）、被 `KnowledgeApiService#previewVersion` 调用 1 处。放在入口处必然漏，放在这里则所有入口一致生效，且新入口自动继承
+- **跨租户与不存在必须是同一个回答**：两者都是 `VERSION_NOT_FOUND` + 同一句 `application version not found`。第二跳失败若报成 `APP_NOT_FOUND`，等于用错误码差异告诉调用方"你猜的这个 id 是真的、只是在别人那里"，404 文案也因此不带 `appId`
+- **判定顺序：租户（404）先于数据范围（403）**。`gate-dataset` 是本域唯一携带第二个资源的入口，原先 `AppVersionController` 先校验入参 `datasetId` 的数据范围、再进服务解析版本——跨租户的版本会先撞上评测集的 403。`kbScopeGuard.requireDatasetAccess` 因此从 Controller 移入 `AppVersionService#setGateDataset`，排在 `require` 之后；Controller 只剩参数传递，`KbScopeGuard` 依赖一并删除
+- **开放 API 与后台线程零影响**：对外 `search` / `chat` 走 `resolveForCall(appId, versionLiteral)`、不经 `require`，其 `appId` 由 `ApiKeyPrincipal#requireAccessTo` 的 Key 绑定授权范围把关，本次一行都没动。`GATE_EXECUTOR` 与预览流执行器上没有控制台主体，`ignoreTable` 整条跳过围栏、行为不变——那两条线程只会看到已被请求线程守住的 `appVersionId`，这是 M16 对后台线程的既有语义
+- 单测：`AppVersionServiceTest` 新增 3 例（真实 `AppVersionGuard` + mock `AppService`，跨租户表达为"根表读作 null"，与围栏在控制台线程上的真实行为一致）——跨租户的 `require`/`submitTest`/`setGateDataset`/`promote`/`rollback` 全数 404 且无 `updateById`、无评测集读取；跨租户与不存在的错误码和文案逐字相同且不含 `appId`；租户判定先于数据范围（同租户范围外 403、跨租户 404 且 `requireDatasetAccess` 根本没被调用）。`ReleaseGateServiceTest` 新增 1 例钉住发布链路：版本解析失败时不 `markGating`、不提交双跑、不冻快照、不 `promote`
+- **测试有效性经变异验证**：把守卫的根表解析短路掉后，`AppVersionServiceTest` 的 3 个新用例全部转红且 26 个既有用例不受影响。`ReleaseGateServiceTest` 那 1 例在变异下仍绿是符合预期的——它 mock 掉了 `AppVersionService`，钉的是"解析失败之后这条链什么都不做"，守卫本身由前 3 例覆盖
+- **测试边界（诚实说明）**：与 V21/V22 同样的限制——跨租户过滤由 MyBatis-Plus 拦截器完成，项目无集成测试基建（无 `@SpringBootTest`/Testcontainers），单测无法真正发出带围栏的 SQL。能钉住的是"每个入口都经根表解析"+"解析失败时后续语句一条不发"，围栏本身的行为由 `KbTenantLineHandlerTest` 覆盖
+- 无 schema 变更、无新增配置键与环境变量；版本状态机、门禁三态、快照冻结与回滚语义均不变
+
 ### 安全修复（M12/M17/M18 后修复：网页源按 id 寻址的入口缺少租户解析）
 
 - **缺陷**：`t_kb_web_source` 是从属表，经 `kb_id` 归属租户，不带 `tenant_id` 也不在 `KbTenantLineHandler.FENCED_TABLES` 里——这个设计没问题，问题是按 `source_id` / `kb_id` 直接寻址的四个入口压根不查根表 `t_kb_knowledge_base`，围栏在那几条语句上什么都没做。任何租户凭一个 `sourceId` 就能：触发别家网页源的抓取（`POST /web-sources/{sourceId}/sync`，还会连带走一遍文档上传管线往别家知识库写版本）、改它的 `sync_enabled` / `render_js` 开关（`PUT /web-sources/{sourceId}`）、**硬删**它的登记（`DELETE /web-sources/{sourceId}` → `hardDeleteById`，不可恢复）；凭一个 `kbId` 就能列出别家知识库登记的全部 URL 与同步状态（`GET /kb/{kbId}/web-sources`）。与 V21 记忆库、V22 站点凭据是同一类缺陷的第三处，本次补齐
