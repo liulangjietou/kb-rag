@@ -3,7 +3,7 @@ package io.kbrag.api.controller;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.SearchRequest;
 import io.kbrag.api.dto.SearchResponse;
-import io.kbrag.app.auth.AccessGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.insight.SearchInsightService;
 import io.kbrag.app.metrics.KbMetrics;
 import io.kbrag.app.retrieval.RetrievalService;
@@ -41,6 +41,7 @@ import java.util.List;
 public class SearchController {
 
     private final RetrievalService retrievalService;
+    private final KbResourceGuard kbResourceGuard;
     private final SearchInsightService searchInsightService;
     private final KbMetrics kbMetrics;
 
@@ -55,7 +56,7 @@ public class SearchController {
     @RequiresPermission(PermissionCodes.SEARCH_DEBUG)
     public Result<SearchResponse> search(@PathVariable String kbId,
                                          @Valid @RequestBody SearchRequest request) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         long startedAt = System.currentTimeMillis();
         SearchOutcome outcome = retrievalService.search(kbId, request.toCommand());
         int resultCount = CollectionUtils.isEmpty(outcome.getNodes()) ? 0 : outcome.getNodes().size();

@@ -2,6 +2,7 @@ package io.kbrag.app.document;
 
 import io.kbrag.app.index.IndexPipelineService;
 import io.kbrag.app.kb.KnowledgeBaseService;
+import io.kbrag.common.exception.BizException;
 import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.DocumentVersion;
@@ -26,9 +27,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -115,6 +118,22 @@ class DocumentServiceTest {
         ArgumentCaptor<Document> captor = ArgumentCaptor.forClass(Document.class);
         verify(documentMapper).updateById(captor.capture());
         assertEquals(PublishStatus.DRAFT, captor.getValue().getPublishStatus());
+    }
+
+    @Test
+    void shouldRefuseEveryKbScopedEntryOfAnotherTenantsBase() {
+        // t_kb_document carries no tenant_id. Naming a base is therefore not proof of anything until
+        // that base is read back through the fence, which is what require() does on a console thread.
+        when(knowledgeBaseService.require(KB_ID))
+                .thenThrow(BizException.notFound("knowledge base not found"));
+
+        assertThrows(BizException.class, () -> service.list(KB_ID, null, 1, 20));
+        assertThrows(BizException.class, () -> service.reindexAll(KB_ID, List.of(DOC_ID)));
+        assertThrows(BizException.class, () -> service.requireAllInKb(KB_ID, List.of(DOC_ID)));
+
+        // 批量删除与批量重建共用 requireAllInKb，所以这一处拦住就两个入口都拦住了。
+        verify(documentMapper, never()).selectPage(any(), any());
+        verify(documentMapper, never()).selectList(any());
     }
 
     private Document capturedInsert() {

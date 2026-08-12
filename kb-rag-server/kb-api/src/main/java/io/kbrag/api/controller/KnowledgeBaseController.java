@@ -13,7 +13,7 @@ import io.kbrag.api.dto.RebuildStatusResponse;
 import io.kbrag.api.dto.UpdateIndexConfigRequest;
 import io.kbrag.api.dto.UpdateKbGovernanceRequest;
 import io.kbrag.api.dto.UpdateKnowledgeBaseRequest;
-import io.kbrag.app.auth.AccessGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.chat.ChatImportService;
 import io.kbrag.app.document.DocumentPreviewService;
 import io.kbrag.app.document.DocumentService;
@@ -66,6 +66,7 @@ public class KnowledgeBaseController {
     private static final String FIELD_REINDEXED_DOC_IDS = "reindexed_doc_ids";
 
     private final KnowledgeBaseService knowledgeBaseService;
+    private final KbResourceGuard kbResourceGuard;
     private final RebuildService rebuildService;
     private final DocumentService documentService;
     private final DocumentPreviewService documentPreviewService;
@@ -99,7 +100,7 @@ public class KnowledgeBaseController {
     @AuditedOperation(module = "KB", action = "UPDATE", targetType = "KNOWLEDGE_BASE", targetId = "#kbId")
     public Result<KnowledgeBaseResponse> update(@PathVariable String kbId,
                                                 @Valid @RequestBody UpdateKnowledgeBaseRequest request) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         KnowledgeBase updated = knowledgeBaseService.update(kbId, request.name(), request.description());
         return Result.success(toResponse(updated));
     }
@@ -124,7 +125,7 @@ public class KnowledgeBaseController {
     @GetMapping("/{kbId}")
     @RequiresPermission(PermissionCodes.KB_READ)
     public Result<KnowledgeBaseResponse> get(@PathVariable String kbId) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         return Result.success(toResponse(knowledgeBaseService.require(kbId)));
     }
 
@@ -145,7 +146,7 @@ public class KnowledgeBaseController {
             targetId = "#kbId")
     public Result<Map<String, Object>> updateIndexConfig(@PathVariable String kbId,
                                                          @Valid @RequestBody UpdateIndexConfigRequest request) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         KnowledgeBase knowledgeBase = knowledgeBaseService.require(kbId);
         KbIndexConfig config = request.toIndexConfig(knowledgeBaseService.indexConfigOf(knowledgeBase));
         int stale = knowledgeBaseService.updateIndexConfig(kbId, config, request.retrievalConfig());
@@ -168,7 +169,7 @@ public class KnowledgeBaseController {
     @AuditedOperation(module = "KB", action = "REBUILD", targetType = "KNOWLEDGE_BASE", targetId = "#kbId")
     public Result<Map<String, Object>> rebuild(@PathVariable String kbId,
                                                @RequestBody(required = false) RebuildRequest request) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         List<String> queued = rebuildService.submit(kbId, request == null ? null : request.docIds());
         return Result.success(Map.of(FIELD_QUEUED_DOC_IDS, queued));
     }
@@ -187,7 +188,7 @@ public class KnowledgeBaseController {
     @GetMapping("/{kbId}/rebuild-status")
     @RequiresPermission(PermissionCodes.KB_READ)
     public Result<RebuildStatusResponse> rebuildStatus(@PathVariable String kbId) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         return Result.success(RebuildStatusResponse.from(rebuildService.status(kbId)));
     }
 
@@ -205,7 +206,7 @@ public class KnowledgeBaseController {
     public Result<Map<String, Object>> confirmDocuments(
             @PathVariable String kbId,
             @RequestBody(required = false) ConfirmDocumentsRequest request) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         List<String> confirmed = documentPreviewService.confirmAll(kbId,
                 request == null ? null : request.docIds());
         return Result.success(Map.of(FIELD_CONFIRMED_DOC_IDS, confirmed));
@@ -228,7 +229,7 @@ public class KnowledgeBaseController {
     public Result<Map<String, Object>> batchDeleteDocuments(
             @PathVariable String kbId,
             @Valid @RequestBody DocumentBatchRequest request) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         List<String> deleted = documentGovernanceService.trashAll(kbId, request.docIds());
         return Result.success(Map.of(FIELD_DELETED_DOC_IDS, deleted));
     }
@@ -250,7 +251,7 @@ public class KnowledgeBaseController {
     public Result<Map<String, Object>> batchReindexDocuments(
             @PathVariable String kbId,
             @Valid @RequestBody DocumentBatchRequest request) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         List<String> submitted = documentService.reindexAll(kbId, request.docIds());
         return Result.success(Map.of(FIELD_REINDEXED_DOC_IDS, submitted));
     }
@@ -269,7 +270,7 @@ public class KnowledgeBaseController {
             @PathVariable String kbId,
             @RequestParam("file") MultipartFile file,
             @RequestParam(name = "mapping_profile", required = false) String mappingProfile) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         if (file == null || file.isEmpty()) {
             throw BizException.invalidParam("file is required");
         }
@@ -296,7 +297,7 @@ public class KnowledgeBaseController {
     public Result<Map<String, Object>> confirmChatImport(
             @PathVariable String kbId,
             @Valid @RequestBody ChatImportConfirmRequest request) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         List<String> imported = chatImportService.confirm(kbId, request.uploadToken(), request.sessionIds());
         return Result.success(Map.of(FIELD_IMPORTED_DOC_IDS, imported));
     }
@@ -314,7 +315,7 @@ public class KnowledgeBaseController {
             targetId = "#kbId")
     public Result<KnowledgeBaseResponse> updateGovernance(@PathVariable String kbId,
                                                           @Valid @RequestBody UpdateKbGovernanceRequest request) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         return Result.success(toResponse(
                 documentGovernanceService.updateGovernance(kbId, request.reviewRequired())));
     }
@@ -329,7 +330,7 @@ public class KnowledgeBaseController {
     @RequiresPermission(PermissionCodes.KB_DELETE)
     @AuditedOperation(module = "KB", action = "DELETE", targetType = "KNOWLEDGE_BASE", targetId = "#kbId")
     public Result<Void> delete(@PathVariable String kbId) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         knowledgeBaseService.delete(kbId);
         return Result.success(null);
     }

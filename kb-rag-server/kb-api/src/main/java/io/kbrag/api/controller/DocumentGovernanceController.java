@@ -6,7 +6,6 @@ import io.kbrag.api.dto.DocumentResponse;
 import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.RejectDocumentRequest;
 import io.kbrag.api.dto.UpdateValidityRequest;
-import io.kbrag.app.auth.AccessGuard;
 import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.governance.DocumentGovernanceService;
 import io.kbrag.common.api.Result;
@@ -130,7 +129,7 @@ public class DocumentGovernanceController {
             @PathVariable String kbId,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         return Result.success(PageResponse.from(
                 documentGovernanceService.listTrash(kbId, normalizePage(page), normalizeSize(size)),
                 DocumentResponse::from));

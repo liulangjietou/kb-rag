@@ -318,6 +318,10 @@ public class DocumentService {
      * @return page of documents
      */
     public IPage<Document> list(String kbId, ProcessStatus processStatus, long page, long size) {
+        // t_kb_document carries no tenant_id, so this listing is only isolated by the fenced read of
+        // the base it names - without it, one kbId is enough to page through another tenant's
+        // documents, file names and parse states included.
+        knowledgeBaseService.require(kbId);
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
                 .eq(Document::getKbId, kbId)
                 // Trashed documents live in the recycle bin listing only; showing them here would make
@@ -444,6 +448,10 @@ public class DocumentService {
         if (CollectionUtils.isEmpty(docIds)) {
             throw BizException.invalidParam("doc_ids is required");
         }
+        // 作用域校验的第一问是"这个库是不是你的"，第二问才是"这些文档在不在这个库里"。
+        // 只问第二问的话，跨租户的调用方拿自己声明的 kbId 与那个库下的 docId 就能对上，
+        // 批量删除与批量重建都会照做——两个入口共用这一处，补在这里就都覆盖到了。
+        knowledgeBaseService.require(kbId);
         // 先去重再比对数量：重复的 id 只会查回一行，不去重会把"传了两遍同一篇"误判成"有文档不属于该库"
         List<String> distinctIds = docIds.stream().distinct().toList();
         List<Document> documents = documentMapper.selectList(new LambdaQueryWrapper<Document>()
