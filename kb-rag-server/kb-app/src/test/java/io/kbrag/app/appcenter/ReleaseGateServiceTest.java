@@ -36,6 +36,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -49,6 +50,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -74,6 +76,11 @@ class ReleaseGateServiceTest {
     private static final String SNAPSHOT_INDEX = "kb_1_none_s1";
     private static final String GATE_PROBE_THREAD = "gate-probe";
     private static final int HAND_OFF_TIMEOUT_SECONDS = 5;
+
+    /** A gate pool whose queue is full: {@code execute} aborts, it never runs the task. */
+    private static final Executor SATURATED_EXECUTOR = task -> {
+        throw new RejectedExecutionException("gate pool saturated");
+    };
 
     /** Frozen snapshot every successful release in this class is expected to install. */
     private static final AppReleaseSnapshotService.ReleaseSnapshot RELEASE_SNAPSHOT =
@@ -343,6 +350,74 @@ class ReleaseGateServiceTest {
         }
     }
 
+    /**
+     * A gate the executor refuses must not leave the version gating forever.
+     *
+     * <p>{@code release} marks the version {@code GATING} and only then hands the gate over, and
+     * {@code GATING} is one of the states {@code release} itself refuses to release out of. A rejection
+     * that only got logged therefore locked that version out of every release path there is - not until a
+     * retry, but permanently, recoverable only by editing the row. The rejection is recorded as the same
+     * retryable outcome a gate that threw produces.
+     */
+    @Test
+    void shouldRecordARetryableOutcomeWhenTheGateExecutorRefusesTheDualRun() {
+        AppVersion version = versionOf(AppVersionStatus.TESTING, DATASET_ID);
+        when(appVersionService.require(VERSION_ID)).thenReturn(version);
+        // The real markGating persists GATING, and failGate only records over a version still in it.
+        doAnswer(invocation -> {
+            version.setStatus(AppVersionStatus.GATING);
+            return null;
+        }).when(appVersionService).markGating(version);
+
+        ReleaseGateService saturatedService = newService(SATURATED_EXECUTOR);
+
+        saturatedService.release(VERSION_ID, false, "admin");
+
+        verify(appVersionService).recordGate(eq(version), eq(AppVersionStatus.GATE_LOG_ONLY),
+                eq(GateVerdict.LOG_ONLY), eq(GateReason.RUN_FAILED), anyString(), eq(null));
+        verify(evalRunService, never()).submit(anyString(), anyInt(), anyList(), anyBoolean());
+        verify(appVersionService, never()).promote(anyString(), anyBoolean(), any(), any());
+    }
+
+    /**
+     * A dual run that outlasts its budget records a retryable outcome rather than deciding on runs that
+     * never finished.
+     *
+     * <p>A failure path that did not exist before the runner was made genuinely asynchronous: while the
+     * runs executed inline inside {@code submit}, the polling loop saw a terminal state on its very first
+     * pass and the budget was unreachable. Now that a run really queues, a saturated evaluation pool can
+     * hold both sides past the deadline, and what the gate does then has to be pinned down - it must not
+     * read metrics off unfinished runs, and it must not block the version on the absence of them.
+     */
+    @Test
+    void shouldRecordLogOnlyWhenTheDualRunOutlastsItsBudget() {
+        // Zero budget: the deadline has already passed when the first poll finds both sides unfinished.
+        properties.getGate().setRunTimeoutMs(0L);
+        AppVersion version = versionOf(AppVersionStatus.GATING, DATASET_ID);
+        AppVersion baseline = baselineVersion();
+        when(appVersionService.require(VERSION_ID)).thenReturn(version);
+        when(appVersionService.parseConfig(version)).thenReturn(snapshot());
+        when(appVersionService.parseConfig(baseline)).thenReturn(snapshot());
+        when(appVersionService.currentReleased(APP_ID)).thenReturn(baseline);
+        EvalRun candidateRun = unfinishedRun(CANDIDATE_RUN, RunStatus.RUNNING);
+        EvalRun baselineRun = unfinishedRun(BASELINE_RUN, RunStatus.PENDING);
+        when(evalRunService.submit(eq(DATASET_ID), anyInt(), anyList(), eq(false)))
+                .thenReturn(List.of(candidateRun, baselineRun));
+        when(evalRunService.requireRun(CANDIDATE_RUN)).thenReturn(candidateRun);
+        when(evalRunService.requireRun(BASELINE_RUN)).thenReturn(baselineRun);
+
+        GateDecision decision = service.runGate(VERSION_ID);
+
+        assertEquals(GateVerdict.LOG_ONLY, decision.verdict());
+        assertEquals(GateReason.RUN_FAILED, decision.reason());
+        verify(appVersionService).recordGate(any(), eq(AppVersionStatus.GATE_LOG_ONLY), eq(GateVerdict.LOG_ONLY),
+                eq(GateReason.RUN_FAILED), anyString(), anyString());
+        // Half written per case rows of a run still in flight are not a comparison, and reading them would
+        // turn an inconclusive gate into a confident wrong number.
+        verify(evalResultMapper, never()).selectList(any());
+        verify(appVersionService, never()).promote(anyString(), anyBoolean(), any(), any());
+    }
+
     @Test
     void shouldRecordLogOnlyWhenARunOfTheDualRunFailed() {
         AppVersion version = versionOf(AppVersionStatus.GATING, DATASET_ID);
@@ -554,6 +629,26 @@ class ReleaseGateServiceTest {
         retrieval.setRerankEnabled(true);
         snapshot.setRetrieval(retrieval);
         return snapshot;
+    }
+
+    /**
+     * A run as the polling loop finds it while it is still queued or executing: no counts yet, because the
+     * runner writes them once, at the end.
+     *
+     * @param runId  run business id
+     * @param status non terminal status
+     * @return unfinished run
+     */
+    private EvalRun unfinishedRun(String runId, RunStatus status) {
+        EvalRun run = new EvalRun();
+        run.setRunId(runId);
+        run.setDatasetId(DATASET_ID);
+        run.setStatus(status);
+        run.setCaseTotal(0);
+        run.setCaseStale(0);
+        run.setCaseEffective(0);
+        run.setCaseDegraded(0);
+        return run;
     }
 
     private EvalRun runOf(String runId, RunStatus status) {

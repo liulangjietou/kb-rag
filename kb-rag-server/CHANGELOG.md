@@ -8,6 +8,22 @@
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
 
+### 修复（M4b/M4c 异步化后修复：线程池形状、拒绝后的状态自锁与 requestId 断链）
+
+前一次修复把 `EvalRunService` / `ReleaseGateService` 的 `@Async` 自调用改成显式注入 Executor 手工 `execute`，那个修复本身是对的。但它让四条此前"看起来异步、实际同步"的路径第一次真的进队列——**永不排队就永不拒绝**，于是下面四个问题同时从理论变成现实。
+
+- **池的 max 是个到不了的数字**。`ThreadPoolTaskExecutor` 只有队列**满**之后才扩容到 max，所以"深队列 + 更大的 max"里的 max 永远不发生。`evalTaskExecutor` `core=2/max=6/queue=50`，稳态并发恒为 2，而它上方的 javadoc 写着"一次提交最多 6 个 run、各自独立交给这个池"；`gateTaskExecutor` `core=1/max=4/queue=20` 同病。这条 `AsyncConfig` 自己在 `QUEUE_CAPACITY` 的注释里写过（索引池 `core=2,max=4` 挂 200 深队列常年只有 2），却没有落到后加的池上。现改为 `evalTaskExecutor` 6/6/50、`gateTaskExecutor` 4/4/20：**6 是一次配置矩阵的上限**，低于它会把控制台呈现为"一个动作"的提交悄悄串行化；**排队的 gate 不是晚点跑而是发布卡住**，版本整段等待期都停在 `GATING`。`auditTaskExecutor` 1/4/2000 与 `extSourceTaskExecutor` 1/2/100 是同一类谎话，但按**当前真实并发**收敛为 1/1（行为零变化，只是不再骗人）。检索池与流式池的 0 队列是刻意例外——没有队列可填，扩容到 max 是第一件发生的事
+- **规则本身做成了测试**：`AsyncConfigTest` 用反射遍历 `AsyncConfig` 全部 `@Bean`，断言"要么 queue==0，要么 core==max"，并要求至少发现 10 个池（防止反射失效后空跑成绿）。这条已经踩过两次，遍历而非逐 bean 断言，是为了不出现第三次
+- **被拒绝后的状态机自锁**。两处提交的 `try/catch` 都写在 lambda **内部**，`execute()` 本身没有保护，而两处都是"状态已经落库之后"才提交。评测侧：run 行已 insert 成 `PENDING`，被拒后永不执行，且同批前面几个配置的行也已落库、已在跑，成半截提交的孤儿行；门禁侧更严重，`markGating` 先执行、`submitGate` 后执行，被拒则版本永久停在 `GATING`——而 `release` 入口的守卫恰好拒绝从 `GATING` 再次发布，**自锁只能改库**。两个池都保留默认 `AbortPolicy` 不换 CallerRuns（把整条评测 run 拽回提交它的 HTTP 请求线程，恰恰是上一次修复干掉的形态），兜底改写在提交处：`EvalRunService` 把被拒的 run 就地改判 `FAILED` 并写明原因、不上抛（上抛会让同批已创建的配置无人交代）；`ReleaseGateService` 把被拒的门禁交给既有的 `failGate`，记为 `LOG_ONLY/RUN_FAILED`，与"门禁抛异常"同一个可重试出口
+- **门禁 30 分钟超时预算第一次变得可触达**。修复前 `submit` 内联跑完才返回，`awaitCompletion` 首轮即见终态，超时形同虚设；现在双跑真进队列，池被占满时会排队等待。超时返回非终态 run → `succeeded=false` → 裁决 `LOG_ONLY/RUN_FAILED`：不自动发布、强制发布仍可用、版本可重试，这是正确的答案，但它是一条修复前不存在、且零覆盖的路径。补 `shouldRecordLogOnlyWhenTheDualRunOutlastsItsBudget` 钉住它，并额外断言**不读未完成 run 的 case 行**——半截写入的 per case 行不是一次比较，拿它算指标会把"没结论"变成"有信心的错数"。超时日志同时带上预算值与未完成 run 的状态
+- **requestId 在 CallerRuns 上断链**。装饰器的 finally 无条件 `RequestIdHolder.clear()`（即 `MDC.remove`）。`evalCaseTaskExecutor` 与 `embedTaskExecutor` 用 CallerRuns 做回压，队列满时任务回跑在**提交者**线程上，跑完清掉的是提交者自己的 requestId——那条评测 run / 那次索引从队列填满的一刻起，后半段日志全部失去关联 id。改为记下运行前绑定的值再放回：worker 线程上本就没有绑定，恢复 null 即等于原本想做的 clear。装饰器降为包级可见以便直接单测两种交接形态（否则要填满 500 深队列才能碰到第二种）
+- **新增 `EvalRunCompensationService`**（fixedDelay 5min，`kb.eval.stuck-*` 四个键）：提交时的拒绝兜底只覆盖了"没崩溃"那一种孤儿，进程中途死掉留下的 `PENDING`/`RUNNING` 行没有任何线程会再碰——控制台永远显示"评测进行中"，backlog 指标永远算它一份。扫描超过 `stuck-timeout-minutes`（默认 120）没动过的行改判 `FAILED`。两个刻意选择：**只改判不重跑**（`execute` 插 case 行前不清旧行，重跑会让 per case 行翻倍、污染包括门禁在内的所有基于它的指标）；**走 wrapper update 不走 `updateById`**（后者会 bump 乐观锁版本，把一个被早收的慢 run 自己那次写入静默吞掉，留下一堆挂在 FAILED run 下的结果行），where 里带状态谓词，选中到写入之间自己终态了的 run 原样不动
+- **`kb.eval.concurrency` 的语义变更补文档**（上一次修复的静默行为变更）：它从"每个 run 的 case 并发"变成"全部在跑评测的 case **全局**并发"，默认吞吐较修复前净降约 6 倍。`application.yml` 补注释说明"六配置矩阵总共判 4 个 case、不是每配置 4 个，要提速调这个不是调 run 池"，`ARCHITECTURE.md` §3.7 线程池表补上 `evalCaseTaskExecutor` / `embedTaskExecutor` 的全局上限语义与全部池的真实 core/max/queue
+- 单测：新增 `AsyncConfigTest`（3 例：池形状规则 + 装饰器两种交接形态）、`EvalRunCompensationServiceTest`（6 例）；`EvalRunServiceTest` 新增 3 例（被拒 run 改判 FAILED 且带 finishedAt、整批被拒不留半截、**每个 case 提交完才 join**）；`ReleaseGateServiceTest` 新增 2 例（门禁被拒落可重试裁决、双跑超预算）；`ApiKeyServiceTest` 补上注释里声称"asserted separately"但全仓不存在的那条断言——last-used 写入必须离开鉴权请求线程
+- **`judgeAll` 的并发性此前没被钉住**：原用例是单 case + 单线程池，把 `join` 挪进提交循环照样绿（产出的行逐字节相同，输出无从分辨）。新用例用 2 个 case + 2 线程池，两个 case 互相等待对方到场才返回，串行化的提交循环会把自己等进超时并让 run 失败
+- **测试有效性经变异验证**：装饰器改回无条件 clear、eval 池改回 `core=2`、去掉两处拒绝兜底、`join` 挪进提交循环、补偿扫描改用 `updateById` —— 五组变异逐一施加后，只有对应的新用例转红（共 8 例），既有用例全程不受影响
+- 无 schema 变更；新增配置键 4 个（`kb.eval.stuck-scan-enabled` / `stuck-scan-interval-ms` / `stuck-timeout-minutes` / `stuck-scan-batch-size`，均带默认值，不配即生效）
+
 ### 安全修复（M12/M17/M18 后修复：网页源按 id 寻址的入口缺少租户解析）
 
 - **缺陷**：`t_kb_web_source` 是从属表，经 `kb_id` 归属租户，不带 `tenant_id` 也不在 `KbTenantLineHandler.FENCED_TABLES` 里——这个设计没问题，问题是按 `source_id` / `kb_id` 直接寻址的四个入口压根不查根表 `t_kb_knowledge_base`，围栏在那几条语句上什么都没做。任何租户凭一个 `sourceId` 就能：触发别家网页源的抓取（`POST /web-sources/{sourceId}/sync`，还会连带走一遍文档上传管线往别家知识库写版本）、改它的 `sync_enabled` / `render_js` 开关（`PUT /web-sources/{sourceId}`）、**硬删**它的登记（`DELETE /web-sources/{sourceId}` → `hardDeleteById`，不可恢复）；凭一个 `kbId` 就能列出别家知识库登记的全部 URL 与同步状态（`GET /kb/{kbId}/web-sources`）。与 V21 记忆库、V22 站点凭据是同一类缺陷的第三处，本次补齐
