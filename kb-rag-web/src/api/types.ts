@@ -128,6 +128,10 @@ export interface UpdateUserRequest {
  */
 export interface RoleSummary {
   role_id: string;
+  /**
+   * 所属租户。内置角色每个租户各有一份、编码相同，平台运维跨租户读这张表时靠它区分同名行。
+   */
+  tenant_id: string;
   code: string;
   name: string;
   description: string | null;

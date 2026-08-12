@@ -22,7 +22,10 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { listKnowledgeBases } from '../../api/kb';
 import { createRole, deleteRole, listPermissionCatalogue, listRoles, updateRole } from '../../api/role';
-import type { KnowledgeBase, PermissionCatalogueItem, RoleSummary } from '../../api/types';
+import { listTenants } from '../../api/tenant';
+import type { KnowledgeBase, PermissionCatalogueItem, RoleSummary, TenantSummary } from '../../api/types';
+import { useAuth } from '../../auth/AuthContext';
+import { PERMISSIONS } from '../../auth/permissions';
 
 interface RoleFormValues {
   code: string;
@@ -45,14 +48,21 @@ interface RoleFormValues {
  * upgrade scripts and the first-login provisioning path all name them by code.
  */
 export default function RoleManagePage() {
+  const { can } = useAuth();
+  // 租户列跟着 tenant:manage 走：租户行过滤只对持有该权限的平台运维放行 t_kb_role，
+  // 也只有这类账号会在列表里同时看到多个租户的内置角色，其他人看到的本就只有自己租户那一份。
+  const canTenantManage = can(PERMISSIONS.TENANT_MANAGE);
   const [roles, setRoles] = useState<RoleSummary[]>([]);
   const [catalogue, setCatalogue] = useState<PermissionCatalogueItem[]>([]);
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
+  const [tenants, setTenants] = useState<TenantSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<RoleSummary | null>(null);
   const [scopeAll, setScopeAll] = useState(true);
+  // 每次打开抽屉自增，作为表单的 key，强制重建一份干净的表单实例，见 formInitialValues 的说明。
+  const [formSeq, setFormSeq] = useState(0);
   const [form] = Form.useForm<RoleFormValues>();
 
   const load = useCallback(async () => {
@@ -75,6 +85,12 @@ export default function RoleManagePage() {
     listKnowledgeBases().then(setKbs).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    if (canTenantManage) {
+      listTenants().then(setTenants).catch(() => undefined);
+    }
+  }, [canTenantManage]);
+
   // The catalogue arrives flat and already ordered; grouping keeps that order inside each module.
   const modules = useMemo(() => {
     const grouped = new Map<string, { moduleName: string; items: PermissionCatalogueItem[] }>();
@@ -91,25 +107,41 @@ export default function RoleManagePage() {
 
   const kbOptions = kbs.map((kb) => ({ value: kb.kb_id, label: kb.name }));
 
+  // 角色行只带租户 id，租户名在租户列表里；租户还没加载完（或角色属于新建的租户）时退回显示原始 id。
+  const tenantNameOf = (tenantId: string) =>
+    tenants.find((tenant) => tenant.tenant_id === tenantId)?.name ?? tenantId;
+
+  /**
+   * 抽屉里表单的初值。回填必须走 initialValues 而不是打开前调 form.setFieldsValue：
+   * openEdit 执行的那一刻抽屉还没渲染，useForm 实例没有连上任何 Form 元素，那次赋值会被 antd
+   * 直接丢弃，编辑态于是变成一张空表单——名称、说明、数据范围和已授权限全都不回显。
+   */
+  const formInitialValues = useMemo<RoleFormValues>(
+    () =>
+      editing
+        ? {
+            code: editing.code,
+            name: editing.name,
+            description: editing.description ?? undefined,
+            kb_scope_all: editing.kb_scope_all,
+            kb_ids: editing.kb_ids ?? [],
+            permission_codes: editing.permission_codes ?? [],
+          }
+        : { code: '', name: '', kb_scope_all: true, kb_ids: [], permission_codes: [] },
+    [editing],
+  );
+
   const openCreate = () => {
     setEditing(null);
     setScopeAll(true);
-    form.resetFields();
-    form.setFieldsValue({ kb_scope_all: true, permission_codes: [], kb_ids: [] });
+    setFormSeq((seq) => seq + 1);
     setDrawerOpen(true);
   };
 
   const openEdit = (record: RoleSummary) => {
     setEditing(record);
     setScopeAll(record.kb_scope_all);
-    form.setFieldsValue({
-      code: record.code,
-      name: record.name,
-      description: record.description ?? undefined,
-      kb_scope_all: record.kb_scope_all,
-      kb_ids: record.kb_ids ?? [],
-      permission_codes: record.permission_codes ?? [],
-    });
+    setFormSeq((seq) => seq + 1);
     setDrawerOpen(true);
   };
 
@@ -157,6 +189,16 @@ export default function RoleManagePage() {
       ),
     },
     { title: '编码', dataIndex: 'code' },
+    // 内置角色每个租户各有一份，编码与名称都相同：没有这一列，平台运维看到的就是一张"重复"的表。
+    ...(canTenantManage
+      ? ([
+          {
+            title: '所属租户',
+            dataIndex: 'tenant_id',
+            render: (value: string) => <Tag color="geekblue">{tenantNameOf(value)}</Tag>,
+          },
+        ] as ColumnsType<RoleSummary>)
+      : []),
     { title: '说明', dataIndex: 'description', render: (value: string | null) => value || '-' },
     {
       title: '数据范围',
@@ -239,7 +281,19 @@ export default function RoleManagePage() {
           </Space>
         }
       >
-        <Form<RoleFormValues> form={form} layout="vertical" onFinish={submit} preserve={false}>
+        {/* key 随每次打开自增，保证 Form 组件重新挂载——rc-field-form 只在挂载那一次把 initialValues
+            写进 store（`setInitialValues(values, !mountRef.current)`），沿用同一个组件实例时它只更新
+            引用。destroyOnClose 通常也能触发重挂载，但要等关闭动画跑完，抽屉被快速关掉再打开就赶不上。
+            下面的 preserve={false} 是同一件事的另一半，不能单独删：卸载时它把这些字段记进
+            prevWithoutPreserves，重挂载时才会被强制取 initialValues，否则 merge 里残留的旧值会赢。 */}
+        <Form<RoleFormValues>
+          key={formSeq}
+          form={form}
+          layout="vertical"
+          onFinish={submit}
+          initialValues={formInitialValues}
+          preserve={false}
+        >
           <Form.Item
             name="code"
             label="角色编码"

@@ -115,6 +115,8 @@
 - `builtin=1` 的角色：`code` 不可改、`DELETE` 拒绝。
 - 任何角色定义或库范围变更 → `PrincipalResolver.evictAll()`。
 
+> **角色行带 `tenant_id`（M16 后修复补齐）**：M15 定稿时还没有租户层，角色的身份就是 `code`，返回体里没有归属信息也不会有歧义。M16 之后不成立了——`TenantService#copyBuiltinRoles` 建租户时会照抄五个内置角色，于是 `SUPER_ADMIN`、`KB_ADMIN`、`EDITOR`、`REVIEWER`、`VIEWER` 每个租户各有一份，**`code` 与 `name` 都相同，只有 `role_id` 与 `tenant_id` 不同**；而 `t_kb_role` 是 `KbTenantLineHandler.OPERATOR_UNFENCED_TABLES` 的两张表之一，持 `tenant:manage` 的平台运维读它不带租户条件（M16 §1.3 的既定放行，否则建了租户就没人能给它授第一个角色）。`RoleResponse` 因此补 `tenant_id`：**这不是新的隔离手段，隔离本来就在围栏那一层，缺的是让跨租户读到的结果可辨识**。控制台角色管理页据此在持 `tenant:manage` 时多渲染一列"所属租户"，其余账号看到的本就只有自己租户那一份，不渲染该列。`SaveRoleRequest` 不收这个字段，归属不由请求体定：普通租户的调用方由行级围栏在 `INSERT` 时补列，平台运维走的是放行分支、围栏不参与，落库取 `V17__tenant_doc_acl_audit.sql` 给该列写的 `DEFAULT 'tnt_default0000000'`——也正是这类账号自己所在的租户（`tenant:manage` 只发给默认租户超管）。
+
 ### 3.4 错误语义
 
 | 场景 | 结果 |

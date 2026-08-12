@@ -9,6 +9,9 @@ import java.util.List;
  * Role row, with its grants and its data scope.
  *
  * @param roleId          role business id
+ * @param tenantId        owning tenant business id (M16); the built in role codes repeat once per
+ *                        tenant, so a platform operator reading this list across tenants needs the
+ *                        owner to tell two rows named alike apart
  * @param code            stable role code, not editable
  * @param name            display label
  * @param description     purpose note
@@ -21,6 +24,7 @@ import java.util.List;
  */
 public record RoleResponse(
         @JsonProperty("role_id") String roleId,
+        @JsonProperty("tenant_id") String tenantId,
         String code,
         String name,
         String description,
@@ -40,6 +44,7 @@ public record RoleResponse(
     public static RoleResponse from(Role role, List<String> permissionCodes, List<String> kbIds) {
         return new RoleResponse(
                 role.getRoleId(),
+                role.getTenantId(),
                 role.getCode(),
                 role.getName(),
                 role.getDescription(),

@@ -8,6 +8,17 @@
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
 
+### 缺陷修复（M15 后修复：角色编辑抽屉不回显已有配置，角色列表跨租户不可辨识）
+
+- **缺陷一（控制台，主诉）**：角色管理页点"编辑"，抽屉里名称、说明、数据范围与**已授权限的勾选**全部是空的——不是权限没保存，是压根没读出来。`RoleManagePage#openEdit` 先调 `form.setFieldsValue(...)` 再 `setDrawerOpen(true)`，而抽屉带 `destroyOnClose`：赋值发生的那一刻表单子树还没挂载，`useForm` 实例没有连上任何 `Form` 元素，antd 直接丢弃这次赋值。**症状看起来是"权限丢了"，实际是保存后再打开就看不到自己保存了什么**——运维要么反复重勾、要么把已有授权覆盖成空集提交上去
+- 改为 `initialValues` 回填，并给 `Form` 加一个每次打开自增的 `key`。**两者是一对耦合条件，不是双保险**：rc-field-form 只在挂载那一次把 `initialValues` 写进 store（`setInitialValues(values, !mountRef.current)`），沿用同一个组件实例时只更新引用；而写进去时走的是 `merge(initialValues, store)`——store 里的残留值会赢，只有卸载时被记进 `prevWithoutPreserves` 的字段（即 `preserve={false}` 的那些）才被强制取 `initialValues`。`key` 保证重挂载、`preserve={false}` 保证残留值让位，删掉任一半都会退回"打开看到上一个角色的值"。`destroyOnClose` 通常也能触发重挂载，但要等关闭动画跑完，快速关掉再打开赶不上
+- 顺带一处 UI 行为变化：编辑数据范围为"指定知识库"的角色时，切到"全部知识库"再切回来，列表恢复为打开抽屉时的原始选择（此前恢复为空、必须重选）。提交语义不变——`kb_scope_all=true` 仍强制提交空 `kb_ids`，那条注释讲的是 payload，不是 UI
+- **缺陷二（同页，顺带）**：`t_kb_role` 是 `KbTenantLineHandler.OPERATOR_UNFENCED_TABLES` 的两张表之一，持 `tenant:manage` 的平台运维读它不带租户条件（M16 §1.3 的既定放行，否则新建租户没人能给它授第一个角色）；而 `TenantService#copyBuiltinRoles` 给每户照抄五个内置角色，`code` 与 `name` 全同。**隔离是对的，可辨识性是缺的**：返回体里只有 `role_id` 能区分，页面于是呈现为"每个内置角色重复 N 遍"的表，编辑哪一行全凭运气
+- `RoleResponse` 补 `tenant_id`（读取 `Role#getTenantId`，该列由 `V17__tenant_doc_acl_audit.sql` 添加，**本次无 schema 变更**）；角色表格在持 `tenant:manage` 时多渲染一列"所属租户"，租户名复用 `GET /api/v1/tenants`，与用户管理页同一手法。其余账号读到的本就只有自己租户那一份，不渲染该列
+- `SaveRoleRequest` 不收 `tenant_id`：普通租户由行级围栏在 `INSERT` 时补列，平台运维走放行分支、围栏不参与，落库取该列的 `DEFAULT 'tnt_default0000000'`——也正是这类账号自己所在的租户（`tenant:manage` 只发给默认租户超管）
+- 单测新增 2 例（`RoleResponseTest`，kb-api 37 → 39，`mvn -o -DskipITs clean test` 全绿 1227 → 1229）：同 `code` 不同租户的两行必须靠 `tenant_id` 区分、缺失的授权与范围映射为空列表而非 null。变异验证：把 `RoleResponse.from` 里的 `role.getTenantId()` 换成 `null`，`shouldCarryTheOwningTenantSoTheOperatorCanTellRepeatedBuiltinRolesApart` 一例转红
+- 前端无测试框架（`tsc -b` + `oxlint`），两处均已通过；无 Flyway、无新增配置键，**对外行为变更仅一处**：`GET /api/v1/roles` 与 `/roles/{roleId}` 返回体多一个 `tenant_id` 字段（纯新增，存量调用方不受影响）
+
 ### 安全修复（M16 后修复：按 `kbId` 寻址的列表与批量入口不解析根表）
 
 - **缺陷**：上一条修的是"路径只带从属资源 id"那一类入口，这一条修的是另一类——路径自带 `kbId`、但链路上从头到尾没有一次对 `t_kb_knowledge_base` 的查询。这类入口的守卫只有 Controller 里那行 `AccessGuard.requireKbAccess(kbId)`，它问的是"这个库在不在你角色配的数据范围里"，而 `kb_scope_all` 对内置角色恒为真，于是**只要报一个别家的 `kbId`，后续那条按 `kb_id` 过滤的语句就照常执行**：`GET /kb/{kbId}/documents`（列出别家全部文档与解析状态）、`/trash`（别家的删除历史）、`/search-insights` 与 `/stats`（别家用户搜过什么，原始 query 文本）、`/documents/batch-delete` 与 `/batch-reindex`（批量删/重建别家文档）、`/documents/confirm`、`/rebuild` 与 `/rebuild-status`（替别家跑一遍全库重建）、`/documents/{docId}/visibility` 读写（别家文档的密级与授权角色）
