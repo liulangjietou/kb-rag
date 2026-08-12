@@ -30,6 +30,7 @@ class KbTenantLineHandlerTest {
     private static final String BASES_TABLE = "t_kb_knowledge_base";
     private static final String MEMORY_LIBRARIES_TABLE = "t_kb_memory_library";
     private static final String WEB_CREDENTIALS_TABLE = "t_kb_web_credential";
+    private static final String SOURCE_MAPPINGS_TABLE = "t_kb_source_mapping";
 
     private final KbTenantLineHandler handler = new KbTenantLineHandler();
 
@@ -81,6 +82,9 @@ class KbTenantLineHandlerTest {
         // The whole isolation of the credential console screen: list, create, edit and delete never
         // name a tenant, so every one of their statements depends on this returning false.
         assertFalse(handler.ignoreTable(WEB_CREDENTIALS_TABLE));
+        // V23: 映射模板从"全部署一份"变成租户内的资源。控制台的增删改查与按名解析都不提租户，
+        // 全靠这里返回 false；启动种子跑在无主体线程上，那一侧由 SourceMappingSeeder 显式钉租户。
+        assertFalse(handler.ignoreTable(SOURCE_MAPPINGS_TABLE));
         assertEquals(TENANT_ID, ((StringValue) handler.getTenantId()).getValue());
     }
 
@@ -97,6 +101,9 @@ class KbTenantLineHandlerTest {
         // Credentials are daily work, not tenant administration: even the platform operator only
         // ever sees the ones of their own tenant.
         assertFalse(handler.ignoreTable(WEB_CREDENTIALS_TABLE));
+        // 同理，映射模板对运营商也钉死本租户。建租户时往新租户插副本靠的是实体显式写 tenant_id
+        // （拦截器见列即放行），不是靠在这里开一个窗口。
+        assertFalse(handler.ignoreTable(SOURCE_MAPPINGS_TABLE));
     }
 
     @Test

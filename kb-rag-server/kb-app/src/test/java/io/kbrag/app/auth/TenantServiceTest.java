@@ -2,13 +2,17 @@ package io.kbrag.app.auth;
 
 import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.BuiltinTenants;
 import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.Role;
 import io.kbrag.domain.entity.RolePermission;
+import io.kbrag.domain.entity.SourceMapping;
 import io.kbrag.domain.entity.Tenant;
+import io.kbrag.domain.enums.SourceMappingType;
 import io.kbrag.domain.enums.TenantStatus;
 import io.kbrag.domain.mapper.RoleMapper;
 import io.kbrag.domain.mapper.RolePermissionMapper;
+import io.kbrag.domain.mapper.SourceMappingMapper;
 import io.kbrag.domain.mapper.TenantMapper;
 import io.kbrag.domain.service.BizIdGenerator;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,13 +49,14 @@ class TenantServiceTest {
     private TenantMapper tenantMapper;
     private RoleMapper roleMapper;
     private RolePermissionMapper rolePermissionMapper;
+    private SourceMappingMapper sourceMappingMapper;
     private RoleService roleService;
     private PrincipalResolver principalResolver;
     private TenantService service;
 
     @BeforeEach
     void setUp() {
-        MybatisLambdaCache.register(Tenant.class, Role.class, RolePermission.class);
+        MybatisLambdaCache.register(Tenant.class, Role.class, RolePermission.class, SourceMapping.class);
         tenantMapper = mock(TenantMapper.class);
         roleMapper = mock(RoleMapper.class);
         rolePermissionMapper = mock(RolePermissionMapper.class);
@@ -60,8 +65,10 @@ class TenantServiceTest {
         BizIdGenerator idGenerator = mock(BizIdGenerator.class);
         when(idGenerator.tenantId()).thenReturn(NEW_TENANT_ID);
         when(idGenerator.roleId()).thenReturn("role_c1", "role_c2", "role_c3", "role_c4", "role_c5");
-        service = new TenantService(tenantMapper, roleMapper, rolePermissionMapper, roleService,
-                idGenerator, principalResolver);
+        sourceMappingMapper = mock(SourceMappingMapper.class);
+        when(idGenerator.sourceMappingId()).thenReturn("smp_c1", "smp_c2", "smp_c3");
+        service = new TenantService(tenantMapper, roleMapper, rolePermissionMapper, sourceMappingMapper,
+                roleService, idGenerator, principalResolver);
     }
 
     @Test
@@ -207,5 +214,49 @@ class TenantServiceTest {
         tenant.setBuiltin(builtin);
         tenant.setStatus(status);
         return tenant;
+    }
+    @Test
+    void shouldCopyTheBuiltinSourceMappingsIntoTheNewTenant() {
+        when(tenantMapper.selectOne(any())).thenReturn(null);
+        when(roleMapper.selectList(any())).thenReturn(builtinTemplates());
+        when(sourceMappingMapper.selectList(any())).thenReturn(List.of(
+                builtinMapping("memotrace"), builtinMapping("liuhen_txt")));
+
+        service.create("acme", "Acme Corp");
+
+        // V23 起映射模板是租户内的资源。不复制的话，新租户第一次聊天导入就会撞上「未知映射模板」，
+        // 而共享一份全局模板要在每个查询里写「本租户的 OR 全局的」——围栏表达不了，漏一处就是缺口。
+        ArgumentCaptor<SourceMapping> copies = ArgumentCaptor.forClass(SourceMapping.class);
+        verify(sourceMappingMapper, times(2)).insert(copies.capture());
+        assertTrue(copies.getAllValues().stream()
+                .allMatch(copy -> NEW_TENANT_ID.equals(copy.getTenantId())));
+        // 副本仍是内置行：新租户里同样只能复制、不能原地改，与默认租户的语义一致。
+        assertTrue(copies.getAllValues().stream()
+                .allMatch(copy -> SourceMapping.BUILTIN == copy.getIsBuiltin()));
+        assertEquals(Set.of("memotrace", "liuhen_txt"), copies.getAllValues().stream()
+                .map(SourceMapping::getName)
+                .collect(Collectors.toSet()));
+    }
+
+    @Test
+    void shouldStillCreateTheTenantWhenNoBuiltinMappingExistsYet() {
+        when(tenantMapper.selectOne(any())).thenReturn(null);
+        when(roleMapper.selectList(any())).thenReturn(builtinTemplates());
+        when(sourceMappingMapper.selectList(any())).thenReturn(List.of());
+
+        // 种子还没跑过的部署里，租户仍然要能建出来——它只是暂时不能聊天导入，而不是建不成。
+        assertEquals(NEW_TENANT_ID, service.create("acme", "Acme Corp").getTenantId());
+        verify(sourceMappingMapper, never()).insert(any(SourceMapping.class));
+    }
+
+    private SourceMapping builtinMapping(String name) {
+        SourceMapping mapping = new SourceMapping();
+        mapping.setMappingId("smp_t_" + name);
+        mapping.setTenantId(BuiltinTenants.DEFAULT_TENANT_ID);
+        mapping.setName(name);
+        mapping.setSourceType(SourceMappingType.CSV);
+        mapping.setProfileYaml("columns: []");
+        mapping.setIsBuiltin(SourceMapping.BUILTIN);
+        return mapping;
     }
 }

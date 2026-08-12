@@ -64,6 +64,7 @@
 | `t_kb_knowledge_base` / `t_kb_api_key` / `t_kb_eval_dataset` / `t_kb_app` | V17 | 否 | — |
 | `t_kb_memory_library` | V21 | 开放端（`kb-mk-*`） | Key 绑库 + `user_id` 查询谓词，刻意不拼租户 |
 | `t_kb_web_credential` | V22 | 网页同步 `@Scheduled` | `resolveFor(tenantId, host)` 显式租户谓词 |
+| `t_kb_source_mapping` | V23 | 启动种子 `SourceMappingSeeder` | 种子两条语句显式钉默认租户（无主体线程围栏跳过） |
 
 ### 1.3.2 从属表的解析义务（围栏名单之外的另一半）
 
@@ -98,6 +99,10 @@
 - `IndexNaming` 全部公开方法加 tenant 参数（调用点均在 kb-app，编译期收口）；kbId 本身在库表内全局唯一（`kb_` + UUID16），租户段的价值是**运维可辨认**与"跨租户挂错别名在名字上就能看出来"，不是防碰撞。
 
 ### 1.5 平台级权限码不下发到子租户
+
+> **V23 增第二个平台级码 `platform:config`（第 20 码）**，管 IK 词典与告警出口两处**部署级配置**。与 `tenant:manage` 分开而不是复用它：那个码同时还是 `t_kb_admin_user` / `t_kb_role` 的围栏例外开关（§1.3），把"改 IK 词典"挂到它下面会让那个例外的边界更难说清。判据是"这份配置属于谁"——IK 词典是 ES 集群级设置（插件按一个 URL 拉一份文档，全部署共用一份分词结果），告警 webhook 是运维出口（可被改写就等于一条把别家告警内容引出去的信道），两样都不是某个租户的资产。原先它们要 `system:config`，而那是每个租户的 SUPER_ADMIN 都持有的码。
+>
+> 同批定性的第三张表 `t_kb_source_mapping`（聊天导入映射模板）走了**相反**的结论：那是租户的业务资产（各家导出格式本就不同），且写端点用的是 `doc:write`——任何租户的普通文档编辑者都能改删全部署的模板，破坏面比另外两处更大。它按 V23 加 `tenant_id` 进围栏，内置模板改为建租户时复制一份（`TenantService#copyBuiltinSourceMappings`，与复制五个内置角色同一套做法）。**不做"内置全局 + 租户自建"的混合可见性**：那要在每个查询里写"本租户的 OR 全局的"，围栏表达不了这种条件，漏一处就是一个缺口。
 
 `tenant:manage` 有两重能力：建/停租户（`TenantController` 类级守卫），以及让 `t_kb_admin_user`、`t_kb_role` 两表不拼租户条件（§1.3 的栅栏例外）。它落到任何子租户的角色上，该租户的管理员就同时拿到了这两样 —— 能建租户、停别人的租户、看全平台的用户和角色，多租户隔离从根上失效。
 

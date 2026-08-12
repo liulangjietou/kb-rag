@@ -91,6 +91,16 @@ public final class PermissionCodes {
     /** Create tenants, rename and suspend them; the only cross tenant vantage point of the console. */
     public static final String TENANT_MANAGE = "tenant:manage";
 
+    /**
+     * Change deployment level configuration: the IK dictionary and the alert dispatcher.
+     *
+     * <p>与 {@link #SYSTEM_CONFIG} 的分界是"这份配置属于谁"：知识库、应用、评测那些设置是租户
+     * 自己的，而 IK 词典是 ES 集群级设置（插件按一个 URL 拉一份文档，全部署共用一份分词结果），
+     * 告警是运维出口（webhook_url 若可被任意租户改写，就是一条把别家告警内容引出去的信道）。
+     * 这两样都不是某个租户的资产，所以不下发到子租户。
+     */
+    public static final String PLATFORM_CONFIG = "platform:config";
+
     /** Read memory libraries, rules, memory nodes and run the retrieval debugger. */
     public static final String MEMORY_READ = "memory:read";
 
@@ -102,10 +112,11 @@ public final class PermissionCodes {
      *
      * <p>平台级权限码：它们的语义是"站在全平台之上"，一旦落到子租户的角色上，该租户的管理员就拿到了
      * 建租户、停租户以及跨租户查看用户与角色的能力（见 {@code KbTenantLineHandler} 的放行分支），
-     * 多租户隔离从根上就没了。所以这不是一条可以由运营方自行决定的配置，而是一条不变量：
+     * 多租户隔离从根上就没了。{@link #PLATFORM_CONFIG} 是同一类：它改的是全部署共用的一份设施，
+     * 一个租户改了，其余租户跟着变。所以这不是一条可以由运营方自行决定的配置，而是一条不变量：
      * 授予入口统一在 {@code RoleService#replacePermissions} 上守。
      */
-    public static final Set<String> PLATFORM_ONLY = Set.of(TENANT_MANAGE);
+    public static final Set<String> PLATFORM_ONLY = Set.of(TENANT_MANAGE, PLATFORM_CONFIG);
 
     private PermissionCodes() {
     }

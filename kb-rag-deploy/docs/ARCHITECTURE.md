@@ -1,8 +1,8 @@
 # kb-rag 架构文档
 
 
-> 版本：v1.8（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14 + 企业化 M15/M16 + 网页抓取增强 M17/M18 + 记忆库 M19 + MCP 协议层 M20 + 记忆库租户隔离修复 V21 + 站点凭据租户隔离修复 V22 + 网页源租户解析修复，2026-08-11；v1.7 基线为 V22，v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
-> 日期：2026-08-11
+> 版本：v1.9（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14 + 企业化 M15/M16 + 网页抓取增强 M17/M18 + 记忆库 M19 + MCP 协议层 M20 + 记忆库租户隔离修复 V21 + 站点凭据租户隔离修复 V22 + 网页源租户解析修复 + **全域租户隔离普查修复**（`KbResourceGuard` 全族、kbId 维度列表与批量、应用版本与调用审计、三张全局表定性 V23），2026-08-12；v1.8 基线为网页源租户解析修复，v1.7 基线为 V22，v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
+> 日期：2026-08-12
 > 作者：RichardFyoung / Claude
 >
 > **文档定位**：本文描述系统的实际实现架构（以代码为准），与以下文档互补——
@@ -238,6 +238,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V20（M19） | 记忆库 6 张表：`t_kb_memory_library` / `t_kb_memory_fragment_rule`（instruction_type/auto_update/expire_days/extract_version/builtin）/ `t_kb_memory_profile_rule`（fields 整体存 JSON 数组）/ `t_kb_memory_node`（idx_library_user）/ `t_kb_memory_profile`（uk_rule_user 唯一键 upsert）/ `t_kb_memory_app_key`（明文 `kb-mk-*`，只存 SHA-256 摘要 + 展示前缀）；权限种子 `memory:read`/`memory:write` |
 | V21（M19 后修复） | `t_kb_memory_library` 增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户）+ `idx_tenant` —— V20 建表时漏了 M16 的租户层，多租户部署下任何租户持 `memory:read` 即可列出全部署记忆库、`memory:write` 可改删他人的库与 Memory Key。记忆库是 memory 域的根聚合表，五张从属表（片段/画像规则、节点、画像、Key）经 `library_id` 归属租户，故只加这一列；配套把它加进 `KbTenantLineHandler.FENCED_TABLES`，并由 `MemoryLibraryGuard` 让每个管理端入口先解析库（见 §7.2） |
 | V22（M18 后修复） | `t_kb_web_credential` 增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户），`uk_host(host)` 收缩为 `uk_tenant_host(tenant_id, host)` —— V19 建表时漏了 M16 的租户层。缺陷两面：管理面任何租户持 `system:config` 可改删停用他人凭据；抓取面凭据按 host 全局查找，B 租户给自己的 WebSource 登记一个同 host URL，夜里的同步就会把 A 租户的密码发到那个请求上。配套把表加进 `KbTenantLineHandler.FENCED_TABLES`（只覆盖管理面），抓取面由 `WebCredentialService#resolveFor(tenantId, host)` 的显式租户谓词覆盖 —— 同步跑在无主体线程上，围栏在那条线程整条跳过（见 §7.2 与 M16 契约 §1.3） |
+| V23（M16 后修复） | `t_kb_source_mapping` 增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户），`uk_name(name)` 收缩为 `uk_tenant_name(tenant_id, name)`，并新增第 20 个权限码 `platform:config` —— 这一版处理的是三张「任意租户可改删全部署数据」的表，**结论按判据分岔**：映射模板是租户的业务资产（各家导出格式不同，且写端点用的是 `doc:write`，任何租户的普通编辑者都能改删全部署的模板），收进租户维度、进围栏、内置模板由 `TenantService#copyBuiltinSourceMappings` 建租户时复制；IK 词典（ES 集群级设置，插件按一个 URL 拉一份全部署共用的分词文档）与告警配置（运维出口，`webhook_url` 可被改成外带信道）是部署级设施，按租户切要么做不到要么语义错，改为明确登记为全局并收紧到 `platform:config`（`PLATFORM_ONLY` 第二个成员，只授默认租户超管）。子租户 SUPER_ADMIN 从此不能改这两处（见 M16 契约 §1.5） |
 
 引擎侧可过滤字段全集（Qdrant 标量 / ES filter，建索引时显式声明）：`kb_id`、`doc_id`、`document_version_id`、`enabled`、`parent_id`、`chunk_type`、`tag_ids`、`session_id`、`sender`、`msg_time`、`chunk_seq`；其余 metadata 只存 MySQL。新增可过滤维度视为 schema 变更，走索引重建迁移。
 

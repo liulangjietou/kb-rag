@@ -8,6 +8,18 @@
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
 
+### 安全修复（M16 后修复：三张"任意租户可改删全部署数据"的表定性并收口）
+
+- `[schema]` Flyway `V23__source_mapping_tenant_and_platform_config.sql`。这三张表都不带 `tenant_id`，仓库里也从来没有任何一处写下过"它们是有意共享的"。普查把它们摊开之后，**结论不是同一个**——判据是"这份数据是租户的业务资产，还是部署本身的设施"
+- **① `t_kb_source_mapping`（聊天导入映射模板）→ 收进租户维度**。各租户导出的聊天记录格式本就不同，模板是他们各自调出来的；而且 `/source-mappings/*` 的写端点用的是 `doc:write` 而非 `system:config`——**任何租户的普通文档编辑者都能改删全部署的模板**，破坏面比另外两张更大。加 `tenant_id`（NOT NULL DEFAULT 默认租户，存量行零迁移）、进 `FENCED_TABLES`、`uk_name(name)` 收缩为 `uk_tenant_name(tenant_id, name)`
+- 内置模板改为**建租户时复制一份**（`TenantService#copyBuiltinSourceMappings`，与 V17 复制五个内置角色同一套做法），迁移脚本为已存在的非默认租户补齐。**不做"内置全局 + 租户自建"的混合可见性**：那要在每个查询里写"本租户的 OR 全局的"，围栏只会拼等值条件、表达不了这种条件，漏一处就是一个缺口。名称随之从全局唯一收缩为租户内唯一——复制会让 `memotrace` 在每个租户各出现一行，全局唯一键会把复制的第一步就顶回去（与 V17 处理 `t_kb_role.uk_code` 逐字相同的推理）
+- 启动种子 `SourceMappingSeeder` 的两条语句**都显式钉死默认租户**：它跑在无主体线程上，`ignoreTable` 整条跳过，进围栏名单对它没有任何作用（V22 立下的通则）。不钉的话，存在检查会看见其他租户的副本、误判默认租户已种过
+- **② `t_kb_ik_dict`（IK 词典）与 ③ `t_kb_system_config` 的告警配置 → 登记为部署级全局，收紧到平台运维权限**。词典由 ES 插件从 `/internal/dict/ik/{type}.txt` 拉取，那是集群级设置：按租户切要求每租户一份渲染文档 + 每租户一套 analyzer + 每租户一批索引配置，那不是隔离问题而是另一个特性。告警本就该有一个运维出口，真正的风险是 `webhook_url` 可被任意租户改成自己的地址、把别家告警内容引出去——那是"谁能改"的问题，不是"存几份"的问题
+- 新增第 20 个权限码 `platform:config`（`PermissionCodes.PLATFORM_ONLY` 的第二个成员，只授默认租户的 SUPER_ADMIN，建租户复制内置角色时自动剔除）。`IkDictController` 类级注解与 `SystemController` 的告警三端点从 `system:config` 改为它。**与 `tenant:manage` 分开而不是复用**：那个码同时还是 `t_kb_admin_user` / `t_kb_role` 的围栏例外开关，把"改 IK 词典"挂到它下面会让那个例外的边界更难说清
+- **行为变更（需要运维知晓）**：子租户的 SUPER_ADMIN 从此不能改 IK 词典与告警配置，控制台"系统设置"页的这两个页签对他们不再渲染（服务端注解才是判定处，前端只是不让人白点一下）。`system:config` 的其余用途不变——模型状态、演示数据仍是租户内的
+- 单测：`TenantServiceTest` 补建租户复制模板（副本落新租户、仍标记为内置、种子未跑时租户仍建得出来）；`KbTenantLineHandlerTest` 补新表在有主体时入栏、运营商也不开窗口；`RoleServicePlatformPermissionTest` 补 `platform:config` 不得授予子租户角色
+- 前端：`PERMISSIONS` 补 `PLATFORM_CONFIG`，设置页两个页签按它渲染
+
 ### 安全修复（M16 后修复：普查新发现的两处——应用版本与开放 API 调用审计）
 
 - 这两处不在既有缺陷清单里，是这轮全域普查按同一判据（"链路上有没有一次对根表的查询"）扫出来的。

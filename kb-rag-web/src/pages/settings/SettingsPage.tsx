@@ -1,4 +1,6 @@
 import { Card, Tabs, Typography } from 'antd';
+import { useAuth } from '../../auth/AuthContext';
+import { PERMISSIONS } from '../../auth/permissions';
 import { useModelStatus } from '../../context/ModelStatusContext';
 import AlertConfigTab from './components/AlertConfigTab';
 import ApiKeyTab from './components/ApiKeyTab';
@@ -14,6 +16,10 @@ import WebCredentialTab from './components/WebCredentialTab';
  */
 export default function SettingsPage() {
   const { modelStatus, loading } = useModelStatus();
+  // ik 词典与告警出口是部署级设施，不是租户自己的配置：词典由 ES 集群按一个 URL 拉取、全部署共用
+  // 一份分词结果，告警 webhook 是运维出口。V23 起它们要 platform:config，而那个码只有默认租户的
+  // 超管持有。这里把两个页签藏起来只是不让人白点一下，服务端注解才是判定处。
+  const platformOperator = useAuth().can(PERMISSIONS.PLATFORM_CONFIG);
 
   return (
     <div>
@@ -39,24 +45,28 @@ export default function SettingsPage() {
               </Card>
             ),
           },
-          {
-            key: 'ik-dict',
-            label: 'ik 词典',
-            children: (
-              <Card>
-                <IkDictTab />
-              </Card>
-            ),
-          },
-          {
-            key: 'alert',
-            label: '告警',
-            children: (
-              <Card>
-                <AlertConfigTab />
-              </Card>
-            ),
-          },
+          ...(platformOperator
+            ? [
+                {
+                  key: 'ik-dict',
+                  label: 'ik 词典',
+                  children: (
+                    <Card>
+                      <IkDictTab />
+                    </Card>
+                  ),
+                },
+                {
+                  key: 'alert',
+                  label: '告警',
+                  children: (
+                    <Card>
+                      <AlertConfigTab />
+                    </Card>
+                  ),
+                },
+              ]
+            : []),
           {
             key: 'api-key',
             label: 'API Key 管理',

@@ -64,7 +64,7 @@ public class SystemController {
      * @return current settings
      */
     @GetMapping("/alert-config")
-    @RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
+    @RequiresPermission(PermissionCodes.PLATFORM_CONFIG)
     public Result<AlertConfigResponse> alertConfig() {
         return Result.success(AlertConfigResponse.from(alertConfigService.current()));
     }
@@ -76,7 +76,7 @@ public class SystemController {
      * @return stored settings
      */
     @PutMapping("/alert-config")
-    @RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
+    @RequiresPermission(PermissionCodes.PLATFORM_CONFIG)
     @AuditedOperation(module = "SYSTEM", action = "UPDATE_ALERT_CONFIG", targetType = "SYSTEM_CONFIG")
     public Result<AlertConfigResponse> updateAlertConfig(
             @Valid @RequestBody UpdateAlertConfigRequest request) {
@@ -99,7 +99,7 @@ public class SystemController {
      * @return empty success envelope
      */
     @PostMapping("/alert-config/test")
-    @RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
+    @RequiresPermission(PermissionCodes.PLATFORM_CONFIG)
     @AuditedOperation(module = "SYSTEM", action = "TEST_ALERT", targetType = "SYSTEM_CONFIG")
     public Result<Void> testAlert() {
         if (!alertService.sendTest(TEST_MESSAGE)) {

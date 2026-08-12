@@ -6,10 +6,12 @@ import io.kbrag.domain.constant.BuiltinTenants;
 import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.Role;
 import io.kbrag.domain.entity.RolePermission;
+import io.kbrag.domain.entity.SourceMapping;
 import io.kbrag.domain.entity.Tenant;
 import io.kbrag.domain.enums.TenantStatus;
 import io.kbrag.domain.mapper.RoleMapper;
 import io.kbrag.domain.mapper.RolePermissionMapper;
+import io.kbrag.domain.mapper.SourceMappingMapper;
 import io.kbrag.domain.mapper.TenantMapper;
 import io.kbrag.domain.service.BizIdGenerator;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +47,7 @@ public class TenantService {
     private final TenantMapper tenantMapper;
     private final RoleMapper roleMapper;
     private final RolePermissionMapper rolePermissionMapper;
+    private final SourceMappingMapper sourceMappingMapper;
     private final RoleService roleService;
     private final BizIdGenerator idGenerator;
     private final PrincipalResolver principalResolver;
@@ -92,6 +95,7 @@ public class TenantService {
         tenantMapper.insert(tenant);
 
         copyBuiltinRoles(tenant.getTenantId());
+        copyBuiltinSourceMappings(tenant.getTenantId());
         log.info("tenant created, tenantId={}, code={}", tenant.getTenantId(), tenantCode);
         return tenant;
     }
@@ -180,6 +184,50 @@ public class TenantService {
             roleService.replacePermissions(role, codes);
         }
         log.info("built in roles copied, tenantId={}, roles={}", tenantId, templates.size());
+    }
+
+    /**
+     * Copies the built in chat import mapping profiles of the default tenant.
+     *
+     * <p>Same shape and same reason as {@link #copyBuiltinRoles(String)}: {@code t_kb_source_mapping}
+     * became a tenant scoped table in V23, so a fresh tenant would otherwise start with no profile at
+     * all and its first chat import would fail on "unknown mapping profile". Copying beats a shared
+     * global set - a "own rows OR global rows" visibility would have to be written into every query
+     * that touches this table, the fence cannot express it, and one forgotten spot is a leak.
+     *
+     * <p>The copies are marked built in, so they stay read only in the new tenant exactly as they are
+     * in the default one; an operator who needs to adjust one copies it again, which is what
+     * {@code SourceMappingService#copy} is for.
+     *
+     * <p>{@code tenant_id} is written explicitly rather than left to the fence: the interceptor would
+     * inject the <em>caller's</em> tenant - the platform operator's, not the new one's.
+     *
+     * @param tenantId tenant the copies belong to
+     */
+    private void copyBuiltinSourceMappings(String tenantId) {
+        List<SourceMapping> templates = sourceMappingMapper.selectList(
+                new LambdaQueryWrapper<SourceMapping>()
+                        .eq(SourceMapping::getTenantId, BuiltinTenants.DEFAULT_TENANT_ID)
+                        .eq(SourceMapping::getIsBuiltin, SourceMapping.BUILTIN));
+        if (CollectionUtils.isEmpty(templates)) {
+            // The seeder inserts them on every startup, so an empty result means it has not run yet
+            // in this deployment. The tenant is still usable - it just cannot chat-import until an
+            // operator adds a profile - so the creation is not failed over it.
+            log.error("no built in source mapping to copy, tenantId={}", tenantId);
+            return;
+        }
+        for (SourceMapping template : templates) {
+            SourceMapping copy = new SourceMapping();
+            copy.setMappingId(idGenerator.sourceMappingId());
+            copy.setTenantId(tenantId);
+            copy.setName(template.getName());
+            copy.setSourceType(template.getSourceType());
+            copy.setProfileYaml(template.getProfileYaml());
+            copy.setIsBuiltin(SourceMapping.BUILTIN);
+            sourceMappingMapper.insert(copy);
+        }
+        log.info("built in source mappings copied, tenantId={}, profiles={}",
+                tenantId, templates.size());
     }
 
     private String normalizeCode(String code) {

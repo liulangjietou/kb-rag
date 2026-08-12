@@ -34,7 +34,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/dict/ik")
 @RequiredArgsConstructor
-@RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
+@RequiresPermission(PermissionCodes.PLATFORM_CONFIG)
 public class IkDictController {
 
     private static final int DEFAULT_PAGE = 1;

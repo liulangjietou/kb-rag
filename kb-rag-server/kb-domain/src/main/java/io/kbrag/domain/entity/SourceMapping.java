@@ -39,11 +39,18 @@ public class SourceMapping extends BaseEntity {
     @TableField("mapping_id")
     private String mappingId;
 
+    /** Owning tenant business id, defaulted to the built in tenant by the V23 migration. */
+    @TableField("tenant_id")
+    private String tenantId;
+
     /**
-     * Profile name, unique across built-in and custom rows.
+     * Profile name, unique inside one tenant.
      *
      * <p>Also the value the {@code mapping_profile} import parameter carried before this table existed, so
      * an import script written against a built-in name keeps working without translation.
+     *
+     * <p>Unique per tenant rather than globally since V23: the built-in profiles are copied into every
+     * tenant, so a name like {@code memotrace} exists once per tenant by design.
      */
     @TableField("name")
     private String name;
