@@ -253,7 +253,9 @@ tags:
 - name: knowledge-base
   description: 知识库管理
 - name: document
-  description: 文档上传、状态查询、分片查看、重建索引
+  description: '文档上传、状态查询、分片查看、重建索引。本组按 docId / chunkId / annotationId
+    直接寻址的端点一律先解析归属知识库：其他租户的 id 读作不存在 → 404（不是 403，见 M16-CONTRACTS.md
+    §1.3.2）。'
 - name: search
   description: 检索调试
 - name: dict
@@ -267,15 +269,21 @@ tags:
 - name: demo
   description: Demo 一键导入（M3，docs/M3-CONTRACTS.md §3.7）
 - name: eval
-  description: 评测体系：评测集/case/证据复核/评测运行与报告（M4b，docs/M4b-CONTRACTS.md）
+  description: '评测体系：评测集/case/证据复核/评测运行与报告（M4b，docs/M4b-CONTRACTS.md）。
+    本组按 datasetId / caseId / runId / feedbackId 直接寻址的端点一律先解析到评测集（该表自身在
+    行级围栏内，case 与 run 经它两跳）：其他租户的 id 读作不存在 → 404（见 M16-CONTRACTS.md §1.3.2）。'
 - name: insight
   description: 检索洞察：零命中/降级记录明细与内容缺口报表（M10，docs/M10-CONTRACTS.md §2.2）
 - name: governance
-  description: 内容治理：审核发布/有效期/回收站（M11，docs/M11-CONTRACTS.md §2.2）
+  description: '内容治理：审核发布/有效期/回收站（M11，docs/M11-CONTRACTS.md §2.2）。本组端点
+    全部按 docId 直接寻址，一律先解析归属知识库：其他租户的 docId 读作不存在 → 404，审核、改密级、
+    回收站与彻底删除均不会发生（见 M16-CONTRACTS.md §1.3.2）。'
 - name: web-source
   description: 数据接入：URL 登记导入与增量同步（M12，docs/M12-CONTRACTS.md §3.4）
 - name: ext-source
-  description: 外部数据源连接器：S3/OSS 兼容对象存储登记、扫描与增量同步（M14，docs/M14-CONTRACTS.md §2）
+  description: '外部数据源连接器：S3/OSS 兼容对象存储登记、扫描与增量同步（M14，docs/M14-CONTRACTS.md
+    §2）。按 sourceId 寻址的端点一律先解析归属知识库，按 kbId 的列表端点先解析该库：其他租户的 id
+    读作不存在 → 404，更新、硬删与连接测试的外发请求一条都不发出（见 M16-CONTRACTS.md §1.3.2）。'
 - name: app-center
   description: 应用中心：应用/版本/发布门禁与控制台 chat 预览（M4c，docs/M4c-CONTRACTS.md §2）
 - name: api-key
@@ -1665,7 +1673,8 @@ paths:
       summary: 彻底删除（仅限回收站内文档，不可逆）
       description: 'M11-CONTRACTS.md §2.2：M11 前 DELETE 的不可逆删除迁移到这里：连同
         全部版本/分片/两个检索引擎副本一并删除。仅对回收站内文档有效（两段式防误删），
-        否则返回 INVALID_PARAM。超过保留期的回收站文档由定时任务自动执行同一逻辑。'
+        否则返回 INVALID_PARAM。超过保留期的回收站文档由定时任务自动执行同一逻辑。
+        其他租户的 docId 读作不存在 → 404，删除不会发生（见 M16-CONTRACTS.md §1.3.2）。'
       responses:
         '200':
           description: 已彻底删除
@@ -2160,7 +2169,8 @@ paths:
       - ext-source
       summary: 编辑源（secret 传空=保留旧值）
       description: 'M14-CONTRACTS.md §2.3：可改 name/endpoint/region/bucket/prefix/access_key/
-        secret_key(空=保留)/sync_enabled。'
+        secret_key(空=保留)/sync_enabled。其他租户的 sourceId 读作不存在 → 404，endpoint 与
+        AK/SK 不会被覆写（见 M16-CONTRACTS.md §1.3.2）。'
       requestBody:
         required: true
         content:
@@ -2208,7 +2218,8 @@ paths:
       tags:
       - ext-source
       summary: 移除源（硬删源行与对象明细，不动文档）
-      description: 'M14-CONTRACTS.md §2.3：硬删源行 + items 行；它喂过的文档保留在知识库。'
+      description: 'M14-CONTRACTS.md §2.3：硬删源行 + items 行；它喂过的文档保留在知识库。
+        其他租户的 sourceId 读作不存在 → 404，删除不会发生（该删除不可恢复，见 M16-CONTRACTS.md §1.3.2）。'
       responses:
         '200':
           description: 已移除
@@ -2229,7 +2240,9 @@ paths:
       tags:
       - ext-source
       summary: 连通性测试（同步执行）
-      description: 'M14-CONTRACTS.md §2.3：同步探测连通性与凭证，返回 HealthStatus，不触碰任何对象。'
+      description: 'M14-CONTRACTS.md §2.3：同步探测连通性与凭证，返回 HealthStatus，不触碰任何对象。
+        其他租户的 sourceId 读作不存在 → 404，且判定排在探测之前：不会拿别家凭据发出任何外网请求
+        （见 M16-CONTRACTS.md §1.3.2）。'
       responses:
         '200':
           description: 探测结果
@@ -2714,6 +2727,8 @@ paths:
   /api/v1/documents/{docId}/versions/{versionId}/activate:
     post:
       summary: Activate a version, rebuilding it first when its chunks were archived
+      description: '其他租户的 docId 读作不存在 → 404，且判定排在激活之前：文档不会被回滚到旧版本、
+        索引不会被重跑（见 M16-CONTRACTS.md §1.3.2）。'
       tags:
       - document
       parameters: *id002
@@ -3437,6 +3452,8 @@ paths:
       tags:
       - eval
       summary: run 命中明细（下钻）
+      description: '其他租户的 runId 读作不存在 → 404：评测明细（查询、命中分片与判分）不会返回
+        （见 M16-CONTRACTS.md §1.3.2）。'
       parameters:
       - name: hit
         in: query

@@ -73,12 +73,12 @@
 |---|---|---|---|
 | 记忆库五张从属表（片段/画像规则、节点、画像、Key） | `library_id` → `t_kb_memory_library` | `MemoryLibraryGuard`（管理端 21 个入口） | V21 |
 | `t_kb_web_source` | `kb_id` → `t_kb_knowledge_base` | `WebSourceGuard`（网页导入 4 个入口） | V22 后修复 |
-| `t_kb_document` / `t_kb_chunk` / `t_kb_annotation` / `t_kb_ext_source` / `t_kb_retrieval_feedback` | `kb_id` → `t_kb_knowledge_base` | `KbResourceGuard`（按自身 id 寻址的 34 个入口） | M16 后修复 |
+| `t_kb_document` / `t_kb_chunk` / `t_kb_annotation` / `t_kb_ext_source` / `t_kb_retrieval_feedback` | `kb_id` → `t_kb_knowledge_base` | `KbResourceGuard`（按自身 id 寻址的 43 个端点） | M16 后修复 |
 | `t_kb_eval_case` / `t_kb_eval_run` | `dataset_id` → `t_kb_eval_dataset`（该表自身在围栏内） | `KbResourceGuard` + `EvalRunService#requireRun` / `EvalDatasetService#requireCase` | M16 后修复 |
 
 - **`t_kb_web_source` 不进围栏名单是对的，漏的是解析**：它是 M12 建的从属表，经 `kb_id` 归属租户，给它加 `tenant_id` 就是造第二个可以不一致的事实源。真正的缺陷是四个入口（`POST /web-sources/{sourceId}/sync`、`PUT /web-sources/{sourceId}`、`DELETE /web-sources/{sourceId}`、`GET /kb/{kbId}/web-sources`）压根不查 `t_kb_knowledge_base` —— 任何租户凭一个 `sourceId` 就能触发别家网页源的抓取、改它的同步开关、硬删它的登记（`hardDeleteById`，不可恢复），凭一个 `kbId` 就能列出别家知识库登记的全部 URL 与同步状态。
 - **数据范围守卫不是租户守卫，这是本次缺陷的根因**：`KbScopeGuard` / `AccessGuard.requireKbAccess` 回答的是"这个库在不在调用者角色配的数据范围里"，从头到尾没有一处比对租户；而且每个方法第一行的 `unrestrictedKbScope()` 短路对 `kb_scope_all` 的账号（租户的 SUPER_ADMIN、未配数据范围的 KB_ADMIN，都是常见配置）直接放行。已被删除的 `KbScopeGuard#requireWebSourceAccess` 就站在这四个入口前面，看起来像守卫、实际一行租户判断都没有 —— **一个只覆盖数据范围的守卫比没有守卫更危险，它让 review 以为这条路径已经守住了**。
-- **同族的另外 8 个方法在 M16 后修复中一并补齐**（`KbScopeGuard` 已重命名为 `KbResourceGuard`）：`requireWebSourceAccess` 只是这一族里第一个被发现的成员，document / chunk / annotation / dataset / case / run / ext-source / feedback 八个方法逐字同构，站在 34 个控制台入口前面。9 个方法一律改成"先解析围栏根表（404）、再判数据范围（403）"，短路整体删除。**类名一起换掉是修复的一部分**：`ScopeGuard` 诚实地描述了它当时做的事，而那件事不是隔离边界，留着这个名字下一个 review 还会误读。
+- **同族的另外 8 个方法在 M16 后修复中一并补齐**（`KbScopeGuard` 已重命名为 `KbResourceGuard`）：`requireWebSourceAccess` 只是这一族里第一个被发现的成员，document / chunk / annotation / dataset / case / run / ext-source / feedback 八个方法逐字同构，站在 43 个控制台端点前面。9 个方法一律改成"先解析围栏根表（404）、再判数据范围（403）"，短路整体删除。**类名一起换掉是修复的一部分**：`ScopeGuard` 诚实地描述了它当时做的事，而那件事不是隔离边界，留着这个名字下一个 review 还会误读。
   > **短路吞掉的不只是数据范围判定，这条比缺陷本身更值得记住**：`requireDatasetAccess` 查的 `t_kb_eval_dataset` 本来就在围栏名单里、围栏会自动给它拼租户条件——但方法第一行的 `return` 让那条语句压根不执行。**围栏只保护它实际发出的语句**；任何"提前 return"都会连同已经写好的围栏一起跳过，而这种失败在代码上看不出来，因为围栏是拦截器、不在方法体里。
 - **解析义务的形态**：入口自带 `kb_id`（列表、登记）→ 直接解析根表，从属表一条语句都不发；入口只有从属表自己的 id（按 `source_id` 同步/改/删）→ **先定位、再解析根**，定位那条 `select` 物理上无法避免（`source_id` 只存在于从属表），但它只读、不改任何状态，判定发生在紧接着的根表那一跳，跨租户在那里读作"不存在"，后续的写语句与抓取一条都不发出。两种形态都以 **404** 收场（与 §1.3 记忆库同口径），不是 403。
 - **租户判定必须排在数据范围判定之前**：先问数据范围会让跨租户的资源答 403、不存在的资源答 404，这个差别本身就告诉调用方"这个 id 在别的租户里存在"。`WebSourceGuard` 的顺序是租户（404）→ 数据范围（403），单测钉住。

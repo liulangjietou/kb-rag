@@ -308,6 +308,17 @@ public class KbResourceGuard {
      * thread the statement is trimmed to the caller's tenant and a foreign base simply does not come
      * back.
      *
+     * <p><b>Why the mapper and not {@code KnowledgeBaseService#find}</b>, which is what
+     * {@code WebSourceGuard} and {@code AppVersionGuard} use. Those two sit in their own domain
+     * package and depend on {@code app.kb} in one direction only. This class sits in {@code
+     * app.auth}, and {@code KnowledgeBaseService} already depends on {@code AccessGuard} of this
+     * package - injecting it here would close that loop. The bean graph would still start, since
+     * that dependency is on a static utility rather than an injected bean, but a package cycle
+     * between the authorisation layer and a business domain is exactly the kind of thing that
+     * becomes a real cycle the next time someone makes {@code AccessGuard} a bean. The statement
+     * below is what {@code find} runs anyway, and the nine mappers already injected here are the
+     * shape this class has always had.
+     *
      * @param kbId knowledge base business id
      * @return the base, or {@code null} when it does not exist or belongs to another tenant
      */
