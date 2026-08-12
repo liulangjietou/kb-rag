@@ -65,15 +65,32 @@ public class AppService {
     }
 
     /**
+     * Loads an application, {@code null} when there is none the caller may see.
+     *
+     * <p><b>This is where the tenant fence reaches the application domain.</b> {@code t_kb_app} is a fenced
+     * root table, so on a console thread the statement is trimmed to the caller's tenant and another tenant's
+     * application comes back as no row at all - indistinguishable from one that never existed, which is the
+     * point. Callers that need to phrase the absence in their own words - {@link AppVersionGuard} reports it
+     * as the version being absent, never as the application - take it from here rather than from
+     * {@link #require(String)}.
+     *
+     * @param appId business id
+     * @return application or {@code null}
+     */
+    public App find(String appId) {
+        return appMapper.selectOne(new LambdaQueryWrapper<App>()
+                .eq(App::getAppId, appId)
+                .last("limit 1"));
+    }
+
+    /**
      * Loads an application or fails.
      *
      * @param appId business id
      * @return application
      */
     public App require(String appId) {
-        App app = appMapper.selectOne(new LambdaQueryWrapper<App>()
-                .eq(App::getAppId, appId)
-                .last("limit 1"));
+        App app = find(appId);
         if (app == null) {
             throw new BizException(ErrorCode.APP_NOT_FOUND, "application not found");
         }
