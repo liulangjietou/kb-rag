@@ -293,7 +293,10 @@ tags:
 - name: api-key
   description: API Key 管理（M4c，docs/M4c-CONTRACTS.md §3）
 - name: api-audit
-  description: 对外调用审计查询与统计（M4c，docs/M4c-CONTRACTS.md §3）
+  description: '对外调用审计查询与统计（M4c，docs/M4c-CONTRACTS.md §3）。审计行经 key_id 归属租户，
+    查询先经行级围栏读出调用者租户下的 API Key 集合再据此过滤：`key_id` 缺省时只覆盖本租户的 Key，
+    传入其他租户的 key_id 与传入一个不存在的 key 同解（空结果，不是 403），见 M16-CONTRACTS.md
+    §1.3.2。'
 - name: open-api
   description: 对外开放 API：search/chat，独立 API Key 鉴权/限流过滤器链（M4c，docs/M4c-CONTRACTS.md
     §3）
