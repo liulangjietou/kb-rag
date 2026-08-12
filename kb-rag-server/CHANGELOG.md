@@ -8,6 +8,20 @@
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
 
+### 安全修复（M16 后修复：`KbScopeGuard` 全族假守卫，34 个按资源自身 id 寻址的入口零租户隔离）
+
+- **缺陷**：PR #36 删掉的 `KbScopeGuard#requireWebSourceAccess` 不是孤例，是一族里的一个。同类的另外 8 个方法（document / chunk / annotation / dataset / case / run / ext-source / feedback）逐字同构：第一行 `if (AccessGuard.unrestrictedKbScope()) return;`，随后 `AccessGuard.requireKbAccess(kbId)`——**一行租户判断都没有**。而 `V16__rbac.sql:163-169` 五个内置角色一律 `kb_scope_all=1`、`TenantService#copyBuiltinRoles` 建租户时照抄，所以第一行那个短路在真实部署里对租户 SUPER_ADMIN 与未配数据范围的 KB_ADMIN 恒成立：**这些守卫的开销为零、判定恒为放行**。站在它们后面的 34 个控制台入口因此全都是跨租户可达的，其中破坏面最大的几条：`PUT /ext-sources/{sourceId}`（覆写别家的 endpoint 与 AK/SK）、`POST /ext-sources/{sourceId}/test`（拿别家凭据向别家对象存储发外网请求）、`DELETE /ext-sources/{sourceId}`（`hardDeleteById`，不可恢复）、`/documents/{docId}/purge`（彻底清除别家文档）、`/documents/{docId}/versions/{versionId}/activate`（把别家文档回滚到旧版本并重跑索引）
+- **短路吞掉的不只是数据范围判定**：`requireDatasetAccess` 查的 `t_kb_eval_dataset` 本来就在 `FENCED_TABLES` 里、围栏会自动拼租户条件——但短路让那条语句压根不执行。**一个 `return` 把已经写好的围栏一起跳过了**，这是"只覆盖数据范围的守卫比没有守卫更危险"的第二种表现形式
+- 类重命名 `KbScopeGuard` → **`KbResourceGuard`**（`io.kbrag.app.auth`），9 个方法全部改成"先解析围栏根表、再判数据范围"，短路整体删除。名字本身是根因的一部分：`ScopeGuard` 诚实地描述了它当时做的事，而那件事不是隔离边界，留着这个名字下一个 review 还会误读。11 个 Controller 的调用点随之改名，编译期收口
+- 解析形态按资源分两类：`t_kb_eval_dataset` 自己就是围栏根（case 与 run 经它两跳，run 走 `dataset_id` 而不是行上那个 `kb_id`——同一条链路只留一个事实源）；其余六种从属资源经 `kb_id` 反查 `t_kb_knowledge_base`。成本是每次多一条主键点查，且这条点查发生在任何写语句、内容读取、外发请求之前
+- 服务层同步补齐，覆盖"不经 Controller 守卫"的所有调用方（这是 `EvalDatasetService#updateCase` 早就用对的形态）：`EvalRunService#requireRun` 补 `evalDatasetService.require(run.getDatasetId())`（原先裸 `selectOne`，与同类的 `requireCase` 相比属漏改）、`ExtSourceService#require` 与 `RetrievalFeedbackService#require` 补根表反查、`ExtSourceService#list` 与 `RetrievalFeedbackService#list`/`record` 补 `knowledgeBaseService.require(kbId)`
+- 两个 Controller 的 `AccessGuard.requireKbAccess(kbId)` 换成 `kbResourceGuard.requireKb(kbId)`（`GET /kb/{kbId}/ext-sources`、`GET /kb/{kbId}/retrieval-feedback`、`POST /retrieval-feedback`）：原先那行只判数据范围，且排在服务层的租户判定之前，**顺序反了会用 403/404 的差异泄露"这个 id 在别的租户里存在"**
+- **对外行为变更只有一处**：跨租户访问从 403（或成功）收敛为 404，且只影响本就不该成功的调用。同租户、数据范围外仍是 403，单测钉住这两者的顺序
+- 单测：`KbResourceGuardTest` 重写（23 例）——六种从属资源各一条跨租户 404、`kb_scope_all` 不再短路、两个判定都会失败时答 404 而非 403、同租户范围外答 403、无主体线程放行、从属行不存在时不发根表查询；新增 `ExtSourceTenantIsolationTest`（4 例）钉住跨租户时 `updateById`/`hardDeleteById`/`hardDeleteBySourceId`/连接器解析一条都不发出；`EvalRunServiceTest`、`RetrievalFeedbackServiceTest` 各补跨租户用例
+- **测试有效性经变异验证**：把守卫的根表解析去掉后 `KbResourceGuardTest` 7 个用例转红（六种从属资源的跨租户用例 + `kb_scope_all` 不短路用例），确认它们钉住的是这条缺陷本身而非恰好为绿
+- **测试边界（诚实说明）**：与 V21/V22/PR #36 同样的限制——跨租户过滤由 MyBatis-Plus 拦截器完成，项目无集成测试基建（无 `@SpringBootTest`/Testcontainers），单测无法真正发出带围栏的 SQL。跨租户在测试里表达为"根表读作 null"，能钉住的是"每个入口都经根表解析"+"解析失败时后续语句一条不发"，围栏本身由 `KbTenantLineHandlerTest` 覆盖
+- 无 schema 变更、无新增配置键与环境变量
+
 ### 安全修复（M12/M17/M18 后修复：网页源按 id 寻址的入口缺少租户解析）
 
 - **缺陷**：`t_kb_web_source` 是从属表，经 `kb_id` 归属租户，不带 `tenant_id` 也不在 `KbTenantLineHandler.FENCED_TABLES` 里——这个设计没问题，问题是按 `source_id` / `kb_id` 直接寻址的四个入口压根不查根表 `t_kb_knowledge_base`，围栏在那几条语句上什么都没做。任何租户凭一个 `sourceId` 就能：触发别家网页源的抓取（`POST /web-sources/{sourceId}/sync`，还会连带走一遍文档上传管线往别家知识库写版本）、改它的 `sync_enabled` / `render_js` 开关（`PUT /web-sources/{sourceId}`）、**硬删**它的登记（`DELETE /web-sources/{sourceId}` → `hardDeleteById`，不可恢复）；凭一个 `kbId` 就能列出别家知识库登记的全部 URL 与同步状态（`GET /kb/{kbId}/web-sources`）。与 V21 记忆库、V22 站点凭据是同一类缺陷的第三处，本次补齐

@@ -9,7 +9,7 @@ import io.kbrag.api.dto.EvalRunResponse;
 import io.kbrag.api.dto.EvalRunSubmitRequest;
 import io.kbrag.api.dto.EvalResultResponse;
 import io.kbrag.api.dto.PageResponse;
-import io.kbrag.app.auth.KbScopeGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.eval.EvalRunService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
@@ -48,7 +48,7 @@ public class EvalRunController {
     private static final int MAX_PAGE_SIZE = 200;
 
     private final EvalRunService evalRunService;
-    private final KbScopeGuard kbScopeGuard;
+    private final KbResourceGuard kbResourceGuard;
 
     /**
      * Submits a configuration matrix, one run created per configuration.
@@ -63,7 +63,7 @@ public class EvalRunController {
             targetId = "#datasetId")
     public Result<List<EvalRunResponse>> submit(@PathVariable String datasetId,
                                                 @Valid @RequestBody EvalRunSubmitRequest request) {
-        kbScopeGuard.requireDatasetAccess(datasetId);
+        kbResourceGuard.requireDatasetAccess(datasetId);
         List<EvalRun> runs = evalRunService.submit(datasetId, request.k(), request.toConfigs(),
                 request.judgeEnabled());
         return Result.success(runs.stream().map(EvalRunResponse::from).toList());
@@ -80,7 +80,7 @@ public class EvalRunController {
     @RequiresPermission(PermissionCodes.EVAL_RUN)
     public Result<EvalRunEstimateResponse> estimate(@PathVariable String datasetId,
                                                     @Valid @RequestBody EvalRunSubmitRequest request) {
-        kbScopeGuard.requireDatasetAccess(datasetId);
+        kbResourceGuard.requireDatasetAccess(datasetId);
         return Result.success(EvalRunEstimateResponse.from(evalRunService.estimate(
                 datasetId, request.k(), request.toConfigs(), request.judgeEnabled())));
     }
@@ -99,7 +99,7 @@ public class EvalRunController {
             @PathVariable String datasetId,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
-        kbScopeGuard.requireDatasetAccess(datasetId);
+        kbResourceGuard.requireDatasetAccess(datasetId);
         IPage<EvalRun> paged = evalRunService.listRuns(datasetId, normalizePage(page), normalizeSize(size));
         return Result.success(PageResponse.from(paged, EvalRunResponse::from));
     }
@@ -113,7 +113,7 @@ public class EvalRunController {
     @GetMapping("/api/v1/eval-runs/{runId}")
     @RequiresPermission(PermissionCodes.EVAL_READ)
     public Result<EvalRunResponse> detail(@PathVariable String runId) {
-        kbScopeGuard.requireRunAccess(runId);
+        kbResourceGuard.requireRunAccess(runId);
         return Result.success(EvalRunResponse.from(evalRunService.requireRun(runId)));
     }
 
@@ -133,7 +133,7 @@ public class EvalRunController {
             @RequestParam(required = false) Boolean hit,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
-        kbScopeGuard.requireRunAccess(runId);
+        kbResourceGuard.requireRunAccess(runId);
         IPage<EvalResult> paged = evalRunService.results(runId, hit, normalizePage(page), normalizeSize(size));
         return Result.success(PageResponse.from(paged, EvalResultResponse::from));
     }
@@ -152,7 +152,7 @@ public class EvalRunController {
         }
         List<String> ids = Arrays.stream(runIds.split(",")).map(String::trim)
                 .filter(id -> !id.isEmpty()).toList();
-        ids.forEach(kbScopeGuard::requireRunAccess);
+        ids.forEach(kbResourceGuard::requireRunAccess);
         return Result.success(EvalRunCompareResponse.from(evalRunService.compare(ids)));
     }
 

@@ -7,7 +7,7 @@ import io.kbrag.api.dto.GateDatasetRequest;
 import io.kbrag.api.filter.AuthInterceptor;
 import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.appcenter.ReleaseGateService;
-import io.kbrag.app.auth.KbScopeGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.common.api.Result;
 import io.kbrag.domain.constant.PermissionCodes;
 import jakarta.servlet.http.HttpServletRequest;
@@ -41,7 +41,7 @@ public class AppVersionController {
 
     private final AppVersionService appVersionService;
     private final ReleaseGateService releaseGateService;
-    private final KbScopeGuard kbScopeGuard;
+    private final KbResourceGuard kbResourceGuard;
 
     /**
      * Loads one version with its gate outcome.
@@ -71,7 +71,7 @@ public class AppVersionController {
         // Binding reaches into an evaluation data set, so the caller has to be allowed the knowledge base
         // that data set belongs to. Clearing names nothing and needs no such check.
         if (request.datasetId() != null && !request.datasetId().isBlank()) {
-            kbScopeGuard.requireDatasetAccess(request.datasetId());
+            kbResourceGuard.requireDatasetAccess(request.datasetId());
         }
         return Result.success(AppVersionResponse.from(
                 appVersionService.setGateDataset(appVersionId, request.datasetId())));

@@ -127,6 +127,10 @@ public class ExtSourceService {
      * @return page of sources
      */
     public IPage<ExtSource> list(String kbId, long page, long size) {
+        // The fenced root read is what isolates this listing: t_kb_ext_source carries no tenant_id,
+        // so without it a caller naming another tenant's base would page through its registrations,
+        // endpoints and access keys included.
+        knowledgeBaseService.require(kbId);
         return extSourceMapper.selectPage(new Page<>(page, size), new LambdaQueryWrapper<ExtSource>()
                 .eq(ExtSource::getKbId, kbId)
                 .orderByDesc(ExtSource::getId));
@@ -415,10 +419,33 @@ public class ExtSourceService {
         }
     }
 
+    /**
+     * Loads a source the current caller may act on, or fails.
+     *
+     * <p><b>Two statements, and the second one is the decision.</b> {@code source_id} exists only in
+     * the subordinate table, so locating the row there is unavoidable - it is a bare read that
+     * changes nothing. The base it belongs to is then read through the tenant fence, and a base of
+     * another tenant simply does not come back: the call ends here, before the update, the hard
+     * delete or the outbound probe that would have spent someone else's credentials.
+     *
+     * <p>Reported as the source being absent rather than the base, in both cases. Another tenant's
+     * registration must be indistinguishable from one that never existed, and the id of a base that
+     * is not the caller's is not theirs to learn.
+     *
+     * <p>Threads with no console principal - the async first scan, the nightly pass - read the base
+     * unfenced and pass, which is the semantics those paths already had: they were handed the id by
+     * a call that was itself checked, or they walk the whole table on purpose.
+     *
+     * @param sourceId source business id
+     * @return source row
+     */
     private ExtSource require(String sourceId) {
         ExtSource source = extSourceMapper.selectOne(new LambdaQueryWrapper<ExtSource>()
                 .eq(ExtSource::getSourceId, sourceId));
         if (source == null) {
+            throw BizException.notFound("外部数据源不存在：" + sourceId);
+        }
+        if (knowledgeBaseService.find(source.getKbId()) == null) {
             throw BizException.notFound("外部数据源不存在：" + sourceId);
         }
         return source;

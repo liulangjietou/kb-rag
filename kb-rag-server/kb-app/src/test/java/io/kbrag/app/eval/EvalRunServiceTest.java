@@ -5,6 +5,7 @@ import io.kbrag.app.retrieval.RetrievalCommand;
 import io.kbrag.app.retrieval.RetrievalNodeView;
 import io.kbrag.app.retrieval.RetrievalService;
 import io.kbrag.app.retrieval.SearchOutcome;
+import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.EvalCase;
@@ -43,6 +44,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -322,6 +324,19 @@ class EvalRunServiceTest {
         EvalRunService.CompareResult result = service.compare(List.of("evr_a", "evr_b"));
 
         assertFalse(result.comparable());
+    }
+
+    @Test
+    void shouldTreatARunWhoseDataSetBelongsToAnotherTenantAsUnknown() {
+        when(evalRunMapper.selectOne(any())).thenReturn(runWithState("evr_a", 3, "fp_1"));
+        // t_kb_eval_run carries no tenant_id, so the run row itself comes back for any caller. The
+        // fenced read of its data set is the whole isolation of the three run endpoints - detail,
+        // results and compare all arrive here.
+        when(evalDatasetService.require(any()))
+                .thenThrow(BizException.notFound("evaluation data set not found"));
+
+        assertThrows(BizException.class, () -> service.requireRun("evr_a"));
+        assertThrows(BizException.class, () -> service.compare(List.of("evr_a", "evr_b")));
     }
 
     private EvalDataset dataset() {

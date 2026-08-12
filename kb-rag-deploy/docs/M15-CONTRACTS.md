@@ -140,9 +140,10 @@
 | 形态 | 用法 | 落点 |
 |---|---|---|
 | 路径带 `{kbId}` | `AccessGuard.requireKbAccess(kbId)` 静态调用 | KnowledgeBase(8) / Document(2) / DocumentGovernance(1) / Search(1) / SearchInsight(2) / Graph(5) / EvalDataset(3) / ExtSource(2) / RetrievalFeedback(2) |
-| 路径只带业务 id | `KbScopeGuard.requireXxxAccess(id)` 反查所属库再判 | document / chunk / annotation / dataset / case / run / extSource / webSource / feedback 九个 |
+| 路径只带业务 id | `KbScopeGuard.requireXxxAccess(id)` 反查所属库再判（M16 后修复重命名为 `KbResourceGuard`，`webSource` 一项已移交 `WebSourceGuard`） | document / chunk / annotation / dataset / case / run / extSource / webSource / feedback 九个 |
 
-- `KbScopeGuard` 每个方法首行 `if (AccessGuard.unrestrictedKbScope()) return;` —— 全范围调用者（管理员、API Key 路径）连反查那一次查询都不付。
+- ~~`KbScopeGuard` 每个方法首行 `if (AccessGuard.unrestrictedKbScope()) return;` —— 全范围调用者（管理员、API Key 路径）连反查那一次查询都不付。~~
+  > **M16 后修复已推翻这一条**（类重命名为 `KbResourceGuard`，短路整体删除）。M15 只有数据权限、没有租户，这个短路在当时是纯粹的省一次查询；M16 引入多租户之后它变成了隔离缺口——`kb_scope_all` 是五个内置角色的默认值（`V16__rbac.sql:163-169`，建租户时照抄），于是短路在真实部署里恒成立，反查从"省一次"变成"从不发生"，而反查正是租户判定唯一的落点。现在每个方法一律先解析围栏根表（跨租户 404）、再判数据范围（403）。详见 M16 契约 §1.3.2。
 - 多库一次校验用 `requireKbAccess(Set)`：**全有或全无**。静默丢掉不可见的库会让多库检索答出一个"看起来完整实则不然"的结果。
 
 ### 4.3 列表与检索裁剪
@@ -213,7 +214,7 @@ bind 成功且库里无此人 → `UserService.provisionDirectoryUser(username)`
 ## 9. 单测清单（离线，精确断言）
 
 - **F1/F2**：`PermissionInterceptor` 方法级覆盖类级、无注解放行、any-of 任一命中即过、缺码抛 403 且 message 含全部码、无主体抛 401。
-- **F3**：`AccessGuard.requireKbAccess` 单库/多库全有或全无；`KbScopeGuard` 九个方法各正负例 + 全范围短路不查库。
+- **F3**：`AccessGuard.requireKbAccess` 单库/多库全有或全无；`KbScopeGuard` 九个方法各正负例 + 全范围短路不查库（**后者已被 M16 后修复推翻**，见 §4.2 注）。
 - **F4**：`KnowledgeBaseService.list()` 全范围返回全部、受限返回交集、范围空返回空列表；`requirePreviewKbAccess` 在未配置库的版本上不拒（交由预览自身报缺失）。
 - **F5**：bind 三态映射（成功/口令错/不可达）；`DIRECTORY_UNAVAILABLE` 不计锁定而 `BAD_PASSWORD` 计；两个入口互不串用四种情形；登录名归一化（大小写、域后缀）；首登建号落 `source=LDAP` + 授默认角色 + 默认角色 code 不存在时不阻断登录。
 - **权限缓存**：`resolve` 命中缓存不重查；`evict`/`evictAll` 生效；账号停用后 `resolve` 抛 401（不等令牌过期）。

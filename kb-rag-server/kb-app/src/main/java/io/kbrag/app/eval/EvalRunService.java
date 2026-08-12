@@ -208,7 +208,14 @@ public class EvalRunService {
     }
 
     /**
-     * Loads a run or fails.
+     * Loads a run the current caller may act on, or fails.
+     *
+     * <p>The second statement is what isolates it. {@code t_kb_eval_run} is a subordinate table with
+     * no {@code tenant_id}, so the lookup by {@code run_id} crosses tenants freely; reading its data
+     * set afterwards does not, because {@code t_kb_eval_dataset} is a fenced root and another
+     * tenant's set does not come back. Same shape as {@link #listRuns} and as
+     * {@code EvalDatasetService#updateCase} - a run reached through its own id must not be cheaper to
+     * reach than one reached through its set.
      *
      * @param runId run business id
      * @return run
@@ -220,6 +227,7 @@ public class EvalRunService {
         if (run == null) {
             throw BizException.notFound("evaluation run not found");
         }
+        evalDatasetService.require(run.getDatasetId());
         return run;
     }
 

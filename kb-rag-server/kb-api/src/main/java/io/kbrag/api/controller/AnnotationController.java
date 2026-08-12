@@ -5,7 +5,7 @@ import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.AnnotationMigrationResponse;
 import io.kbrag.api.dto.MigrateAnnotationRequest;
 import io.kbrag.app.annotation.AnnotationMigrationService;
-import io.kbrag.app.auth.KbScopeGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.common.api.Result;
 import io.kbrag.domain.constant.PermissionCodes;
 import jakarta.validation.Valid;
@@ -33,7 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AnnotationController {
 
     private final AnnotationMigrationService annotationMigrationService;
-    private final KbScopeGuard kbScopeGuard;
+    private final KbResourceGuard kbResourceGuard;
 
     /**
      * Applies an annotation of an older version to a chunk of the active one and closes the review item.
@@ -48,7 +48,7 @@ public class AnnotationController {
             targetId = "#annotationId")
     public Result<AnnotationMigrationResponse> migrate(@PathVariable String annotationId,
                                                        @Valid @RequestBody MigrateAnnotationRequest request) {
-        kbScopeGuard.requireAnnotationAccess(annotationId);
+        kbResourceGuard.requireAnnotationAccess(annotationId);
         return Result.success(AnnotationMigrationResponse.from(
                 annotationMigrationService.migrate(annotationId, request.targetChunkId())));
     }

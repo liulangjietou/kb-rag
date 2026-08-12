@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component;
  *
  * <p>A bean rather than a method on {@link MemoryAdminService} because {@link MemoryAppKeyService}
  * needs the same check and is a dependency of the admin service - the reverse edge would be a cycle.
- * Same shape as {@code KbScopeGuard} on the knowledge side, and the same reason: an ownership check
+ * Same shape as {@code KbResourceGuard} on the knowledge side, and the same reason: an ownership check
  * has to sit next to the data, since one placed in a controller only guards the paths somebody
  * remembered to guard.
  *
