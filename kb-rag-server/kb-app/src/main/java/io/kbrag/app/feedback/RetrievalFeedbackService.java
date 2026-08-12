@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.kbrag.app.eval.EvalDatasetService;
+import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.app.openapi.ApiKeyPrincipal;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
@@ -53,6 +54,7 @@ public class RetrievalFeedbackService {
     private final ChunkMapper chunkMapper;
     private final SearchInsightMapper searchInsightMapper;
     private final EvalDatasetService evalDatasetService;
+    private final KnowledgeBaseService knowledgeBaseService;
     private final BizIdGenerator bizIdGenerator;
 
     /**
@@ -69,6 +71,9 @@ public class RetrievalFeedbackService {
      * @return persisted row, {@code status=NEW}
      */
     public RetrievalFeedback record(String kbId, String query, String chunkId, FeedbackVerdict verdict) {
+        // The base is named by the request body, so it is resolved through the fence before a row is
+        // written into it - otherwise a caller could seed another tenant's feedback queue.
+        knowledgeBaseService.require(kbId);
         RetrievalFeedback feedback = new RetrievalFeedback();
         feedback.setFeedbackId(bizIdGenerator.retrievalFeedbackId());
         feedback.setKbId(kbId);
@@ -159,6 +164,9 @@ public class RetrievalFeedbackService {
      */
     public IPage<RetrievalFeedback> list(String kbId, FeedbackVerdict verdict, FeedbackStatus status,
                                          FeedbackChannel channel, long page, long size) {
+        // t_kb_retrieval_feedback carries no tenant_id: the fenced read of the base is the only thing
+        // standing between this listing and another tenant's queries, verbatim.
+        knowledgeBaseService.require(kbId);
         LambdaQueryWrapper<RetrievalFeedback> wrapper = new LambdaQueryWrapper<RetrievalFeedback>()
                 .eq(RetrievalFeedback::getKbId, kbId);
         if (verdict != null) {
@@ -225,7 +233,12 @@ public class RetrievalFeedbackService {
     }
 
     /**
-     * Loads a feedback row or fails.
+     * Loads a feedback row the current caller may act on, or fails.
+     *
+     * <p>The row is located by its own id - it has to be, that id exists nowhere else - and the base
+     * it belongs to is then read through the tenant fence. Another tenant's row is reported exactly
+     * as one that never existed, so convert and dismiss cannot reach it and cannot tell it apart from
+     * a wrong id either.
      *
      * @param feedbackId feedback business id
      * @return feedback row
@@ -235,7 +248,7 @@ public class RetrievalFeedbackService {
                 new LambdaQueryWrapper<RetrievalFeedback>()
                         .eq(RetrievalFeedback::getFeedbackId, feedbackId)
                         .last("limit 1"));
-        if (feedback == null) {
+        if (feedback == null || knowledgeBaseService.find(feedback.getKbId()) == null) {
             throw BizException.notFound("retrieval feedback not found");
         }
         return feedback;

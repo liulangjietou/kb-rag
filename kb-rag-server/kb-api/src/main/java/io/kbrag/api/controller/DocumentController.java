@@ -10,7 +10,7 @@ import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.ReparseRequest;
 import io.kbrag.api.dto.UpdateDocumentVisibilityRequest;
 import io.kbrag.app.auth.AccessGuard;
-import io.kbrag.app.auth.KbScopeGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.document.DocumentAclService;
 import io.kbrag.app.document.DocumentPreviewService;
 import io.kbrag.app.document.DocumentService;
@@ -42,7 +42,7 @@ import java.util.Map;
  * Document intake and inspection endpoints.
  *
  * <p>The endpoints keyed by a knowledge base assert its scope directly; the ones keyed by a document id
- * resolve the owning base first through {@link KbScopeGuard}, since otherwise knowing an id would be enough
+ * resolve the owning base first through {@link KbResourceGuard}, since otherwise knowing an id would be enough
  * to reach a document of a base the caller was never granted.
  *
  * @author owlzhangfq@gmail.com
@@ -61,7 +61,7 @@ public class DocumentController {
     private final DocumentPreviewService documentPreviewService;
     private final DocumentGovernanceService documentGovernanceService;
     private final DocumentAclService documentAclService;
-    private final KbScopeGuard kbScopeGuard;
+    private final KbResourceGuard kbResourceGuard;
 
     /**
      * Uploads a document and hands it over to the asynchronous pipeline.
@@ -126,7 +126,7 @@ public class DocumentController {
             @PathVariable String docId,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
-        kbScopeGuard.requireDocumentContentAccess(docId);
+        kbResourceGuard.requireDocumentContentAccess(docId);
         return Result.success(PageResponse.from(
                 documentService.chunks(docId, normalizePage(page), normalizeSize(size)),
                 ChunkResponse::from));
@@ -142,7 +142,7 @@ public class DocumentController {
     @RequiresPermission(PermissionCodes.DOC_WRITE)
     @AuditedOperation(module = "DOCUMENT", action = "REINDEX", targetType = "DOCUMENT", targetId = "#docId")
     public Result<Map<String, String>> reindex(@PathVariable String docId) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         return Result.success(Map.of(FIELD_VERSION_ID, documentService.reindex(docId)));
     }
 
@@ -155,7 +155,7 @@ public class DocumentController {
     @GetMapping("/api/v1/documents/{docId}/preview")
     @RequiresPermission(PermissionCodes.KB_READ)
     public Result<DocumentPreviewResponse> preview(@PathVariable String docId) {
-        kbScopeGuard.requireDocumentContentAccess(docId);
+        kbResourceGuard.requireDocumentContentAccess(docId);
         return Result.success(DocumentPreviewResponse.from(documentPreviewService.preview(docId)));
     }
 
@@ -169,7 +169,7 @@ public class DocumentController {
     @RequiresPermission(PermissionCodes.DOC_WRITE)
     @AuditedOperation(module = "DOCUMENT", action = "CONFIRM", targetType = "DOCUMENT", targetId = "#docId")
     public Result<Map<String, String>> confirm(@PathVariable String docId) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         return Result.success(Map.of(FIELD_VERSION_ID, documentPreviewService.confirm(docId)));
     }
 
@@ -185,7 +185,7 @@ public class DocumentController {
     @AuditedOperation(module = "DOCUMENT", action = "REPARSE", targetType = "DOCUMENT", targetId = "#docId")
     public Result<DocumentPreviewResponse> reparse(@PathVariable String docId,
                                                   @RequestBody(required = false) ReparseRequest request) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         return Result.success(DocumentPreviewResponse.from(documentPreviewService.reparse(docId,
                 request == null ? null : request.cleanRules())));
     }
@@ -204,7 +204,7 @@ public class DocumentController {
     @RequiresPermission(PermissionCodes.DOC_WRITE)
     @AuditedOperation(module = "DOCUMENT", action = "DELETE", targetType = "DOCUMENT", targetId = "#docId")
     public Result<Void> delete(@PathVariable String docId) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         documentGovernanceService.trash(docId);
         return Result.success(null);
     }

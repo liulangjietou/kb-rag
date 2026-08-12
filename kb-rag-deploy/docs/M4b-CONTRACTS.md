@@ -38,6 +38,8 @@
 | `GET /api/v1/eval-datasets/{datasetId}/stale-cases` | 证据复核工作台数据：待复核 case 列表 + 每条的失配证据与当前激活版本中的候选原文（按 §4 重叠率取 Top3 候选供人工选择） |
 | `POST /api/v1/kb/{kbId}/eval-datasets/import-demo` | 导入 deploy 仓 `demo/eval-cases.json`（M3 移交）：按 `file_name + content_hash_sha256` 匹配该库文档得 doc_id（匹配不到的 case 跳过并在响应列出），幂等（同名评测集已存在则返回其 id 不重复导入） |
 
+> **租户解析义务（M16 后修复补齐）**：本节按 `datasetId` / `caseId` 寻址的端点与 §3 按 `runId` 寻址的端点，原先只过 `KbScopeGuard` 的对应方法——那些方法一行租户判断都没有，且首行 `kb_scope_all` 短路对常见账号恒成立，等价于无守卫：凭一个 `runId` 能读别家的评测明细（含 query 与命中分片正文），凭一个 `caseId`/`datasetId` 能改删别家的评测集与用例。补齐形态与本域其余表不同、**这是它值得单独记一笔的原因**：`t_kb_eval_dataset` 自己就带 `tenant_id` 且在行级围栏名单内，所以解析到评测集即完成租户判定，不必再多一跳；`t_kb_eval_case` 与 `t_kb_eval_run` 经 `dataset_id` 两跳到它。`EvalRun` 行上另有一个冗余的 `kb_id`，**解析一律不走它**——同一条链路只留一个事实源，走 `kb_id` 会绕开这条链上唯一带围栏的那张表。跨租户读作"不存在" → **404**。详见 `M16-CONTRACTS.md` §1.3.2。
+
 **从检索调试页一键收进评测集**（需求 §4.5）：
 - `POST /api/v1/eval-datasets/{datasetId}/cases/from-retrieval`：`{query, messages?, chunk_ids:[...], anchor_type?}` → 服务端读取这些 chunk 的正文作为 span 证据、其 doc_id 作为锚定文档；`source=DEBUG_PAGE`
 - 图片类 chunk（`chunk_type=image`）或调用方显式传 `anchor_type=DOCUMENT` → 建成文档级锚定 case（需求 §4.5：图片 case 的 span 锚定不成立）

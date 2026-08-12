@@ -1,7 +1,7 @@
 package io.kbrag.app.appcenter;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import io.kbrag.app.auth.KbScopeGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.eval.EvalDatasetService;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.ErrorCode;
@@ -66,7 +66,7 @@ public class AppVersionService {
     private final AppVersionMapper appVersionMapper;
     private final KnowledgeBaseService knowledgeBaseService;
     private final EvalDatasetService evalDatasetService;
-    private final KbScopeGuard kbScopeGuard;
+    private final KbResourceGuard kbResourceGuard;
     private final BizIdGenerator bizIdGenerator;
     private final GraphFusionPolicy graphFusionPolicy;
     private final KbProperties properties;
@@ -130,7 +130,7 @@ public class AppVersionService {
         if (datasetId != null && !datasetId.isBlank()) {
             // Binding reaches into an evaluation data set, so the caller has to be allowed the knowledge base
             // that data set belongs to. Clearing names nothing and needs no such check.
-            kbScopeGuard.requireDatasetAccess(datasetId);
+            kbResourceGuard.requireDatasetAccess(datasetId);
         }
         if (version.getStatus() != AppVersionStatus.DRAFT && version.getStatus() != AppVersionStatus.TESTING) {
             throw BizException.invalidParam("仅草稿或测试版可修改门禁评测集，当前状态 " + version.getStatus());

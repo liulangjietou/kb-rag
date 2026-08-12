@@ -1,6 +1,6 @@
 package io.kbrag.app.appcenter;
 
-import io.kbrag.app.auth.KbScopeGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.eval.EvalDatasetService;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.ErrorCode;
@@ -65,7 +65,7 @@ class AppVersionServiceTest {
     private AppService appService;
     private KnowledgeBaseService knowledgeBaseService;
     private EvalDatasetService evalDatasetService;
-    private KbScopeGuard kbScopeGuard;
+    private KbResourceGuard kbResourceGuard;
     private BizIdGenerator bizIdGenerator;
     private KbProperties properties;
     private AppVersionService service;
@@ -76,14 +76,14 @@ class AppVersionServiceTest {
         appService = mock(AppService.class);
         knowledgeBaseService = mock(KnowledgeBaseService.class);
         evalDatasetService = mock(EvalDatasetService.class);
-        kbScopeGuard = mock(KbScopeGuard.class);
+        kbResourceGuard = mock(KbResourceGuard.class);
         bizIdGenerator = mock(BizIdGenerator.class);
         properties = new KbProperties();
         when(bizIdGenerator.appVersionId()).thenReturn(VERSION_ID);
         // The real guard over the mocked application service, so an application the tenant fence filters
         // away is simply a null row here - which is exactly what the fence does on a console thread.
         service = new AppVersionService(new AppVersionGuard(appVersionMapper, appService),
-                appVersionMapper, knowledgeBaseService, evalDatasetService, kbScopeGuard,
+                appVersionMapper, knowledgeBaseService, evalDatasetService, kbResourceGuard,
                 bizIdGenerator, new GraphFusionPolicy(), properties);
         // Every version in this class belongs to the one application of the caller's own tenant; the tenant
         // tests point their version at a foreign application instead.
@@ -486,7 +486,7 @@ class AppVersionServiceTest {
         AppVersion draft = versionOf("V1.0", AppVersionStatus.DRAFT);
         when(appVersionMapper.selectOne(any())).thenReturn(draft);
         org.mockito.Mockito.doThrow(BizException.forbidden("knowledge base outside your data scope"))
-                .when(kbScopeGuard).requireDatasetAccess(DATASET_ID);
+                .when(kbResourceGuard).requireDatasetAccess(DATASET_ID);
 
         BizException forbidden = assertThrows(BizException.class,
                 () -> service.setGateDataset(VERSION_ID, DATASET_ID));
@@ -497,7 +497,7 @@ class AppVersionServiceTest {
         assertNotFound(() -> service.setGateDataset(VERSION_ID, DATASET_ID));
 
         // The foreign call never reached the data scope check at all: one invocation, from the first half.
-        verify(kbScopeGuard, times(1)).requireDatasetAccess(DATASET_ID);
+        verify(kbResourceGuard, times(1)).requireDatasetAccess(DATASET_ID);
         verify(appVersionMapper, never()).updateById(any(AppVersion.class));
     }
 

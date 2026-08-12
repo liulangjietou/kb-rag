@@ -9,7 +9,7 @@ import io.kbrag.api.dto.EvalRecheckRequest;
 import io.kbrag.api.dto.FromRetrievalRequest;
 import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.StaleCaseResponse;
-import io.kbrag.app.auth.KbScopeGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.eval.EvalCaseStalenessService;
 import io.kbrag.app.eval.EvalDatasetService;
 import io.kbrag.common.api.Result;
@@ -48,7 +48,7 @@ public class EvalCaseController {
 
     private final EvalDatasetService evalDatasetService;
     private final EvalCaseStalenessService evalCaseStalenessService;
-    private final KbScopeGuard kbScopeGuard;
+    private final KbResourceGuard kbResourceGuard;
 
     /**
      * Adds a case to a data set.
@@ -63,7 +63,7 @@ public class EvalCaseController {
             targetId = "#result.data.caseId")
     public Result<EvalCaseResponse> create(@PathVariable String datasetId,
                                            @Valid @RequestBody EvalCaseRequest request) {
-        kbScopeGuard.requireDatasetAccess(datasetId);
+        kbResourceGuard.requireDatasetAccess(datasetId);
         return Result.success(EvalCaseResponse.from(
                 evalDatasetService.createCase(datasetId, request.toCommand())));
     }
@@ -84,7 +84,7 @@ public class EvalCaseController {
             @RequestParam(name = "status", required = false) String status,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
-        kbScopeGuard.requireDatasetAccess(datasetId);
+        kbResourceGuard.requireDatasetAccess(datasetId);
         IPage<EvalCase> paged = evalDatasetService.listCases(datasetId, parseStatus(status),
                 normalizePage(page), normalizeSize(size));
         return Result.success(PageResponse.from(paged, EvalCaseResponse::from));
@@ -103,7 +103,7 @@ public class EvalCaseController {
             targetId = "#result.data.caseId")
     public Result<EvalCaseResponse> collectFromRetrieval(@PathVariable String datasetId,
                                                          @Valid @RequestBody FromRetrievalRequest request) {
-        kbScopeGuard.requireDatasetAccess(datasetId);
+        kbResourceGuard.requireDatasetAccess(datasetId);
         return Result.success(EvalCaseResponse.from(evalDatasetService.collectFromRetrieval(
                 datasetId, request.query(), request.toMessages(), request.chunkIds(),
                 request.parsedAnchorType())));
@@ -119,7 +119,7 @@ public class EvalCaseController {
     @GetMapping("/api/v1/eval-datasets/{datasetId}/stale-cases")
     @RequiresPermission(PermissionCodes.EVAL_READ)
     public Result<List<StaleCaseResponse>> staleCases(@PathVariable String datasetId) {
-        kbScopeGuard.requireDatasetAccess(datasetId);
+        kbResourceGuard.requireDatasetAccess(datasetId);
         evalDatasetService.require(datasetId);
         return Result.success(evalCaseStalenessService.staleCases(datasetId).stream()
                 .map(StaleCaseResponse::from).toList());
@@ -137,7 +137,7 @@ public class EvalCaseController {
     @AuditedOperation(module = "EVAL", action = "UPDATE", targetType = "EVAL_CASE", targetId = "#caseId")
     public Result<EvalCaseResponse> update(@PathVariable String caseId,
                                            @Valid @RequestBody EvalCaseRequest request) {
-        kbScopeGuard.requireCaseAccess(caseId);
+        kbResourceGuard.requireCaseAccess(caseId);
         return Result.success(EvalCaseResponse.from(evalDatasetService.updateCase(caseId, request.toCommand())));
     }
 
@@ -151,7 +151,7 @@ public class EvalCaseController {
     @RequiresPermission(PermissionCodes.EVAL_WRITE)
     @AuditedOperation(module = "EVAL", action = "DELETE", targetType = "EVAL_CASE", targetId = "#caseId")
     public Result<Void> delete(@PathVariable String caseId) {
-        kbScopeGuard.requireCaseAccess(caseId);
+        kbResourceGuard.requireCaseAccess(caseId);
         evalDatasetService.deleteCase(caseId);
         return Result.success(null);
     }
@@ -168,7 +168,7 @@ public class EvalCaseController {
     @AuditedOperation(module = "EVAL", action = "RECHECK", targetType = "EVAL_CASE", targetId = "#caseId")
     public Result<EvalCaseResponse> recheck(@PathVariable String caseId,
                                             @Valid @RequestBody EvalRecheckRequest request) {
-        kbScopeGuard.requireCaseAccess(caseId);
+        kbResourceGuard.requireCaseAccess(caseId);
         return Result.success(EvalCaseResponse.from(evalDatasetService.recheck(
                 caseId, request.parsedAction(), request.toEvidences())));
     }

@@ -6,8 +6,7 @@ import io.kbrag.api.dto.ConvertFeedbackRequest;
 import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.RetrievalFeedbackRequest;
 import io.kbrag.api.dto.RetrievalFeedbackResponse;
-import io.kbrag.app.auth.AccessGuard;
-import io.kbrag.app.auth.KbScopeGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.feedback.RetrievalFeedbackService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
@@ -47,7 +46,7 @@ public class RetrievalFeedbackController {
     private static final int MAX_PAGE_SIZE = 200;
 
     private final RetrievalFeedbackService retrievalFeedbackService;
-    private final KbScopeGuard kbScopeGuard;
+    private final KbResourceGuard kbResourceGuard;
 
     /**
      * Records one feedback signal.
@@ -58,7 +57,7 @@ public class RetrievalFeedbackController {
     @PostMapping("/api/v1/retrieval-feedback")
     @RequiresPermission({PermissionCodes.SEARCH_DEBUG, PermissionCodes.FEEDBACK_MANAGE})
     public Result<RetrievalFeedbackResponse> feedback(@Valid @RequestBody RetrievalFeedbackRequest request) {
-        AccessGuard.requireKbAccess(request.kbId());
+        kbResourceGuard.requireKb(request.kbId());
         FeedbackVerdict verdict = FeedbackVerdict.from(request.verdict());
         if (verdict == null) {
             throw BizException.invalidParam("verdict 仅支持 GOOD 或 BAD");
@@ -88,7 +87,7 @@ public class RetrievalFeedbackController {
             @RequestParam(required = false) String channel,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         IPage<RetrievalFeedback> paged = retrievalFeedbackService.list(kbId,
                 parseVerdict(verdict), parseStatus(status), parseChannel(channel),
                 normalizePage(page), normalizeSize(size));
@@ -108,8 +107,8 @@ public class RetrievalFeedbackController {
                                                      @Valid @RequestBody ConvertFeedbackRequest request) {
         // Both ends are checked: the signal's own knowledge base and the data set it is about to be
         // written into, which may well belong to another one.
-        kbScopeGuard.requireFeedbackAccess(feedbackId);
-        kbScopeGuard.requireDatasetAccess(request.datasetId());
+        kbResourceGuard.requireFeedbackAccess(feedbackId);
+        kbResourceGuard.requireDatasetAccess(request.datasetId());
         return Result.success(RetrievalFeedbackResponse.from(
                 retrievalFeedbackService.convert(feedbackId, request.datasetId())));
     }
@@ -123,7 +122,7 @@ public class RetrievalFeedbackController {
     @PostMapping("/api/v1/retrieval-feedback/{feedbackId}/dismiss")
     @RequiresPermission(PermissionCodes.FEEDBACK_MANAGE)
     public Result<RetrievalFeedbackResponse> dismiss(@PathVariable String feedbackId) {
-        kbScopeGuard.requireFeedbackAccess(feedbackId);
+        kbResourceGuard.requireFeedbackAccess(feedbackId);
         return Result.success(RetrievalFeedbackResponse.from(
                 retrievalFeedbackService.dismiss(feedbackId)));
     }

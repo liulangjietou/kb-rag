@@ -1,6 +1,7 @@
 package io.kbrag.app.feedback;
 
 import io.kbrag.app.eval.EvalDatasetService;
+import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.app.openapi.ApiKeyPrincipal;
 import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.common.exception.BizException;
@@ -72,7 +73,8 @@ class RetrievalFeedbackOpenApiTest {
         BizIdGenerator bizIdGenerator = mock(BizIdGenerator.class);
         when(bizIdGenerator.retrievalFeedbackId()).thenReturn(FEEDBACK_ID);
         service = new RetrievalFeedbackService(retrievalFeedbackMapper, chunkMapper,
-                searchInsightMapper, mock(EvalDatasetService.class), bizIdGenerator);
+                searchInsightMapper, mock(EvalDatasetService.class),
+                mock(KnowledgeBaseService.class), bizIdGenerator);
     }
 
     @Test

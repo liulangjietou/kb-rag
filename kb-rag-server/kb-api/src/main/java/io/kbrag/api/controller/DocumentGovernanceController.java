@@ -7,7 +7,7 @@ import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.RejectDocumentRequest;
 import io.kbrag.api.dto.UpdateValidityRequest;
 import io.kbrag.app.auth.AccessGuard;
-import io.kbrag.app.auth.KbScopeGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.governance.DocumentGovernanceService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
@@ -49,7 +49,7 @@ public class DocumentGovernanceController {
     private static final int MAX_PAGE_SIZE = 200;
 
     private final DocumentGovernanceService documentGovernanceService;
-    private final KbScopeGuard kbScopeGuard;
+    private final KbResourceGuard kbResourceGuard;
 
     /**
      * Submits a draft or a rejected document for review.
@@ -62,7 +62,7 @@ public class DocumentGovernanceController {
     @AuditedOperation(module = "GOVERNANCE", action = "SUBMIT_REVIEW", targetType = "DOCUMENT",
             targetId = "#docId")
     public Result<DocumentResponse> submitReview(@PathVariable String docId) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         return Result.success(DocumentResponse.from(documentGovernanceService.submitReview(docId)));
     }
 
@@ -76,7 +76,7 @@ public class DocumentGovernanceController {
     @RequiresPermission(PermissionCodes.DOC_REVIEW)
     @AuditedOperation(module = "GOVERNANCE", action = "APPROVE", targetType = "DOCUMENT", targetId = "#docId")
     public Result<DocumentResponse> approve(@PathVariable String docId) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         return Result.success(DocumentResponse.from(documentGovernanceService.approve(docId)));
     }
 
@@ -92,7 +92,7 @@ public class DocumentGovernanceController {
     @AuditedOperation(module = "GOVERNANCE", action = "REJECT", targetType = "DOCUMENT", targetId = "#docId")
     public Result<DocumentResponse> reject(@PathVariable String docId,
                                            @Valid @RequestBody RejectDocumentRequest request) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         return Result.success(DocumentResponse.from(
                 documentGovernanceService.reject(docId, request.note().trim())));
     }
@@ -110,7 +110,7 @@ public class DocumentGovernanceController {
             targetId = "#docId")
     public Result<DocumentResponse> updateValidity(@PathVariable String docId,
                                                    @RequestBody UpdateValidityRequest request) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         return Result.success(DocumentResponse.from(documentGovernanceService.updateValidity(docId,
                 parseTime(request.effectiveAt(), "effective_at"),
                 parseTime(request.expiresAt(), "expires_at"))));
@@ -146,7 +146,7 @@ public class DocumentGovernanceController {
     @RequiresPermission(PermissionCodes.DOC_REVIEW)
     @AuditedOperation(module = "GOVERNANCE", action = "RESTORE", targetType = "DOCUMENT", targetId = "#docId")
     public Result<DocumentResponse> restore(@PathVariable String docId) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         return Result.success(DocumentResponse.from(documentGovernanceService.restore(docId)));
     }
 
@@ -160,7 +160,7 @@ public class DocumentGovernanceController {
     @RequiresPermission(PermissionCodes.DOC_REVIEW)
     @AuditedOperation(module = "GOVERNANCE", action = "PURGE", targetType = "DOCUMENT", targetId = "#docId")
     public Result<Void> purge(@PathVariable String docId) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         documentGovernanceService.purge(docId);
         return Result.success(null);
     }

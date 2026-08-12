@@ -1,9 +1,12 @@
 package io.kbrag.app.feedback;
 
 import io.kbrag.app.eval.EvalDatasetService;
+import io.kbrag.app.kb.KnowledgeBaseService;
+import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.EvalCase;
+import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.entity.RetrievalFeedback;
 import io.kbrag.domain.enums.CaseSource;
 import io.kbrag.domain.enums.FeedbackStatus;
@@ -51,6 +54,7 @@ class RetrievalFeedbackServiceTest {
     private RetrievalFeedbackMapper retrievalFeedbackMapper;
     private ChunkMapper chunkMapper;
     private EvalDatasetService evalDatasetService;
+    private KnowledgeBaseService knowledgeBaseService;
     private RetrievalFeedbackService service;
 
     @BeforeEach
@@ -60,8 +64,13 @@ class RetrievalFeedbackServiceTest {
         evalDatasetService = mock(EvalDatasetService.class);
         BizIdGenerator bizIdGenerator = mock(BizIdGenerator.class);
         when(bizIdGenerator.retrievalFeedbackId()).thenReturn(FEEDBACK_ID);
+        knowledgeBaseService = mock(KnowledgeBaseService.class);
+        // The base is inside the caller's tenant unless a test says otherwise: on a console thread the
+        // fence is what makes this read come back empty for a foreign base.
+        when(knowledgeBaseService.find(anyString())).thenReturn(new KnowledgeBase());
         service = new RetrievalFeedbackService(retrievalFeedbackMapper, chunkMapper,
-                mock(SearchInsightMapper.class), evalDatasetService, bizIdGenerator);
+                mock(SearchInsightMapper.class), evalDatasetService, knowledgeBaseService,
+                bizIdGenerator);
     }
 
     @Test
@@ -155,6 +164,32 @@ class RetrievalFeedbackServiceTest {
         when(retrievalFeedbackMapper.selectOne(any())).thenReturn(null);
 
         assertThrows(BizException.class, () -> service.dismiss(FEEDBACK_ID));
+    }
+
+    @Test
+    void shouldTreatAFeedbackOfAnotherTenantExactlyAsAnUnknownOne() {
+        when(retrievalFeedbackMapper.selectOne(any()))
+                .thenReturn(feedback(FeedbackVerdict.GOOD, FeedbackStatus.NEW));
+        // t_kb_retrieval_feedback carries no tenant_id, so the row itself comes back; the fenced read
+        // of its base is what refuses the call, and it refuses it as "no such feedback".
+        when(knowledgeBaseService.find(anyString())).thenReturn(null);
+
+        assertEquals(ErrorCode.NOT_FOUND,
+                assertThrows(BizException.class, () -> service.dismiss(FEEDBACK_ID)).getErrorCode());
+        assertEquals(ErrorCode.NOT_FOUND,
+                assertThrows(BizException.class,
+                        () -> service.convert(FEEDBACK_ID, DATASET_ID)).getErrorCode());
+        verify(retrievalFeedbackMapper, never()).updateById(any(RetrievalFeedback.class));
+    }
+
+    @Test
+    void shouldRefuseToRecordIntoTheBaseOfAnotherTenant() {
+        when(knowledgeBaseService.require(anyString()))
+                .thenThrow(BizException.notFound("knowledge base not found"));
+
+        assertThrows(BizException.class,
+                () -> service.record(KB_ID, QUERY, CHUNK_ID, FeedbackVerdict.GOOD));
+        verify(retrievalFeedbackMapper, never()).insert(any(RetrievalFeedback.class));
     }
 
     private RetrievalFeedback feedback(FeedbackVerdict verdict, FeedbackStatus status) {

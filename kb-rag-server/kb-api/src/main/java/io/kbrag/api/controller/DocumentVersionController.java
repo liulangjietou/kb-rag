@@ -7,7 +7,7 @@ import io.kbrag.api.dto.ActivateVersionResponse;
 import io.kbrag.api.dto.DocumentVersionResponse;
 import io.kbrag.api.dto.PendingAnnotationResponse;
 import io.kbrag.app.annotation.AnnotationMigrationService;
-import io.kbrag.app.auth.KbScopeGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.document.DocumentVersionService;
 import io.kbrag.common.api.Result;
 import io.kbrag.domain.constant.PermissionCodes;
@@ -37,7 +37,7 @@ public class DocumentVersionController {
 
     private final DocumentVersionService documentVersionService;
     private final AnnotationMigrationService annotationMigrationService;
-    private final KbScopeGuard kbScopeGuard;
+    private final KbResourceGuard kbResourceGuard;
 
     /**
      * Lists the versions of a document, newest first.
@@ -48,7 +48,7 @@ public class DocumentVersionController {
     @GetMapping("/versions")
     @RequiresPermission(PermissionCodes.KB_READ)
     public Result<List<DocumentVersionResponse>> versions(@PathVariable String docId) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         return Result.success(documentVersionService.list(docId).stream()
                 .map(DocumentVersionResponse::from).toList());
     }
@@ -64,7 +64,7 @@ public class DocumentVersionController {
     @RequiresPermission(PermissionCodes.KB_READ)
     public Result<ActivateImpactResponse> activateImpact(@PathVariable String docId,
                                                          @PathVariable String versionId) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         return Result.success(ActivateImpactResponse.from(
                 documentVersionService.activateImpact(docId, versionId)));
     }
@@ -82,7 +82,7 @@ public class DocumentVersionController {
             targetId = "#docId")
     public Result<ActivateVersionResponse> activate(@PathVariable String docId,
                                                     @PathVariable String versionId) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         return Result.success(ActivateVersionResponse.from(
                 documentVersionService.activate(docId, versionId)));
     }
@@ -102,7 +102,7 @@ public class DocumentVersionController {
     @GetMapping("/annotations/pending-review")
     @RequiresPermission({PermissionCodes.DOC_REVIEW, PermissionCodes.DOC_WRITE})
     public Result<List<PendingAnnotationResponse>> pendingReview(@PathVariable String docId) {
-        kbScopeGuard.requireDocumentAccess(docId);
+        kbResourceGuard.requireDocumentAccess(docId);
         return Result.success(annotationMigrationService.pendingReview(docId).stream()
                 .map(PendingAnnotationResponse::from).toList());
     }

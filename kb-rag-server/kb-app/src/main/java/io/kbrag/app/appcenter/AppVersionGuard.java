@@ -37,7 +37,7 @@ import org.springframework.stereotype.Component;
  * base - its configuration names the bases it retrieves from - so there is no application level data
  * scope to apply, and the knowledge base half is enforced where the configuration is actually used:
  * {@code KnowledgeApiService#requirePreviewKbAccess} before a preview retrieves, and
- * {@code KbScopeGuard#requireDatasetAccess} before a gate data set is bound. Both of those now run
+ * {@code KbResourceGuard#requireDatasetAccess} before a gate data set is bound. Both of those now run
  * <em>after</em> this resolution, which is the order the M16 contract fixes: tenant answers 404 first,
  * data scope answers 403 second, because the other order leaks "this id exists in another tenant"
  * through the difference between the two status codes.

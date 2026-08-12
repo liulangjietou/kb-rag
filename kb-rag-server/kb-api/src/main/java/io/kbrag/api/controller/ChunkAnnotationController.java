@@ -8,7 +8,7 @@ import io.kbrag.api.dto.SplitChunkRequest;
 import io.kbrag.api.dto.ToggleChunkRequest;
 import io.kbrag.api.dto.UpdateChunkRequest;
 import io.kbrag.app.annotation.ChunkAnnotationService;
-import io.kbrag.app.auth.KbScopeGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.common.api.Result;
 import io.kbrag.domain.constant.PermissionCodes;
 import jakarta.validation.Valid;
@@ -48,7 +48,7 @@ public class ChunkAnnotationController {
     private static final String FIELD_CHUNKS = "chunks";
 
     private final ChunkAnnotationService chunkAnnotationService;
-    private final KbScopeGuard kbScopeGuard;
+    private final KbResourceGuard kbResourceGuard;
 
     /**
      * Replaces the text of a chunk, re-embeds it and overwrites it in both engines.
@@ -61,7 +61,7 @@ public class ChunkAnnotationController {
     @AuditedOperation(module = "ANNOTATION", action = "EDIT", targetType = "CHUNK", targetId = "#chunkId")
     public Result<ChunkResponse> edit(@PathVariable String chunkId,
                                       @Valid @RequestBody UpdateChunkRequest request) {
-        kbScopeGuard.requireChunkAccess(chunkId);
+        kbResourceGuard.requireChunkAccess(chunkId);
         return Result.success(ChunkResponse.from(chunkAnnotationService.edit(chunkId, request.content())));
     }
 
@@ -76,7 +76,7 @@ public class ChunkAnnotationController {
     @AuditedOperation(module = "ANNOTATION", action = "TOGGLE", targetType = "CHUNK", targetId = "#chunkId")
     public Result<Map<String, Object>> toggle(@PathVariable String chunkId,
                                               @Valid @RequestBody ToggleChunkRequest request) {
-        kbScopeGuard.requireChunkAccess(chunkId);
+        kbResourceGuard.requireChunkAccess(chunkId);
         List<String> changed = chunkAnnotationService.toggle(chunkId, request.enabled());
         return Result.success(Map.of(FIELD_CHANGED_CHUNK_IDS, changed));
     }
@@ -90,7 +90,7 @@ public class ChunkAnnotationController {
     @PostMapping("/merge")
     @AuditedOperation(module = "ANNOTATION", action = "MERGE", targetType = "CHUNK")
     public Result<ChunkResponse> merge(@Valid @RequestBody MergeChunksRequest request) {
-        kbScopeGuard.requireChunkAccess(request.chunkIds().get(0));
+        kbResourceGuard.requireChunkAccess(request.chunkIds().get(0));
         return Result.success(ChunkResponse.from(chunkAnnotationService.merge(request.chunkIds())));
     }
 
@@ -105,7 +105,7 @@ public class ChunkAnnotationController {
     @AuditedOperation(module = "ANNOTATION", action = "SPLIT", targetType = "CHUNK", targetId = "#chunkId")
     public Result<Map<String, Object>> split(@PathVariable String chunkId,
                                              @Valid @RequestBody SplitChunkRequest request) {
-        kbScopeGuard.requireChunkAccess(chunkId);
+        kbResourceGuard.requireChunkAccess(chunkId);
         List<ChunkResponse> parts = chunkAnnotationService.split(chunkId, request.splitOffsets()).stream()
                 .map(ChunkResponse::from).toList();
         return Result.success(Map.of(FIELD_CHUNKS, parts));
