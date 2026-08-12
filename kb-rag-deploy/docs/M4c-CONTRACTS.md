@@ -13,6 +13,7 @@
 - 应用 CRUD `/api/v1/apps`；版本：`POST /apps/{id}/versions`(从当前草稿配置建版)、`GET /apps/{id}/versions`、`POST /app-versions/{vid}/submit-test`(DRAFT→TESTING)、`POST /app-versions/{vid}/release`、`POST /app-versions/{vid}/rollback`(历史 RELEASED/SUPERSEDED 版重新 release)
 - **发布门禁（release 时自动执行，需求 §4.7 逐条实现）**：绑定 gate_dataset 时进入 GATING——**同语料双跑**：候选配置与当前 RELEASED 配置各一轮（复用 M4b EvalRunService，离线档）；比较仅在**双方有效 case 交集**上重算 Hit Rate/Recall@K；容差 ε=max(0.02, 1/N)，候选 < 对照−ε → GATE_BLOCKED；三种情况归 **GATE_LOG_ONLY**（未绑评测集/有效 case<50/重试后仍含降级 case/待复核占比>15%）→ 不自动 release，需 `POST .../release?force=true` 留痕放行；首发无对照：配置了绝对阈值比阈值，否则记录基线并放行；通过→RELEASED，原 RELEASED→SUPERSEDED
 - 发布/回滚均为原子状态切换；SUPERSEDED 不可被对外 API 调用
+- **租户解析（M16 引入租户层后补齐）**：`/app-versions/{vid}` 下的五个端点（详情、`gate-dataset`、`submit-test`、`release`、`rollback`）一律先解析到根表 `t_kb_app`、再碰版本表。`t_kb_app_version` 是从属表、不带 `tenant_id`，行级围栏够不着它，按 `app_version_id` 直接寻址就等于零隔离（不是弱隔离——那条语句上围栏什么都没做，也没有任何东西会报错）；功能权限码 `app:read`/`app:write`/`app:release` 只回答"这个账号能不能碰应用版本"，回答不了"能碰哪些"。守卫 `AppVersionGuard` 落在 `AppVersionService#require` 背后而非各入口前面——该方法是 11 处调用方的唯一入口（本服务自调用 5、`ReleaseGateService` 5、控制台预览 1），放入口必漏。跨租户一律 **404 而非 403**，且与"版本不存在"共用同一错误码与同一文案（报成 `APP_NOT_FOUND` 会用差异泄露"这个 id 在别的租户里存在"），写语句与门禁双跑一条都不发出。`gate-dataset` 的数据范围检查随之从 Controller 移入服务层，排在版本解析之后（租户 404 先于数据范围 403）。**对外 API 不受影响**：`search`/`chat` 走 `resolveForCall(appId, versionLiteral)`、不经该方法，其 `appId` 由 API Key 的 `app_scope` 授权范围把关。详见 `M16-CONTRACTS.md` §1.3.2。
 - VersionPinChecker 仍为空实现（索引快照与版本可见集属 M6，本期配置快照不冻结文档版本——契约明示，勿实现）
 
 ## 3. 对外 API（API Key 鉴权，独立过滤器链，路径前缀 /api/v1/knowledge/*）

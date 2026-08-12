@@ -7,7 +7,6 @@ import io.kbrag.api.dto.GateDatasetRequest;
 import io.kbrag.api.filter.AuthInterceptor;
 import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.appcenter.ReleaseGateService;
-import io.kbrag.app.auth.KbScopeGuard;
 import io.kbrag.common.api.Result;
 import io.kbrag.domain.constant.PermissionCodes;
 import jakarta.servlet.http.HttpServletRequest;
@@ -31,6 +30,11 @@ import org.springframework.web.bind.annotation.RestController;
  * and a forced release additionally overrides a failing gate. Whoever prepares a configuration is
  * therefore not automatically whoever puts it in front of users.
  *
+ * <p><b>What a permission code cannot answer is whose version this is.</b> Every path variable here is an
+ * {@code appVersionId} of a subordinate table, so each of these five endpoints resolves it to its owning
+ * application through {@code AppVersionGuard} - inside the service, not here. A guard in a controller only
+ * covers the paths somebody remembered to guard, and this one is reached from the gate service too.
+ *
  * @author owlzhangfq@gmail.com
  */
 @Slf4j
@@ -41,7 +45,6 @@ public class AppVersionController {
 
     private final AppVersionService appVersionService;
     private final ReleaseGateService releaseGateService;
-    private final KbScopeGuard kbScopeGuard;
 
     /**
      * Loads one version with its gate outcome.
@@ -68,11 +71,6 @@ public class AppVersionController {
             targetId = "#appVersionId")
     public Result<AppVersionResponse> gateDataset(@PathVariable String appVersionId,
                                                  @Valid @RequestBody GateDatasetRequest request) {
-        // Binding reaches into an evaluation data set, so the caller has to be allowed the knowledge base
-        // that data set belongs to. Clearing names nothing and needs no such check.
-        if (request.datasetId() != null && !request.datasetId().isBlank()) {
-            kbScopeGuard.requireDatasetAccess(request.datasetId());
-        }
         return Result.success(AppVersionResponse.from(
                 appVersionService.setGateDataset(appVersionId, request.datasetId())));
     }
