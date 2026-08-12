@@ -37,12 +37,14 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -64,6 +66,11 @@ class EvalRunServiceTest {
     private static final String RUN_PROBE_THREAD = "eval-run-probe";
     private static final String CASE_PROBE_THREAD = "eval-case-probe";
     private static final int HAND_OFF_TIMEOUT_SECONDS = 5;
+
+    /** An evaluation pool whose queue is full: {@code execute} aborts, it never runs the task. */
+    private static final Executor SATURATED_EXECUTOR = task -> {
+        throw new RejectedExecutionException("evaluation pool saturated");
+    };
 
     private EvalDatasetService evalDatasetService;
     private EvalRunMapper evalRunMapper;
@@ -204,6 +211,66 @@ class EvalRunServiceTest {
     }
 
     /**
+     * A run the evaluation pool refuses to queue must be closed out, never left pending.
+     *
+     * <p>The row is inserted before the hand-off, so a rejected submission used to leave a {@code PENDING}
+     * run nothing would ever pick up: no thread owns it, no scan looked at it, and the release gate would
+     * spend its entire wait budget polling a run that was never queued. The pool aborts rather than running
+     * the task on the caller on purpose - a whole evaluation run dragged back onto the submitting HTTP
+     * request is the exact behaviour the {@code @Async} self invocation used to produce - which makes
+     * recording the rejection on the row the submitter's obligation.
+     */
+    @Test
+    void shouldFailARunTheEvaluationPoolRefusedToQueueRatherThanLeaveItPending() {
+        when(evalDatasetService.require(DATASET_ID)).thenReturn(dataset());
+        when(corpusFingerprintFactory.fingerprint(KB_ID)).thenReturn("fp_1");
+        when(embeddingProvider.isConfigured()).thenReturn(false);
+        when(bizIdGenerator.evalRunId()).thenReturn("evr_rejected");
+
+        EvalRunService saturatedService = newService(SATURATED_EXECUTOR, Runnable::run);
+
+        List<EvalRun> runs = saturatedService.submit(DATASET_ID, 5, List.of(configOf(EvalMode.BM25_ONLY)), false);
+
+        assertEquals(1, runs.size());
+        assertEquals(RunStatus.FAILED, runs.get(0).getStatus());
+        assertTrue(runs.get(0).getFailReason().contains("队列已满"));
+        ArgumentCaptor<EvalRun> runCaptor = ArgumentCaptor.forClass(EvalRun.class);
+        verify(evalRunMapper).updateById(runCaptor.capture());
+        assertEquals(RunStatus.FAILED, runCaptor.getValue().getStatus());
+        // Terminal in every sense: the gate reads the outcome on its first poll instead of timing out.
+        assertNotNull(runCaptor.getValue().getFinishedAt());
+        verify(retrievalService, never()).search(anyString(), any());
+    }
+
+    /**
+     * A rejection partway through a matrix must not orphan the configurations already created.
+     *
+     * <p>Rethrowing would surface the failure of the third configuration as a failure of the whole
+     * submission while the first two were already inserted and, worse, already running - a batch half of
+     * which the caller is told nothing about. Every row is therefore closed out on its own.
+     */
+    @Test
+    void shouldCloseOutEveryConfigurationOfABatchWhenTheEvaluationPoolIsSaturated() {
+        when(evalDatasetService.require(DATASET_ID)).thenReturn(dataset());
+        when(corpusFingerprintFactory.fingerprint(KB_ID)).thenReturn("fp_1");
+        when(embeddingProvider.isConfigured()).thenReturn(false);
+        when(bizIdGenerator.evalRunId()).thenReturn("evr_1", "evr_2", "evr_3");
+
+        EvalRunService saturatedService = newService(SATURATED_EXECUTOR, Runnable::run);
+
+        List<EvalRun> runs = saturatedService.submit(DATASET_ID, 5, List.of(configOf(EvalMode.BM25_ONLY),
+                configOf(EvalMode.BM25_ONLY), configOf(EvalMode.BM25_ONLY)), false);
+
+        assertEquals(3, runs.size());
+        for (EvalRun run : runs) {
+            assertEquals(RunStatus.FAILED, run.getStatus());
+            assertTrue(run.getFailReason().contains("队列已满"));
+        }
+        verify(evalRunMapper, org.mockito.Mockito.times(3)).insert(any(EvalRun.class));
+        verify(evalRunMapper, org.mockito.Mockito.times(3)).updateById(any(EvalRun.class));
+    }
+
+    /**
      * The cases must be judged on the container managed pool, not on one the run creates for itself.
      *
      * <p>Regression guard for the per run {@code Executors.newFixedThreadPool} this replaced: its threads
@@ -235,6 +302,45 @@ class EvalRunServiceTest {
         } finally {
             casePool.shutdownNow();
         }
+    }
+
+    /**
+     * Every case must be submitted before any of them is joined.
+     *
+     * <p>Moving the {@code join} into the submission loop judges the cases one at a time and produces
+     * byte identical rows, so nothing about a run's output can tell the two apart - which is why the
+     * previous coverage, a single case on a single threaded pool, stayed green either way. The two cases
+     * here refuse to return until both are in flight, so a serialising loop deadlocks itself into the
+     * timeout and fails the run instead of succeeding slowly.
+     */
+    @Test
+    void shouldSubmitEveryCaseBeforeJoiningAnyOfThem() {
+        EvalRun run = pendingRun();
+        when(evalRunMapper.selectOne(any())).thenReturn(run);
+        when(evalCaseMapper.selectList(any())).thenReturn(List.of(spanCase("evc_1"), spanCase("evc_2")));
+        when(bizIdGenerator.evalResultId()).thenReturn("evre_1", "evre_2");
+
+        CountDownLatch bothInFlight = new CountDownLatch(2);
+        when(retrievalService.search(anyString(), any(RetrievalCommand.class))).thenAnswer(invocation -> {
+            bothInFlight.countDown();
+            if (!bothInFlight.await(HAND_OFF_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("the cases were judged one at a time");
+            }
+            return new SearchOutcome(List.of(hitNode()), List.of(), null);
+        });
+
+        ExecutorService casePool = Executors.newFixedThreadPool(2);
+        try {
+            newService(Runnable::run, casePool).execute("evr_run", false);
+        } finally {
+            casePool.shutdownNow();
+        }
+
+        assertEquals(0L, bothInFlight.getCount(), "both cases never overlapped");
+        ArgumentCaptor<EvalRun> runCaptor = ArgumentCaptor.forClass(EvalRun.class);
+        verify(evalRunMapper, org.mockito.Mockito.atLeastOnce()).updateById(runCaptor.capture());
+        EvalRun finalState = runCaptor.getAllValues().get(runCaptor.getAllValues().size() - 1);
+        assertEquals(RunStatus.SUCCESS, finalState.getStatus());
     }
 
     @Test
@@ -380,8 +486,12 @@ class EvalRunServiceTest {
     }
 
     private EvalCase spanCase() {
+        return spanCase("evc_1");
+    }
+
+    private EvalCase spanCase(String caseId) {
         EvalCase evalCase = new EvalCase();
-        evalCase.setCaseId("evc_1");
+        evalCase.setCaseId(caseId);
         evalCase.setDatasetId(DATASET_ID);
         evalCase.setQuery("why does it matter");
         evalCase.setAnchorType(AnchorType.SPAN);

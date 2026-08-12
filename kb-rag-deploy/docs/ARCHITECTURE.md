@@ -1,7 +1,10 @@
 # kb-rag 架构文档
 
 
-> 版本：v1.9（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14 + 企业化 M15/M16 + 网页抓取增强 M17/M18 + 记忆库 M19 + MCP 协议层 M20 + 记忆库租户隔离修复 V21 + 站点凭据租户隔离修复 V22 + 网页源租户解析修复 + 应用版本租户解析修复，2026-08-12；v1.8 基线为网页源租户解析修复，v1.7 基线为 V22，v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
+
+
+> 版本：v1.9（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14 + 企业化 M15/M16 + 网页抓取增强 M17/M18 + 记忆库 M19 + MCP 协议层 M20 + 记忆库租户隔离修复 V21 + 站点凭据租户隔离修复 V22 + 网页源租户解析修复 + 异步池形状与状态机修复，应用版本租户解析修复，2026-08-12；v1.8 基线为网页源租户解析修复，v1.7 基线为 V22，v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
+
 > 日期：2026-08-12
 > 作者：RichardFyoung / Claude
 >
@@ -60,7 +63,7 @@
 
 - **MySQL `t_kb_chunk` 是唯一事实源**；Qdrant 与 ES 均为派生索引，可从 MySQL 幂等重建。
 - 双写状态按"分片 × 物理索引"粒度记录在 `t_kb_chunk_index_sync`，由定时补偿任务重放（§3.7）。
-- **无消息队列、无强制 Redis**：异步全部为 Spring `@Async` + 进程内线程池；跨存储一致性 = 同步状态表 + 定时补偿。限流计数与上传 Token 为进程内实现，明确记录为单实例部署的降级方案（多实例扩展是未来边界，不影响功能正确性）；管理台登录 Token 自 M9 后修复起落库 `t_kb_auth_token`（V11，仅存 SHA-256 哈希，单实例重启不再踢掉全部会话）。
+- **无消息队列、无强制 Redis**：异步全部落在进程内线程池上（多数经 Spring `@Async`；**自调用的提交点显式注入 Executor 手工 `execute`**——`@Async` 代理拦不住同 bean 自调用，标了也是内联跑，评测提交与门禁提交都属这一类，见 §3.7）；跨存储一致性 = 同步状态表 + 定时补偿。限流计数与上传 Token 为进程内实现，明确记录为单实例部署的降级方案（多实例扩展是未来边界，不影响功能正确性）；管理台登录 Token 自 M9 后修复起落库 `t_kb_auth_token`（V11，仅存 SHA-256 哈希，单实例重启不再踢掉全部会话）。
 
 ---
 
@@ -192,20 +195,31 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 线程池（`AsyncConfig`，统一 `TaskDecorator` 透传 requestId 到 worker 线程）：
 
+**池形状只有一条规则：要么队列为 0，要么 core == max。** `ThreadPoolTaskExecutor` 只有在队列**满**之后才扩容到 max，所以"深队列 + 更大的 max"这个组合里的 max 永远到不了——写下的上限是个不会发生的数字，而后面每个读代码的人都会信它。这条已经踩过两次（索引池 `core=2,max=4` 挂 200 深队列常年只有 2；评测池 `core=2,max=6` 挂 50 深队列常年只有 2，而它自己的 javadoc 写着"6 个 run 并行"）。检索池与流式池的 0 队列是刻意的例外：没有队列可填，扩容到 max 是**第一件**发生的事，正是它们要的"先吸收突发、再拒绝"。其余每个池的 core 就是真实并发，只有一个数字要读，`AsyncConfigTest` 用反射遍历全部 `@Bean` 钉住这条规则，防止出现第三次。
+
 | 池 | core/max/queue | 用途与设计理由 |
 |---|---|---|
-| `indexTaskExecutor` | 2/4/200 | 索引管线；刻意小 + 有界队列，防饿死控制台 |
+| `indexTaskExecutor` | `kb.index.concurrency`(4)/同/200 | 索引管线；刻意小 + 有界队列，防饿死控制台 |
 | `retrievalTaskExecutor` | 4/16/**0** | 检索超时保护；队列为 0，宁可快速降级不排队 |
-| `evalTaskExecutor` | 2/6/50 | 评测 run（case 级并发另由 `kb.eval.concurrency` 控制） |
-| `gateTaskExecutor` | 1/4/20 | 门禁双跑监督；**必须与评测池分离**，否则 gate 排在自己等待的 run 前面死锁 |
-| `auditTaskExecutor` | 1/4/2000 | 审计异步写；异常只记日志绝不上抛 |
-| `chatStreamTaskExecutor` | — | SSE 流式生成 |
+| `evalTaskExecutor` | M4b/M4c 异步化后修复起 6/6/50 | 评测 run 监督；6 = 一次提交的配置矩阵上限，低于它会把控制台呈现为"一个动作"的矩阵悄悄串行化。case 级并发另由 `kb.eval.concurrency` 控制 |
+| `evalCaseTaskExecutor` | `kb.eval.concurrency`(4)/同/500 | 全部在跑评测的 case **全局**上限（非每 run）；CallerRuns 回压 |
+| `gateTaskExecutor` | M4b/M4c 异步化后修复起 4/4/20 | 门禁双跑监督；**必须与评测池分离**，否则 gate 排在自己等待的 run 前面死锁。排队的 gate 不是"晚点跑"而是"发布卡住"——版本整段等待期都停在 `GATING` |
+| `auditTaskExecutor` | 1/1/2000 | 审计异步写；异常只记日志绝不上抛（1 是它一直以来的真实并发，原 max=4 在 2000 深队列后从未达到） |
+| `chatStreamTaskExecutor` | 2/16/**0** | SSE 流式生成；排队的流 = 客户端盯着没有首 token 的连接 |
+| `extSourceTaskExecutor` | 1/1/100 | 外部源扫描；慢出站 I/O，突发排队而非并行扫桶 |
+| `graphTaskExecutor` | `kb.graph.task-concurrency`(2)/同/50 | 图谱抽取，单任务小时级；与 `extract-concurrency` 相乘才是对话模型峰值 |
+| `embedTaskExecutor` | `kb.embedding.concurrency`(4)/同/500 | 嵌入请求**全局**上限；CallerRuns 回压 |
+
+**拒绝策略与提交处的义务**（M4b/M4c 异步化后修复起）：评测池与门禁池保留默认 `AbortPolicy`，不换 CallerRuns——把整条评测 run 拽回提交它的 HTTP 请求线程，恰恰是 PR #32 修掉的那个形态。代价是 `execute()` 会抛 `RejectedExecutionException`，而两处提交都发生在"状态已经落库之后"，所以兜底必须写在提交处：`EvalRunService` 把被拒的 run 就地改判 `FAILED` 并写明原因（否则留下一行没人推进的 `PENDING`，且同批前面的配置已落库，成半截提交）；`ReleaseGateService` 把被拒的门禁交给 `failGate` 记为 `LOG_ONLY/RUN_FAILED`（否则版本永久停在 `GATING`，而 `release` 入口恰好拒绝从 `GATING` 再次发布——自锁只能改库）。
+
+**requestId 装饰器保存并恢复、而不是无条件 clear**（M4b/M4c 异步化后修复起）：`evalCaseTaskExecutor` 与 `embedTaskExecutor` 用 CallerRuns，队列满时任务回跑在提交者线程上，finally 里的 `MDC.remove` 会清掉**提交者自己**的 requestId——那条 run / 那次索引从队列填满的那一刻起后半段全部断链。改为记下运行前绑定的值再放回：worker 线程上本就没有绑定，恢复 null 即等于原本想做的 clear。
 
 定时任务（`@Scheduled`，`SchedulingConfig` 单独持有 `@EnableScheduling` 便于单测排除）：
 
 | 任务 | 触发 | 职责 |
 |---|---|---|
 | `IndexSyncCompensationService` | fixedDelay 30s | 扫 FAILED + 超时 PENDING 同步行，按物理索引分组幂等重放 |
+| `EvalRunCompensationService` | fixedDelay 5min | 扫超过 `kb.eval.stuck-timeout-minutes`(120) 没动过的 PENDING/RUNNING 评测 run，改判 FAILED；**只改判不重跑**（`execute` 插 case 行前不清旧行，重跑会翻倍污染指标），且走 wrapper update 不走 `updateById`（不碰乐观锁版本，被早收的慢 run 自己那次写入仍能落地） |
 | `AlertEvaluator` | fixedDelay 60s | 任务连续失败 / 降级率 / 双写积压三类触发 + 静默期 |
 | `ApiAuditArchiveService` | cron 03:30 | 审计日志归档 MinIO → 分批物理删除 |
 | `AppSnapshotRetentionService` | cron 04:15 | SUPERSEDED 版本快照按保留数清理（RELEASED 永不清理） |
