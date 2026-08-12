@@ -6,6 +6,7 @@ import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.entity.App;
 import io.kbrag.domain.entity.AppVersion;
 import io.kbrag.domain.entity.EvalDataset;
 import io.kbrag.domain.entity.KnowledgeBase;
@@ -28,7 +29,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -47,6 +50,7 @@ class AppVersionServiceTest {
     private static final String VERSION_ID = "av_1";
 
     private AppVersionMapper appVersionMapper;
+    private AppService appService;
     private KnowledgeBaseService knowledgeBaseService;
     private EvalDatasetService evalDatasetService;
     private BizIdGenerator bizIdGenerator;
@@ -61,8 +65,11 @@ class AppVersionServiceTest {
         bizIdGenerator = mock(BizIdGenerator.class);
         properties = new KbProperties();
         when(bizIdGenerator.appVersionId()).thenReturn(VERSION_ID);
-        service = new AppVersionService(appVersionMapper, knowledgeBaseService, evalDatasetService,
-                bizIdGenerator, new GraphFusionPolicy(), properties);
+        appService = mock(AppService.class);
+        // 默认应用可见：围栏在控制台线程上会把别家的应用裁掉，个别用例把它改成 null 来表达跨租户。
+        when(appService.find(anyString())).thenReturn(new App());
+        service = new AppVersionService(appVersionMapper, appService, knowledgeBaseService,
+                evalDatasetService, bizIdGenerator, new GraphFusionPolicy(), properties);
     }
 
     @Test
@@ -433,5 +440,22 @@ class AppVersionServiceTest {
         retrieval.setFusionMode("rrf");
         snapshot.setRetrieval(retrieval);
         return snapshot;
+    }
+    @Test
+    void shouldTreatAVersionOfAnotherTenantsApplicationAsUnknown() {
+        AppVersion version = new AppVersion();
+        version.setAppVersionId(VERSION_ID);
+        version.setAppId(APP_ID);
+        version.setStatus(AppVersionStatus.TESTING);
+        when(appVersionMapper.selectOne(any())).thenReturn(version);
+        // t_kb_app_version 不带 tenant_id，上面那条 select 对任何租户都命中；
+        // t_kb_app 在围栏里，别家的应用读作不存在，于是它的版本也不存在。
+        when(appService.find(anyString())).thenReturn(null);
+
+        assertThrows(BizException.class, () -> service.require(VERSION_ID));
+        assertThrows(BizException.class, () -> service.submitTest(VERSION_ID));
+        assertThrows(BizException.class, () -> service.rollback(VERSION_ID));
+        assertThrows(BizException.class, () -> service.setGateDataset(VERSION_ID, null));
+        verify(appVersionMapper, never()).updateById(any(AppVersion.class));
     }
 }

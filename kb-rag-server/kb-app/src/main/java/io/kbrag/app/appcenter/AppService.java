@@ -65,15 +65,30 @@ public class AppService {
     }
 
     /**
+     * Loads an application, {@code null} when there is none under that id.
+     *
+     * <p>{@code t_kb_app} is a fenced root, so on a console thread another tenant's application reads
+     * as a missing one - which is what lets the version side resolve ownership without writing a
+     * tenant clause of its own. Threads with no console principal see every tenant's applications,
+     * unchanged.
+     *
+     * @param appId business id
+     * @return application or {@code null}
+     */
+    public App find(String appId) {
+        return appMapper.selectOne(new LambdaQueryWrapper<App>()
+                .eq(App::getAppId, appId)
+                .last("limit 1"));
+    }
+
+    /**
      * Loads an application or fails.
      *
      * @param appId business id
      * @return application
      */
     public App require(String appId) {
-        App app = appMapper.selectOne(new LambdaQueryWrapper<App>()
-                .eq(App::getAppId, appId)
-                .last("limit 1"));
+        App app = find(appId);
         if (app == null) {
             throw new BizException(ErrorCode.APP_NOT_FOUND, "application not found");
         }

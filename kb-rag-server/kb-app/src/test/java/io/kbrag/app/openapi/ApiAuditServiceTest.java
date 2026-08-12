@@ -1,10 +1,13 @@
 package io.kbrag.app.openapi;
 
+import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.ApiAuditLog;
+import io.kbrag.domain.entity.ApiKey;
 import io.kbrag.domain.enums.TargetStage;
 import io.kbrag.domain.mapper.ApiAuditLogMapper;
+import io.kbrag.domain.mapper.ApiKeyMapper;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.QueryDigestFactory;
 import io.kbrag.domain.service.TextDesensitizer;
@@ -20,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -35,16 +39,21 @@ class ApiAuditServiceTest {
     private static final String AUDIT_ID = "aud_1";
 
     private ApiAuditLogMapper apiAuditLogMapper;
+    private ApiKeyMapper apiKeyMapper;
     private KbProperties properties;
     private ApiAuditService service;
 
     @BeforeEach
     void setUp() {
+        MybatisLambdaCache.register(ApiKey.class);
         apiAuditLogMapper = mock(ApiAuditLogMapper.class);
         BizIdGenerator bizIdGenerator = mock(BizIdGenerator.class);
         when(bizIdGenerator.apiAuditLogId()).thenReturn(AUDIT_ID);
         properties = new KbProperties();
-        service = new ApiAuditService(apiAuditLogMapper,
+        apiKeyMapper = mock(ApiKeyMapper.class);
+        // 审计行经 key 归属租户：默认让这把 key 落在调用者租户内，跨租户用例把它改成空。
+        when(apiKeyMapper.selectList(any())).thenReturn(List.of(apiKey(KEY_ID)));
+        service = new ApiAuditService(apiAuditLogMapper, apiKeyMapper,
                 new QueryDigestFactory(new TextDesensitizer()), bizIdGenerator, properties);
     }
 
@@ -147,5 +156,30 @@ class ApiAuditServiceTest {
         ArgumentCaptor<ApiAuditLog> captor = ArgumentCaptor.forClass(ApiAuditLog.class);
         verify(apiAuditLogMapper).insert(captor.capture());
         return captor.getValue();
+    }
+    @Test
+    void shouldAnswerNothingWhenTheCallerHoldsNoKeyOfThatTenant() {
+        // t_kb_api_audit_log 不带 tenant_id，本身分不出租户；能分的是 t_kb_api_key，它在围栏里。
+        // 围栏裁完一把都不剩，就意味着这条链路上没有任何一行审计属于调用者——答空，而不是"不加过滤"。
+        when(apiKeyMapper.selectList(any())).thenReturn(List.of());
+
+        assertEquals(0L, service.stats(null, null, null, null).totalCalls());
+        assertEquals(0L, service.query(null, null, null, null, 1, 20).getTotal());
+        verify(apiAuditLogMapper, never()).selectList(any());
+        verify(apiAuditLogMapper, never()).selectPage(any(), any());
+    }
+
+    @Test
+    void shouldTreatAKeyOfAnotherTenantAsOneThatDoesNotExist() {
+        when(apiKeyMapper.selectList(any())).thenReturn(List.of());
+
+        assertEquals(0L, service.stats("kb-key-of-another-tenant", null, null, null).totalCalls());
+        verify(apiAuditLogMapper, never()).selectList(any());
+    }
+
+    private ApiKey apiKey(String keyId) {
+        ApiKey key = new ApiKey();
+        key.setKeyId(keyId);
+        return key;
     }
 }

@@ -62,6 +62,7 @@ public class AppVersionService {
     private static final int PRIMARY = 0;
 
     private final AppVersionMapper appVersionMapper;
+    private final AppService appService;
     private final KnowledgeBaseService knowledgeBaseService;
     private final EvalDatasetService evalDatasetService;
     private final BizIdGenerator bizIdGenerator;
@@ -161,6 +162,12 @@ public class AppVersionService {
                 .eq(AppVersion::getAppVersionId, appVersionId)
                 .last("limit 1"));
         if (version == null) {
+            throw new BizException(ErrorCode.VERSION_NOT_FOUND, "application version not found");
+        }
+        // t_kb_app_version 是从属表，经 app_id 归属租户，本身不带 tenant_id 也不在围栏名单里。
+        // 上面那条 select 因此对任何租户都能命中，判定发生在这一跳：应用读自围栏内的根表，
+        // 别家的应用读作不存在，于是它的版本也不存在——发布、回滚、改门禁全部止步于此。
+        if (appService.find(version.getAppId()) == null) {
             throw new BizException(ErrorCode.VERSION_NOT_FOUND, "application version not found");
         }
         return version;

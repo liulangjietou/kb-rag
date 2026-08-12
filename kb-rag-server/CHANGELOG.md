@@ -8,6 +8,15 @@
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
 
+### 安全修复（M16 后修复：普查新发现的两处——应用版本与开放 API 调用审计）
+
+- 这两处不在既有缺陷清单里，是这轮全域普查按同一判据（"链路上有没有一次对根表的查询"）扫出来的。
+- **`t_kb_app_version`（应用版本）**：`AppVersionService#require:159` 是裸 `selectOne`，而该表是 `t_kb_app`（围栏根表）的从属表。`/api/v1/app-versions/{appVersionId}` 下五个端点全部经它，其中 `POST /{appVersionId}/release` 与 `/rollback` **能改别家租户线上应用正在跑的版本**——发布一个未经其运维审核的配置，或把它回滚到旧版本；`PUT /{appVersionId}/gate-dataset` 能改别家的发布门禁基线；`GET /{appVersionId}` 能读别家应用的完整配置快照（含关联知识库、提示词、路由参数）。修复：`require` 补一跳 `appService.find(version.getAppId())`，跨租户读作"版本不存在"（`VERSION_NOT_FOUND`，与不存在的 id 同码同文案）
+- **`t_kb_api_audit_log`（开放 API 调用审计）**：`GET /api/v1/api-audit-logs` 与 `/stats` 只按可选的 `key_id` 过滤，**`key_id` 不传就是全部署所有租户的调用流水**（key_id、app_id、endpoint、query 摘要、耗时、错误码）。该表是 `t_kb_api_key`（围栏根表）的从属表，自己不带 `tenant_id`。修复：查询前先经围栏解析出调用者租户下的 key 集合，用它约束 `in`；一把都不剩就答空页，而不是"不加过滤"——**这是这类修复最容易写错的地方，空集合退化成无条件查询会把缺陷原样保留**。别家的 `key_id` 在这里解析为空，读起来与一个不存在的 key 完全一致
+- 审计表不加 `tenant_id` 列而是解析根表，遵循 M16 契约 §1.1 取舍①（从属表经根归属租户，加列只会造第二个可以不一致的事实源）；`in` 列表的长度由一个租户持有的 key 数量决定，那是控制台管理的个位到两位数
+- 单测新增 3 例：`AppVersionServiceTest`（跨租户时 require / submit-test / rollback / gate-dataset 全数拒绝且无写语句）、`ApiAuditServiceTest`（围栏裁完无 key 时答空且**一条审计语句都不发**；别家 key_id 与不存在的 key 同解）
+- 无 schema 变更、无新增配置键与环境变量；开放 API 的写入侧（`record`/`recordAsync`）跑在无主体线程上，不经这两处改动
+
 ### 安全修复（M16 后修复：按 `kbId` 寻址的列表与批量入口不解析根表）
 
 - **缺陷**：上一条修的是"路径只带从属资源 id"那一类入口，这一条修的是另一类——路径自带 `kbId`、但链路上从头到尾没有一次对 `t_kb_knowledge_base` 的查询。这类入口的守卫只有 Controller 里那行 `AccessGuard.requireKbAccess(kbId)`，它问的是"这个库在不在你角色配的数据范围里"，而 `kb_scope_all` 对内置角色恒为真，于是**只要报一个别家的 `kbId`，后续那条按 `kb_id` 过滤的语句就照常执行**：`GET /kb/{kbId}/documents`（列出别家全部文档与解析状态）、`/trash`（别家的删除历史）、`/search-insights` 与 `/stats`（别家用户搜过什么，原始 query 文本）、`/documents/batch-delete` 与 `/batch-reindex`（批量删/重建别家文档）、`/documents/confirm`、`/rebuild` 与 `/rebuild-status`（替别家跑一遍全库重建）、`/documents/{docId}/visibility` 读写（别家文档的密级与授权角色）

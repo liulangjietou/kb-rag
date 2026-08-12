@@ -75,6 +75,8 @@
 | `t_kb_web_source` | `kb_id` → `t_kb_knowledge_base` | `WebSourceGuard`（网页导入 4 个入口） | V22 后修复 |
 | `t_kb_document` / `t_kb_chunk` / `t_kb_annotation` / `t_kb_ext_source` / `t_kb_retrieval_feedback` | `kb_id` → `t_kb_knowledge_base` | `KbResourceGuard`（按自身 id 寻址的 34 个入口） | M16 后修复 |
 | `t_kb_eval_case` / `t_kb_eval_run` | `dataset_id` → `t_kb_eval_dataset`（该表自身在围栏内） | `KbResourceGuard` + `EvalRunService#requireRun` / `EvalDatasetService#requireCase` | M16 后修复 |
+| `t_kb_app_version` | `app_id` → `t_kb_app` | `AppVersionService#require`（`/app-versions/{id}` 五个入口） | M16 后修复 |
+| `t_kb_api_audit_log` | `key_id` → `t_kb_api_key` | `ApiAuditService#visibleKeyIds`（列表与统计，见下） | M16 后修复 |
 
 - **`t_kb_web_source` 不进围栏名单是对的，漏的是解析**：它是 M12 建的从属表，经 `kb_id` 归属租户，给它加 `tenant_id` 就是造第二个可以不一致的事实源。真正的缺陷是四个入口（`POST /web-sources/{sourceId}/sync`、`PUT /web-sources/{sourceId}`、`DELETE /web-sources/{sourceId}`、`GET /kb/{kbId}/web-sources`）压根不查 `t_kb_knowledge_base` —— 任何租户凭一个 `sourceId` 就能触发别家网页源的抓取、改它的同步开关、硬删它的登记（`hardDeleteById`，不可恢复），凭一个 `kbId` 就能列出别家知识库登记的全部 URL 与同步状态。
 - **数据范围守卫不是租户守卫，这是本次缺陷的根因**：`KbScopeGuard` / `AccessGuard.requireKbAccess` 回答的是"这个库在不在调用者角色配的数据范围里"，从头到尾没有一处比对租户；而且每个方法第一行的 `unrestrictedKbScope()` 短路对 `kb_scope_all` 的账号（租户的 SUPER_ADMIN、未配数据范围的 KB_ADMIN，都是常见配置）直接放行。已被删除的 `KbScopeGuard#requireWebSourceAccess` 就站在这四个入口前面，看起来像守卫、实际一行租户判断都没有 —— **一个只覆盖数据范围的守卫比没有守卫更危险，它让 review 以为这条路径已经守住了**。
@@ -83,6 +85,7 @@
 - **「入口自带 `kb_id`」不等于已解析**：这类入口最容易被误判为安全，因为路径里那个 `kbId` 看着就是作用域本身。但它是**调用方声明的**作用域，不是被证实的——不查根表就没有任何东西证实过它属于调用者的租户，而按 `kb_id` 过滤的那条从属表语句会照常执行。M16 后修复补齐了 15 个这样的入口（文档列表 / 回收站 / 检索洞察与统计 / 批量删除与重建 / 批量确认 / 全库重建与状态 / 文档密级读写），落点一律在服务层方法首行。**判据**：这条链路上有没有一次对 `t_kb_knowledge_base` 的查询？没有 → 未守，`kbId` 在路径里也一样。
 - **解析义务的形态**：入口自带 `kb_id`（列表、登记）→ 直接解析根表，从属表一条语句都不发；入口只有从属表自己的 id（按 `source_id` 同步/改/删）→ **先定位、再解析根**，定位那条 `select` 物理上无法避免（`source_id` 只存在于从属表），但它只读、不改任何状态，判定发生在紧接着的根表那一跳，跨租户在那里读作"不存在"，后续的写语句与抓取一条都不发出。两种形态都以 **404** 收场（与 §1.3 记忆库同口径），不是 403。
 - **租户判定必须排在数据范围判定之前**：先问数据范围会让跨租户的资源答 403、不存在的资源答 404，这个差别本身就告诉调用方"这个 id 在别的租户里存在"。`WebSourceGuard` 的顺序是租户（404）→ 数据范围（403），单测钉住。
+- **过滤型入口的第三种形态：没有任何 id 可解析**。`GET /api-audit-logs` 的 `key_id` 是**可选**过滤参数，不传就没有任何东西可以解析——而"没有 id"在这里等于"全部署所有租户的调用流水"。这类入口要反过来做：先经围栏读出调用者租户下的根表 id 集合（`t_kb_api_key`），再用它约束从属表的 `in`。**空集合必须答空，绝不能退化成"不加过滤"**——那会把缺陷原样保留，而且看起来像已经修了。判据：可选过滤参数缺省时，这条语句的作用域是什么？答案是"全表"就是未守。
 - **判据（新增入口时自查）**：这个入口的路径参数是根表的 id 吗？不是 → 它必须过本域的守卫。守卫做成独立 bean、检查放服务层不放 Controller —— Controller 里的守卫只护得住有人记得加的那几条路径，而服务方法是所有调用方的必经之路。
 
 - 平台超管跨租户：**默认租户的 SUPER_ADMIN** 是唯一能看到租户管理页的人；其余一切读写都被钉死在自己租户内，包括默认租户超管的日常操作 —— 跨租户视角只存在于 `TenantController`，不存在"切换租户"的全局态，全局态是每一个越权 bug 的温床。

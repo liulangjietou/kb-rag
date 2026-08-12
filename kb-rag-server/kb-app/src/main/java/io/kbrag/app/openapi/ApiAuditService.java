@@ -8,8 +8,10 @@ import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.ApiAuditLog;
+import io.kbrag.domain.entity.ApiKey;
 import io.kbrag.domain.enums.TargetStage;
 import io.kbrag.domain.mapper.ApiAuditLogMapper;
+import io.kbrag.domain.mapper.ApiKeyMapper;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.QueryDigestFactory;
 import lombok.Builder;
@@ -49,6 +51,7 @@ public class ApiAuditService {
     public static final String ENDPOINT_CHAT = "chat";
 
     private final ApiAuditLogMapper apiAuditLogMapper;
+    private final ApiKeyMapper apiKeyMapper;
     private final QueryDigestFactory queryDigestFactory;
     private final BizIdGenerator bizIdGenerator;
     private final KbProperties properties;
@@ -110,8 +113,12 @@ public class ApiAuditService {
      */
     public IPage<ApiAuditLog> query(String keyId, TargetStage targetStage, LocalDateTime from,
                                     LocalDateTime to, long page, long size) {
-        return apiAuditLogMapper.selectPage(new Page<>(page, size), filter(keyId, targetStage, from, to)
-                .orderByDesc(ApiAuditLog::getId));
+        List<String> visibleKeyIds = visibleKeyIds(keyId);
+        if (visibleKeyIds.isEmpty()) {
+            return new Page<>(page, size);
+        }
+        return apiAuditLogMapper.selectPage(new Page<>(page, size),
+                filter(visibleKeyIds, targetStage, from, to).orderByDesc(ApiAuditLog::getId));
     }
 
     /**
@@ -128,7 +135,12 @@ public class ApiAuditService {
      * @return totals of the filtered rows
      */
     public AuditStats stats(String keyId, TargetStage targetStage, LocalDateTime from, LocalDateTime to) {
-        List<ApiAuditLog> rows = apiAuditLogMapper.selectList(filter(keyId, targetStage, from, to));
+        List<String> visibleKeyIds = visibleKeyIds(keyId);
+        if (visibleKeyIds.isEmpty()) {
+            return new AuditStats(0L, 0.0d, 0L, 0L);
+        }
+        List<ApiAuditLog> rows = apiAuditLogMapper.selectList(
+                filter(visibleKeyIds, targetStage, from, to));
         if (CollectionUtils.isEmpty(rows)) {
             return new AuditStats(0L, 0.0d, 0L, 0L);
         }
@@ -147,12 +159,38 @@ public class ApiAuditService {
         return new AuditStats(rows.size(), (double) latencySum / rows.size(), degraded, errors);
     }
 
-    private LambdaQueryWrapper<ApiAuditLog> filter(String keyId, TargetStage targetStage,
+    /**
+     * Resolves which keys the current caller may read the trail of.
+     *
+     * <p><b>This is the tenant boundary of the whole audit screen.</b> {@code t_kb_api_audit_log} is a
+     * subordinate of {@code t_kb_api_key} and carries no {@code tenant_id}, so nothing in its own
+     * statement can tell one tenant's calls from another's. {@code t_kb_api_key} is a fenced root, so
+     * reading the key ids through it yields exactly the keys of the caller's tenant - and an empty
+     * answer, which the callers turn into an empty page rather than into "no filter at all".
+     *
+     * <p>Materialising the ids into an {@code in} clause rather than writing a tenant column onto the
+     * audit table follows the M16 contract section 1.1①: a subordinate reaches its tenant through its root,
+     * and a second tenant column would be a second fact that can disagree. The list is bounded by the
+     * number of keys a tenant holds, which is a console-managed handful.
+     *
+     * <p>A named key of another tenant comes back empty here, so it reads exactly like a key that does
+     * not exist - the same answer a filter value that matches nothing has always given.
+     *
+     * @param keyId optional key filter named by the request
+     * @return key ids to constrain the trail to, empty when the caller may read none
+     */
+    private List<String> visibleKeyIds(String keyId) {
+        LambdaQueryWrapper<ApiKey> wrapper = new LambdaQueryWrapper<ApiKey>().select(ApiKey::getKeyId);
+        if (keyId != null && !keyId.isBlank()) {
+            wrapper.eq(ApiKey::getKeyId, keyId);
+        }
+        return apiKeyMapper.selectList(wrapper).stream().map(ApiKey::getKeyId).toList();
+    }
+
+    private LambdaQueryWrapper<ApiAuditLog> filter(List<String> keyIds, TargetStage targetStage,
                                                    LocalDateTime from, LocalDateTime to) {
         LambdaQueryWrapper<ApiAuditLog> wrapper = new LambdaQueryWrapper<>();
-        if (keyId != null && !keyId.isBlank()) {
-            wrapper.eq(ApiAuditLog::getKeyId, keyId);
-        }
+        wrapper.in(ApiAuditLog::getKeyId, keyIds);
         if (targetStage != null) {
             wrapper.eq(ApiAuditLog::getTargetStage, targetStage);
         }
