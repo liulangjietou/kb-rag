@@ -104,6 +104,8 @@ public interface FulltextStore { /* upsert/delete/searchBm25(alias, text, filter
 - `GET /api/v1/system/model-status` → {embedding_configured, vector_engine, provider, model}
 - `GET /actuator/health`（含 MySQL/ES/MinIO/Qdrant(配置时) 探活）
 
+> **租户解析义务（M16 后修复补齐）**：上面按 `kbId` 寻址的端点（文档列表、上传、检索）以及后续里程碑挂在同一前缀下的批量端点（`documents/batch-delete`、`batch-reindex`、`documents/confirm`、`rebuild`、`rebuild-status`），原先在 Controller 里只过 `AccessGuard.requireKbAccess(kbId)`。**路径里那个 `kbId` 是调用方声明的作用域，不是被证实的**：那行只回答"这个库在不在调用者角色配的数据范围里"，而 `kb_scope_all` 对五个内置角色恒为真，于是报一个别家的 `kbId`，后续按 `kb_id` 过滤的语句照常执行——列出别家的全部文档、批量把它们丢进回收站、替它们跑一遍全库重建。现在服务层（`DocumentService#list`/`#requireAllInKb`、`DocumentPreviewService#confirmAll`、`RebuildService#submit`/`#status`）首行一律 `knowledgeBaseService.require(kbId)` 先经行级围栏读回该库，跨租户读作"不存在" → **404**；Controller 那行换成 `KbResourceGuard#requireKb`，把租户判定摆回数据范围判定之前。批量端点的作用域校验因此变成两问："这个库是不是你的"在前，"这些文档在不在这个库里"在后——只问后者的话，别家的 `kbId` 配上该库下的 `docId` 完全对得上。详见 `M16-CONTRACTS.md` §1.3.2。
+
 ## 6. kb-rag-parser API
 
 - `POST /api/v1/parse`：multipart `file` + form `file_ext`；支持 pdf(pymupdf)/docx(python-docx)/txt/md/xlsx(openpyxl)/csv；返回 `{code:"OK", data:{markdown, pages:[{page_no,text}], images:[]}, message, request_id}`；失败 code=PARSE_FAILED + message（`pages[]` 后续里程碑扩展 `scanned`/`ocr_source` 见 M3/M8、`markdown` 切片见 M14）

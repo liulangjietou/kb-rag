@@ -52,6 +52,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * Evaluation run submission, execution and comparison, requirement section 4.6.
@@ -83,6 +84,10 @@ public class EvalRunService {
     private static final int MIN_CONFIGS = 1;
     private static final int MAX_CONFIGS = 6;
     private static final int MIN_K = 1;
+
+    /** Recorded on a run the evaluation pool refused to queue, see {@link #submitExecution}. */
+    private static final String QUEUE_FULL_REASON = "评测执行队列已满：当前并发评测数已达部署上限，本次运行未能进入"
+            + "执行队列，请等待在跑的评测结束后重新提交";
 
     private final EvalDatasetService evalDatasetService;
     private final EvalRunMapper evalRunMapper;
@@ -341,7 +346,7 @@ public class EvalRunService {
         }
         run.setStatus(RunStatus.PENDING);
         evalRunMapper.insert(run);
-        submitExecution(run.getRunId(), judgeEnabled);
+        submitExecution(run, judgeEnabled);
         return run;
     }
 
@@ -352,18 +357,38 @@ public class EvalRunService {
      * never reaches its executor thread is visible as a run that stayed pending rather than as one that
      * was never created - which is what the release gate's wait budget is there to time out on.
      *
-     * @param runId        run business id
+     * <p><b>A rejected submission is turned into a failed run, never left pending.</b> The pool aborts
+     * rather than running the task on the caller, because dragging a whole run back onto the submitting
+     * HTTP request is precisely the behaviour the {@code @Async} self invocation used to produce. That
+     * leaves this method holding an inserted row nothing will ever pick up, so it records the rejection on
+     * the row itself: the submitter sees a {@code FAILED} run with a reason instead of a matrix half of
+     * which quietly never ran, and the release gate reads a terminal state immediately instead of burning
+     * its whole wait budget on a run that was never queued. The exception is deliberately not rethrown -
+     * the configurations already created would otherwise be orphaned mid batch by the very failure this
+     * handles.
+     *
+     * @param run          inserted run row, updated in place when the executor refuses it
      * @param judgeEnabled {@code true} runs the LLM-as-judge stage
      */
-    private void submitExecution(String runId, boolean judgeEnabled) {
-        evalExecutor.execute(() -> {
-            try {
-                execute(runId, judgeEnabled);
-            } catch (Exception e) {
-                log.error("evaluation run execution could not start, errorCode={}, runId={}",
-                        ErrorCode.INTERNAL_ERROR, runId, e);
-            }
-        });
+    private void submitExecution(EvalRun run, boolean judgeEnabled) {
+        String runId = run.getRunId();
+        try {
+            evalExecutor.execute(() -> {
+                try {
+                    execute(runId, judgeEnabled);
+                } catch (Exception e) {
+                    log.error("evaluation run execution could not start, errorCode={}, runId={}",
+                            ErrorCode.INTERNAL_ERROR, runId, e);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            run.setStatus(RunStatus.FAILED);
+            run.setFailReason(QUEUE_FULL_REASON);
+            run.setFinishedAt(LocalDateTime.now());
+            evalRunMapper.updateById(run);
+            log.error("evaluation run rejected by a saturated executor, errorCode={}, runId={}",
+                    ErrorCode.INTERNAL_ERROR, runId, e);
+        }
     }
 
     /**

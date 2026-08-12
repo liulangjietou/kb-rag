@@ -36,6 +36,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * Runs the release gate and drives the release itself, requirement section 4.7 "evaluation gate".
@@ -193,18 +194,30 @@ public class ReleaseGateService {
      * <p>Its own executor and not the evaluation pool: this thread waits for evaluation runs to finish, and
      * waiting inside the pool those runs are queued on would deadlock the gate against its own work.
      *
+     * <p><b>A rejected gate has to be recorded, not logged.</b> {@link #release} moves the version to
+     * {@code GATING} before calling this, and {@code GATING} is one of the states {@link #release} itself
+     * refuses to release out of - so a rejection nobody records locks that version out of every release
+     * path there is, permanently, with only a database edit to get it back. Handing the rejection to
+     * {@link #failGate} gives it the same retryable outcome a gate that threw would have produced.
+     *
      * @param appVersionId version business id
      */
     private void submitGate(String appVersionId) {
-        gateExecutor.execute(() -> {
-            try {
-                runGate(appVersionId);
-            } catch (Exception e) {
-                log.error("release gate pass failed, errorCode={}, appVersionId={}",
-                        ErrorCode.INTERNAL_ERROR, appVersionId, e);
-                failGate(appVersionId);
-            }
-        });
+        try {
+            gateExecutor.execute(() -> {
+                try {
+                    runGate(appVersionId);
+                } catch (Exception e) {
+                    log.error("release gate pass failed, errorCode={}, appVersionId={}",
+                            ErrorCode.INTERNAL_ERROR, appVersionId, e);
+                    failGate(appVersionId);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            log.error("release gate rejected by a saturated executor, errorCode={}, appVersionId={}",
+                    ErrorCode.INTERNAL_ERROR, appVersionId, e);
+            failGate(appVersionId);
+        }
     }
 
     /**
@@ -318,11 +331,20 @@ public class ReleaseGateService {
      * honest way to learn the outcome. The budget bounds the wait so a stuck run leaves a retryable verdict
      * instead of an executor thread parked forever.
      *
+     * <p><b>The budget is reachable, and what it produces is a verdict rather than an exception.</b> While
+     * the runner ran inline this loop saw a terminal state on its very first pass and the timeout was
+     * decoration; now that a run really queues, a saturated evaluation pool can keep both sides pending
+     * past the deadline. Returning them non terminal is deliberate: {@code runGate} reads that as
+     * {@code succeeded=false} and the judge answers {@code LOG_ONLY / RUN_FAILED}, which never auto
+     * releases, keeps the forced release available and leaves the version retryable. Throwing instead would
+     * reach {@code failGate} and record the same outcome by a longer road.
+     *
      * @param runs runs as they were created
      * @return the same runs, re-read in the same order, in whatever state they ended up in
      */
     private List<EvalRun> awaitCompletion(List<EvalRun> runs) {
-        long deadline = System.currentTimeMillis() + properties.getGate().getRunTimeoutMs();
+        long budgetMs = properties.getGate().getRunTimeoutMs();
+        long deadline = System.currentTimeMillis() + budgetMs;
         long interval = Math.max(1L, properties.getGate().getPollIntervalMs());
         while (true) {
             List<EvalRun> current = runs.stream()
@@ -334,8 +356,12 @@ public class ReleaseGateService {
                 return current;
             }
             if (System.currentTimeMillis() >= deadline) {
-                log.error("release gate dual run exceeded its budget, errorCode={}, runIds={}",
-                        ErrorCode.INTERNAL_ERROR, current.stream().map(EvalRun::getRunId).toList());
+                log.error("release gate dual run exceeded its budget, errorCode={}, budgetMs={}, unfinished={}",
+                        ErrorCode.INTERNAL_ERROR, budgetMs, current.stream()
+                                .filter(run -> run.getStatus() == RunStatus.PENDING
+                                        || run.getStatus() == RunStatus.RUNNING)
+                                .map(run -> run.getRunId() + ":" + run.getStatus())
+                                .toList());
                 return current;
             }
             sleep(interval);

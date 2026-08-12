@@ -66,6 +66,8 @@ msg_time_from, msg_time_to}
 - 结果卡片：各路原始分+归一化分、fused 分、rerank 分、阈值作用类型 Tag、父子模式下展开命中子片明细
 - 顶部 applied 信息条（实际使用的改写后 query、fusion 模式、阈值作用分数）
 - 系统设置新增"ik 词典"tab：词表分页/新增/删除/类型切换
+
+> **租户定性（M16 后修复补齐，Flyway V23）**：`t_kb_ik_dict` 是**部署级配置**，不收进租户维度。词典由 ES 的 ik 插件按一个固定 URL（`/internal/dict/ik/{type}.txt`）拉取，那是集群级设置：按租户切要求每租户一份渲染文档 + 每租户一套 analyzer + 每租户一批索引配置，那不是隔离问题而是另一个特性。但"全部署共用一份"意味着一个租户改了其余租户的分词跟着变，所以本节四个端点的权限码由 `system:config`（每个租户的超管都持有）收紧为新增的 `platform:config`（`PermissionCodes.PLATFORM_ONLY` 第二个成员，只授默认租户超管，建租户复制内置角色时自动剔除）。控制台"ik 词典"页签对无此码的账号不再渲染。详见 `M16-CONTRACTS.md` §1.5。
 - 知识库详情：索引配置编辑（含父子分片开关与长度）、config_stale 提示与重建
 
 ## 6. deploy 增量

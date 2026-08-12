@@ -65,12 +65,14 @@ public class AppService {
     }
 
     /**
-     * Loads an application, {@code null} when there is none under that id.
+     * Loads an application, {@code null} when there is none the caller may see.
      *
-     * <p>{@code t_kb_app} is a fenced root, so on a console thread another tenant's application reads
-     * as a missing one - which is what lets the version side resolve ownership without writing a
-     * tenant clause of its own. Threads with no console principal see every tenant's applications,
-     * unchanged.
+     * <p><b>This is where the tenant fence reaches the application domain.</b> {@code t_kb_app} is a fenced
+     * root table, so on a console thread the statement is trimmed to the caller's tenant and another tenant's
+     * application comes back as no row at all - indistinguishable from one that never existed, which is the
+     * point. Callers that need to phrase the absence in their own words - {@link AppVersionGuard} reports it
+     * as the version being absent, never as the application - take it from here rather than from
+     * {@link #require(String)}.
      *
      * @param appId business id
      * @return application or {@code null}

@@ -20,6 +20,8 @@
 - **kb-rag-parser（sonnet）**：§0.1/0.2/0.3（parser 半）/0.4；pytest 覆盖：TXT 两模板+自定义正则+30% 失败线+多行归并、HTML 留痕模板+安全剥离+图片占位、profile_yaml 随请求传入优先于本地文件、OCR 开关三态（none 跳过/paddle 未装 fast-fail/装了出文本带 ocr_source——paddle 真实推理用小图 fixture，CI 无依赖时 skip 标记）
 - **kb-rag-server（opus）**：§0.3（server 半）/0.5/0.6/0.7（API+种子化）；Flyway V9（t_kb_source_mapping 若一期建表缺列则补齐，按实际表结构定）；单测：overlap 校验单点、msg_span 落 metadata、近重复归并（重叠率 0.5 边界/保排名最高/merged ids ≤5/非聊天零影响/与父子归并次序）、映射 CRUD 与内置保护、preview 兼容旧 profile 名
 - **kb-rag-web（sonnet）**：§0.7 web 半（导入映射 tab、聊天导入向导 profile 下拉与 TXT/HTML 格式项、调试页 merged_window_chunk_ids 展示走既有 metadata 明细惯例）
+
+> **租户定性（M16 后修复补齐，Flyway V23）**：`t_kb_source_mapping` 建表时不带 `tenant_id`，仓库里也从来没有一处写下过"它是有意共享的"。实际后果比看上去重：本节这四个写端点用的是 `doc:write` 而不是 `system:config`，**任何租户的普通文档编辑者都能改删全部署的映射模板**——别家导入解析随即错乱。定性结论是**收进租户维度**（映射模板是租户的业务资产，各家导出格式本就不同）：加 `tenant_id` 进行级围栏，`uk_name(name)` 收缩为 `uk_tenant_name(tenant_id, name)`，内置模板改为建租户时复制一份（`TenantService#copyBuiltinSourceMappings`，与 V17 复制五个内置角色同一套做法），迁移脚本为已存在的非默认租户补齐。**不做"内置全局 + 租户自建"的混合可见性**：那要在每个查询里写"本租户的 OR 全局的"，行级围栏只会拼等值条件、表达不了，漏一处就是缺口。名称随之从全局唯一收缩为租户内唯一——复制会让 `memotrace` 在每个租户各出现一行。启动种子（`SourceMappingSeeder`）跑在无控制台主体的线程上、围栏整条跳过，因此它的两条语句都显式钉死默认租户。详见 `M16-CONTRACTS.md` §1.5。
 - **kb-rag-deploy（主会话收尾）**：OpenAPI 0.9.0-m8、CHANGELOG、.env.example（OCR 两键注释在 parser 段）、需求文档 v1.14、契约 §5 回补
 
 ## 4. 验收（主会话，零 Key 域）

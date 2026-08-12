@@ -46,6 +46,10 @@
 - KB 开关：`PUT /api/v1/kb/{kbId}/governance`：`{review_required}`；GET /kb 响应增 `review_required`
 - 存量查询隔离：文档列表（DocumentService.list）与上传归并查找（findLogicalDocument）排除 `trashed=1`——同名文件在回收站时新上传建新文档，不给回收站里的文档追加版本
 
+> **租户解析义务（M16 后修复补齐）**：本节除 KB 开关与回收站列表外全部按 `docId` 寻址，而 `t_kb_document` 是经 `kb_id` 归属租户的从属表、不在行级围栏名单里。这些入口原先只过 `KbScopeGuard#requireDocumentAccess`，那个方法一行租户判断都没有、且首行 `kb_scope_all` 短路对常见账号恒成立，等价于无守卫：任何租户凭一个 `docId` 就能审核发布、改别家文档的有效期、丢进回收站，乃至 `purge` **彻底清除**（连同全部版本、分片与两个检索引擎副本，不可恢复）。现由 `KbResourceGuard#requireDocumentAccess` 一律先解析根表 `t_kb_knowledge_base`，跨租户读作"不存在" → **404**，判定排在状态迁移与删除之前。定时清理不受影响（无控制台主体，按 `trashed_at` 全表扫描是既有语义）。详见 `M16-CONTRACTS.md` §1.3.2。
+>
+> **被上面那句排除在外的两个 `kbId` 入口（回收站列表 `GET /kb/{kbId}/trash`、KB 审核开关 `PUT /kb/{kbId}/governance`）随后一并补齐**：开关那条服务层本就有 `knowledgeBaseService.require`（只是判定顺序反了，Controller 先答 403），回收站列表则彻底没有——凭一个别家的 `kbId` 就能读到它的删除历史。现由 `DocumentGovernanceService#listTrash` 首行解析根表，两条的 Controller 守卫统一为 `KbResourceGuard#requireKb`，租户 404 排在数据范围 403 之前。
+
 ### 2.3 配置键（application.yml 接环境占位符，KbProperties.Governance 承载）
 - `kb.governance.trash-retention-days=30`（TRASH_RETENTION_DAYS）
 - `kb.governance.trash-purge-batch-size=100`（TRASH_PURGE_BATCH_SIZE）
