@@ -392,6 +392,16 @@ class DocumentGovernanceServiceTest {
     /**
      * Records the SET clause of the next wrapper based update, the only place a null write is visible.
      */
+    @Test
+    void shouldRefuseToListTheRecycleBinOfAnotherTenantsBase() {
+        when(knowledgeBaseService.require(KB_ID))
+                .thenThrow(BizException.notFound("knowledge base not found"));
+
+        // 回收站里是尚未彻底清除的文档，跨租户读到就是读到别家的删除历史。
+        assertThrows(BizException.class, () -> service.listTrash(KB_ID, 1, 20));
+        verify(documentMapper, never()).selectPage(any(), any());
+    }
+
     private AtomicReference<String> captureUpdateSqlSet() {
         AtomicReference<String> sqlSet = new AtomicReference<>();
         when(documentMapper.update(any(), any())).thenAnswer(invocation -> {

@@ -1,5 +1,7 @@
 package io.kbrag.app.insight;
 
+import io.kbrag.app.kb.KnowledgeBaseService;
+import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.SearchInsight;
@@ -19,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -42,6 +45,7 @@ class SearchInsightServiceTest {
     private static final String KB_B = "kb_b";
 
     private SearchInsightMapper searchInsightMapper;
+    private KnowledgeBaseService knowledgeBaseService;
     private KbProperties properties;
     private SearchInsightService service;
 
@@ -51,8 +55,10 @@ class SearchInsightServiceTest {
         BizIdGenerator bizIdGenerator = mock(BizIdGenerator.class);
         when(bizIdGenerator.searchInsightId()).thenReturn(INSIGHT_ID);
         properties = new KbProperties();
+        knowledgeBaseService = mock(KnowledgeBaseService.class);
         service = new SearchInsightService(searchInsightMapper,
-                new QueryDigestFactory(new TextDesensitizer()), bizIdGenerator, properties);
+                new QueryDigestFactory(new TextDesensitizer()), bizIdGenerator, properties,
+                knowledgeBaseService);
     }
 
     @Test
@@ -196,5 +202,16 @@ class SearchInsightServiceTest {
         ArgumentCaptor<SearchInsight> captor = ArgumentCaptor.forClass(SearchInsight.class);
         verify(searchInsightMapper).insert(captor.capture());
         return captor.getValue();
+    }
+    @Test
+    void shouldRefuseToReadTheInsightsOfAnotherTenantsBase() {
+        when(knowledgeBaseService.require(KB_A))
+                .thenThrow(BizException.notFound("knowledge base not found"));
+
+        // 洞察行存的是原始 query 文本与命中情况，跨租户读到就是读到别家用户搜了什么。
+        assertThrows(BizException.class, () -> service.list(KB_A, null, null, null, 1, 20));
+        assertThrows(BizException.class, () -> service.stats(KB_A, null, null));
+        verify(searchInsightMapper, never()).selectPage(any(), any());
+        verify(searchInsightMapper, never()).selectList(any());
     }
 }

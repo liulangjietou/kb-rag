@@ -5,7 +5,7 @@ import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.SearchInsightResponse;
 import io.kbrag.api.dto.SearchInsightStatsResponse;
-import io.kbrag.app.auth.AccessGuard;
+import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.insight.SearchInsightService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
@@ -37,6 +37,7 @@ public class SearchInsightController {
     private static final int MAX_PAGE_SIZE = 200;
 
     private final SearchInsightService searchInsightService;
+    private final KbResourceGuard kbResourceGuard;
 
     /**
      * Pages the insight rows of one knowledge base, newest first.
@@ -57,7 +58,7 @@ public class SearchInsightController {
             @RequestParam(required = false) String to,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         IPage<SearchInsight> paged = searchInsightService.list(kbId, zeroHit,
                 parseTime(from, "from"), parseTime(to, "to"), normalizePage(page), normalizeSize(size));
         return Result.success(PageResponse.from(paged, SearchInsightResponse::from));
@@ -76,7 +77,7 @@ public class SearchInsightController {
             @PathVariable String kbId,
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         return Result.success(SearchInsightStatsResponse.from(
                 searchInsightService.stats(kbId, parseTime(from, "from"), parseTime(to, "to"))));
     }

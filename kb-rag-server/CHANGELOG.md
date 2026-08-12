@@ -8,6 +8,16 @@
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
 
+### 安全修复（M16 后修复：按 `kbId` 寻址的列表与批量入口不解析根表）
+
+- **缺陷**：上一条修的是"路径只带从属资源 id"那一类入口，这一条修的是另一类——路径自带 `kbId`、但链路上从头到尾没有一次对 `t_kb_knowledge_base` 的查询。这类入口的守卫只有 Controller 里那行 `AccessGuard.requireKbAccess(kbId)`，它问的是"这个库在不在你角色配的数据范围里"，而 `kb_scope_all` 对内置角色恒为真，于是**只要报一个别家的 `kbId`，后续那条按 `kb_id` 过滤的语句就照常执行**：`GET /kb/{kbId}/documents`（列出别家全部文档与解析状态）、`/trash`（别家的删除历史）、`/search-insights` 与 `/stats`（别家用户搜过什么，原始 query 文本）、`/documents/batch-delete` 与 `/batch-reindex`（批量删/重建别家文档）、`/documents/confirm`、`/rebuild` 与 `/rebuild-status`（替别家跑一遍全库重建）、`/documents/{docId}/visibility` 读写（别家文档的密级与授权角色）
+- `/documents/{docId}/visibility` 那两条值得单独说：`DocumentAclService#requireOwned` 校验的是"文档挂在这个 kbId 下"，跨租户调用方把别家的 `kbId` 与该库下的 `docId` 一起传进来**完全对得上**——校验通过，密级照读照改。"从属行属于这个父"和"这个父属于你"是两个问题
+- 修复落在服务层，不在 Controller：`DocumentService#list` / `#requireAllInKb`、`DocumentPreviewService#confirmAll`、`DocumentGovernanceService#listTrash`、`RebuildService#submit` / `#status`、`SearchInsightService#list` / `#stats`、`DocumentAclService#requireOwned` 首行补 `knowledgeBaseService.require(kbId)`。`requireAllInKb` 一处覆盖 batch-delete 与 batch-reindex 两个入口——它本来就是批量作用域校验的唯一落点，缺的只是第一问
+- 28 处 Controller 的 `AccessGuard.requireKbAccess(kbId)` 统一换成 `kbResourceGuard.requireKb(kbId)`（7 个控制器），**判定顺序由此在全域一致**：租户 404 先于数据范围 403。原先 Graph 五端点、chat-imports、`/kb/{kbId}/search`、知识库增改删这些服务层已经有 `require` 的入口，顺序是反的（Controller 先答 403），跨租户与"范围外"在状态码上可区分
+- **对外行为变更**：跨租户从 403（或成功）收敛为 404，同租户范围外仍是 403
+- 单测新增 6 例：`DocumentServiceTest`（list / reindexAll / requireAllInKb 三个入口一并拒绝且从属表零语句）、`DocumentPreviewServiceTenantTest`（新建）、`DocumentGovernanceServiceTest`（回收站）、`RebuildServiceTest`（重建与状态，且不提交任何索引任务）、`SearchInsightServiceTest`（列表与统计）、`DocumentAclServiceTest`（密级读写，且不落 ACL 写操作）
+- 无 schema 变更、无新增配置键与环境变量；开放 API 与定时任务链路不经这些方法，行为不变
+
 ### 安全修复（M16 后修复：`KbScopeGuard` 全族假守卫，34 个按资源自身 id 寻址的入口零租户隔离）
 
 - **缺陷**：PR #36 删掉的 `KbScopeGuard#requireWebSourceAccess` 不是孤例，是一族里的一个。同类的另外 8 个方法（document / chunk / annotation / dataset / case / run / ext-source / feedback）逐字同构：第一行 `if (AccessGuard.unrestrictedKbScope()) return;`，随后 `AccessGuard.requireKbAccess(kbId)`——**一行租户判断都没有**。而 `V16__rbac.sql:163-169` 五个内置角色一律 `kb_scope_all=1`、`TenantService#copyBuiltinRoles` 建租户时照抄，所以第一行那个短路在真实部署里对租户 SUPER_ADMIN 与未配数据范围的 KB_ADMIN 恒成立：**这些守卫的开销为零、判定恒为放行**。站在它们后面的 34 个控制台入口因此全都是跨租户可达的，其中破坏面最大的几条：`PUT /ext-sources/{sourceId}`（覆写别家的 endpoint 与 AK/SK）、`POST /ext-sources/{sourceId}/test`（拿别家凭据向别家对象存储发外网请求）、`DELETE /ext-sources/{sourceId}`（`hardDeleteById`，不可恢复）、`/documents/{docId}/purge`（彻底清除别家文档）、`/documents/{docId}/versions/{versionId}/activate`（把别家文档回滚到旧版本并重跑索引）

@@ -5,7 +5,6 @@ import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.CreateEvalDatasetRequest;
 import io.kbrag.api.dto.EvalDatasetResponse;
 import io.kbrag.api.dto.ImportDemoEvalDatasetResponse;
-import io.kbrag.app.auth.AccessGuard;
 import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.eval.EvalDatasetService;
 import io.kbrag.app.eval.EvalDemoImportService;
@@ -51,7 +50,7 @@ public class EvalDatasetController {
             targetId = "#result.data.datasetId")
     public Result<EvalDatasetResponse> create(@PathVariable String kbId,
                                               @Valid @RequestBody CreateEvalDatasetRequest request) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         EvalDataset dataset = evalDatasetService.create(kbId, request.name(), request.description());
         return Result.success(EvalDatasetResponse.from(evalDatasetService.detail(dataset.getDatasetId())));
     }
@@ -65,7 +64,7 @@ public class EvalDatasetController {
     @GetMapping("/api/v1/kb/{kbId}/eval-datasets")
     @RequiresPermission(PermissionCodes.EVAL_READ)
     public Result<List<EvalDatasetResponse>> list(@PathVariable String kbId) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         return Result.success(evalDatasetService.list(kbId).stream().map(EvalDatasetResponse::from).toList());
     }
 
@@ -80,7 +79,7 @@ public class EvalDatasetController {
     @AuditedOperation(module = "EVAL", action = "IMPORT_DEMO", targetType = "KNOWLEDGE_BASE",
             targetId = "#kbId")
     public Result<ImportDemoEvalDatasetResponse> importDemo(@PathVariable String kbId) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         return Result.success(ImportDemoEvalDatasetResponse.from(evalDemoImportService.importDemo(kbId)));
     }
 

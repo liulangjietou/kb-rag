@@ -245,6 +245,8 @@ public class DocumentGovernanceService {
      * @return page of trashed documents
      */
     public IPage<Document> listTrash(String kbId, long page, long size) {
+        // 回收站列的是尚未彻底清除的文档，跨租户读到这一页等于读到别家的删除历史。
+        knowledgeBaseService.require(kbId);
         return documentMapper.selectPage(new Page<>(page, size), new LambdaQueryWrapper<Document>()
                 .eq(Document::getKbId, kbId)
                 .eq(Document::getTrashed, TRASHED)

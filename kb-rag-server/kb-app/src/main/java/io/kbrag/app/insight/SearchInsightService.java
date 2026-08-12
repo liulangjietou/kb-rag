@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.kbrag.app.config.AsyncConfig;
+import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.util.HashUtil;
 import io.kbrag.common.util.JsonUtil;
@@ -67,6 +68,7 @@ public class SearchInsightService {
     private final QueryDigestFactory queryDigestFactory;
     private final BizIdGenerator bizIdGenerator;
     private final KbProperties properties;
+    private final KnowledgeBaseService knowledgeBaseService;
 
     /**
      * Queues one insight row per searched knowledge base.
@@ -154,6 +156,8 @@ public class SearchInsightService {
      */
     public IPage<SearchInsight> list(String kbId, Boolean zeroHit, LocalDateTime from, LocalDateTime to,
                                      long page, long size) {
+        // 洞察行存的是原始 query 文本与命中情况，跨租户读到就是读到别家用户搜了什么。
+        knowledgeBaseService.require(kbId);
         return searchInsightMapper.selectPage(new Page<>(page, size),
                 filter(kbId, zeroHit, from, to).orderByDesc(SearchInsight::getId));
     }
@@ -171,6 +175,7 @@ public class SearchInsightService {
      * @return totals plus the top zero hit query groups
      */
     public InsightStats stats(String kbId, LocalDateTime from, LocalDateTime to) {
+        knowledgeBaseService.require(kbId);
         LocalDateTime effectiveFrom = from != null ? from
                 : LocalDate.now().minusDays(DEFAULT_STATS_WINDOW_DAYS).atStartOfDay();
         List<SearchInsight> rows = searchInsightMapper.selectList(

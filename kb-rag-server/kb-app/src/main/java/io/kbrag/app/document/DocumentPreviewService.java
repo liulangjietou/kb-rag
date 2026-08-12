@@ -2,6 +2,7 @@ package io.kbrag.app.document;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.kbrag.app.index.IndexPipelineService;
+import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.Document;
@@ -44,6 +45,7 @@ public class DocumentPreviewService {
     private final ObjectStorage objectStorage;
     private final IndexPipelineService indexPipelineService;
     private final KbProperties properties;
+    private final KnowledgeBaseService knowledgeBaseService;
 
     /**
      * Reads the preview of a document.
@@ -82,6 +84,7 @@ public class DocumentPreviewService {
      * @return document ids that were confirmed
      */
     public List<String> confirmAll(String kbId, List<String> docIds) {
+        knowledgeBaseService.require(kbId);
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
                 .eq(Document::getKbId, kbId)
                 .eq(Document::getProcessStatus, ProcessStatus.PENDING_CONFIRM);

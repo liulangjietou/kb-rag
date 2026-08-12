@@ -2,6 +2,7 @@ package io.kbrag.app.document;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.kbrag.app.auth.AccessGuard;
+import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.DocAcl;
 import io.kbrag.domain.entity.Document;
@@ -50,6 +51,7 @@ public class DocumentAclService {
     private final DocumentVersionMapper documentVersionMapper;
     private final DocAclMapper docAclMapper;
     private final RoleMapper roleMapper;
+    private final KnowledgeBaseService knowledgeBaseService;
 
     /**
      * Current visibility of a document together with the granted roles.
@@ -220,6 +222,9 @@ public class DocumentAclService {
     }
 
     private Document requireOwned(String kbId, String docId) {
+        // 「文档挂在这个库下」和「这个库是你的」是两个问题。只问前者的话，跨租户的调用方
+        // 把别家的 kbId 与该库下的 docId 一起传进来就完全对得上，密级与授权角色照读照改。
+        knowledgeBaseService.require(kbId);
         Document document = documentMapper.selectOne(new LambdaQueryWrapper<Document>()
                 .eq(Document::getDocId, docId)
                 .last("limit 1"));

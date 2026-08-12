@@ -1,5 +1,6 @@
 package io.kbrag.app.document;
 
+import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.context.UserContextHolder;
@@ -54,6 +55,7 @@ class DocumentAclServiceTest {
     private DocumentVersionMapper documentVersionMapper;
     private DocAclMapper docAclMapper;
     private RoleMapper roleMapper;
+    private KnowledgeBaseService knowledgeBaseService;
     private DocumentAclService service;
 
     @BeforeEach
@@ -63,7 +65,9 @@ class DocumentAclServiceTest {
         documentVersionMapper = mock(DocumentVersionMapper.class);
         docAclMapper = mock(DocAclMapper.class);
         roleMapper = mock(RoleMapper.class);
-        service = new DocumentAclService(documentMapper, documentVersionMapper, docAclMapper, roleMapper);
+        knowledgeBaseService = mock(KnowledgeBaseService.class);
+        service = new DocumentAclService(documentMapper, documentVersionMapper, docAclMapper, roleMapper,
+                knowledgeBaseService);
     }
 
     @AfterEach
@@ -244,5 +248,17 @@ class DocumentAclServiceTest {
         version.setVersionId(versionId);
         version.setDocId(docId);
         return version;
+    }
+    @Test
+    void shouldRefuseToReadOrChangeTheClearanceOfAnotherTenantsDocument() {
+        when(knowledgeBaseService.require(KB_ID))
+                .thenThrow(BizException.notFound("knowledge base not found"));
+
+        // 「文档挂在这个库下」对得上，不代表「这个库是你的」——两个问题，之前只问了前一个。
+        assertThrows(BizException.class, () -> service.visibility(KB_ID, DOC_ID));
+        assertThrows(BizException.class,
+                () -> service.updateVisibility(KB_ID, DOC_ID, DocVisibility.RESTRICTED, List.of(GRANTED_ROLE)));
+        verify(documentMapper, never()).selectOne(any());
+        verify(docAclMapper, never()).deleteByDocumentId(any());
     }
 }

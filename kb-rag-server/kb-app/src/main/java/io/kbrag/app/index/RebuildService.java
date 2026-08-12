@@ -2,6 +2,7 @@ package io.kbrag.app.index;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.kbrag.app.document.DocumentService;
+import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.enums.ProcessStatus;
 import io.kbrag.domain.mapper.DocumentMapper;
@@ -53,6 +54,7 @@ public class RebuildService {
     private final DocumentMapper documentMapper;
     private final DocumentService documentService;
     private final IndexPipelineService indexPipelineService;
+    private final KnowledgeBaseService knowledgeBaseService;
 
     /**
      * 汇报整个知识库的配置追平情况，供控制台还原"重建中"的展示。
@@ -69,6 +71,7 @@ public class RebuildService {
      * @return 追平状态
      */
     public RebuildStatus status(String kbId) {
+        knowledgeBaseService.require(kbId);
         int stale = count(kbId, null);
         int inProgress = count(kbId, IN_PROGRESS);
         int failed = count(kbId, FAILED);
@@ -91,6 +94,9 @@ public class RebuildService {
      * @return documents that were queued
      */
     public List<String> submit(String kbId, List<String> docIds) {
+        // 重建会把整个库的文档重新推进索引管线，跨租户提交一次就是替别家烧一遍算力、
+        // 并把它们的索引换成本次配置的产物。
+        knowledgeBaseService.require(kbId);
         List<Document> targets = resolveTargets(kbId, docIds);
         List<String> queued = new ArrayList<>(targets.size());
         for (Document document : targets) {

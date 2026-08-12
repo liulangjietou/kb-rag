@@ -9,7 +9,6 @@ import io.kbrag.api.dto.DocumentVisibilityResponse;
 import io.kbrag.api.dto.PageResponse;
 import io.kbrag.api.dto.ReparseRequest;
 import io.kbrag.api.dto.UpdateDocumentVisibilityRequest;
-import io.kbrag.app.auth.AccessGuard;
 import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.document.DocumentAclService;
 import io.kbrag.app.document.DocumentPreviewService;
@@ -76,7 +75,7 @@ public class DocumentController {
             targetId = "#result.data.docId")
     public Result<DocumentResponse> upload(@PathVariable String kbId,
                                            @RequestParam("file") MultipartFile file) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         if (file == null || file.isEmpty()) {
             throw BizException.invalidParam("file is required");
         }
@@ -106,7 +105,7 @@ public class DocumentController {
             @RequestParam(name = "process_status", required = false) String processStatus,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         return Result.success(PageResponse.from(
                 documentService.list(kbId, parseStatus(processStatus), normalizePage(page), normalizeSize(size)),
                 DocumentResponse::from));
@@ -220,7 +219,7 @@ public class DocumentController {
     @RequiresPermission(PermissionCodes.DOC_REVIEW)
     public Result<DocumentVisibilityResponse> visibility(@PathVariable String kbId,
                                                          @PathVariable String docId) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         return Result.success(DocumentVisibilityResponse.from(
                 documentAclService.visibility(kbId, docId)));
     }
@@ -242,7 +241,7 @@ public class DocumentController {
             targetId = "#docId")
     public Result<Void> updateVisibility(@PathVariable String kbId, @PathVariable String docId,
                                          @Valid @RequestBody UpdateDocumentVisibilityRequest request) {
-        AccessGuard.requireKbAccess(kbId);
+        kbResourceGuard.requireKb(kbId);
         DocVisibility visibility = parseVisibility(request.visibility());
         // Same shape rule as the M15 kb_scope_all pair: a state that ignores its companion list must
         // receive it empty, or the operator meant something the call will not do.
