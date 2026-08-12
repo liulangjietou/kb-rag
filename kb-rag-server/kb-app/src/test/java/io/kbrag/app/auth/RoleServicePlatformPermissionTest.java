@@ -90,6 +90,17 @@ class RoleServicePlatformPermissionTest {
     }
 
     @Test
+    void shouldRefuseTheDeploymentConfigCodeOnATenantRole() {
+        // platform:config 与 tenant:manage 同属平台级：它改的是全部署共用的一份设施——IK 词典是
+        // ES 集群级设置，告警 webhook 是运维出口——一个租户改了，其余租户跟着变。
+        assertThrows(BizException.class, () -> service.replacePermissions(
+                role(TENANT_ROLE_ID, OTHER_TENANT_ID),
+                List.of(PermissionCodes.SYSTEM_CONFIG, PermissionCodes.PLATFORM_CONFIG)));
+
+        verify(rolePermissionMapper, never()).insert(any(RolePermission.class));
+    }
+
+    @Test
     void shouldGrantOrdinaryPermissionsToATenantRole() {
         when(permissionMapper.selectList(any())).thenReturn(List.of(permission(PermissionCodes.KB_READ)));
 

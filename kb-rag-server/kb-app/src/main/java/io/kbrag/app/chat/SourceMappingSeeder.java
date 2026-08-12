@@ -3,6 +3,7 @@ package io.kbrag.app.chat;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.BuiltinTenants;
 import io.kbrag.domain.entity.SourceMapping;
 import io.kbrag.domain.enums.SourceMappingType;
 import io.kbrag.domain.mapper.SourceMappingMapper;
@@ -69,6 +70,7 @@ public class SourceMappingSeeder implements ApplicationRunner {
             }
             SourceMapping mapping = new SourceMapping();
             mapping.setMappingId(bizIdGenerator.sourceMappingId());
+            mapping.setTenantId(BuiltinTenants.DEFAULT_TENANT_ID);
             mapping.setName(profile.name());
             mapping.setSourceType(profile.sourceType());
             mapping.setProfileYaml(read(profile.resourceName()));
@@ -80,8 +82,23 @@ public class SourceMappingSeeder implements ApplicationRunner {
                 BUILTIN_PROFILES.size(), seeded);
     }
 
+    /**
+     * Whether the default tenant already holds this profile.
+     *
+     * <p><b>The tenant is written by hand on both statements of this class, and that is not optional.</b>
+     * A startup runner has no console principal, so {@code KbTenantLineHandler#ignoreTable} skips the
+     * fence entirely on this thread - V23 put {@code t_kb_source_mapping} in the fenced set, which
+     * covers the console and nothing else. Without the clause below the check would see the copies
+     * every other tenant holds and conclude the default tenant is already seeded; without the one in
+     * {@link #run}, the insert would fall back to the column DEFAULT, which happens to be the same
+     * tenant today and would silently stop being so the day that default changes.
+     *
+     * @param name profile name
+     * @return {@code true} when the default tenant already has a row under that name
+     */
     private boolean exists(String name) {
         return sourceMappingMapper.exists(new LambdaQueryWrapper<SourceMapping>()
+                .eq(SourceMapping::getTenantId, BuiltinTenants.DEFAULT_TENANT_ID)
                 .eq(SourceMapping::getName, name));
     }
 

@@ -49,11 +49,17 @@ public class KbTenantLineHandler implements TenantLineHandler {
      * because {@code WebCredentialService#resolveFor} takes the tenant as an argument and puts it in
      * the query by hand. Dropping that argument would silently restore the cross tenant leak this
      * table was added here to fix, and no test of this class would notice.
+     *
+     * <p>{@code t_kb_source_mapping} joined in V23. It has one background reader, the startup seeder,
+     * and that one is handled the way this note prescribes: {@code SourceMappingSeeder} runs with no
+     * principal, so the fence skips it entirely and the seeder pins the default tenant by hand. The
+     * console side - list, create, copy, edit, delete, and the name lookup the chat import performs -
+     * is covered by membership here alone.
      */
     private static final Set<String> FENCED_TABLES = Set.of(
             "t_kb_admin_user", "t_kb_role", "t_kb_knowledge_base",
             "t_kb_api_key", "t_kb_eval_dataset", "t_kb_app", "t_kb_memory_library",
-            "t_kb_web_credential");
+            "t_kb_web_credential", "t_kb_source_mapping");
 
     /** Tables the platform operator may query across tenants, see the class comment. */
     private static final Set<String> OPERATOR_UNFENCED_TABLES = Set.of("t_kb_admin_user", "t_kb_role");

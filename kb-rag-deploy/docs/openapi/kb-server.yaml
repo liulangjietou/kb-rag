@@ -261,13 +261,17 @@ tags:
 - name: search
   description: 检索调试
 - name: dict
-  description: ik 中文分词自定义词典管理（M2）
+  description: 'ik 中文分词自定义词典管理（M2）。**部署级配置，V23 起要 `platform:config`**（只授默认
+    租户超管）：词典由 ES 插件按一个 URL 拉取、全部署共用一份分词结果，一个租户改了其余租户跟着变，
+    因此不下发到子租户，见 M16-CONTRACTS.md §1.5。'
 - name: parse-preview
   description: 解析预览与确认（M3，docs/M3-CONTRACTS.md §3.4）
 - name: chat-import
   description: 聊天记录导入（M3，docs/M3-CONTRACTS.md §3.5）
 - name: alert
-  description: 告警 Webhook 配置（M3，docs/M3-CONTRACTS.md §3.6）
+  description: '告警 Webhook 配置（M3，docs/M3-CONTRACTS.md §3.6）。**部署级配置，V23 起要
+    `platform:config`**（只授默认租户超管）：运维告警只有一个出口，而 `webhook_url` 若可被任意租户
+    改写就是一条把别家告警内容引出去的信道，见 M16-CONTRACTS.md §1.5。'
 - name: demo
   description: Demo 一键导入（M3，docs/M3-CONTRACTS.md §3.7）
 - name: eval
@@ -955,6 +959,9 @@ paths:
     get:
       tags: [source-mapping]
       summary: 导入映射列表（内置在前，组内按名称升序）
+      description: 'V23 起本表按租户隔离：只返回调用者租户的模板。内置模板在建租户时被复制一份到
+        新租户（与内置角色同一套做法），因此每个租户各有一套同名内置行，名称在租户内唯一而非全局
+        唯一。V23 之前任何持 `doc:write` 的账号都能改删全部署的模板，见 M16-CONTRACTS.md §1.5。'
       parameters:
       - name: source_type
         in: query

@@ -103,6 +103,8 @@
 - 消息体兼容钉钉/企微/Slack 的通用 text 结构：`{"msgtype":"text","text":{"content":"..."}}`；未配置 URL 时降级为 error 日志（需求 §5）
 - **静默期**：同一告警类型 `alert.silence_minutes`（默认 30）内不重复发送，避免刷屏
 
+> **租户定性（M16 后修复补齐，Flyway V23）**：告警配置是**部署级设施**，不收进租户维度——运维告警本就只有一个出口。真正的风险不是"存几份"而是"谁能改"：`alert.webhook_url` 原先任何租户持 `system:config` 的账号都能改写，那等于一条把别家告警内容引出去的外带信道。三个端点（读、写、发测试）的权限码因此收紧为新增的 `platform:config`（只授默认租户超管），控制台"告警"页签对无此码的账号不再渲染。详见 `M16-CONTRACTS.md` §1.5。
+
 ### 3.7 Demo 一键导入
 - `POST /api/v1/system/demo/import` → 创建知识库"Demo 知识库"并导入 deploy 仓分发的文档集（镜像内路径 `DEMO_DATA_DIR`，默认 `/opt/kb-rag/demo`，本地开发指向 deploy 仓 `demo/` 目录）
 - 幂等：已存在同名 Demo 知识库则返回其 kb_id 不重复导入
