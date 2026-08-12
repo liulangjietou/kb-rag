@@ -251,7 +251,9 @@ tags:
 - name: operation-audit
   description: 操作审计「谁」维度：管理台写操作留痕查询（M16，docs/M16-CONTRACTS.md §3.7）
 - name: knowledge-base
-  description: 知识库管理
+  description: '知识库管理。路径里的 kbId 是调用方声明的作用域、不是被证实的：本组端点（含文档列表、
+    批量删除/重建、批量确认、全库重建与状态）一律先经行级围栏读回该库，其他租户的 kbId 读作不存在
+    → 404，后续按 kb_id 过滤的语句一条都不发出（见 M16-CONTRACTS.md §1.3.2）。'
 - name: document
   description: '文档上传、状态查询、分片查看、重建索引。本组按 docId / chunkId / annotationId
     直接寻址的端点一律先解析归属知识库：其他租户的 id 读作不存在 → 404（不是 403，见 M16-CONTRACTS.md
@@ -273,7 +275,9 @@ tags:
     本组按 datasetId / caseId / runId / feedbackId 直接寻址的端点一律先解析到评测集（该表自身在
     行级围栏内，case 与 run 经它两跳）：其他租户的 id 读作不存在 → 404（见 M16-CONTRACTS.md §1.3.2）。'
 - name: insight
-  description: 检索洞察：零命中/降级记录明细与内容缺口报表（M10，docs/M10-CONTRACTS.md §2.2）
+  description: '检索洞察：零命中/降级记录明细与内容缺口报表（M10，docs/M10-CONTRACTS.md §2.2）。
+    洞察行存的是原始 query 文本，两个端点都先解析路径里的知识库：其他租户的 kbId 读作不存在 → 404
+    （见 M16-CONTRACTS.md §1.3.2）。'
 - name: governance
   description: '内容治理：审核发布/有效期/回收站（M11，docs/M11-CONTRACTS.md §2.2）。本组端点
     全部按 docId 直接寻址，一律先解析归属知识库：其他租户的 docId 读作不存在 → 404，审核、改密级、
@@ -1190,7 +1194,8 @@ paths:
       tags:
       - knowledge-base
       summary: 按当前索引配置重建文档索引
-      description: 'M2-CONTRACTS.md §4：body 可选 `doc_ids`，缺省时重建该知识库下全部
+      description: '跨租户的 kbId 在解析该库时读作不存在 → 404，一个索引任务都不会被提交（M16-CONTRACTS.md
+        §1.3.2）。M2-CONTRACTS.md §4：body 可选 `doc_ids`，缺省时重建该知识库下全部
 
         config_stale=1 的文档。每篇文档一个 REBUILD 任务：从 MinIO 解析产物
 
@@ -1308,7 +1313,9 @@ paths:
       tags:
       - document
       summary: 批量将文档移入回收站
-      description: '控制台文档列表勾选后的批量删除。`doc_ids` 必填——重建与确认缺省成全量是安全的，
+      description: '作用域校验先问"这个库是不是你的"（跨租户 kbId → 404，M16-CONTRACTS.md §1.3.2），
+        再问"这些文档在不在这个库里"——只问后者的话，报一个别家的 kbId 配上该库下的 docId 就完全对得上。
+        控制台文档列表勾选后的批量删除。`doc_ids` 必填——重建与确认缺省成全量是安全的，
 
         批量删除缺省成"整库"则是会造成损失的默认值。列表中混入不属于该知识库的文档时整批
 
@@ -1379,6 +1386,8 @@ paths:
       tags:
       - document
       summary: 文档可见性与授权角色（DOC_REVIEW，M16）
+      description: 路径里的 kbId 先经行级围栏解析，跨租户读作不存在 → 404；密级与授权角色不会被读到
+        （M16-CONTRACTS.md §1.3.2）。
       responses:
         '200':
           description: OK
