@@ -233,8 +233,15 @@ info:
 
     其余为纯新增字段。
 
+
+    0.22.0-m15-fix 增量：`Role` 增 `tenant_id`（纯新增字段，缺字段的存量调用方不受影响）。
+
+    内置角色每个租户各有一份、code 与 name 都相同，而 GET /api/v1/roles 对持 tenant:manage 的
+
+    平台运维不走行级围栏（M16 §1.3 的既定放行），返回体此前无从区分同名行。
+
     '
-  version: 0.21.0-m14-fix
+  version: 0.22.0-m15-fix
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -729,7 +736,10 @@ paths:
       tags:
       - rbac
       summary: 角色列表（ROLE_MANAGE）
-      description: 裸数组，角色总量小不分页。
+      description: 裸数组，角色总量小不分页。持 tenant:manage 的平台运维读这张表不受行级围栏限制
+        （M16 §1.3 的既定放行，用户管理页要能给新租户建首个账号并授角色），返回的是全部租户的角色，
+        其中五个内置角色每户各一份、code 与 name 都相同——消费方须以 `tenant_id` 区分同名行。
+        其余调用方只会读到本租户那一份。
       responses:
         '200':
           description: OK
@@ -5736,6 +5746,10 @@ components:
       properties:
         role_id:
           type: string
+        tenant_id:
+          type: string
+          description: 所属租户。内置角色每个租户各有一份、code 与 name 都相同，持 tenant:manage
+            的平台运维读这张表不受行级围栏限制（M16 §1.3 的既定放行），靠这个字段区分同名行
         code:
           type: string
           maxLength: 64
