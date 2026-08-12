@@ -243,6 +243,25 @@ class ReleaseGateServiceTest {
     }
 
     @Test
+    void shouldStopACrossTenantReleaseAtTheVersionResolution() {
+        // The tenant of an application version is resolved by AppVersionService#require through the fenced
+        // root table, which is the whole of the isolation on this path: this service holds nothing but an
+        // appVersionId. What matters here is where the rejection lands - before the gate. Releasing was the
+        // single most expensive entry to leave unguarded: it does not only publish another tenant's version,
+        // it starts a dual evaluation run on the gate executor, spending their retrieval and model calls.
+        when(appVersionService.require(VERSION_ID))
+                .thenThrow(new BizException(ErrorCode.VERSION_NOT_FOUND, "application version not found"));
+
+        BizException e = assertThrows(BizException.class, () -> service.release(VERSION_ID, true, "admin"));
+
+        assertEquals(ErrorCode.VERSION_NOT_FOUND, e.getErrorCode());
+        verify(appVersionService, never()).markGating(any());
+        verify(evalRunService, never()).submit(anyString(), anyInt(), anyList(), anyBoolean());
+        verify(releaseSnapshotService, never()).freeze(any(), any());
+        verify(appVersionService, never()).promote(anyString(), anyBoolean(), any(), any());
+    }
+
+    @Test
     void shouldRunBothSidesOnTheSameDataSetAndReleaseWhenTheCandidateHoldsUp() {
         AppVersion version = versionOf(AppVersionStatus.GATING, DATASET_ID);
         AppVersion baseline = baselineVersion();
