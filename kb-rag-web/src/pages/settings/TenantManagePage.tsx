@@ -1,11 +1,12 @@
 // Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useState } from 'react';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DollarOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
   Button,
   Card,
   Form,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
   Space,
@@ -16,12 +17,18 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { createTenant, listTenants, renameTenant, updateTenantStatus } from '../../api/tenant';
+import { createTenant, listTenants, renameTenant, updateTenantModelQuota, updateTenantStatus } from '../../api/tenant';
 import type { TenantSummary } from '../../api/types';
+import ModelPriceDrawer from './components/ModelPriceDrawer';
+import ModelUsageDrawer from './components/ModelUsageDrawer';
 
 interface TenantFormValues {
   code: string;
   name: string;
+}
+
+interface QuotaFormValues {
+  monthlyTokenQuota: number;
 }
 
 /**
@@ -39,7 +46,11 @@ export default function TenantManagePage() {
   const [submitting, setSubmitting] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<TenantSummary | null>(null);
+  const [quotaTenant, setQuotaTenant] = useState<TenantSummary | null>(null);
+  const [usageTenant, setUsageTenant] = useState<TenantSummary | null>(null);
+  const [priceOpen, setPriceOpen] = useState(false);
   const [form] = Form.useForm<TenantFormValues>();
+  const [quotaForm] = Form.useForm<QuotaFormValues>();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,6 +103,24 @@ export default function TenantManagePage() {
     load();
   };
 
+  const openQuota = (record: TenantSummary) => {
+    setQuotaTenant(record);
+    quotaForm.setFieldsValue({ monthlyTokenQuota: record.monthly_token_quota });
+  };
+
+  const submitQuota = async (values: QuotaFormValues) => {
+    if (!quotaTenant) return;
+    setSubmitting(true);
+    try {
+      await updateTenantModelQuota(quotaTenant.tenant_id, values.monthlyTokenQuota);
+      message.success(values.monthlyTokenQuota === 0 ? '租户模型 Token 配额已设为不限额' : '租户模型 Token 配额已更新');
+      setQuotaTenant(null);
+      load();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const columns: ColumnsType<TenantSummary> = [
     {
       title: '租户',
@@ -109,6 +138,12 @@ export default function TenantManagePage() {
       render: (value: string) => <Typography.Text code>{value}</Typography.Text>,
     },
     {
+      title: '月度模型 Token 配额',
+      dataIndex: 'monthly_token_quota',
+      width: 190,
+      render: (value: number) => value === 0 ? <Tag>不限额</Tag> : new Intl.NumberFormat('zh-CN').format(value),
+    },
+    {
       title: '状态',
       dataIndex: 'status',
       width: 100,
@@ -119,9 +154,11 @@ export default function TenantManagePage() {
     {
       title: '操作',
       key: 'actions',
-      width: 140,
+      width: 250,
       render: (_, record) => (
         <Space size={8}>
+          <a onClick={() => setUsageTenant(record)}>用量</a>
+          <a onClick={() => openQuota(record)}>配额</a>
           <a onClick={() => openRename(record)}>改名</a>
           {record.builtin ? (
             <Tooltip title="内置默认租户不可停用">
@@ -153,6 +190,9 @@ export default function TenantManagePage() {
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>
             刷新
+          </Button>
+          <Button icon={<DollarOutlined />} onClick={() => setPriceOpen(true)}>
+            模型价格
           </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             新建租户
@@ -200,6 +240,29 @@ export default function TenantManagePage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Modal
+        open={!!quotaTenant}
+        title={quotaTenant ? `模型 Token 配额 - ${quotaTenant.name}` : '模型 Token 配额'}
+        onCancel={() => setQuotaTenant(null)}
+        onOk={() => quotaForm.submit()}
+        confirmLoading={submitting}
+        destroyOnClose
+      >
+        <Form<QuotaFormValues> form={quotaForm} layout="vertical" onFinish={submitQuota} preserve={false}>
+          <Form.Item
+            name="monthlyTokenQuota"
+            label="每月 Token 配额"
+            rules={[{ required: true, message: '请输入非负整数' }]}
+            extra="按 UTC+8 自然月统计；0 表示不限额。下调后不会取消已发出的调用，从下一次模型请求开始生效。"
+          >
+            <InputNumber min={0} precision={0} step={1000000} style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <ModelUsageDrawer tenant={usageTenant} onClose={() => setUsageTenant(null)} />
+      <ModelPriceDrawer open={priceOpen} onClose={() => setPriceOpen(false)} />
     </Card>
   );
 }

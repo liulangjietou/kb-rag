@@ -13,7 +13,7 @@ kb-rag-server            # parent，统一依赖版本
 ├── kb-infrastructure    # 端口实现：Elasticsearch、Qdrant、Neo4j、MinIO、模型 Provider、parser 客户端、Webhook
 ├── kb-app               # 应用编排：kb / document / index / retrieval / graph / annotation / eval /
 │                        #           appcenter / openapi / chat / alert / dict / auth / system / config /
-│                        #           feedback / insight / governance / websource / metrics
+│                        #           feedback / insight / governance / websource / modelusage / metrics
 └── kb-api               # Controller + DTO + 过滤器 + 健康探针 + Flyway 脚本 + 启动类
 ```
 
@@ -45,6 +45,11 @@ kb-infrastructure 实现 kb-domain 定义的端口接口，kb-app 只依赖端�
 | M11 | 内容治理：文档审核状态机（草稿 / 待审 / 已发布 / 已驳回）、有效期调度（生效 / 过期自动下线）、回收站软删除与恢复 |
 | M12 | 数据接入：网页 URL 导入（登记即抓取）、增量同步四态（成功 / 未变更 / 失败 / 跳过）、SSRF 防护、通用 HTML 解析 |
 | M13 | 运维指标：Prometheus 端点激活，检索耗时 / 任务完成 / 开放 API 拒绝 / 网页同步四类业务指标 + 任务积压 gauge |
+| M14-M20 | 外部数据源与多模态、RBAC/多租户/SSO、网页抓取增强、Agent 记忆库与 MCP 工具层 |
+| M21 | 最终答案质量闭环：生产路径生成、五维答案 Judge、期望拒答与显式发布门禁 |
+| M22 | MCP `2026-07-28` 逐请求元数据协议与旧 initialize 双协议兼容 |
+| M23 | Confluence Cloud 连接器：Space cursor 分页、页面版本增量同步、复用普通入库链 |
+| M24 | 模型 Token 台账与租户月配额：出站原子预占、真实/估算结算、价格快照与管理端查询 |
 
 ## 环境要求
 
@@ -217,7 +222,7 @@ micrometer 的 Prometheus registry，`/actuator/prometheus` 可直接抓取：�
 |---|---|
 | `ARCHITECTURE.md` | 四仓总体架构；§3 是本服务的模块、端口、检索链路、索引管线、异步与数据模型 |
 | `FLOWS.md` | 端到端流程时序（上传入库、检索、发布、评测、导入） |
-| `M1~M23-CONTRACTS.md` | 各里程碑的开发契约与「实现期修订」——实现与契约的偏离都记在这里 |
+| `M1~M24-CONTRACTS.md` | 各里程碑的开发契约与「实现期修订」——实现与契约的偏离都记在这里 |
 | `openapi/kb-server.yaml` | 本服务的 API 契约 |
 | `openapi/kb-parser.yaml` | parser 服务的 API 契约 |
 | [`ACTUATOR-SECURITY.md`](../kb-rag-deploy/docs/ACTUATOR-SECURITY.md) | Actuator 独立管理端口与远程 Prometheus 安全部署指南 |

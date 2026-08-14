@@ -12,9 +12,11 @@ import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.HashUtil;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.context.ModelUsageContextHolder;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.ExtSource;
 import io.kbrag.domain.entity.ExtSourceItem;
+import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.ExtSourceItemStatus;
 import io.kbrag.domain.enums.ExtSourceSyncStatus;
 import io.kbrag.domain.mapper.DocumentMapper;
@@ -22,6 +24,7 @@ import io.kbrag.domain.mapper.ExtSourceItemMapper;
 import io.kbrag.domain.mapper.ExtSourceMapper;
 import io.kbrag.domain.model.ExtSourceConfig;
 import io.kbrag.domain.model.HealthStatus;
+import io.kbrag.domain.model.ModelUsageContext;
 import io.kbrag.domain.port.ExternalConnector;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.ConnectorRouter;
@@ -297,6 +300,17 @@ public class ExtSourceService {
      * @param source source row, mutated in place with the outcome
      */
     public void syncSource(ExtSource source) {
+        KnowledgeBase base = knowledgeBaseService.find(source.getKbId());
+        String tenantId = base == null ? null : base.getTenantId();
+        ModelUsageContext current = ModelUsageContextHolder.get();
+        ModelUsageContext context = current != null && tenantId != null && tenantId.equals(current.tenantId())
+                ? current
+                : new ModelUsageContext(tenantId, ModelUsageContext.SOURCE_SCHEDULED, source.getSourceId());
+        ModelUsageContextHolder.run(context, () -> syncSourceAttributed(source));
+    }
+
+    /** Executes one scan after its tenant cost attribution has been bound. */
+    private void syncSourceAttributed(ExtSource source) {
         source.setLastSyncAt(LocalDateTime.now());
         try {
             ExternalConnector connector = connectorRouter.resolve(source.getSourceType());

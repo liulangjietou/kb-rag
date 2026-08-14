@@ -19,11 +19,13 @@ MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 dock
 | 索引与检索 | 文档版本化、可配置切分与父子分片、向量 + BM25 + 可选图路召回、RRF / 加权融合、Query 改写、重排、图片检索、多知识库路由 |
 | 质量与治理 | 分片标注、检索与最终答案双层评测、最终答案五维 Judge、发布门禁、检索反馈与洞察、文档审核、有效期、回收站、索引补偿与重建 |
 | 应用与 Agent | 应用版本发布与快照回滚、知识库 REST API、MCP 工具、SSE 流式问答、Agent 长期记忆抽取 / 画像 / 检索 |
-| 企业与运维 | 多租户隔离、RBAC 与知识库数据范围、文档 ACL、LDAP / OIDC / SAML / CAS、限流与审计、Prometheus 指标、备份恢复 |
+| 企业与运维 | 多租户隔离、RBAC 与知识库数据范围、文档 ACL、LDAP / OIDC / SAML / CAS、限流与审计、模型 Token 成本台账与租户月配额、Prometheus 指标、备份恢复 |
 
-当前实现基线覆盖 M1–M23；其中 M15 / M16 为权限与企业化能力，M17 / M18
+当前实现基线覆盖 M1–M24；其中 M15 / M16 为权限与企业化能力，M17 / M18
 为网页抓取增强，M19 为记忆库，M20 为 MCP 工具层，M21 为最终答案质量门禁，M22 为
-MCP `2026-07-28` 双协议兼容，M23 为 Confluence Cloud 数据源连接器。详细边界以
+MCP `2026-07-28` 双协议兼容，M23 为 Confluence Cloud 数据源连接器，M24 为模型用量与租户配额。
+通用持久化任务调度经评审继续延后，投入门槛见
+[`DURABLE-SCHEDULING-DECISION.md`](kb-rag-deploy/docs/DURABLE-SCHEDULING-DECISION.md)。详细边界以
 [`ARCHITECTURE.md`](kb-rag-deploy/docs/ARCHITECTURE.md) 和现有里程碑契约为准。
 
 ## 架构图
@@ -293,7 +295,8 @@ python3 scripts/validate_config.py
 | [`kb-rag-deploy/README.md`](kb-rag-deploy/README.md) | 部署总入口：部署模式、环境变量、ik 分词、备份恢复、各里程碑功能说明 |
 | [`kb-rag-deploy/docs/ARCHITECTURE.md`](kb-rag-deploy/docs/ARCHITECTURE.md) | 系统整体架构 |
 | [`kb-rag-deploy/docs/FLOWS.md`](kb-rag-deploy/docs/FLOWS.md) | 全量核心流程图（状态机、双写补偿、索引重建、评测、备份恢复等） |
-| `kb-rag-deploy/docs/M1-CONTRACTS.md` ～ `M17-CONTRACTS.md`、`M19-CONTRACTS.md` ～ `M23-CONTRACTS.md` | 已落库的里程碑实现契约；M18 的站点凭据实现与后续隔离修复见架构文档 |
+| `kb-rag-deploy/docs/M1-CONTRACTS.md` ～ `M17-CONTRACTS.md`、`M19-CONTRACTS.md` ～ `M24-CONTRACTS.md` | 已落库的里程碑实现契约；M18 的站点凭据实现与后续隔离修复见架构文档 |
+| [`kb-rag-deploy/docs/DURABLE-SCHEDULING-DECISION.md`](kb-rag-deploy/docs/DURABLE-SCHEDULING-DECISION.md) | 多实例持久化任务调度的延后结论、量化触发器与未来最小方案约束 |
 | [`kb-rag-deploy/docs/openapi/kb-server.yaml`](kb-rag-deploy/docs/openapi/kb-server.yaml) | Java 主服务 OpenAPI 契约 |
 | [`kb-rag-deploy/docs/openapi/kb-parser.yaml`](kb-rag-deploy/docs/openapi/kb-parser.yaml) | Python 解析服务 OpenAPI 契约 |
 | [`docs/MCP接入指南.md`](docs/MCP接入指南.md) | MCP 客户端（Claude Desktop / Cursor 等）接入配置与工具目录 |

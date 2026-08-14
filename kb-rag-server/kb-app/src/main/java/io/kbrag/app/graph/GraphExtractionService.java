@@ -10,6 +10,7 @@ import io.kbrag.common.exception.ProviderException;
 import io.kbrag.common.exception.ProviderErrorType;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.context.ModelUsageContextHolder;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.DocumentVersion;
@@ -271,7 +272,8 @@ public class GraphExtractionService {
             List<CompletableFuture<Void>> futures = new ArrayList<>(chunks.size());
             for (Chunk chunk : chunks) {
                 futures.add(CompletableFuture
-                        .supplyAsync(() -> extractOne(kbId, chunk, skipped, throttled), extractors)
+                        .supplyAsync(ModelUsageContextHolder.wrap(
+                                () -> extractOne(kbId, chunk, skipped, throttled)), extractors)
                         .thenAcceptAsync(this::upsertOne, writer)
                         .exceptionally(error -> {
                             // One passage the provider refused must not end a run over a whole corpus; the

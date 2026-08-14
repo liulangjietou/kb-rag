@@ -8,6 +8,12 @@
 
 ### Added
 
+- **模型 Token 成本台账与租户月度配额（M24，`docs/M24-CONTRACTS.md`）**：Flyway V24
+  新增月度原子计数器、调用台账和价格配置；全部模型 Provider 在出站边界先预占后结算，控制台提供
+  租户配额、用量与价格管理。OpenAPI 升至 `0.26.0-m24`，新增三个恢复配置键。
+- **持久化任务调度投入决策**：`docs/DURABLE-SCHEDULING-DECISION.md` 记录当前延后结论、真实多实例
+  压力触发器和未来 lease/idempotency/接管测试约束，本期不新增调度中间件。
+
 - **Confluence Cloud 数据源连接器（M23，`docs/M23-CONTRACTS.md`）**：M14 ext-source API
   新增 `source_type=confluence` 语义，按 Space Key 与 REST API v2 cursor 分页同步页面；OpenAPI
   升至 `0.25.0-m23`。无新容器、环境变量、配置键、数据库迁移或第三方依赖。

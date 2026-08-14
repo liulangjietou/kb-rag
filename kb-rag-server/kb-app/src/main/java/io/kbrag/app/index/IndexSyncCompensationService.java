@@ -2,13 +2,18 @@ package io.kbrag.app.index;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.kbrag.common.api.ErrorCode;
+import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.context.ModelUsageContextHolder;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.ChunkIndexSync;
+import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.IndexSyncStatus;
 import io.kbrag.domain.mapper.ChunkIndexSyncMapper;
 import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.port.EmbeddingProvider;
+import io.kbrag.domain.model.ModelUsageContext;
+import io.kbrag.app.kb.KnowledgeBaseService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
@@ -57,6 +62,7 @@ public class IndexSyncCompensationService {
     private final IndexAliasManager indexAliasManager;
     private final ChunkIndexWriter chunkIndexWriter;
     private final EmbeddingProvider embeddingProvider;
+    private final KnowledgeBaseService knowledgeBaseService;
     private final KbProperties properties;
 
     /**
@@ -162,7 +168,8 @@ public class IndexSyncCompensationService {
         }
 
         try {
-            Map<String, float[]> vectors = target.carriesVector() ? embed(chunks) : Map.of();
+            Map<String, float[]> vectors = target.carriesVector()
+                    ? embedWithTenant(chunks, physicalIndexName) : Map.of();
             chunkIndexWriter.writeTarget(target, chunks, vectors);
             log.info("index sync compensated, index={}, chunks={}, reEmbedded={}",
                     physicalIndexName, chunks.size(), target.carriesVector());
@@ -196,6 +203,17 @@ public class IndexSyncCompensationService {
             }
         }
         return vectors;
+    }
+
+    /** Binds scheduled compensation spend to the knowledge base tenant before calling the provider. */
+    private Map<String, float[]> embedWithTenant(List<Chunk> chunks, String physicalIndexName) {
+        KnowledgeBase base = knowledgeBaseService.find(chunks.get(0).getKbId());
+        if (base == null) {
+            throw BizException.notFound("knowledge base not found: " + chunks.get(0).getKbId());
+        }
+        ModelUsageContext context = new ModelUsageContext(base.getTenantId(),
+                ModelUsageContext.SOURCE_SCHEDULED, physicalIndexName);
+        return ModelUsageContextHolder.with(context, () -> embed(chunks));
     }
 
     /**

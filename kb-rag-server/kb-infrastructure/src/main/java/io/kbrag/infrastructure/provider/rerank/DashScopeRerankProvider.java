@@ -7,8 +7,11 @@ import io.kbrag.common.exception.ProviderException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.model.HealthStatus;
+import io.kbrag.domain.model.ModelCallSpec;
 import io.kbrag.domain.port.RerankProvider;
+import io.kbrag.domain.port.ModelCallMeter;
 import io.kbrag.infrastructure.provider.DashScopeHttp;
+import io.kbrag.infrastructure.provider.ModelUsageSupport;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.web.client.RestClient;
@@ -59,9 +62,16 @@ public class DashScopeRerankProvider implements RerankProvider {
 
     private final KbProperties.Rerank config;
     private final RestClient restClient;
+    private final ModelCallMeter modelCallMeter;
 
     public DashScopeRerankProvider(KbProperties properties) {
+        this(properties, ModelCallMeter.NOOP);
+    }
+
+    /** Builds the production adapter with durable quota and usage metering. */
+    public DashScopeRerankProvider(KbProperties properties, ModelCallMeter modelCallMeter) {
         this.config = properties.getRerank();
+        this.modelCallMeter = modelCallMeter;
         this.restClient = DashScopeHttp.client(null, config.getApiKey(), config.getTimeoutMs());
     }
 
@@ -101,8 +111,15 @@ public class DashScopeRerankProvider implements RerankProvider {
         payload.put(FIELD_INPUT, input);
         payload.put(FIELD_PARAMETERS, parameters);
 
-        String body = DashScopeHttp.post(restClient, config.getUrl(), payload, PROVIDER_NAME, STAGE);
-        return parseScores(body, documents.size());
+        List<String> meteredTexts = new ArrayList<>(documents.size() + 1);
+        meteredTexts.add(query);
+        meteredTexts.addAll(documents);
+        return ModelUsageSupport.execute(modelCallMeter,
+                new ModelCallSpec(ModelUsageSupport.billingProvider(config.getProvider(), PROVIDER_NAME),
+                        ModelCallSpec.RERANK, config.getModel(),
+                        ModelUsageSupport.textUpperBound(meteredTexts)),
+                () -> DashScopeHttp.post(restClient, config.getUrl(), payload, PROVIDER_NAME, STAGE),
+                body -> parseScores(body, documents.size()));
     }
 
     @Override

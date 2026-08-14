@@ -1,13 +1,13 @@
 # kb-rag 架构文档
 
 
-> 版本：v2.6（基线 = v2.5 + M23 Confluence Cloud 数据源连接器，2026-08-14；v2.5 基线为 M22 MCP 双协议兼容，其余历史见 Git）
+> 版本：v2.7（基线 = v2.6 + M24 模型 Token 成本台账与租户配额，2026-08-14；v2.6 基线为 M23，其余历史见 Git）
 > 日期：2026-08-14
 > 作者：RichardFyoung / Claude
 >
 > **文档定位**：本文描述系统的实际实现架构（以代码为准），与以下文档互补——
 > - `知识库需求文档.md`：需求与设计决策的唯一事实源（"为什么做、做什么"）
-> - `M1~M23-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
+> - `M1~M24-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
 > - `openapi/kb-server.yaml`、`openapi/kb-parser.yaml`：HTTP 接口的唯一契约源
 > - `FLOWS.md`：核心流程图（与本文配套阅读）
 
@@ -95,14 +95,14 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | 模块 | 职责 | 关键内容 |
 |---|---|---|
 | **kb-common** | 无 Spring 依赖的基础件 | `Result` 统一响应信封、`ErrorCode`、`BizException`/`ProviderException`、`JsonUtil`/`HashUtil`、`RequestIdHolder`、`KbConstants`（业务 ID 前缀与 `kb-sk-` Key 前缀） |
-| **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 43 张业务表一一对应）、30+ 枚举、60+ 领域模型、**21 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
+| **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 46 张业务表对应）、30+ 枚举、60+ 领域模型、**22 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
 | **kb-infrastructure** | 端口实现，按外部依赖分包 | `search.es` / `search.qdrant` / `graph` / `provider.{chat,embedding,rerank,vision}` / `connector` / `storage` / `parser` / `notify` / `web` / `auth`（LDAP/OIDC/SAML/CAS）/ `config` |
-| **kb-app** | 应用编排层（架构主体） | 23 个业务域包：`kb` / `document` / `index` / `retrieval` / `graph` / `annotation` / `eval` / `appcenter` / `openapi` / `chat` / `alert` / `dict` / `auth` / `audit` / `system` / `config` / `feedback` / `insight` / `governance` / `websource` / `extsource` / `memory` / `metrics` |
-| **kb-api** | HTTP 边界与装配点 | 35 个 Controller、过滤器/拦截器、SSE、MCP 协议层（`api.mcp`，§3.9）、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
+| **kb-app** | 应用编排层（架构主体） | 24 个业务域包：既有索引/检索/评测/开放平台等 23 域 + `modelusage` 用量编排 |
+| **kb-api** | HTTP 边界与装配点 | 36 个 Controller、过滤器/拦截器、SSE、MCP 协议层（`api.mcp`，§3.9）、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
 
 分层规则：Controller 只依赖 kb-app 的 Service 与 kb-domain 的 model/enum；kb-app 只依赖端口接口，**从不依赖 kb-infrastructure 具体类**；kb-infrastructure 实现端口，与 kb-app 互不感知。
 
-### 3.2 领域端口与实现（21 个）
+### 3.2 领域端口与实现（22 个）
 
 | 端口 | 实现（默认 / 降级） | 说明 |
 |---|---|---|
@@ -127,6 +127,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `SamlProcessor`（M16） | `XmlDsigSamlProcessor` | SAML 2.0 Response 签名验证（自实现 XML-DSig，不引入 Spring Security SAML） |
 | `CasValidator`（M16） | `HttpCasValidator` | CAS ticket 服务端二次校验 |
 | `MemoryStore`（M19） | `EsMemoryStore` | 记忆节点检索副本：单物理索引 `kb_memory_nodes_v1` 所有记忆库共用（隔离靠 `library_id`+`user_id` filter）；vector mapping 懒加载（首个带 embedding 的写入按维度 putMapping）；kNN+BM25 并联，零 Key 降级 BM25 单路；过期节点查询期过滤 |
+| `ModelCallMeter`（M24） | `ModelUsageService` / 测试用 `NOOP` | Provider HTTP 出站前做租户月配额原子预占，响应后以供应商 usage 或保守估算结算；适配器不知道数据库细节 |
 
 **零 Key / 能力开关统一装置**：`ModelProviderConfig` 是唯一读模型凭据的地方，凭据为空即注入 `Unconfigured*` 实现；`GraphStoreConfig`（NEO4J_URI 空 → `DisabledGraphStore`）与 `QdrantClientConfig`（QDRANT_URI 空 → 不建 client、不注册健康探针）镜像同一模式。上游代码只写 `isConfigured()/isEnabled()` 一个分支，全链路无 null 检查——这是需求 §5"防御式编程只做一处且高复用"的落地点。
 
@@ -191,7 +192,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 ### 3.7 异步与定时（无 MQ 架构的支撑件）
 
-线程池（`AsyncConfig`，统一 `TaskDecorator` 透传 requestId 到 worker 线程）：
+线程池（`AsyncConfig`，统一 `TaskDecorator` 透传 requestId 与 M24 计量上下文到 worker 线程）：
 
 **池形状只有一条规则：要么队列为 0，要么 core == max。** `ThreadPoolTaskExecutor` 只有在队列**满**之后才扩容到 max，所以"深队列 + 更大的 max"这个组合里的 max 永远到不了——写下的上限是个不会发生的数字，而后面每个读代码的人都会信它。这条已经踩过两次（索引池 `core=2,max=4` 挂 200 深队列常年只有 2；评测池 `core=2,max=6` 挂 50 深队列常年只有 2，而它自己的 javadoc 写着"6 个 run 并行"）。检索池与流式池的 0 队列是刻意的例外：没有队列可填，扩容到 max 是**第一件**发生的事，正是它们要的"先吸收突发、再拒绝"。其余每个池的 core 就是真实并发，只有一个数字要读，`AsyncConfigTest` 用反射遍历全部 `@Bean` 钉住这条规则，防止出现第三次。
 
@@ -221,8 +222,13 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `AlertEvaluator` | fixedDelay 60s | 任务连续失败 / 降级率 / 双写积压三类触发 + 静默期 |
 | `ApiAuditArchiveService` | cron 03:30 | 审计日志归档 MinIO → 分批物理删除 |
 | `AppSnapshotRetentionService` | cron 04:15 | SUPERSEDED 版本快照按保留数清理（RELEASED 永不清理） |
+| `WebSourceService` / `ExtSourceService` | cron 02:30 / 03:00 | 按源同步网页与外部连接器内容；模型消费显式归属知识库租户 |
+| `ModelUsageService` | cron 每小时 05 分 | 将超时 RESERVED 预占保守结算为 estimated；乐观锁保证多实例重复扫描安全 |
 
-### 3.8 数据模型（43 张业务表，Flyway V1-V20）
+通用持久化任务调度当前仍不投入：`t_kb_task` 是状态事实而非竞争消费队列，其他定时器在多实例下也没有
+统一 lease/owner/heartbeat 语义。量化立项门槛和未来最小协议见 `DURABLE-SCHEDULING-DECISION.md`。
+
+### 3.8 数据模型（46 张业务表，Flyway V1-V24）
 
 全部 InnoDB，统一 `id / created_at / updated_at / lock_version / deleted`，审计字段由 `AuditFieldFiller` 填充，业务 ID 带类型前缀（kb/doc/dv/ck/task/img/upt/an/evds/evc/evr/evre/app/av/ak/aud/smp/rfb/si/ws/wcred/exts/usr/role/tnt/opa/ml/mfr/mpr/mn/mak）。
 
@@ -251,6 +257,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V21（M19 后修复） | `t_kb_memory_library` 增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户）+ `idx_tenant` —— V20 建表时漏了 M16 的租户层，多租户部署下任何租户持 `memory:read` 即可列出全部署记忆库、`memory:write` 可改删他人的库与 Memory Key。记忆库是 memory 域的根聚合表，五张从属表（片段/画像规则、节点、画像、Key）经 `library_id` 归属租户，故只加这一列；配套把它加进 `KbTenantLineHandler.FENCED_TABLES`，并由 `MemoryLibraryGuard` 让每个管理端入口先解析库（见 §7.2） |
 | V22（M18 后修复） | `t_kb_web_credential` 增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户），`uk_host(host)` 收缩为 `uk_tenant_host(tenant_id, host)` —— V19 建表时漏了 M16 的租户层。缺陷两面：管理面任何租户持 `system:config` 可改删停用他人凭据；抓取面凭据按 host 全局查找，B 租户给自己的 WebSource 登记一个同 host URL，夜里的同步就会把 A 租户的密码发到那个请求上。配套把表加进 `KbTenantLineHandler.FENCED_TABLES`（只覆盖管理面），抓取面由 `WebCredentialService#resolveFor(tenantId, host)` 的显式租户谓词覆盖 —— 同步跑在无主体线程上，围栏在那条线程整条跳过（见 §7.2 与 M16 契约 §1.3） |
 | V23（M21） | 最终答案评测字段：`t_kb_eval_case.expected_refusal`；`t_kb_eval_run` 增应用配置快照、答案 Judge 身份与聚合指标；`t_kb_eval_result` 增生成答案、生成耗时、五维评分、答/拒结果与失败原因。全部新列可空或有兼容默认值，存量 run 不回填 |
+| V24（M24） | `t_kb_tenant.monthly_token_quota`（0=不限）；`t_kb_model_usage_monthly`（租户+月份原子 used/reserved 计数器）；`t_kb_model_usage`（不含客户内容的调用台账与价格快照）；`t_kb_model_price`（provider+capability+model 唯一价格） |
 
 引擎侧可过滤字段全集（Qdrant 标量 / ES filter，建索引时显式声明）：`kb_id`、`doc_id`、`document_version_id`、`enabled`、`parent_id`、`chunk_type`、`tag_ids`、`session_id`、`sender`、`msg_time`、`chunk_seq`；其余 metadata 只存 MySQL。新增可过滤维度视为 schema 变更，走索引重建迁移。
 
@@ -354,7 +361,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | `scripts/benchmark.sh` | 纯 bash+curl 压测（P50/P95/P99），验收口径 P95<2s；`seed-bench.py` 零 Key 直灌 10 万分片种子数据 |
 | `demo/` | 4 篇原创文档（md/docx/pdf/xlsx 各一，字节级可复现生成）+ `eval-cases.json`（10 条，含文档级锚定图片 case，按文件名+content_hash 关联导入） |
 | `mappings/` | 聊天记录列名映射模板分发（memotrace 等） |
-| `docs/` | 需求文档、M1-M23 契约、OpenAPI（`kb-server.yaml` 0.25.0-m23 / `kb-parser.yaml` 0.12.0-m12）、备份恢复手册、本文档与 `FLOWS.md`；调用方接入文档另见主仓 `docs/MCP接入指南.md` |
+| `docs/` | 需求文档、M1-M24 契约、OpenAPI（`kb-server.yaml` 0.26.0-m24 / `kb-parser.yaml` 0.12.0-m12）、持久化调度投入决策、备份恢复手册、本文档与 `FLOWS.md`；调用方接入文档另见主仓 `docs/MCP接入指南.md` |
 
 ---
 

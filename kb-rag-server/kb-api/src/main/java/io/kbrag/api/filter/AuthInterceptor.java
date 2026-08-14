@@ -5,6 +5,9 @@ import io.kbrag.app.auth.TokenStore;
 import io.kbrag.common.constant.KbConstants;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.context.UserContextHolder;
+import io.kbrag.domain.context.ModelUsageContextHolder;
+import io.kbrag.domain.model.ModelUsageContext;
+import io.kbrag.domain.model.UserPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -53,7 +56,10 @@ public class AuthInterceptor implements HandlerInterceptor {
         }
         request.setAttribute(ATTR_USERNAME, username.get());
         request.setAttribute(ATTR_TOKEN, token);
-        UserContextHolder.set(principalResolver.resolve(username.get()));
+        UserPrincipal principal = principalResolver.resolve(username.get());
+        UserContextHolder.set(principal);
+        ModelUsageContextHolder.set(new ModelUsageContext(
+                principal.tenantId(), ModelUsageContext.SOURCE_CONSOLE, principal.userId()));
         return true;
     }
 
@@ -63,5 +69,6 @@ public class AuthInterceptor implements HandlerInterceptor {
         // Container threads are pooled, so an unbound entry left behind would be read by whoever gets the
         // thread next. Cleared here rather than in postHandle, which a thrown exception skips.
         UserContextHolder.clear();
+        ModelUsageContextHolder.clear();
     }
 }

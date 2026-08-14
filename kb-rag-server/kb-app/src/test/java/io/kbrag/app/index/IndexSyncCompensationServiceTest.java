@@ -1,8 +1,10 @@
 package io.kbrag.app.index;
 
+import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.ChunkIndexSync;
+import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.ChunkType;
 import io.kbrag.domain.enums.IndexSyncStatus;
 import io.kbrag.domain.enums.VectorEngine;
@@ -45,6 +47,7 @@ class IndexSyncCompensationServiceTest {
     private IndexAliasManager indexAliasManager;
     private ChunkIndexWriter chunkIndexWriter;
     private EmbeddingProvider embeddingProvider;
+    private KnowledgeBaseService knowledgeBaseService;
     private KbProperties properties;
     private IndexSyncCompensationService service;
 
@@ -55,9 +58,14 @@ class IndexSyncCompensationServiceTest {
         indexAliasManager = mock(IndexAliasManager.class);
         chunkIndexWriter = mock(ChunkIndexWriter.class);
         embeddingProvider = mock(EmbeddingProvider.class);
+        knowledgeBaseService = mock(KnowledgeBaseService.class);
+        KnowledgeBase base = new KnowledgeBase();
+        base.setKbId(KB_ID);
+        base.setTenantId("tnt_default0000000");
+        when(knowledgeBaseService.find(KB_ID)).thenReturn(base);
         properties = new KbProperties();
         service = new IndexSyncCompensationService(chunkIndexSyncMapper, chunkMapper, indexAliasManager,
-                chunkIndexWriter, embeddingProvider, properties);
+                chunkIndexWriter, embeddingProvider, knowledgeBaseService, properties);
     }
 
     @Test

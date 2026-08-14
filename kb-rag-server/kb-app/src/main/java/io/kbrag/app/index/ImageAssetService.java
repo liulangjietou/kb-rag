@@ -2,6 +2,7 @@ package io.kbrag.app.index;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.context.ModelUsageContextHolder;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.DocumentVersion;
 import io.kbrag.domain.entity.ImageAsset;
@@ -235,7 +236,7 @@ public class ImageAssetService {
                 ImageAsset asset = assets.get(index);
                 ParsedDocument.ParsedImage image = images.get(index);
                 futures.add(CompletableFuture.runAsync(
-                        () -> storeAndDescribe(asset, image, ocrPages), executor));
+                        ModelUsageContextHolder.wrap(() -> storeAndDescribe(asset, image, ocrPages)), executor));
             }
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         } catch (CompletionException e) {

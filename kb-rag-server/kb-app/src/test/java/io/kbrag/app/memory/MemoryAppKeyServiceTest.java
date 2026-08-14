@@ -6,6 +6,7 @@ import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.MemoryAppKey;
+import io.kbrag.domain.entity.MemoryLibrary;
 import io.kbrag.domain.enums.MemoryAppKeyStatus;
 import io.kbrag.domain.mapper.MemoryAppKeyMapper;
 import io.kbrag.domain.service.BizIdGenerator;
@@ -27,7 +28,7 @@ import static org.mockito.Mockito.when;
  * Covers the memory key trust boundary: authentication tells "mistyped" apart from "withdrawn",
  * the principal carries the one bound library, rotation swaps the digest while dropping the stale
  * rate limit bucket, and the console entries refuse a library outside the caller's tenant while
- * authentication stays free of that lookup.
+ * authentication resolves the billing tenant only after a credential is accepted.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -90,10 +91,12 @@ class MemoryAppKeyServiceTest {
         when(memoryKeyFactory.looksLikeKey(PLAINTEXT)).thenReturn(true);
         when(memoryKeyFactory.hash(PLAINTEXT)).thenReturn("digest");
         when(memoryAppKeyMapper.selectOne(any())).thenReturn(keyRow());
+        when(memoryLibraryGuard.requireLibrary(LIBRARY_ID)).thenReturn(libraryRow());
 
         MemoryKeyPrincipal principal = service.authenticate(PLAINTEXT);
 
         assertEquals(KEY_ID, principal.getKeyId());
+        assertEquals("tnt_acme", principal.getTenantId());
         assertEquals(LIBRARY_ID, principal.getLibraryId());
         assertEquals(25, principal.getQpsLimit());
     }
@@ -147,17 +150,16 @@ class MemoryAppKeyServiceTest {
     }
 
     @Test
-    void shouldAuthenticateWithoutResolvingTheLibrary() {
-        // The open API thread has no console caller, so the fence is skipped there anyway; the
-        // isolation of that surface is the key's own binding to one library. Adding a library
-        // lookup here would cost a query per call and protect nothing.
+    void shouldResolveTheBillingTenantOnlyAfterCredentialAuthentication() {
         when(memoryKeyFactory.looksLikeKey(PLAINTEXT)).thenReturn(true);
         when(memoryKeyFactory.hash(PLAINTEXT)).thenReturn("digest");
         when(memoryAppKeyMapper.selectOne(any())).thenReturn(keyRow());
+        when(memoryLibraryGuard.requireLibrary(LIBRARY_ID)).thenReturn(libraryRow());
 
-        service.authenticate(PLAINTEXT);
+        MemoryKeyPrincipal principal = service.authenticate(PLAINTEXT);
 
-        verify(memoryLibraryGuard, never()).requireLibrary(anyString());
+        assertEquals("tnt_acme", principal.getTenantId());
+        verify(memoryLibraryGuard).requireLibrary(LIBRARY_ID);
     }
 
     private void assertNotFound(Executable call) {
@@ -176,5 +178,12 @@ class MemoryAppKeyServiceTest {
         key.setStatus(MemoryAppKeyStatus.ENABLED);
         key.setQpsLimit(25);
         return key;
+    }
+
+    private MemoryLibrary libraryRow() {
+        MemoryLibrary library = new MemoryLibrary();
+        library.setLibraryId(LIBRARY_ID);
+        library.setTenantId("tnt_acme");
+        return library;
     }
 }

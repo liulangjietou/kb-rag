@@ -1,7 +1,7 @@
 # kb-rag 流程图文档
 
 
-> 版本：v1.8（基线与 `ARCHITECTURE.md` v2.6 相同 = M1-M23 及其后修复的状态；v1.7 基线为 M22）
+> 版本：v1.9（基线与 `ARCHITECTURE.md` v2.7 相同 = M1-M24 及其后修复的状态；v1.8 基线为 M23）
 > 日期：2026-08-14
 > 作者：RichardFyoung / Claude
 >
@@ -595,3 +595,51 @@ flowchart TD
 ```
 
 安全边界：JDK HttpClient 禁止自动重定向，body `_links.next` 与 HTTP Link header 都必须保持登记 Site URL 的同 origin 后才携带 Basic Token；列表/正文响应有体积上限。列表结构不完整、page 缺 id/version 或 cursor 循环直接判本轮失败，不能把上游异常翻译成“页面已删除”。
+
+---
+
+## 17. 模型 Token 预占、结算与恢复（M24）
+
+对应：三条鉴权入口 / `AsyncConfig` / 模型 Provider / `ModelUsageSupport` / `ModelUsageService`
+（契约 M24）。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Console / API Key / Memory Key / Scheduled
+    participant X as ModelUsageContext
+    participant P as Provider adapter
+    participant M as ModelUsageService
+    participant DB as MySQL monthly + ledger
+    participant L as DashScope
+
+    C->>X: 绑定 tenant_id + source + safe source_id
+    Note over X: TaskDecorator / 内部线程池包装后传播
+    X->>P: 发起 chat/embed/rerank/vision/mm 调用
+    P->>P: 计算文本/像素/输出预算的保守上界
+    P->>M: reserve(spec)
+    M->>DB: ensure tenant-month counter
+    M->>DB: 原子条件 UPDATE reserved_tokens
+    alt 配额不足
+        DB-->>M: 0 rows
+        M-->>C: 429 MODEL_QUOTA_EXCEEDED
+    else 预占成功
+        M->>DB: INSERT ledger RESERVED + price snapshot
+        M-->>P: ticket
+        P->>L: 模型 HTTP 请求
+        alt 明确调用失败
+            L--xP: 网络/上游异常
+            P->>M: fail(ticket)
+            M->>DB: ledger FAILED + release reservation
+        else 供应商已返回
+            L-->>P: response + optional usage
+            P->>M: succeed(real usage / unknown)
+            M->>DB: ledger SUCCEEDED + used settlement<br/>unknown 按 reservation estimated
+            P->>P: 解析业务响应<br/>解析失败也不释放已结算消费
+        end
+    end
+```
+
+崩溃恢复扫描超时 RESERVED 行并按预占量保守结算。原因是进程死亡点不可知：可能尚未发请求，也可能
+供应商已经受理；在配额系统中漏扣会让后续请求继续越界。台账行乐观锁让多实例扫描最多一个实例成功结算。
+成本按价格快照计算并按币种分别汇总，不做汇率换算。

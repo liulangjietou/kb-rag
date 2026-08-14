@@ -459,9 +459,9 @@ public class MemoryAdminService {
      * @return search outcome
      */
     public MemorySearchOutcome searchDebug(String libraryId, MemorySearchCommand command) {
-        requireLibrary(libraryId);
+        MemoryLibrary library = requireLibrary(libraryId);
         return memoryApiService.search(
-                new MemoryKeyPrincipal("console", libraryId, "search-debug", 0), command);
+                new MemoryKeyPrincipal("console", library.getTenantId(), libraryId, "search-debug", 0), command);
     }
 
     // ------------------------------------------------------------------ internals

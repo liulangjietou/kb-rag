@@ -21,3 +21,10 @@ export function renameTenant(tenantId: string, payload: SaveTenantRequest): Prom
 export function updateTenantStatus(tenantId: string, status: TenantStatus): Promise<void> {
   return apiPut<void>(`/tenants/${tenantId}/status`, { status });
 }
+
+/** Zero removes the monthly ceiling; a lower quota applies to the next reservation. */
+export function updateTenantModelQuota(tenantId: string, monthlyTokenQuota: number): Promise<TenantSummary> {
+  return apiPut<TenantSummary>(`/tenants/${tenantId}/model-quota`, {
+    monthly_token_quota: monthlyTokenQuota,
+  });
+}

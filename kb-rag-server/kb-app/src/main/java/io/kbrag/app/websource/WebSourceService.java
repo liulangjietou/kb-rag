@@ -11,6 +11,7 @@ import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.HashUtil;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.context.ModelUsageContextHolder;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.entity.WebSource;
@@ -18,6 +19,7 @@ import io.kbrag.domain.enums.WebSourceFetchStatus;
 import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.mapper.WebSourceMapper;
 import io.kbrag.domain.model.FetchCredential;
+import io.kbrag.domain.model.ModelUsageContext;
 import io.kbrag.domain.port.WebPageFetcher;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.UrlGuard;
@@ -327,6 +329,15 @@ public class WebSourceService {
      *         pass uses to stop fetching the same site, see {@link #syncEnabledSources()}
      */
     public boolean sync(WebSource source, String tenantId) {
+        ModelUsageContext current = ModelUsageContextHolder.get();
+        ModelUsageContext context = current != null && tenantId != null && tenantId.equals(current.tenantId())
+                ? current
+                : new ModelUsageContext(tenantId, ModelUsageContext.SOURCE_SCHEDULED, source.getSourceId());
+        return ModelUsageContextHolder.with(context, () -> syncAttributed(source, tenantId));
+    }
+
+    /** Executes the sync after its tenant cost attribution has been bound. */
+    private boolean syncAttributed(WebSource source, String tenantId) {
         source.setLastFetchAt(LocalDateTime.now());
         try {
             URI uri = urlGuard.validate(source.getUrl());

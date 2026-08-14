@@ -18,6 +18,11 @@
 
 ### Added
 
+**M24 · 模型 Token 台账与租户配额**（`docs/M24-CONTRACTS.md`）
+- 租户管理页新增月度 Token 配额编辑、当月用量抽屉与模型价格配置抽屉；汇总区分已用/在途/剩余、
+  估算调用和未定价调用，成本始终按币种分别展示。
+- 用量明细只展示安全业务维度，不展示 prompt、回答、图片、凭据或异常正文。
+
 **M23 · Confluence Cloud 数据源**（`docs/M23-CONTRACTS.md`）
 - 知识库“外部数据源”表单由固定 S3/OSS 扩展为两种连接器；Confluence 表单使用 Site URL、
   Space Key、Atlassian 账号邮箱与 API Token，列表和同步明细按类型展示同步范围与页面 Key。

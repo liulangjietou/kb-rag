@@ -2384,6 +2384,8 @@ export interface TenantSummary {
   name: string;
   status: TenantStatus;
   builtin: boolean;
+  /** Monthly model Token quota; zero means unlimited. */
+  monthly_token_quota: number;
   created_at: string;
 }
 
@@ -2394,6 +2396,65 @@ export interface TenantSummary {
 export interface SaveTenantRequest {
   code: string;
   name: string;
+}
+
+// ---------------------------------------------------------------------------
+// Model Token usage ledger and tenant quota (M24)
+// ---------------------------------------------------------------------------
+
+export interface ModelCostTotal {
+  currency: string;
+  cost_micros: number;
+}
+
+export interface ModelUsageSummary {
+  tenant_id: string;
+  month: string;
+  quota_tokens: number;
+  used_tokens: number;
+  reserved_tokens: number;
+  /** Null while quota_tokens is zero (unlimited). */
+  remaining_tokens: number | null;
+  estimated_calls: number;
+  unpriced_calls: number;
+  costs: ModelCostTotal[];
+}
+
+export type ModelCapability = 'CHAT' | 'EMBEDDING' | 'RERANK' | 'VISION' | 'MULTIMODAL_EMBEDDING';
+
+export interface ModelUsageRecord {
+  usage_id: string;
+  tenant_id: string;
+  request_id: string | null;
+  source: string;
+  source_id: string | null;
+  provider: string;
+  capability: ModelCapability;
+  model: string;
+  status: 'RESERVED' | 'SUCCEEDED' | 'FAILED';
+  reserved_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  estimated: boolean;
+  priced: boolean;
+  currency: string | null;
+  cost_micros: number;
+  error_type: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface ModelPrice {
+  provider: string;
+  capability: ModelCapability;
+  model: string;
+  currency: string;
+  /** Price per one million input tokens, in currency 10^-6 units. */
+  input_price_micros: number;
+  /** Price per one million output tokens, in currency 10^-6 units. */
+  output_price_micros: number;
+  enabled: boolean;
 }
 
 /**

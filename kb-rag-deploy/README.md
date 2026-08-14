@@ -9,9 +9,9 @@ OpenAPI 接口契约、备份/预检脚本与总体文档。
 React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch 与 Qdrant（检索引擎）/
 MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 docker-compose 一键拉起中间件。**
 
-> 本仓库当前状态：**M1-M23 已实现**；其中 M15/M16 为权限与企业化，M17/M18 为网页抓取增强，
+> 本仓库当前状态：**M1-M24 已实现**；其中 M15/M16 为权限与企业化，M17/M18 为网页抓取增强，
 > M19 为 Agent 长期记忆，M20 为 MCP 工具层，M21 为最终答案质量门禁，M22 为 MCP 双协议兼容，
-> M23 为 Confluence Cloud 数据源连接器。
+> M23 为 Confluence Cloud 数据源连接器，M24 为模型 Token 成本台账与租户配额。
 > 一期交付上传解析→混合检索（向量+BM25+图路三路融合）→分片标注→评测闭环→应用发布→
 > 多知识库路由→索引快照回滚→GraphRAG 的完整链路；二期增强聊天记录导入
 > （TXT/HTML 格式、本地 OCR 兜底、重叠滑窗归并、映射档案维护界面，M8）与标注
@@ -22,7 +22,7 @@ MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 dock
 > [核心能力增强（M10-M13）](#核心能力增强m10-m13)与
 > [竞品能力对齐（M14）](#竞品能力对齐m14)。
 > 各里程碑契约见 [`docs/M1-CONTRACTS.md`](docs/M1-CONTRACTS.md) 至
-> [`docs/M23-CONTRACTS.md`](docs/M23-CONTRACTS.md)；系统整体架构与核心流程图见
+> [`docs/M24-CONTRACTS.md`](docs/M24-CONTRACTS.md)；系统整体架构与核心流程图见
 > [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 与 [`docs/FLOWS.md`](docs/FLOWS.md)。
 
 ## 目录
@@ -44,6 +44,7 @@ MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 dock
 - [核心能力增强（M10-M13）](#核心能力增强m10-m13)
 - [竞品能力对齐（M14）](#竞品能力对齐m14)
 - [Confluence Cloud 数据源（M23）](#confluence-cloud-数据源m23)
+- [模型 Token 台账与租户配额（M24）](#模型-token-台账与租户配额m24)
 - [接口契约（OpenAPI）](#接口契约openapi)
 - [开源工程文档](#开源工程文档)
 
@@ -460,6 +461,17 @@ M23 在 M14 的 `ExternalConnector` SPI 上新增 `source_type=confluence`，按
 HTTP 客户端不跟随重定向。API Token 适用于自托管受控运维集成，面向多客户分发前应迁移到
 OAuth 2.0 3LO。完整边界见 [`docs/M23-CONTRACTS.md`](docs/M23-CONTRACTS.md)。
 
+## 模型 Token 台账与租户配额（M24）
+
+M24 在所有模型 Provider 的真实 HTTP 出站边界统一执行“租户月度原子预占 → 调用 → usage 结算”，
+覆盖嵌入、重排、对话、Judge、图谱抽取、视觉与多模态嵌入。租户管理页可配置月配额、查看当月已用/
+在途/剩余量和安全明细，并按 provider/capability/model 维护分币种价格；未配置价格不阻断调用，只标记
+未定价。配额 0 表示不限，存量租户升级行为不变。
+
+进程崩溃遗留的预占因无法证明供应商未受理而按预占量保守结算；台账不保存 prompt、回答、图片、凭据
+或异常正文。配置与接口详见 [`docs/M24-CONTRACTS.md`](docs/M24-CONTRACTS.md)。通用持久化任务调度
+暂不投入，量化立项门槛见 [`docs/DURABLE-SCHEDULING-DECISION.md`](docs/DURABLE-SCHEDULING-DECISION.md)。
+
 ## 接口契约（OpenAPI）
 
 - [`docs/openapi/kb-server.yaml`](docs/openapi/kb-server.yaml)：kb-rag-server 管理台
@@ -496,9 +508,9 @@ python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb
 
 ## 文档
 
-- [知识库需求文档（v1.14，唯一事实源）](docs/知识库需求文档.md)
+- [知识库需求文档（v1.25，唯一事实源）](docs/知识库需求文档.md)
 - [系统架构总览（ARCHITECTURE.md）](docs/ARCHITECTURE.md) /
   [核心流程图（FLOWS.md）](docs/FLOWS.md)
-- [M1](docs/M1-CONTRACTS.md) ~ [M23 开发契约](docs/M23-CONTRACTS.md)（按里程碑记录
+- [M1](docs/M1-CONTRACTS.md) ~ [M24 开发契约](docs/M24-CONTRACTS.md)（按里程碑记录
   实现细节与已接受偏离）
 - [OpenAPI 定义](docs/openapi/)

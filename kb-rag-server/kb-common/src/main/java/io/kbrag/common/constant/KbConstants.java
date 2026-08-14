@@ -106,6 +106,9 @@ public final class KbConstants {
     /** Business id prefix of a memory app key row, never the key material itself. */
     public static final String MEMORY_APP_KEY_ID_PREFIX = "mak";
 
+    /** Model usage ledger row id prefix. */
+    public static final String MODEL_USAGE_ID_PREFIX = "mu";
+
     /**
      * Fixed prefix of every open API key plaintext, requirement section 4.8 "kb-sk-{prefix}{random}".
      *

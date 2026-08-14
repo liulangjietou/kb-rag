@@ -267,8 +267,15 @@ info:
 
     详见 M23-CONTRACTS.md。
 
+
+    0.26.0-m24 增量：全部模型 Provider 在出站边界统一做租户月度 Token 预占与真实/估算结算；
+
+    租户新增 monthly_token_quota，平台运维可查询用量汇总/安全明细并维护分模型价格。配额不足在
+
+    模型请求发出前返回 429 MODEL_QUOTA_EXCEEDED。详见 M24-CONTRACTS.md。
+
     '
-  version: 0.25.0-m23
+  version: 0.26.0-m24
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -282,6 +289,8 @@ tags:
   description: 权限体系：用户与角色管理、权限目录（M15，docs/M15-CONTRACTS.md §3）
 - name: tenant
   description: 多租户管理：租户 CRUD 与移户，仅默认租户超管可达（M16，docs/M16-CONTRACTS.md §3.1）
+- name: model-usage
+  description: 模型 Token 台账、租户月度配额与价格配置（平台级 TENANT_MANAGE，M24）
 - name: operation-audit
   description: 操作审计「谁」维度：管理台写操作留痕查询（M16，docs/M16-CONTRACTS.md §3.7）
 - name: knowledge-base
@@ -985,6 +994,125 @@ paths:
           $ref: '#/components/responses/PermissionDenied'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/tenants/{tenantId}/model-quota:
+    put:
+      tags: [tenant, model-usage]
+      summary: 更新租户月度模型 Token 配额（TENANT_MANAGE，M24）
+      description: 0 表示不限额；按 UTC+8 自然月统计。下调不会取消已发往 Provider 的调用，从下一次原子预占开始生效。
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTenantModelQuotaRequest'
+      responses:
+        '200':
+          description: 已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/model-usage/summary:
+    get:
+      tags: [model-usage]
+      summary: 租户月度模型用量与成本汇总（TENANT_MANAGE，M24）
+      parameters:
+      - name: tenant_id
+        in: query
+        required: true
+        schema: {type: string}
+      - name: month
+        in: query
+        description: YYYY-MM，留空为当前 UTC+8 月份
+        schema: {type: string, pattern: '^\d{4}-\d{2}$'}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelUsageSummaryResult'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/model-usage/records:
+    get:
+      tags: [model-usage]
+      summary: 模型调用明细台账（TENANT_MANAGE，M24）
+      description: 仅返回计量维度，不存也不返回 Prompt、答案、图片、凭据或异常正文。
+      parameters:
+      - name: tenant_id
+        in: query
+        required: true
+        schema: {type: string}
+      - name: month
+        in: query
+        schema: {type: string, pattern: '^\d{4}-\d{2}$'}
+      - name: page
+        in: query
+        schema: {type: integer, minimum: 1, default: 1}
+      - name: size
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 200, default: 20}
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelUsageRecordListResult'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/model-usage/prices:
+    get:
+      tags: [model-usage]
+      summary: 模型价格配置列表（TENANT_MANAGE，M24）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelPriceListResult'
+    put:
+      tags: [model-usage]
+      summary: 新增或更新模型价格（TENANT_MANAGE，M24）
+      description: 以 provider + capability + model 唯一；只影响后续调用，历史台账保留结算时快照。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelPrice'
+      responses:
+        '200':
+          description: 已保存
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelPriceResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
   /api/v1/source-mappings:
     get:
       tags: [source-mapping]
@@ -5305,6 +5433,7 @@ components:
       - VERSION_NOT_FOUND
       - VERSION_NOT_PUBLISHED
       - RATE_LIMITED
+      - MODEL_QUOTA_EXCEEDED
       - PARSE_FAILED
       - UPSTREAM_MODEL_ERROR
       - INTERNAL_ERROR
@@ -5639,6 +5768,11 @@ components:
         builtin:
           type: boolean
           description: 内置默认租户标记；true 的行不可停用
+        monthly_token_quota:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 每月模型 Token 配额，0 表示不限额
         created_at:
           type: string
           format: date-time
@@ -5682,6 +5816,119 @@ components:
           enum:
           - ENABLED
           - DISABLED
+    UpdateTenantModelQuotaRequest:
+      type: object
+      required: [monthly_token_quota]
+      properties:
+        monthly_token_quota:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 每月模型 Token 配额，0 表示不限额
+    ModelCapability:
+      type: string
+      enum: [CHAT, EMBEDDING, RERANK, VISION, MULTIMODAL_EMBEDDING]
+    ModelPrice:
+      type: object
+      required: [provider, capability, model, currency, input_price_micros, output_price_micros, enabled]
+      properties:
+        provider: {type: string, maxLength: 64}
+        capability: {$ref: '#/components/schemas/ModelCapability'}
+        model: {type: string, maxLength: 128}
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          description: ISO 4217 币种
+        input_price_micros:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 每百万输入 Token 价格，单位为币种的 10^-6
+        output_price_micros:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 每百万输出 Token 价格，单位为币种的 10^-6
+        enabled: {type: boolean}
+    ModelPriceResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data: {$ref: '#/components/schemas/ModelPrice'}
+    ModelPriceListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: array
+            items: {$ref: '#/components/schemas/ModelPrice'}
+    ModelCostTotal:
+      type: object
+      properties:
+        currency: {type: string}
+        cost_micros: {type: integer, format: int64}
+    ModelUsageSummary:
+      type: object
+      properties:
+        tenant_id: {type: string}
+        month: {type: string, example: '2026-08'}
+        quota_tokens: {type: integer, format: int64, description: 0 表示不限额}
+        used_tokens: {type: integer, format: int64}
+        reserved_tokens: {type: integer, format: int64}
+        remaining_tokens: {type: integer, format: int64, nullable: true}
+        estimated_calls: {type: integer, format: int64}
+        unpriced_calls: {type: integer, format: int64}
+        costs:
+          type: array
+          description: 不同币种不相加
+          items: {$ref: '#/components/schemas/ModelCostTotal'}
+    ModelUsageSummaryResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data: {$ref: '#/components/schemas/ModelUsageSummary'}
+    ModelUsageRecord:
+      type: object
+      description: 不含 Prompt、回答、图片、凭据与异常正文的安全计量行
+      properties:
+        usage_id: {type: string}
+        tenant_id: {type: string}
+        request_id: {type: string, nullable: true}
+        source: {type: string, enum: [CONSOLE, KNOWLEDGE_API, MEMORY_API, SCHEDULED, INTERNAL]}
+        source_id: {type: string, nullable: true}
+        provider: {type: string}
+        capability: {$ref: '#/components/schemas/ModelCapability'}
+        model: {type: string}
+        status: {type: string, enum: [RESERVED, SUCCEEDED, FAILED]}
+        reserved_tokens: {type: integer, format: int64}
+        input_tokens: {type: integer, format: int64}
+        output_tokens: {type: integer, format: int64}
+        total_tokens: {type: integer, format: int64}
+        estimated: {type: boolean}
+        priced: {type: boolean}
+        currency: {type: string, nullable: true}
+        cost_micros: {type: integer, format: int64}
+        error_type: {type: string, nullable: true}
+        created_at: {type: string, format: date-time}
+        completed_at: {type: string, format: date-time, nullable: true}
+    ModelUsageRecordListResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              items:
+                type: array
+                items: {$ref: '#/components/schemas/ModelUsageRecord'}
+              page: {type: integer, format: int64}
+              size: {type: integer, format: int64}
+              total: {type: integer, format: int64}
     SsoProviders:
       type: object
       description: 三协议各自的就绪态：enabled 且必填项非空且 web-base-url 已配置

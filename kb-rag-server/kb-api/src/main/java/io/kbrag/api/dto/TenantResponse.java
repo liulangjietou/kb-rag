@@ -11,6 +11,7 @@ import io.kbrag.domain.entity.Tenant;
  * @param name     display name
  * @param status   {@code ENABLED} or {@code DISABLED}
  * @param builtin  {@code true} for the default tenant shipped with the product
+ * @param monthlyTokenQuota monthly model Token quota, zero means unlimited
  * @param createdAt ISO creation timestamp
  *
  * @author owlzhangfq@gmail.com
@@ -21,6 +22,7 @@ public record TenantResponse(
         String name,
         String status,
         boolean builtin,
+        @JsonProperty("monthly_token_quota") long monthlyTokenQuota,
         @JsonProperty("created_at") String createdAt) {
 
     /**
@@ -36,6 +38,7 @@ public record TenantResponse(
                 tenant.getName(),
                 tenant.getStatus() == null ? null : tenant.getStatus().name(),
                 tenant.builtin(),
+                tenant.getMonthlyTokenQuota() == null ? 0L : tenant.getMonthlyTokenQuota(),
                 tenant.getCreatedAt() == null ? null : tenant.getCreatedAt().toString());
     }
 }

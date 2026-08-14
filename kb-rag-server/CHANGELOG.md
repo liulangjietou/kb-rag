@@ -7,6 +7,15 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### M24 · 模型 Token 成本台账与租户月度配额
+
+- `[schema]` Flyway V24 为租户增加 `monthly_token_quota`，新增月度原子计数器、调用明细台账与
+  provider/capability/model 价格表；0 配额表示不限，升级不锁存量租户。
+- 全部真实模型 Provider 在 HTTP 出站边界统一先预占后调用，按供应商 usage 结算；缺失 usage 与崩溃
+  遗留预占保守估算，明确的上游调用失败才释放。管理台、开放 Key、Memory Key 与后台任务均传播租户归属。
+- 新增平台级用量汇总/明细/价格接口及租户配额更新，拒绝码为 429 `MODEL_QUOTA_EXCEEDED`。
+  完整契约见 `kb-rag-deploy/docs/M24-CONTRACTS.md`。
+
 ### M23 · Confluence Cloud 数据源连接器
 
 - M14 `ExternalConnector` SPI 新增 `source_type=confluence`：Space Key 解析、REST API v2

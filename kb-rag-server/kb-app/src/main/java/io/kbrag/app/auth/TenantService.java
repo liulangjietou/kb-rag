@@ -138,6 +138,27 @@ public class TenantService {
     }
 
     /**
+     * Replaces a tenant's monthly model Token quota.
+     *
+     * <p>Zero means unlimited. Lowering below current usage is allowed and takes effect by refusing
+     * the next reservation; already running calls are never cancelled after the provider received them.
+     *
+     * @param tenantId tenant business id
+     * @param monthlyTokenQuota non-negative monthly quota, zero for unlimited
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void updateModelQuota(String tenantId, long monthlyTokenQuota) {
+        if (monthlyTokenQuota < 0L) {
+            throw BizException.invalidParam("monthly_token_quota 不能为负数");
+        }
+        Tenant tenant = requireTenant(tenantId);
+        tenant.setMonthlyTokenQuota(monthlyTokenQuota);
+        tenantMapper.updateById(tenant);
+        log.info("tenant model quota changed, tenantId={}, monthlyTokenQuota={}",
+                tenantId, monthlyTokenQuota);
+    }
+
+    /**
      * Copies the built in roles of the default tenant, permission bindings included.
      *
      * <p>The knowledge base scope rows are deliberately not copied: they point at bases of the

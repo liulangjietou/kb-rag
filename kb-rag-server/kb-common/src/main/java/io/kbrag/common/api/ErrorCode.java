@@ -58,6 +58,9 @@ public enum ErrorCode {
     /** Per key token bucket exhausted; the response carries a {@code Retry-After} header. */
     RATE_LIMITED(429, "rate limit exceeded"),
 
+    /** Tenant monthly model Token quota is exhausted before an upstream call starts. */
+    MODEL_QUOTA_EXCEEDED(429, "tenant model token quota exceeded"),
+
     /** Document parsing failed inside the parser service or during post processing. */
     PARSE_FAILED(500, "parse document failed"),
 

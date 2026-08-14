@@ -8,8 +8,11 @@ import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.model.ChatMessage;
 import io.kbrag.domain.model.HealthStatus;
+import io.kbrag.domain.model.ModelCallSpec;
 import io.kbrag.domain.port.ChatProvider;
+import io.kbrag.domain.port.ModelCallMeter;
 import io.kbrag.infrastructure.provider.DashScopeHttp;
+import io.kbrag.infrastructure.provider.ModelUsageSupport;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.web.client.RestClient;
@@ -52,6 +55,7 @@ public class DashScopeChatProvider implements ChatProvider {
 
     private final KbProperties.Chat config;
     private final RestClient restClient;
+    private final ModelCallMeter modelCallMeter;
 
     /**
      * Builds a chat provider from one chat configuration.
@@ -64,7 +68,13 @@ public class DashScopeChatProvider implements ChatProvider {
      * @param config chat sub-configuration
      */
     public DashScopeChatProvider(KbProperties.Chat config) {
+        this(config, ModelCallMeter.NOOP);
+    }
+
+    /** Builds the production adapter with durable quota and usage metering. */
+    public DashScopeChatProvider(KbProperties.Chat config, ModelCallMeter modelCallMeter) {
         this.config = config;
+        this.modelCallMeter = modelCallMeter;
         // Connect keeps the short control-plane budget so network faults fail fast; the read ceiling is
         // the generation budget - answer generation is the only call that legitimately needs it, and the
         // fast paths (routing, rewrite) still cut themselves off earlier at the future level.
@@ -107,8 +117,12 @@ public class DashScopeChatProvider implements ChatProvider {
         payload.put(FIELD_TEMPERATURE, config.getTemperature());
         payload.put(FIELD_MAX_TOKENS, config.getMaxTokens());
 
-        String body = DashScopeHttp.post(restClient, COMPLETIONS_PATH, payload, PROVIDER_NAME, STAGE);
-        return parseContent(body);
+        return ModelUsageSupport.execute(modelCallMeter,
+                new ModelCallSpec(ModelUsageSupport.billingProvider(config.getProvider(), PROVIDER_NAME),
+                        ModelCallSpec.CHAT, config.getModel(),
+                        ModelUsageSupport.chatUpperBound(systemPrompt, messages, config.getMaxTokens())),
+                () -> DashScopeHttp.post(restClient, COMPLETIONS_PATH, payload, PROVIDER_NAME, STAGE),
+                this::parseContent);
     }
 
     @Override
