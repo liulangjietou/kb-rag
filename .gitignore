@@ -10,6 +10,8 @@ secrets*
 
 # ===== IDE 与本地 Agent 配置 =====
 .claude/
+AGENTS.md
+CLAUDE.md
 .idea/
 *.iml
 *.ipr
