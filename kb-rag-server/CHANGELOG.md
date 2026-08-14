@@ -7,6 +7,13 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 工程修复（monorepo 配置基线）
+
+- `kb.demo.data-dir` 的默认值由个人开发机绝对路径改为 monorepo 相对路径
+  `../kb-rag-deploy/demo`，保持从 `kb-rag-server` 目录启动时仍可直接导入 Demo。
+- 根级 CI 的 Java 基础门禁显式排除需要真实 Chromium 的 `browser` 标签；浏览器集成测试保留为
+  预装 Playwright Chromium 后单独执行的验证项，避免环境依赖导致基础门禁不确定或长期挂起。
+
 
 ### 缺陷修复（M15 后修复：角色编辑抽屉不回显已有配置，角色列表跨租户不可辨识）
 

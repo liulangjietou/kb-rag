@@ -1,0 +1,138 @@
+name: Monorepo CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Server / JDK 17
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kb-rag-server
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: "kb-rag-server/**/pom.xml"
+
+      - name: Build and test
+        run: mvn -B -ntp verify -DexcludedGroups=browser
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-surefire-reports
+          path: kb-rag-server/**/target/surefire-reports/**
+          retention-days: 7
+
+  parser:
+    name: Parser / Python 3.11
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kb-rag-parser
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: kb-rag-parser/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest -q
+
+  web:
+    name: Web / Node.js 22
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kb-rag-web
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: kb-rag-web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  deploy:
+    name: Deploy contracts
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kb-rag-deploy
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install YAML validator
+        run: pip install pyyaml==6.0.3
+
+      - name: Run deploy unit tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Validate repository configuration contract
+        run: python3 scripts/validate_config.py
+
+      - name: Validate compose files
+        run: |
+          docker compose -f docker-compose.lite.yml config -q
+          docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.lite.yml -f docker-compose.es-ik.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.es-ik.yml config -q
+
+      - name: Validate OpenAPI YAML syntax
+        run: |
+          python3 -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb-server.yaml
+          python3 -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb-parser.yaml
+
+      - name: Validate shell script syntax
+        run: |
+          for file in scripts/*.sh; do
+            bash -n "$file"
+          done

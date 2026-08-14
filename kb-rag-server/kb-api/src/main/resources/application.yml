@@ -156,7 +156,7 @@ kb:
     webhook-timeout-ms: ${ALERT_WEBHOOK_TIMEOUT_MS:3000}
   demo:
     # Local development points at the deployment repository; a container mounts the set and overrides this.
-    data-dir: ${DEMO_DATA_DIR:/Users/zhangfuqiang/AI/kb-rag/kb-rag-deploy/demo}
+    data-dir: ${DEMO_DATA_DIR:../kb-rag-deploy/demo}
     knowledge-base-name: ${DEMO_KB_NAME:Demo 知识库}
   sync:
     compensation-enabled: ${SYNC_COMPENSATION_ENABLED:true}

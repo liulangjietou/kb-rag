@@ -22,7 +22,8 @@ demo/
 ```
 
 `DEMO_DATA_DIR` 环境变量（见 `.env.example`）指向本目录（容器内默认
-`/opt/kb-rag/demo`，本地开发默认指向本仓库 `demo/` 的绝对路径）；`demo/import`
+`/opt/kb-rag/demo`，从 `kb-rag-server` 目录本地启动时默认使用相对路径
+`../kb-rag-deploy/demo`）；`demo/import`
 读取 `${DEMO_DATA_DIR}/manifest.json`，按 `documents[].file_name`（相对本目录的
 路径，如 `docs/01-rag-intro.md`）逐个上传进新建的"Demo 知识库"。
 

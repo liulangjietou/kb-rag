@@ -257,10 +257,33 @@ cd ../kb-rag-deploy # 当前终端位于任一 kb-rag-* 子目录时
 docker compose -f docker-compose.lite.yml down
 ```
 
+## 测试与质量门禁
+
+GitHub Actions 的唯一入口是仓库根目录 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
+每次提交到 `main` 或发起 Pull Request 时，并行执行以下四组门禁：
+
+- Java 主服务：JDK 17 下执行 `mvn -B -ntp verify -DexcludedGroups=browser`；真实 Chromium
+  集成测试单独执行，不混入无浏览器依赖的基础门禁。
+- Python 解析服务：Python 3.11 下安装基础依赖并执行 `pytest -q`。
+- React 管理台：Node.js 22 下执行 Vitest 单元测试、oxlint 和生产构建。
+- 部署契约：配置一致性单测、环境变量模板校验、四种 compose 组合、OpenAPI YAML 与 Shell 语法校验。
+
+本地提交前运行与 CI 相同的命令，完整清单见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。配置模板或
+应用默认值发生变化时，至少执行：
+
+```bash
+cd kb-rag-deploy
+python3 -m unittest discover -s tests -p 'test_*.py'
+python3 scripts/validate_config.py
+```
+
+配置校验会拒绝 `.env.example` 重复键、开发机用户目录绝对路径，以及两份需求文档内容漂移。
+
 ## 文档导航
 
 | 文档 | 内容 |
 | --- | --- |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | monorepo 开发纪律、本地质量门禁与文档同步规则 |
 | [`kb-rag-deploy/README.md`](kb-rag-deploy/README.md) | 部署总入口：部署模式、环境变量、ik 分词、备份恢复、各里程碑功能说明 |
 | [`kb-rag-deploy/docs/ARCHITECTURE.md`](kb-rag-deploy/docs/ARCHITECTURE.md) | 系统整体架构 |
 | [`kb-rag-deploy/docs/FLOWS.md`](kb-rag-deploy/docs/FLOWS.md) | 全量核心流程图（状态机、双写补偿、索引重建、评测、备份恢复等） |
