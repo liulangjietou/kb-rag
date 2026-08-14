@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 建立 Vitest 单元测试基线，首批覆盖格式化、应用版本知识库引用兼容和 SSE 分帧；`npm test`
+  与 lint、生产构建一起进入 monorepo 根级 CI。
+
 ### Fixed
 
 **M14 · 切分策略装配缺陷（前端侧）**（`docs/M14-CONTRACTS.md` §4）

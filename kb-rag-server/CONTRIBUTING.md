@@ -50,7 +50,8 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 ## 测试
 
-- 全量单测不依赖任何外部中间件，可离线执行；请勿引入需要真实 MySQL / ES / Qdrant 的测试
+- 基础测试不依赖任何外部中间件，可离线执行；请勿引入需要真实 MySQL / ES / Qdrant 的测试
+- 真实 Chromium 集成测试必须标记 `browser`，并与确定性的基础 CI 门禁分开执行
 - 新增领域算法必须带**精确断言**的单测（手算期望值），不接受「跑通就行」的冒烟测试
 - 修 bug 时补一条回归测试，注释写清这条测试在防什么
 
@@ -58,14 +59,15 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 ```bash
 export JAVA_HOME=/path/to/jdk17
-mvn -B -ntp verify
+mvn -B -ntp verify -DexcludedGroups=browser
 ```
 
-CI 用 temurin 17 跑同一条 `mvn -B -ntp verify`。
+CI 用 Temurin 17 跑同一条基础门禁。预装 Playwright Chromium 后，可单独执行
+`mvn -B -ntp -pl kb-infrastructure -am test -Dgroups=browser`。
 
 ## 提交 PR 前自查清单
 
-- [ ] `mvn -B -ntp verify` 本地通过
+- [ ] `mvn -B -ntp verify -DexcludedGroups=browser` 本地通过
 - [ ] 代码原创，未复制 LLMentor / know-engine 的任何代码片段
 - [ ] 依赖方向未被打破（kb-app 未 import kb-infrastructure 具体类）
 - [ ] 新增类带 `@author`，注释为英文，无 `log.warn`，无魔法值

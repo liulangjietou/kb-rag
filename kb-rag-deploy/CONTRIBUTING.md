@@ -31,12 +31,15 @@ kb-rag-web 仓库。
   ```
 - 提交前请至少跑一次配置语法校验：
   ```bash
+  python3 -m unittest discover -s tests -p 'test_*.py'
+  python3 scripts/validate_config.py
   docker compose -f docker-compose.lite.yml config -q
   docker compose -f docker-compose.yml config -q
   ```
 
 ## 提交 PR 前自查清单
 
+- [ ] `scripts/validate_config.py` 与配置校验单测通过
 - [ ] `docker compose config -q` 通过（lite 与 full 两个文件）
 - [ ] OpenAPI 文件可被 `yaml.safe_load` 解析
 - [ ] 未提交任何真实密钥/密码（检查 `git diff` 是否误提交 `.env`）

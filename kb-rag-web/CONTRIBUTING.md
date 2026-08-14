@@ -40,12 +40,14 @@
 - 提交前至少跑一次：
 
   ```bash
+  npm test         # Vitest 单元测试
   npm run lint     # oxlint 静态检查
   npm run build    # tsc -b 类型检查 + 生产构建
   ```
 
 ## 提交 PR 前自查清单
 
+- [ ] `npm test` 通过
 - [ ] `npm run lint` 通过
 - [ ] `npm run build` 通过（tsc 类型检查 + 生产构建）
 - [ ] 未提交任何真实密钥/凭据

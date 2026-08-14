@@ -23,6 +23,8 @@ npm run dev      # 启动开发服务器，默认端口 20002
 | `npm run build` | TypeScript 类型检查（`tsc -b`）+ 生产构建 |
 | `npm run preview` | 预览生产构建产物 |
 | `npm run lint` | oxlint 静态检查 |
+| `npm test` | Vitest 单元测试（单次运行） |
+| `npm run test:watch` | Vitest 监听模式 |
 | `npx tsc --noEmit` | 仅做类型检查，不产出文件 |
 
 ## 页面与路由

@@ -167,16 +167,18 @@ mvn -B -ntp -DskipTests package
 java -jar kb-api/target/kb-rag-server.jar
 ```
 
-启动时 Flyway 自动执行迁移（当前 V1–V14，26 张业务表）。数据库中没有管理员账号时会创建 `admin` 并把随机密码打印到启动日志（只打印一次），首次登录强制改密。
+启动时 Flyway 自动执行迁移（当前 V1–V22，26 张业务表）。数据库中没有管理员账号时会创建 `admin` 并把随机密码打印到启动日志（只打印一次），首次登录强制改密。
 
 跑测试：
 
 ```bash
-mvn -B -ntp test          # 单测
-mvn -B -ntp verify        # CI 跑的命令，等价于全量单测 + 打包
+mvn -B -ntp test -DexcludedGroups=browser    # 无外部环境依赖的测试
+mvn -B -ntp verify -DexcludedGroups=browser  # CI 基础门禁：测试 + 打包
+mvn -B -ntp -pl kb-infrastructure -am test -Dgroups=browser # 需预装 Playwright Chromium
 ```
 
-全量单测不依赖任何外部中间件，可离线执行。CI 配置见 `.github/workflows/ci.yml`（temurin 17 + `mvn -B -ntp verify`）。
+基础测试不依赖外部中间件，可离线执行；`browser` 标签用例会启动真实 Chromium，需在具备浏览器的环境中单独执行。
+CI 配置见仓库根目录 `../.github/workflows/ci.yml`（Temurin 17）。
 
 ## 接口
 
