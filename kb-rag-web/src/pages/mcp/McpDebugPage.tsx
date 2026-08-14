@@ -4,11 +4,15 @@ import { ApiOutlined, SendOutlined, UnorderedListOutlined } from '@ant-design/ic
 import { Alert, Button, Card, Col, Descriptions, Input, Radio, Row, Select, Space, Tag, Typography, message } from 'antd';
 import {
   MCP_PATHS,
-  MCP_PROTOCOL_VERSION,
+  MCP_PROTOCOL_VERSIONS,
+  buildMcpHeaders,
+  buildMcpRequest,
   mcpCallTool,
+  mcpDiscover,
   mcpInitialize,
   mcpListTools,
   type McpEndpoint,
+  type McpProtocolEra,
   type McpRpcOutcome,
   type McpToolInfo,
 } from '../../api/mcp';
@@ -55,13 +59,26 @@ function templateOf(tool: McpToolInfo): string {
   return JSON.stringify(args, null, 2);
 }
 
-function buildCurl(endpoint: McpEndpoint, apiKey: string, body: string): string {
+function buildCurl(
+  endpoint: McpEndpoint,
+  apiKey: string,
+  era: McpProtocolEra,
+  body: string,
+  method: string,
+  params: Record<string, unknown>,
+): string {
+  const transportHeaders = buildMcpHeaders(era, method, params);
   return [
     `curl -X POST '${window.location.origin}${MCP_PATHS[endpoint]}' \\`,
     `  -H 'Authorization: Bearer ${apiKey || ENDPOINT_META[endpoint].keyPrefix + 'xxxxxxxxxxxxxxxx'}' \\`,
-    `  -H 'Content-Type: application/json' \\`,
-    `  -d '${body.replace(/\n\s*/g, ' ')}'`,
+    ...Object.entries(transportHeaders).map(([name, value]) => `  -H '${name}: ${value}' \\`),
+    `  -d ${quoteForShell(body.replace(/\n\s*/g, ' '))}`,
   ].join('\n');
+}
+
+/** POSIX shell 单引号字面量，保证 query 中含撇号时生成的 curl 仍可直接执行。 */
+function quoteForShell(value: string): string {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
 }
 
 /** The mcpServers snippet an MCP-capable agent (Claude Desktop / Cursor / Cline...) pastes in. */
@@ -82,13 +99,12 @@ function buildClientConfig(endpoint: McpEndpoint, apiKey: string): string {
 }
 
 /**
- * MCP 调试 page (M20-CONTRACTS.md): fires real initialize / tools\/list / tools\/call exchanges at
- * the two MCP endpoints with a pasted-in plaintext key, and shows both failure planes untouched --
- * a JSON-RPC `error` is a protocol violation, a result with `isError: true` is a business refusal.
- * The plaintext is only ever shown once at key creation/rotation, so it must be re-pasted here.
+ * MCP 双协议调试页：现代版发 server/discover 与逐请求元数据，旧版发 initialize；两者共用
+ * tools/list / tools/call，并原样展示 HTTP、JSON-RPC 与工具业务结果平面。
  */
 export default function McpDebugPage() {
   const [endpoint, setEndpoint] = useState<McpEndpoint>('knowledge');
+  const [protocolEra, setProtocolEra] = useState<McpProtocolEra>('modern');
   const [apiKey, setApiKey] = useState('');
   const [tools, setTools] = useState<McpToolInfo[]>([]);
   const [selectedTool, setSelectedTool] = useState<string | undefined>(undefined);
@@ -99,23 +115,25 @@ export default function McpDebugPage() {
   const meta = ENDPOINT_META[endpoint];
   const activeTool = tools.find((tool) => tool.name === selectedTool);
 
-  const callBody = useMemo(
-    () =>
-      JSON.stringify(
-        {
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'tools/call',
-          params: { name: selectedTool ?? 'tool_name', arguments: JSON.parse(safeArgs(argsText) ?? '{}') },
-        },
-        null,
-        2,
-      ),
+  const callParams = useMemo(
+    () => ({ name: selectedTool ?? 'tool_name', arguments: JSON.parse(safeArgs(argsText) ?? '{}') }),
     [selectedTool, argsText],
+  );
+  const callBody = useMemo(
+    () => JSON.stringify(buildMcpRequest(protocolEra, 1, 'tools/call', callParams), null, 2),
+    [protocolEra, callParams],
   );
 
   const switchEndpoint = (next: McpEndpoint) => {
     setEndpoint(next);
+    setTools([]);
+    setSelectedTool(undefined);
+    setArgsText('{}');
+    setOutcome(null);
+  };
+
+  const switchProtocol = (next: McpProtocolEra) => {
+    setProtocolEra(next);
     setTools([]);
     setSelectedTool(undefined);
     setArgsText('{}');
@@ -130,11 +148,13 @@ export default function McpDebugPage() {
     return true;
   };
 
-  const handleInitialize = async () => {
+  const handleDiscovery = async () => {
     if (!requireKey()) return;
     setBusy(true);
     try {
-      setOutcome(await mcpInitialize(endpoint, apiKey.trim()));
+      setOutcome(protocolEra === 'modern'
+        ? await mcpDiscover(endpoint, apiKey.trim())
+        : await mcpInitialize(endpoint, apiKey.trim()));
     } finally {
       setBusy(false);
     }
@@ -144,7 +164,7 @@ export default function McpDebugPage() {
     if (!requireKey()) return;
     setBusy(true);
     try {
-      const { outcome: listOutcome, tools: listed } = await mcpListTools(endpoint, apiKey.trim());
+      const { outcome: listOutcome, tools: listed } = await mcpListTools(endpoint, apiKey.trim(), protocolEra);
       setOutcome(listOutcome);
       setTools(listed);
       if (listed.length > 0) {
@@ -169,7 +189,7 @@ export default function McpDebugPage() {
     }
     setBusy(true);
     try {
-      setOutcome(await mcpCallTool(endpoint, apiKey.trim(), selectedTool, JSON.parse(parsed)));
+      setOutcome(await mcpCallTool(endpoint, apiKey.trim(), protocolEra, selectedTool, JSON.parse(parsed)));
     } finally {
       setBusy(false);
     }
@@ -207,6 +227,16 @@ export default function McpDebugPage() {
             optionType="button"
             buttonStyle="solid"
           />
+          <Radio.Group
+            value={protocolEra}
+            onChange={(event) => switchProtocol(event.target.value as McpProtocolEra)}
+            options={[
+              { label: '2026-07-28（逐请求元数据）', value: 'modern' },
+              { label: '2025-03-26（initialize 兼容）', value: 'legacy' },
+            ]}
+            optionType="button"
+            buttonStyle="solid"
+          />
           <Input.Password
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
@@ -215,8 +245,8 @@ export default function McpDebugPage() {
             style={{ maxWidth: 480 }}
           />
           <Space wrap>
-            <Button icon={<ApiOutlined />} loading={busy} onClick={handleInitialize}>
-              initialize 握手
+            <Button icon={<ApiOutlined />} loading={busy} onClick={handleDiscovery}>
+              {protocolEra === 'modern' ? 'server/discover 能力发现' : 'initialize 握手'}
             </Button>
             <Button icon={<UnorderedListOutlined />} loading={busy} onClick={handleListTools}>
               tools/list 列出工具
@@ -303,9 +333,11 @@ export default function McpDebugPage() {
 
       <Card title="接入示例" size="small">
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          <Typography.Text type="secondary">curl（协议版本 {MCP_PROTOCOL_VERSION}，Streamable HTTP，单次 JSON 响应）：</Typography.Text>
+          <Typography.Text type="secondary">
+            curl（协议版本 {MCP_PROTOCOL_VERSIONS[protocolEra]}，Streamable HTTP，单次 JSON 响应）：
+          </Typography.Text>
           <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, overflowX: 'auto' }}>
-            {buildCurl(endpoint, apiKey, callBody)}
+            {buildCurl(endpoint, apiKey, protocolEra, callBody, 'tools/call', callParams)}
           </pre>
           <Typography.Text type="secondary">MCP 客户端配置（Claude Desktop / Cursor / Cline 等的 mcpServers）：</Typography.Text>
           <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, overflowX: 'auto' }}>

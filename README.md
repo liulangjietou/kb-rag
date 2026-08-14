@@ -21,8 +21,9 @@ MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 dock
 | 应用与 Agent | 应用版本发布与快照回滚、知识库 REST API、MCP 工具、SSE 流式问答、Agent 长期记忆抽取 / 画像 / 检索 |
 | 企业与运维 | 多租户隔离、RBAC 与知识库数据范围、文档 ACL、LDAP / OIDC / SAML / CAS、限流与审计、Prometheus 指标、备份恢复 |
 
-当前实现基线覆盖 M1–M21；其中 M15 / M16 为权限与企业化能力，M17 / M18
-为网页抓取增强，M19 为记忆库，M20 为 MCP 协议层，M21 为最终答案质量评测与发布门禁。详细边界以
+当前实现基线覆盖 M1–M22；其中 M15 / M16 为权限与企业化能力，M17 / M18
+为网页抓取增强，M19 为记忆库，M20 为 MCP 工具层，M21 为最终答案质量门禁，M22 为
+MCP `2026-07-28` 双协议兼容。详细边界以
 [`ARCHITECTURE.md`](kb-rag-deploy/docs/ARCHITECTURE.md) 和现有里程碑契约为准。
 
 ## 架构图
@@ -139,7 +140,7 @@ flowchart LR
 ```mermaid
 flowchart LR
     C["MCP 客户端<br/>（Claude Desktop / Cursor /<br/>Cline / 自研 Agent）"] -- "POST JSON-RPC 2.0<br/>Bearer kb-sk-* / kb-mk-*" --> FL["既有过滤器链<br/>（鉴权 / 限流 / 审计零改动复用）"]
-    FL --> EN["McpServerEngine（无状态，零依赖手写）<br/>initialize / ping / tools/list / tools/call"]
+    FL --> EN["McpServerEngine（无状态，双协议）<br/>现代 server/discover · 逐请求元数据<br/>旧版 initialize 兼容"]
     EN --> TK["知识库：knowledge_search · knowledge_chat<br/>记忆库：memory_add · search · list ·<br/>update · delete · get_profile"]
     TK --> RS["复用 REST 孪生服务，返回结构同源<br/>业务失败 → isError:true 工具结果<br/>协议违规 → JSON-RPC error"]
 ```
@@ -292,7 +293,7 @@ python3 scripts/validate_config.py
 | [`kb-rag-deploy/README.md`](kb-rag-deploy/README.md) | 部署总入口：部署模式、环境变量、ik 分词、备份恢复、各里程碑功能说明 |
 | [`kb-rag-deploy/docs/ARCHITECTURE.md`](kb-rag-deploy/docs/ARCHITECTURE.md) | 系统整体架构 |
 | [`kb-rag-deploy/docs/FLOWS.md`](kb-rag-deploy/docs/FLOWS.md) | 全量核心流程图（状态机、双写补偿、索引重建、评测、备份恢复等） |
-| `kb-rag-deploy/docs/M1-CONTRACTS.md` ～ `M17-CONTRACTS.md`、`M19-CONTRACTS.md` ～ `M21-CONTRACTS.md` | 已落库的里程碑实现契约；M18 的站点凭据实现与后续隔离修复见架构文档 |
+| `kb-rag-deploy/docs/M1-CONTRACTS.md` ～ `M17-CONTRACTS.md`、`M19-CONTRACTS.md` ～ `M22-CONTRACTS.md` | 已落库的里程碑实现契约；M18 的站点凭据实现与后续隔离修复见架构文档 |
 | [`kb-rag-deploy/docs/openapi/kb-server.yaml`](kb-rag-deploy/docs/openapi/kb-server.yaml) | Java 主服务 OpenAPI 契约 |
 | [`kb-rag-deploy/docs/openapi/kb-parser.yaml`](kb-rag-deploy/docs/openapi/kb-parser.yaml) | Python 解析服务 OpenAPI 契约 |
 | [`docs/MCP接入指南.md`](docs/MCP接入指南.md) | MCP 客户端（Claude Desktop / Cursor 等）接入配置与工具目录 |

@@ -8,6 +8,10 @@
 
 ### Added
 
+- **MCP 2026-07-28 双协议兼容（M22，`docs/M22-CONTRACTS.md`）**：同一 MCP POST 端点新增无握手
+  逐请求元数据协议、`server/discover`、标准镜像头与 Origin 校验、现代 400/404 HTTP 语义，保留
+  2025-03-26 / 2024-11-05 initialize 客户端。OpenAPI 升至 `0.24.0-m22`，调用指南改以现代版为
+  主流程并单列旧版兼容。无新增容器、环境变量、配置键或数据库迁移。
 - **M21 最终答案质量评测与发布门禁**：新增 `docs/M21-CONTRACTS.md`、Flyway V23 数据字典说明与最终答案双跑流程；`.env.example` 新增 `GATE_ANSWER_SCORE_EPSILON=0.2`。OpenAPI `kb-server.yaml` 升 `0.23.0-m21`，补齐期望拒答、答案评测提交/预估/run/result、应用 `answer_gate` 和门禁答案对比 schema。历史应用版本默认关闭答案门禁，升级行为不变。
 
 - 新增 `docs/ACTUATOR-SECURITY.md`，说明独立管理端口的安全默认值与远程 Prometheus 抓取边界。

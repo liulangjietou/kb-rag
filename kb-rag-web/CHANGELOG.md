@@ -18,6 +18,12 @@
 
 ### Added
 
+**M22 · MCP 2026-07-28 双协议调试**（`docs/M22-CONTRACTS.md`）
+- MCP 调试页新增现代/旧版切换，默认 2026-07-28：现代首步为 `server/discover`，每次请求自动生成
+  `_meta` 与版本/方法/名称镜像头；旧版继续使用 initialize。
+- curl 预览按所选时代输出真实 transport 头；新增请求构造单测，覆盖现代元数据、Unicode
+  `Mcp-Name` Base64 sentinel 与旧版形态不回归。
+
 **M21 · 最终答案质量评测与发布门禁**（`docs/M21-CONTRACTS.md`）
 - 评测 case 表单新增“期望拒答”；运行表单可选择关联当前知识库的应用版本，预估并展示答案生成与答案 Judge 调用次数。
 - 评测报告新增最终答案五维评分、答/拒决策准确率、Judge 失败数与生成 P95 时延，case 下钻展示生成答案和评分，CSV 同步增加答案分。

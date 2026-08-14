@@ -217,7 +217,7 @@ micrometer 的 Prometheus registry，`/actuator/prometheus` 可直接抓取：�
 |---|---|
 | `ARCHITECTURE.md` | 四仓总体架构；§3 是本服务的模块、端口、检索链路、索引管线、异步与数据模型 |
 | `FLOWS.md` | 端到端流程时序（上传入库、检索、发布、评测、导入） |
-| `M1~M21-CONTRACTS.md` | 各里程碑的开发契约与「实现期修订」——实现与契约的偏离都记在这里 |
+| `M1~M22-CONTRACTS.md` | 各里程碑的开发契约与「实现期修订」——实现与契约的偏离都记在这里 |
 | `openapi/kb-server.yaml` | 本服务的 API 契约 |
 | `openapi/kb-parser.yaml` | parser 服务的 API 契约 |
 | [`ACTUATOR-SECURITY.md`](../kb-rag-deploy/docs/ACTUATOR-SECURITY.md) | Actuator 独立管理端口与远程 Prometheus 安全部署指南 |

@@ -6,6 +6,7 @@ import io.kbrag.api.dto.KnowledgeChatResponse;
 import io.kbrag.api.dto.KnowledgeSearchResponse;
 import io.kbrag.api.filter.ApiKeyAuthFilter;
 import io.kbrag.api.mcp.McpArgumentBinder;
+import io.kbrag.api.mcp.McpHttpRequestHeaders;
 import io.kbrag.api.mcp.McpJsonSchemas;
 import io.kbrag.api.mcp.McpServerEngine;
 import io.kbrag.api.mcp.McpToolSpec;
@@ -26,8 +27,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The knowledge application's MCP endpoint, the M20 contract: the open API's search and chat as
- * MCP tools, so any MCP capable agent can call a published application without bespoke glue code.
+ * 知识库应用的 MCP 双协议端点，把开放 API 的检索与问答暴露为 Agent 工具。
  *
  * <p>Lives under the open API prefix on purpose: {@link ApiKeyAuthFilter} authenticates and rate
  * limits it with the very same {@code kb-sk-*} credential, scope rule and token bucket as the REST
@@ -48,11 +48,11 @@ public class KnowledgeMcpController {
     /** Tool running the open chat call, body transport. */
     public static final String TOOL_CHAT = "knowledge_chat";
 
-    /** Server name advertised on {@code initialize}. */
+    /** 在现代 discover 元数据与旧版 initialize 中公布的服务名。 */
     private static final String SERVER_NAME = "kb-rag-knowledge";
 
-    /** Server version advertised on {@code initialize}, follows the OpenAPI contract version. */
-    private static final String SERVER_VERSION = "0.20.0";
+    /** 随服务信息公布的版本，与 OpenAPI 契约版本一致。 */
+    private static final String SERVER_VERSION = "0.24.0";
 
     private final KnowledgeApiService knowledgeApiService;
     private final McpArgumentBinder binder;
@@ -82,7 +82,7 @@ public class KnowledgeMcpController {
     @PostMapping(value = "/api/v1/knowledge/mcp", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> handle(@RequestBody String body, HttpServletRequest httpRequest) {
         ApiKeyPrincipal principal = principalOf(httpRequest);
-        McpServerEngine.McpReply reply = engine.handle(body,
+        McpServerEngine.McpReply reply = engine.handle(body, McpHttpRequestHeaders.from(httpRequest),
                 (toolName, arguments) -> execute(principal, toolName, arguments));
         return ResponseEntity.status(reply.status()).body(reply.body());
     }

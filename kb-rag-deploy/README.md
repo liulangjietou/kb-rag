@@ -9,8 +9,8 @@ OpenAPI 接口契约、备份/预检脚本与总体文档。
 React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch 与 Qdrant（检索引擎）/
 MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 docker-compose 一键拉起中间件。**
 
-> 本仓库当前状态：**M1-M21 已实现**；其中 M15/M16 为权限与企业化，M17/M18 为网页抓取增强，
-> M19 为 Agent 长期记忆，M20 为 MCP 协议层，M21 为最终答案质量评测与发布门禁。
+> 本仓库当前状态：**M1-M22 已实现**；其中 M15/M16 为权限与企业化，M17/M18 为网页抓取增强，
+> M19 为 Agent 长期记忆，M20 为 MCP 工具层，M21 为最终答案质量门禁，M22 为 MCP 双协议兼容。
 > 一期交付上传解析→混合检索（向量+BM25+图路三路融合）→分片标注→评测闭环→应用发布→
 > 多知识库路由→索引快照回滚→GraphRAG 的完整链路；二期增强聊天记录导入
 > （TXT/HTML 格式、本地 OCR 兜底、重叠滑窗归并、映射档案维护界面，M8）与标注
@@ -21,7 +21,7 @@ MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 dock
 > [核心能力增强（M10-M13）](#核心能力增强m10-m13)与
 > [竞品能力对齐（M14）](#竞品能力对齐m14)。
 > 各里程碑契约见 [`docs/M1-CONTRACTS.md`](docs/M1-CONTRACTS.md) 至
-> [`docs/M21-CONTRACTS.md`](docs/M21-CONTRACTS.md)；系统整体架构与核心流程图见
+> [`docs/M22-CONTRACTS.md`](docs/M22-CONTRACTS.md)；系统整体架构与核心流程图见
 > [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 与 [`docs/FLOWS.md`](docs/FLOWS.md)。
 
 ## 目录
@@ -486,6 +486,6 @@ python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb
 - [知识库需求文档（v1.14，唯一事实源）](docs/知识库需求文档.md)
 - [系统架构总览（ARCHITECTURE.md）](docs/ARCHITECTURE.md) /
   [核心流程图（FLOWS.md）](docs/FLOWS.md)
-- [M1](docs/M1-CONTRACTS.md) ~ [M21 开发契约](docs/M21-CONTRACTS.md)（按里程碑记录
+- [M1](docs/M1-CONTRACTS.md) ~ [M22 开发契约](docs/M22-CONTRACTS.md)（按里程碑记录
   实现细节与已接受偏离）
 - [OpenAPI 定义](docs/openapi/)

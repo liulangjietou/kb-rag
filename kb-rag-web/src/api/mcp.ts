@@ -1,23 +1,24 @@
 // Author: owlzhangfq@gmail.com
 
-/**
- * Direct JSON-RPC 2.0 calls against the MCP endpoints (M20-CONTRACTS.md), used only by the MCP
- * 调试 page. Deliberately bypasses request.ts's shared axios `client` for the same reason
- * publicApi.ts does: these endpoints are authenticated with a pasted-in API Key / Memory Key, not
- * the admin JWT, and a bad/disabled/rate-limited key is exactly what the page exists to observe.
- */
+/** MCP 调试页使用的双协议 JSON-RPC 客户端，不经过管理台 JWT axios 实例。 */
 
-/** The two MCP servers this console can debug, one per credential family. */
+/** 两个 MCP 服务端点。 */
 export type McpEndpoint = 'knowledge' | 'memory';
 
-/** Path of each MCP server; both live under their REST twin's auth-filter prefix. */
+/** 现代逐请求元数据协议与旧版 initialize 握手协议。 */
+export type McpProtocolEra = 'modern' | 'legacy';
+
 export const MCP_PATHS: Record<McpEndpoint, string> = {
   knowledge: '/api/v1/knowledge/mcp',
   memory: '/api/v1/memory/mcp',
 };
 
-/** Protocol revision this console speaks; the server negotiates down from its own if needed. */
-export const MCP_PROTOCOL_VERSION = '2025-03-26';
+export const MCP_PROTOCOL_VERSIONS: Record<McpProtocolEra, string> = {
+  modern: '2026-07-28',
+  legacy: '2025-03-26',
+};
+
+const MCP_CLIENT_INFO = { name: 'kb-rag-console', version: '1.0.0' };
 
 export interface McpToolInfo {
   name: string;
@@ -39,37 +40,77 @@ export interface JsonRpcResponse {
 }
 
 export interface McpRpcOutcome {
-  /** HTTP status; 202 means an accepted notification without a body. */
+  /** HTTP 状态；现代协议的 400/404 与 JSON-RPC error 同时保留。 */
   http_status: number;
-  /** Parsed JSON-RPC reply, null on a bodyless 202 or an unparsable body. */
   response: JsonRpcResponse | null;
-  /** The exact request body that was sent, for the raw exchange view. */
   request_body: string;
 }
 
 let nextId = 1;
 
-/**
- * Fires one JSON-RPC request at an MCP endpoint and returns both planes untouched: a JSON-RPC
- * `error` (protocol violation) and a `result` with `isError: true` (business failure) are results
- * to display, not exceptions -- distinguishing them is the point of the debug page.
- */
+/** 构造可直接上 wire 的 JSON-RPC 请求对象，也供页面生成准确的 curl 预览。 */
+export function buildMcpRequest(
+  era: McpProtocolEra,
+  id: number,
+  method: string,
+  params?: Record<string, unknown>,
+): Record<string, unknown> {
+  const requestParams = era === 'modern'
+    ? {
+        ...(params ?? {}),
+        _meta: {
+          'io.modelcontextprotocol/protocolVersion': MCP_PROTOCOL_VERSIONS.modern,
+          'io.modelcontextprotocol/clientCapabilities': {},
+          'io.modelcontextprotocol/clientInfo': MCP_CLIENT_INFO,
+        },
+      }
+    : params;
+  return {
+    jsonrpc: '2.0',
+    id,
+    method,
+    ...(requestParams !== undefined ? { params: requestParams } : {}),
+  };
+}
+
+/** 构造 transport 请求头；Mcp-Name 的非 ASCII 值按规范使用精确 Base64 sentinel。 */
+export function buildMcpHeaders(
+  era: McpProtocolEra,
+  method: string,
+  params?: Record<string, unknown>,
+): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json, text/event-stream',
+  };
+  if (era === 'legacy') return headers;
+  headers['MCP-Protocol-Version'] = MCP_PROTOCOL_VERSIONS.modern;
+  headers['Mcp-Method'] = method;
+  if (method === 'tools/call' && typeof params?.name === 'string') {
+    headers['Mcp-Name'] = encodeHeaderValue(params.name);
+  }
+  return headers;
+}
+
+/** 发起一次请求并原样保留 HTTP、JSON-RPC、工具业务三类结果平面。 */
 export async function mcpRpc(
   endpoint: McpEndpoint,
   apiKey: string,
+  era: McpProtocolEra,
   method: string,
   params?: Record<string, unknown>,
 ): Promise<McpRpcOutcome> {
-  const body = JSON.stringify(
-    { jsonrpc: '2.0', id: nextId++, method, ...(params !== undefined ? { params } : {}) },
-    null,
-    2,
-  );
+  const request = buildMcpRequest(era, nextId++, method, params);
+  const requestHeaders = {
+    ...buildMcpHeaders(era, method, params),
+    Authorization: `Bearer ${apiKey}`,
+  };
+  const body = JSON.stringify(request, null, 2);
   let response: Response;
   try {
     response = await fetch(MCP_PATHS[endpoint], {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      headers: requestHeaders,
       body,
     });
   } catch {
@@ -87,31 +128,50 @@ export async function mcpRpc(
   return { http_status: response.status, response: parsed, request_body: body };
 }
 
-/** The `initialize` handshake, the first exchange every MCP client performs. */
+/** 现代协议的无状态能力发现。 */
+export function mcpDiscover(endpoint: McpEndpoint, apiKey: string): Promise<McpRpcOutcome> {
+  return mcpRpc(endpoint, apiKey, 'modern', 'server/discover', {});
+}
+
+/** 旧版协议的 initialize 握手。 */
 export function mcpInitialize(endpoint: McpEndpoint, apiKey: string): Promise<McpRpcOutcome> {
-  return mcpRpc(endpoint, apiKey, 'initialize', {
-    protocolVersion: MCP_PROTOCOL_VERSION,
+  return mcpRpc(endpoint, apiKey, 'legacy', 'initialize', {
+    protocolVersion: MCP_PROTOCOL_VERSIONS.legacy,
     capabilities: {},
-    clientInfo: { name: 'kb-rag-console', version: '1.0.0' },
+    clientInfo: MCP_CLIENT_INFO,
   });
 }
 
-/** `tools/list`: the server's tool catalogue with JSON Schema argument shapes. */
+/** 列出工具目录。 */
 export async function mcpListTools(
   endpoint: McpEndpoint,
   apiKey: string,
+  era: McpProtocolEra,
 ): Promise<{ outcome: McpRpcOutcome; tools: McpToolInfo[] }> {
-  const outcome = await mcpRpc(endpoint, apiKey, 'tools/list');
+  const outcome = await mcpRpc(endpoint, apiKey, era, 'tools/list', era === 'modern' ? {} : undefined);
   const tools = (outcome.response?.result?.tools as McpToolInfo[] | undefined) ?? [];
   return { outcome, tools };
 }
 
-/** `tools/call`: runs one tool with the given arguments object. */
+/** 调用一个工具。 */
 export function mcpCallTool(
   endpoint: McpEndpoint,
   apiKey: string,
+  era: McpProtocolEra,
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<McpRpcOutcome> {
-  return mcpRpc(endpoint, apiKey, 'tools/call', { name: toolName, arguments: args });
+  return mcpRpc(endpoint, apiKey, era, 'tools/call', { name: toolName, arguments: args });
+}
+
+function encodeHeaderValue(value: string): string {
+  const isVisibleAscii = /^[\x21-\x7E](?:[\x20-\x7E]*[\x21-\x7E])?$/.test(value);
+  const isSentinel = value.startsWith('=?base64?') && value.endsWith('?=');
+  if (isVisibleAscii && !isSentinel) return value;
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return `=?base64?${btoa(binary)}?=`;
 }

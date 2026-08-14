@@ -1,7 +1,7 @@
 # kb-rag 流程图文档
 
 
-> 版本：v1.6（基线与 `ARCHITECTURE.md` 相同 = M1-M21 及其后修复的状态；v1.5 基线为 M20 及记忆库租户隔离修复 V21，v1.4 基线为 M20，v1.3 基线为 M19，v1.2 基线为 M13）
+> 版本：v1.7（基线与 `ARCHITECTURE.md` v2.5 相同 = M1-M22 及其后修复的状态；v1.6 基线为 M21）
 > 日期：2026-08-14
 > 作者：RichardFyoung / Claude
 >
@@ -478,35 +478,44 @@ flowchart TD
 
 ---
 
-## 15. MCP 调用链（M20）
+## 15. MCP 双协议调用链（M20 / M22）
 
-对应：`McpServerEngine` / `KnowledgeMcpController` / `MemoryMcpController` / `McpArgumentBinder`（契约 M20 §1/§2/§3）。
+对应：`McpOriginValidationFilter` / `McpServerEngine` / `KnowledgeMcpController` / `MemoryMcpController` / `McpArgumentBinder`（契约 M22）。
 
-两个端点共用同一引擎：`POST /api/v1/knowledge/mcp`（`Bearer kb-sk-*`，工具 knowledge_search / knowledge_chat）与 `POST /api/v1/memory/mcp`（`Bearer kb-mk-*`，memory_* 六工具）。MCP 是 REST 之外的第二种 transport——请求进 Controller 前已过完全同一条鉴权/限流/审计过滤器链。
+两个端点共用同一引擎：`POST /api/v1/knowledge/mcp`（`Bearer kb-sk-*`，工具 knowledge_search / knowledge_chat）与 `POST /api/v1/memory/mcp`（`Bearer kb-mk-*`，memory_* 六工具）。MCP 是 REST 之外的第二种 transport——请求进 Controller 前先过 Origin，再进入与 REST 完全相同的鉴权/限流/审计链。
 
-### 15.1 initialize / tools/list / tools/call 时序
+### 15.1 现代发现与旧版握手共存时序
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant A as MCP 客户端(Claude Desktop/Cursor/自研 Agent)
-    participant F as ApiKeyAuthFilter / MemoryKeyAuthFilter<br/>(与 REST 完全同一条过滤器链)
+    participant O as McpOriginValidationFilter
+    participant F as ApiKeyAuthFilter / MemoryKeyAuthFilter<br/>(与 REST 完全同一条身份链)
     participant C as KnowledgeMcpController / MemoryMcpController
     participant E as McpServerEngine(无状态, 每 Controller 一实例)
     participant S as KnowledgeApiService / MemoryApiService<br/>(REST 孪生的同一服务层)
 
-    A->>F: POST /api/v1/{knowledge|memory}/mcp<br/>Authorization: Bearer kb-sk-*/kb-mk-*
-    Note over F: 鉴权/app_scope/库绑定/令牌桶限流/审计<br/>失败 → 401/429 信封同 REST(唯一的非 200 来源)
+    A->>O: POST /api/v1/{knowledge|memory}/mcp<br/>Authorization + 可选 Origin
+    alt Origin 存在且不在白名单
+        O-->>A: 403 无 body
+    else Origin 合法或不存在
+        O->>F: 放行
+    end
+    Note over F: 鉴权/app_scope/库绑定/令牌桶限流/审计<br/>失败 → 401/429 信封同 REST
     F->>C: 放行(principal 挂 request attribute)
-    C->>E: handle(body, executor 绑定 principal)
-    alt initialize
-        E-->>A: 200 protocolVersion 协商(2025-03-26,<br/>客户端报 2024-11-05 时回显) + capabilities.tools + serverInfo
+    C->>E: handle(body, transportHeaders, executor 绑定 principal)
+    alt 现代 server/discover
+        Note over E: 校验 _meta + Version/Method 头<br/>每请求独立，不读取历史协商状态
+        E-->>A: 200 supportedVersions + capabilities.tools<br/>+ resultType/serverInfo + TTL/cacheScope
+    else 旧版 initialize
+        E-->>A: 200 protocolVersion 协商(2025-03-26 / 2024-11-05)<br/>+ capabilities.tools + serverInfo
     else notifications/* (无 id)
         E-->>A: 202 无 body
     else ping
         E-->>A: 200 空对象 result
     else tools/list
-        E-->>A: 200 工具目录(name/description/inputSchema)
+        E-->>A: 200 工具目录；现代版附 resultType/serverInfo<br/>+ ttlMs=300000/cacheScope=public，名称稳定排序
     else tools/call
         E->>E: 工具名在目录中? arguments 为对象?<br/>否 → JSON-RPC error -32602
         E->>C: executor.execute(toolName, arguments)
@@ -514,7 +523,7 @@ sequenceDiagram
         C->>S: 调 REST 孪生的同一服务方法<br/>(记忆库: 库来自 principal, arguments 无法指定 library_id)
         alt 业务成功
             S-->>E: 响应 DTO(同 REST data 结构)
-            E-->>A: 200 result: content[0].text(JSON 文本)<br/>+ structuredContent + isError:false
+            E-->>A: 200 result: content[0].text(JSON 文本)<br/>+ structuredContent + isError:false<br/>现代版另含 resultType/serverInfo
         else 业务失败(BizException)
             S-->>E: 错误码 + 消息
             E-->>A: 200 result: isError:true<br/>content[0].text = "错误码: 消息"(工具结果平面)
@@ -522,26 +531,38 @@ sequenceDiagram
     end
 ```
 
-### 15.2 两个失败平面的裁决
+### 15.2 双时代 HTTP 与失败平面裁决
 
 ```mermaid
 flowchart TD
-    Q[POST JSON-RPC body] --> P{body 是合法 JSON?}
-    P -- 否 --> E1[JSON-RPC error -32700]
-    P -- 是 --> B{单个对象?<br/>批量数组 2025-03-26 修订已移除}
-    B -- 否 --> E2[JSON-RPC error -32600]
-    B -- 是 --> ID{有 id?}
+    Q[POST MCP] --> O{Origin 存在且非法?}
+    O -- 是 --> O403[HTTP 403, 空 body]
+    O -- 否 --> A[Key 鉴权/限流]
+    A -- 失败 --> AR[HTTP 401/429, REST 信封]
+    A -- 通过 --> P{现代标记存在?<br/>header / _meta / server/discover}
+    P -- 现代 --> H{_meta 与三类标准头一致?<br/>版本受支持?}
+    H -- 头错 --> H400[HTTP 400, -32020]
+    H -- 版本错 --> V400[HTTP 400, -32022 + supported]
+    H -- 通过 --> MM{现代方法已实现?}
+    MM -- 否 --> M404[HTTP 404, -32601]
+    MM -- 是 --> MT{工具与参数形态合法?}
+    MT -- 否 --> P400[HTTP 400, -32602]
+    MT -- 是 --> X[执行工具]
+    P -- 旧版 --> J{body 是合法单 JSON-RPC 对象?}
+    J -- 否 --> E1[HTTP 200, -32700/-32600]
+    J -- 是 --> ID{有 id?}
     ID -- 无 id 且是 notifications/* --> N[202 无 body]
-    ID -- 无 id 且非通知 --> E2
-    ID -- 有 id --> M{方法在表中?<br/>initialize/ping/tools/list/tools/call}
+    ID -- 无 id 且非通知 --> E2[HTTP 200, -32600]
+    ID -- 有 id --> M{旧版方法在表中?<br/>initialize/ping/tools/list/tools/call}
     M -- 否 --> E3[JSON-RPC error -32601]
     M -- 是 --> T{tools/call: 工具在目录?<br/>arguments 是对象?}
     T -- 否 --> E4[JSON-RPC error -32602]
-    T -- 是 --> X[执行工具 = 调 REST 孪生服务层]
+    T -- 是 --> X
     X -- 正常返回 --> OK[200 result: isError:false<br/>content text + structuredContent 同源双形态]
     X -- BizException 业务失败 --> BE[200 result: isError:true<br/>text = 错误码: 消息<br/>参数不对/资源不存在/stream:true 等<br/>Agent 可读反馈, 自行修正后重试]
-    E1 & E2 & E3 & E4 -.协议违规平面.-> PL[客户端/框架处理<br/>HTTP 仍是 200]
+    E1 & E2 & E3 & E4 -.旧版协议违规平面.-> PL[客户端/框架处理<br/>HTTP 200]
+    H400 & V400 & M404 & P400 -.现代协议违规平面.-> PL
     OK & BE -.工具结果平面.-> ML[调用方模型处理]
 ```
 
-要点：**协议违规是客户端框架的事，业务失败是调用方模型的事**——前者走 JSON-RPC error（框架层纠正请求形态），后者走 `isError: true` 的成功响应（模型读到 `错误码: 消息` 文本后自行修正参数重试），两个平面严格分离（契约 M20 §1 核心不变式）。HTTP 恒 200（通知 202），非 200 只可能来自过滤器链（401/429）。`knowledge_chat` 带 `stream: true` 落业务失败平面（INVALID_PARAM 并指路 REST SSE）——tools/call 是单次请求应答，流式生成走 REST 孪生端点。
+要点：协议错误仍由客户端框架修正，工具业务失败仍由模型读取 `isError: true` 后自纠；M22 只让现代协议的 HTTP 状态表达 transport 事实，不改变业务失败平面。`knowledge_chat` 的 `stream:true` 仍是 INVALID_PARAM 工具结果，流式生成继续走 REST SSE。

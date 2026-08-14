@@ -7,6 +7,16 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### M22 · MCP 2026-07-28 双协议兼容
+
+- `McpServerEngine` 在同一端点按单次请求识别协议时代：新增现代 `server/discover`、逐请求 `_meta`、
+  `resultType` / serverInfo、工具目录 TTL/cacheScope 与稳定排序；原 2025-03-26 / 2024-11-05
+  initialize、工具与业务错误平面保持兼容。
+- 现代 transport 严格校验 `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name`（含 Base64 sentinel）：
+  头体不一致 400/-32020、版本不支持 400/-32022、方法未实现 404/-32601。
+- 新增 `McpOriginValidationFilter`，在 Key 鉴权前复用 CORS 白名单阻断非法浏览器 Origin；无 Origin 的
+  服务间客户端不受影响。零新增 Maven 依赖、配置键和数据库迁移。
+
 ### M21 · 最终答案质量评测与发布门禁
 
 - `[schema]` Flyway `V23__final_answer_evaluation.sql` 为评测用例增加期望拒答，为 run 冻结应用问答配置与答案 Judge 身份，为 case 结果记录生成答案、耗时、五维评分、答/拒结果和失败原因；存量行兼容，无需回填。
