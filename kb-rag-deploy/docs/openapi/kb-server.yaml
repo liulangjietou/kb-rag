@@ -240,8 +240,17 @@ info:
 
     平台运维不走行级围栏（M16 §1.3 的既定放行），返回体此前无从区分同名行。
 
+
+    0.23.0-m21 增量：最终答案质量评测与发布门禁。评测 run 可选冻结应用版本的生成配置，
+
+    复用生产问答路径生成答案并按正确性、忠实度、完整性、引用与拒答决策评分；应用版本可显式
+
+    开启 answer_gate，使发布门禁在既有检索双跑之外比较最终答案指标。历史版本默认关闭，避免
+
+    升级后被非确定性裁判静默阻断。详见 M21-CONTRACTS.md。
+
     '
-  version: 0.22.0-m15-fix
+  version: 0.23.0-m21
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -7931,6 +7940,10 @@ components:
         expected_answer:
           type: string
           nullable: true
+        expected_refusal:
+          type: boolean
+          default: false
+          description: 正确答案是否应拒答；与 expected_answer 共同定义最终答案判定目标
         anchor_type:
           $ref: '#/components/schemas/AnchorType'
         evidences:
@@ -7965,6 +7978,10 @@ components:
         expected_answer:
           type: string
           nullable: true
+        expected_refusal:
+          type: boolean
+          default: false
+          description: true 表示该用例期望模型拒答
         anchor_type:
           $ref: '#/components/schemas/AnchorType'
         evidences:
@@ -8230,6 +8247,16 @@ components:
           type: string
           nullable: true
           description: 留空沿用 EVAL_JUDGE_MODEL（未配置则回退 ChatProvider 当前模型）
+    AnswerEvaluationRequestConfig:
+      type: object
+      description: M21 最终答案评测开关；启用后按所选应用版本冻结生成模型与 Prompt 快照
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        app_version_id:
+          type: string
+          description: enabled=true 时必填；用于生成最终答案的应用版本，必须关联当前评测集所属知识库
     CreateEvalRunsRequest:
       type: object
       description: configs 允许 1..6 组，一次提交产生 N 个 run（每组一个），共享 dataset_revision 与
@@ -8250,6 +8277,10 @@ components:
         judge:
           allOf:
           - $ref: '#/components/schemas/JudgeRequestConfig'
+          nullable: true
+        answer:
+          allOf:
+          - $ref: '#/components/schemas/AnswerEvaluationRequestConfig'
           nullable: true
     ConfidenceInterval:
       type: object
@@ -8294,6 +8325,47 @@ components:
         type: object
         additionalProperties:
           $ref: '#/components/schemas/EvalMetricValue'
+    FinalAnswerMetrics:
+      type: object
+      nullable: true
+      description: M21 最终答案质量聚合指标；评分维度为 1-5，refusal_accuracy 为 0-1
+      properties:
+        score:
+          type: number
+          format: double
+        correctness:
+          type: number
+          format: double
+        faithfulness:
+          type: number
+          format: double
+        completeness:
+          type: number
+          format: double
+        citation_correctness:
+          type: number
+          format: double
+        citation_completeness:
+          type: number
+          format: double
+        refusal_accuracy:
+          type: number
+          format: double
+        evaluated_cases:
+          type: integer
+        judge_failed_cases:
+          type: integer
+        latency_p95_ms:
+          type: integer
+    AnswerEvaluationSummary:
+      type: object
+      nullable: true
+      properties:
+        app_version_id:
+          type: string
+        generation_model:
+          type: string
+          nullable: true
     EvalRun:
       type: object
       properties:
@@ -8321,6 +8393,16 @@ components:
         judge_prompt_version:
           type: string
           nullable: true
+        answer_evaluation:
+          $ref: '#/components/schemas/AnswerEvaluationSummary'
+        answer_judge_model:
+          type: string
+          nullable: true
+        answer_judge_prompt_version:
+          type: string
+          nullable: true
+        answer_metrics:
+          $ref: '#/components/schemas/FinalAnswerMetrics'
         status:
           $ref: '#/components/schemas/RunStatus'
         metrics:
@@ -8393,6 +8475,12 @@ components:
           type: integer
         judge_calls:
           type: integer
+        generation_calls:
+          type: integer
+          description: 最终答案生成调用次数
+        answer_judge_calls:
+          type: integer
+          description: 最终答案裁判调用次数
     EvalRunEstimateResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
@@ -8452,6 +8540,50 @@ components:
           - $ref: '#/components/schemas/JudgeScore'
           nullable: true
         judge_reason:
+          type: string
+          nullable: true
+        generated_answer:
+          type: string
+          nullable: true
+        answer_judge_requested:
+          type: boolean
+        generation_latency_ms:
+          type: integer
+          nullable: true
+        answer_score:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 5
+        answer_correctness:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 5
+        answer_faithfulness:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 5
+        answer_completeness:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 5
+        citation_correctness:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 5
+        citation_completeness:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 5
+        refusal_correct:
+          type: boolean
+          nullable: true
+        answer_judge_reason:
           type: string
           nullable: true
     EvalResultListResult:
@@ -8652,6 +8784,37 @@ components:
           nullable: true
           minimum: 0
           maximum: 1
+    AppAnswerGateConfig:
+      type: object
+      description: M21 最终答案发布门禁；显式开启才参与判定，历史版本默认关闭
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        min_score:
+          type: number
+          format: double
+          nullable: true
+          minimum: 1
+          maximum: 5
+        min_faithfulness:
+          type: number
+          format: double
+          nullable: true
+          minimum: 1
+          maximum: 5
+        min_citation_correctness:
+          type: number
+          format: double
+          nullable: true
+          minimum: 1
+          maximum: 5
+        min_refusal_accuracy:
+          type: number
+          format: double
+          nullable: true
+          minimum: 0
+          maximum: 1
     AppVersionConfigRequest:
       type: object
       description: 建版请求即控制台配置表单；未传字段继承最新版本配置（M4c-CONTRACTS.md §1/§2，
@@ -8684,6 +8847,8 @@ components:
           $ref: '#/components/schemas/AppPromptConfig'
         gate:
           $ref: '#/components/schemas/AppGateThresholds'
+        answer_gate:
+          $ref: '#/components/schemas/AppAnswerGateConfig'
         chat_model:
           type: string
           nullable: true
@@ -8725,6 +8890,8 @@ components:
           nullable: true
         gate:
           $ref: '#/components/schemas/AppGateThresholds'
+        answer_gate:
+          $ref: '#/components/schemas/AppAnswerGateConfig'
     AppKbRef:
       type: object
       description: 应用版本关联的一个知识库及其配额权重（M5-CONTRACTS.md §1/§2.2）
@@ -8798,6 +8965,14 @@ components:
       - ABSOLUTE_THRESHOLD_MET
       - ABSOLUTE_THRESHOLD_NOT_MET
       - BASELINE_RECORDED
+      - ANSWER_EVAL_UNAVAILABLE
+      - ANSWER_INSUFFICIENT_CASES
+      - ANSWER_JUDGE_FAILED
+      - ANSWER_METRICS_REGRESSED
+      - ANSWER_WITHIN_TOLERANCE
+      - ANSWER_ABSOLUTE_THRESHOLD_MET
+      - ANSWER_ABSOLUTE_THRESHOLD_NOT_MET
+      - ANSWER_BASELINE_RECORDED
     GateCoreMetrics:
       type: object
       description: 门禁仅允许判定的两个核心指标；Precision/MRR/NDCG 与 LLM-as-judge 答案分只展示不参与门禁
@@ -8808,6 +8983,66 @@ components:
         recall:
           type: number
           format: float
+    FinalAnswerMetricDeltas:
+      type: object
+      properties:
+        score:
+          type: number
+          format: double
+        correctness:
+          type: number
+          format: double
+        faithfulness:
+          type: number
+          format: double
+        completeness:
+          type: number
+          format: double
+        citation_correctness:
+          type: number
+          format: double
+        citation_completeness:
+          type: number
+          format: double
+        refusal_accuracy:
+          type: number
+          format: double
+    FinalAnswerGateComparison:
+      type: object
+      nullable: true
+      properties:
+        candidate:
+          $ref: '#/components/schemas/FinalAnswerMetrics'
+        baseline:
+          $ref: '#/components/schemas/FinalAnswerMetrics'
+        effective_cases:
+          type: integer
+        judge_failed_cases:
+          type: integer
+        degraded_cases:
+          type: integer
+        case_ids:
+          type: array
+          items:
+            type: string
+    FinalAnswerGateDecision:
+      type: object
+      nullable: true
+      properties:
+        verdict:
+          $ref: '#/components/schemas/GateVerdict'
+        reason:
+          $ref: '#/components/schemas/GateReason'
+        score_epsilon:
+          type: number
+          format: double
+        accuracy_epsilon:
+          type: number
+          format: double
+        deltas:
+          allOf:
+          - $ref: '#/components/schemas/FinalAnswerMetricDeltas'
+          nullable: true
     GateReport:
       type: object
       description: 一次门禁双跑的持久化结果，供控制台双跑对比面板渲染（M4c-CONTRACTS.md §1/§6）
@@ -8861,6 +9096,10 @@ components:
           type: array
           items:
             type: string
+        answer_comparison:
+          $ref: '#/components/schemas/FinalAnswerGateComparison'
+        answer_decision:
+          $ref: '#/components/schemas/FinalAnswerGateDecision'
     AppVersion:
       type: object
       description: 应用版本（t_kb_app_version），含发布状态机位置与门禁结论（M4c-CONTRACTS.md §1/§2）

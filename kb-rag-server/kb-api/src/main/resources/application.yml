@@ -348,6 +348,8 @@ kb:
     min-cases: ${GATE_MIN_CASES:50}
     # Tolerance floor in percentage points; the effective tolerance is max(this / 100, 1 / effectiveCases).
     epsilon-pp: ${GATE_EPSILON_PP:2}
+    # Tolerance on final-answer judge dimensions, which use a 1-5 scale.
+    answer-score-epsilon: ${GATE_ANSWER_SCORE_EPSILON:0.2}
     # Pending review ratio above which the evaluation data set counts as invalid for gating.
     stale-ratio: ${GATE_STALE_RATIO:0.15}
     run-timeout-ms: ${GATE_RUN_TIMEOUT_MS:1800000}

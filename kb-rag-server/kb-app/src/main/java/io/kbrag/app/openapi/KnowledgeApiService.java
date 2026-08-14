@@ -3,6 +3,7 @@ package io.kbrag.app.openapi;
 import io.kbrag.app.appcenter.AppService;
 import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.auth.AccessGuard;
+import io.kbrag.app.chat.AnswerGenerationService;
 import io.kbrag.app.config.AsyncConfig;
 import io.kbrag.app.insight.SearchInsightService;
 import io.kbrag.app.metrics.KbMetrics;
@@ -21,12 +22,8 @@ import io.kbrag.domain.enums.TargetStage;
 import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.AppIndexSnapshot;
 import io.kbrag.domain.model.AppRoutingConfig;
-import io.kbrag.domain.model.ChatMessage;
 import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
-import io.kbrag.domain.port.ChatProvider;
-import io.kbrag.domain.port.ChatProviderFactory;
-import io.kbrag.domain.service.ChatPromptAssembler;
 import io.kbrag.domain.service.ContentBudgetTrimmer;
 import io.kbrag.domain.service.RequestOverridePolicy;
 import lombok.RequiredArgsConstructor;
@@ -69,8 +66,7 @@ public class KnowledgeApiService {
     private final AppService appService;
     private final AppVersionService appVersionService;
     private final RetrievalService retrievalService;
-    private final ChatProviderFactory chatProviderFactory;
-    private final ChatPromptAssembler chatPromptAssembler;
+    private final AnswerGenerationService answerGenerationService;
     private final ContentBudgetTrimmer contentBudgetTrimmer;
     private final RequestOverridePolicy requestOverridePolicy;
     private final ApiAuditService apiAuditService;
@@ -437,9 +433,7 @@ public class KnowledgeApiService {
      */
     private String generate(ResolvedTarget target, KnowledgeCallCommand command,
                             List<RetrievalNodeView> nodes) {
-        ChatProvider provider = requireChatProvider(target);
-        return provider.complete(chatPromptAssembler.systemPrompt(target.snapshot().promptOrDefaults()),
-                promptMessages(command, nodes));
+        return answerGenerationService.generate(target.snapshot(), command.getQuery(), command.getMessages(), nodes);
     }
 
     /**
@@ -452,54 +446,7 @@ public class KnowledgeApiService {
      */
     private void streamGenerate(ResolvedTarget target, KnowledgeCallCommand command,
                                 List<RetrievalNodeView> nodes, java.util.function.Consumer<String> onDelta) {
-        ChatProvider provider = requireChatProvider(target);
-        provider.stream(chatPromptAssembler.systemPrompt(target.snapshot().promptOrDefaults()),
-                promptMessages(command, nodes), onDelta);
-    }
-
-    /**
-     * Resolves the generation model of a version, or explains why generation is unavailable.
-     *
-     * <p>The zero key deployment is a supported state for retrieval and an unsupported one for generation, so
-     * the failure is explicit and classified rather than an empty answer: an agent has to be able to tell "no
-     * model configured" from "the model had nothing to say".
-     *
-     * @param target resolved application version
-     * @return configured chat provider
-     */
-    private ChatProvider requireChatProvider(ResolvedTarget target) {
-        ChatProvider provider = chatProviderFactory.forModel(target.snapshot().getChatModel());
-        if (!provider.isConfigured()) {
-            throw new BizException(ErrorCode.UPSTREAM_MODEL_ERROR,
-                    "问答生成不可用：当前部署未配置对话模型（零 Key 模式），"
-                            + "请在系统设置中配置对话模型 Provider 后重试；检索接口不受影响");
-        }
-        return provider;
-    }
-
-    /**
-     * Builds the message list of a generation call: the caller's history plus the assembled question.
-     *
-     * <p>The history is carried through unchanged and the retrieved material is attached to the <em>last</em>
-     * user message only, so the model sees the conversation as it happened and the quoted material where the
-     * question is - attaching passages to every historical turn would multiply the untrusted text and dilute
-     * the current question.
-     *
-     * @param command call parameters
-     * @param nodes   retrieved material
-     * @return chronological messages
-     */
-    private List<ChatMessage> promptMessages(KnowledgeCallCommand command, List<RetrievalNodeView> nodes) {
-        List<String> passages = new ArrayList<>();
-        for (RetrievalNodeView node : nodes) {
-            passages.add(node.getContent());
-        }
-        List<ChatMessage> messages = new ArrayList<>();
-        if (CollectionUtils.isNotEmpty(command.getMessages())) {
-            messages.addAll(command.getMessages());
-        }
-        messages.add(ChatMessage.user(chatPromptAssembler.userPrompt(command.getQuery(), passages)));
-        return messages;
+        answerGenerationService.stream(target.snapshot(), command.getQuery(), command.getMessages(), nodes, onDelta);
     }
 
     private KnowledgeCallResult withAnswer(KnowledgeCallResult result, String answer) {

@@ -48,6 +48,10 @@ public class EvalCase extends BaseEntity {
     @TableField("expected_answer")
     private String expectedAnswer;
 
+    /** Whether a correct final answer should refuse because the corpus cannot support an answer. */
+    @TableField("expected_refusal")
+    private Boolean expectedRefusal;
+
     /** Anchoring granularity. */
     @TableField("anchor_type")
     private AnchorType anchorType;

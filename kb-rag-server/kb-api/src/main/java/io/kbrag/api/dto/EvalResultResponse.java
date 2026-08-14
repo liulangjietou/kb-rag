@@ -23,6 +23,17 @@ import java.util.List;
  * @param retryCount       automatic retries this case went through
  * @param judgeScore       LLM-as-judge score, {@code null} when not judged
  * @param judgeReason      LLM-as-judge free text rationale
+ * @param generatedAnswer final answer generated through the production prompt path
+ * @param answerJudgeRequested whether this case required final-answer judgment
+ * @param generationLatencyMs generation wall time
+ * @param answerScore overall final-answer score
+ * @param answerCorrectness final-answer correctness score
+ * @param answerFaithfulness final-answer faithfulness score
+ * @param answerCompleteness final-answer completeness score
+ * @param citationCorrectness citation correctness score
+ * @param citationCompleteness citation completeness score
+ * @param refusalCorrect correct answer/refuse decision
+ * @param answerJudgeReason final-answer judge rationale or failure reason
  *
  * @author owlzhangfq@gmail.com
  */
@@ -37,7 +48,18 @@ public record EvalResultResponse(
         List<String> degraded,
         @JsonProperty("retry_count") Integer retryCount,
         @JsonProperty("judge_score") Integer judgeScore,
-        @JsonProperty("judge_reason") String judgeReason) {
+        @JsonProperty("judge_reason") String judgeReason,
+        @JsonProperty("generated_answer") String generatedAnswer,
+        @JsonProperty("answer_judge_requested") boolean answerJudgeRequested,
+        @JsonProperty("generation_latency_ms") Integer generationLatencyMs,
+        @JsonProperty("answer_score") Integer answerScore,
+        @JsonProperty("answer_correctness") Integer answerCorrectness,
+        @JsonProperty("answer_faithfulness") Integer answerFaithfulness,
+        @JsonProperty("answer_completeness") Integer answerCompleteness,
+        @JsonProperty("citation_correctness") Integer citationCorrectness,
+        @JsonProperty("citation_completeness") Integer citationCompleteness,
+        @JsonProperty("refusal_correct") Boolean refusalCorrect,
+        @JsonProperty("answer_judge_reason") String answerJudgeReason) {
 
     /**
      * Maps a stored result onto its response.
@@ -60,6 +82,17 @@ public record EvalResultResponse(
                 }),
                 result.getRetryCount(),
                 result.getJudgeScore(),
-                result.getJudgeReason());
+                result.getJudgeReason(),
+                result.getGeneratedAnswer(),
+                Boolean.TRUE.equals(result.getAnswerJudgeRequested()),
+                result.getGenerationLatencyMs(),
+                result.getAnswerScore(),
+                result.getAnswerCorrectness(),
+                result.getAnswerFaithfulness(),
+                result.getAnswerCompleteness(),
+                result.getCitationCorrectness(),
+                result.getCitationCompleteness(),
+                result.getRefusalCorrect(),
+                result.getAnswerJudgeReason());
     }
 }

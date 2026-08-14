@@ -60,6 +60,22 @@ public class EvalRun extends BaseEntity {
     @TableField("judge_prompt_version")
     private String judgePromptVersion;
 
+    /** JSON answer-evaluation snapshot; {@code null} keeps this a retrieval-only run. */
+    @TableField("answer_eval_config")
+    private String answerEvalConfig;
+
+    /** Model used to judge generated answers, {@code null} for a retrieval-only run. */
+    @TableField("answer_judge_model")
+    private String answerJudgeModel;
+
+    /** Version of the final-answer judging rubric. */
+    @TableField("answer_judge_prompt_version")
+    private String answerJudgePromptVersion;
+
+    /** Aggregated final-answer metrics, separate from the retrieval metrics document. */
+    @TableField("answer_metrics")
+    private String answerMetrics;
+
     /** Lifecycle state. */
     @TableField("status")
     private RunStatus status;

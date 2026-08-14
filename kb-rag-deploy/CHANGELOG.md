@@ -8,6 +8,8 @@
 
 ### Added
 
+- **M21 最终答案质量评测与发布门禁**：新增 `docs/M21-CONTRACTS.md`、Flyway V23 数据字典说明与最终答案双跑流程；`.env.example` 新增 `GATE_ANSWER_SCORE_EPSILON=0.2`。OpenAPI `kb-server.yaml` 升 `0.23.0-m21`，补齐期望拒答、答案评测提交/预估/run/result、应用 `answer_gate` 和门禁答案对比 schema。历史应用版本默认关闭答案门禁，升级行为不变。
+
 - 新增 `docs/ACTUATOR-SECURITY.md`，说明独立管理端口的安全默认值与远程 Prometheus 抓取边界。
 - 新增 `scripts/validate_config.py` 与单元测试，统一拦截 `.env.example` 重复键、开发机绝对路径和
   两份需求文档漂移；校验已接入 monorepo 根级 CI。

@@ -73,6 +73,19 @@ public class AppConfigSnapshot {
     @JsonProperty("gate")
     private GateThresholds gate;
 
+    /** Opt-in quality gate over generated final answers. */
+    @JsonProperty("answer_gate")
+    private AnswerGateConfig answerGate;
+
+    /**
+     * Final-answer gate configuration, never {@code null}.
+     *
+     * @return frozen answer gate configuration, disabled for legacy snapshots
+     */
+    public AnswerGateConfig answerGateOrDefaults() {
+        return answerGate == null ? new AnswerGateConfig() : answerGate;
+    }
+
     /**
      * Knowledge bases of this application, legacy shape translated, never {@code null}.
      *

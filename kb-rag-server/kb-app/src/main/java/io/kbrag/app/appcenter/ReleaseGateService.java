@@ -17,15 +17,22 @@ import io.kbrag.domain.enums.GateVerdict;
 import io.kbrag.domain.enums.RunStatus;
 import io.kbrag.domain.mapper.EvalResultMapper;
 import io.kbrag.domain.model.AppConfigSnapshot;
+import io.kbrag.domain.model.AnswerEvaluationConfig;
+import io.kbrag.domain.model.AnswerGateConfig;
 import io.kbrag.domain.model.GateCaseOutcome;
 import io.kbrag.domain.model.GateComparison;
 import io.kbrag.domain.model.GateDecision;
 import io.kbrag.domain.model.GateReport;
+import io.kbrag.domain.model.FinalAnswerCaseOutcome;
+import io.kbrag.domain.model.FinalAnswerGateComparison;
+import io.kbrag.domain.model.FinalAnswerGateDecision;
 import io.kbrag.domain.model.EvalRetrievalConfig;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.RerankProvider;
 import io.kbrag.domain.service.GateMetricsRecomputer;
+import io.kbrag.domain.service.FinalAnswerGateJudge;
+import io.kbrag.domain.service.FinalAnswerGateRecomputer;
 import io.kbrag.domain.service.ReleaseGateJudge;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
@@ -73,6 +80,8 @@ public class ReleaseGateService {
     private final EvalRunService evalRunService;
     private final EvalResultMapper evalResultMapper;
     private final GateMetricsRecomputer gateMetricsRecomputer;
+    private final FinalAnswerGateRecomputer finalAnswerGateRecomputer;
+    private final FinalAnswerGateJudge finalAnswerGateJudge;
     private final ReleaseGateJudge releaseGateJudge;
     private final EmbeddingProvider embeddingProvider;
     private final RerankProvider rerankProvider;
@@ -84,6 +93,8 @@ public class ReleaseGateService {
                               EvalRunService evalRunService,
                               EvalResultMapper evalResultMapper,
                               GateMetricsRecomputer gateMetricsRecomputer,
+                              FinalAnswerGateRecomputer finalAnswerGateRecomputer,
+                              FinalAnswerGateJudge finalAnswerGateJudge,
                               ReleaseGateJudge releaseGateJudge,
                               EmbeddingProvider embeddingProvider,
                               RerankProvider rerankProvider,
@@ -94,6 +105,8 @@ public class ReleaseGateService {
         this.evalRunService = evalRunService;
         this.evalResultMapper = evalResultMapper;
         this.gateMetricsRecomputer = gateMetricsRecomputer;
+        this.finalAnswerGateRecomputer = finalAnswerGateRecomputer;
+        this.finalAnswerGateJudge = finalAnswerGateJudge;
         this.releaseGateJudge = releaseGateJudge;
         this.embeddingProvider = embeddingProvider;
         this.rerankProvider = rerankProvider;
@@ -241,7 +254,22 @@ public class ReleaseGateService {
                 ? properties.getRetrieval().getDefaultTopN()
                 : candidateConfig.retrievalOrDefaults().getTopN();
 
-        List<EvalRun> runs = evalRunService.submit(datasetId, k, configs, false);
+        AnswerGateConfig answerGateConfig = candidateConfig.answerGateOrDefaults();
+        boolean answerGateEnabled = answerGateConfig.isEnabled();
+        List<EvalRun> runs;
+        if (answerGateEnabled) {
+            List<EvalRunService.AnswerRunSpec> specs = new ArrayList<>(configs.size());
+            specs.add(new EvalRunService.AnswerRunSpec(configs.get(0),
+                    new AnswerEvaluationConfig(version.getAppVersionId(), candidateConfig)));
+            if (baselineVersion != null) {
+                specs.add(new EvalRunService.AnswerRunSpec(configs.get(1),
+                        new AnswerEvaluationConfig(baselineVersion.getAppVersionId(),
+                                appVersionService.parseConfig(baselineVersion))));
+            }
+            runs = evalRunService.submitAnswerRuns(datasetId, k, specs, false);
+        } else {
+            runs = evalRunService.submit(datasetId, k, configs, false);
+        }
         List<EvalRun> finished = awaitCompletion(runs);
         EvalRun candidateRun = finished.get(0);
         EvalRun baselineRun = finished.size() > 1 ? finished.get(1) : null;
@@ -255,14 +283,25 @@ public class ReleaseGateService {
                 : null;
 
         double staleRatio = staleRatioOf(candidateRun);
-        GateDecision decision = releaseGateJudge.judge(new ReleaseGateJudge.GateInput(
+        GateDecision retrievalDecision = releaseGateJudge.judge(new ReleaseGateJudge.GateInput(
                 true, succeeded, comparable, comparison, staleRatio, candidateConfig.getGate(),
                 properties.getGate().getMinCases(), properties.getGate().getEpsilonPp(),
                 properties.getGate().getStaleRatio()));
 
+        FinalAnswerGateComparison answerComparison = answerGateEnabled && succeeded
+                ? finalAnswerGateRecomputer.recompute(finalAnswerOutcomesOf(candidateRun),
+                        baselineRun == null ? List.of() : finalAnswerOutcomesOf(baselineRun))
+                : null;
+        FinalAnswerGateDecision answerDecision = answerGateEnabled
+                ? finalAnswerGateJudge.judge(answerComparison, answerGateConfig,
+                        properties.getGate().getMinCases(), properties.getGate().getAnswerScoreEpsilon(),
+                        properties.getGate().getEpsilonPp())
+                : null;
+        GateDecision decision = combine(retrievalDecision, answerDecision);
+
         GateReport report = reportOf(decision, comparison, candidateRun.getCaseTotal(),
                 candidateRun.getCaseStale(), staleRatio, candidateRun.getRunId(),
-                baselineRun == null ? null : baselineRun.getRunId());
+                baselineRun == null ? null : baselineRun.getRunId(), answerComparison, answerDecision);
         // Run id order is part of the contract with the console: candidate first, baseline second, so the
         // comparison panel can reuse the M4b compare endpoint without a second convention.
         List<String> runIds = new ArrayList<>();
@@ -400,6 +439,32 @@ public class ReleaseGateService {
         return outcomes;
     }
 
+    private List<FinalAnswerCaseOutcome> finalAnswerOutcomesOf(EvalRun run) {
+        List<EvalResult> results = evalResultMapper.selectList(new LambdaQueryWrapper<EvalResult>()
+                .eq(EvalResult::getRunId, run.getRunId()));
+        if (CollectionUtils.isEmpty(results)) {
+            return List.of();
+        }
+        List<FinalAnswerCaseOutcome> outcomes = new ArrayList<>(results.size());
+        for (EvalResult result : results) {
+            outcomes.add(new FinalAnswerCaseOutcome(result.getCaseId(), result.getAnswerScore(),
+                    result.getAnswerCorrectness(), result.getAnswerFaithfulness(),
+                    result.getAnswerCompleteness(), result.getCitationCorrectness(),
+                    result.getCitationCompleteness(), result.getRefusalCorrect(),
+                    result.getGenerationLatencyMs(), Boolean.TRUE.equals(result.getAnswerJudgeRequested()),
+                    isDegraded(result.getDegraded())));
+        }
+        return outcomes;
+    }
+
+    private GateDecision combine(GateDecision retrievalDecision, FinalAnswerGateDecision answerDecision) {
+        if (answerDecision == null || retrievalDecision.verdict() != GateVerdict.PASSED) {
+            return retrievalDecision;
+        }
+        return new GateDecision(answerDecision.verdict(), answerDecision.reason(), retrievalDecision.epsilon(),
+                retrievalDecision.hitRateDelta(), retrievalDecision.recallDelta());
+    }
+
     /**
      * Tells whether a stored degradation array holds anything.
      *
@@ -455,6 +520,14 @@ public class ReleaseGateService {
     private GateReport reportOf(GateDecision decision, GateComparison comparison, Integer totalCases,
                                 Integer staleCases, double staleRatio, String candidateRunId,
                                 String baselineRunId) {
+        return reportOf(decision, comparison, totalCases, staleCases, staleRatio, candidateRunId,
+                baselineRunId, null, null);
+    }
+
+    private GateReport reportOf(GateDecision decision, GateComparison comparison, Integer totalCases,
+                                Integer staleCases, double staleRatio, String candidateRunId,
+                                String baselineRunId, FinalAnswerGateComparison answerComparison,
+                                FinalAnswerGateDecision answerDecision) {
         return new GateReport(
                 decision.verdict().name(),
                 decision.reason().name(),
@@ -472,6 +545,8 @@ public class ReleaseGateService {
                 candidateRunId,
                 baselineRunId,
                 LocalDateTime.now().toString(),
-                comparison == null ? List.of() : comparison.caseIds());
+                comparison == null ? List.of() : comparison.caseIds(),
+                answerComparison,
+                answerDecision);
     }
 }

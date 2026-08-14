@@ -10,6 +10,7 @@ import io.kbrag.app.retrieval.RetrievalIndexOverride;
 import io.kbrag.app.retrieval.RetrievalNodeView;
 import io.kbrag.app.retrieval.RetrievalService;
 import io.kbrag.app.retrieval.SearchOutcome;
+import io.kbrag.app.chat.AnswerGenerationService;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
@@ -89,8 +90,9 @@ class KnowledgeApiServiceTest {
         when(appService.require(APP_ID)).thenReturn(new App());
         when(chatProviderFactory.forModel(any())).thenReturn(chatProvider);
         meterRegistry = new SimpleMeterRegistry();
-        service = new KnowledgeApiService(appService, appVersionService, retrievalService, chatProviderFactory,
-                new ChatPromptAssembler(), new ContentBudgetTrimmer(), new RequestOverridePolicy(),
+        service = new KnowledgeApiService(appService, appVersionService, retrievalService,
+                new AnswerGenerationService(chatProviderFactory, new ChatPromptAssembler()),
+                new ContentBudgetTrimmer(), new RequestOverridePolicy(),
                 apiAuditService, mock(SearchInsightService.class), new KbMetrics(meterRegistry));
     }
 

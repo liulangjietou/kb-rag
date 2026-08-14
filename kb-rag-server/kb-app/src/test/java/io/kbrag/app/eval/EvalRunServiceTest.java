@@ -1,5 +1,7 @@
 package io.kbrag.app.eval;
 
+import io.kbrag.app.appcenter.AppVersionService;
+import io.kbrag.app.chat.AnswerGenerationService;
 import io.kbrag.app.retrieval.OfflineExecutionContext;
 import io.kbrag.app.retrieval.RetrievalCommand;
 import io.kbrag.app.retrieval.RetrievalNodeView;
@@ -21,6 +23,11 @@ import io.kbrag.domain.mapper.EvalResultMapper;
 import io.kbrag.domain.mapper.EvalRunMapper;
 import io.kbrag.domain.model.EvalEvidence;
 import io.kbrag.domain.model.EvalRetrievalConfig;
+import io.kbrag.domain.model.AnswerEvaluationConfig;
+import io.kbrag.domain.model.AppConfigSnapshot;
+import io.kbrag.domain.model.FinalAnswerJudgment;
+import io.kbrag.domain.model.FinalAnswerMetrics;
+import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.RerankProvider;
@@ -28,6 +35,7 @@ import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.ChunkTextHasher;
 import io.kbrag.domain.service.EvalHitJudge;
 import io.kbrag.domain.service.EvalMetricsCalculator;
+import io.kbrag.domain.service.FinalAnswerMetricsCalculator;
 import io.kbrag.domain.service.OverlapRatioCalculator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,6 +58,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -75,6 +84,7 @@ class EvalRunServiceTest {
     };
 
     private EvalDatasetService evalDatasetService;
+    private AppVersionService appVersionService;
     private EvalRunMapper evalRunMapper;
     private EvalResultMapper evalResultMapper;
     private EvalCaseMapper evalCaseMapper;
@@ -83,6 +93,8 @@ class EvalRunServiceTest {
     private RerankProvider rerankProvider;
     private ChatProvider chatProvider;
     private EvalJudgeService evalJudgeService;
+    private AnswerGenerationService answerGenerationService;
+    private FinalAnswerJudgeService finalAnswerJudgeService;
     private CorpusFingerprintFactory corpusFingerprintFactory;
     private BizIdGenerator bizIdGenerator;
     private KbProperties properties;
@@ -91,6 +103,7 @@ class EvalRunServiceTest {
     @BeforeEach
     void setUp() {
         evalDatasetService = mock(EvalDatasetService.class);
+        appVersionService = mock(AppVersionService.class);
         evalRunMapper = mock(EvalRunMapper.class);
         evalResultMapper = mock(EvalResultMapper.class);
         evalCaseMapper = mock(EvalCaseMapper.class);
@@ -99,6 +112,8 @@ class EvalRunServiceTest {
         rerankProvider = mock(RerankProvider.class);
         chatProvider = mock(ChatProvider.class);
         evalJudgeService = mock(EvalJudgeService.class);
+        answerGenerationService = mock(AnswerGenerationService.class);
+        finalAnswerJudgeService = mock(FinalAnswerJudgeService.class);
         corpusFingerprintFactory = mock(CorpusFingerprintFactory.class);
         bizIdGenerator = mock(BizIdGenerator.class);
         properties = new KbProperties();
@@ -118,10 +133,12 @@ class EvalRunServiceTest {
      * @return service under test
      */
     private EvalRunService newService(Executor evalExecutor, Executor evalCaseExecutor) {
-        return new EvalRunService(evalDatasetService, evalRunMapper, evalResultMapper, evalCaseMapper,
+        return new EvalRunService(evalDatasetService, appVersionService, evalRunMapper, evalResultMapper, evalCaseMapper,
                 retrievalService, embeddingProvider, rerankProvider, chatProvider, evalJudgeService,
-                corpusFingerprintFactory, new EvalHitJudge(new OverlapRatioCalculator(new ChunkTextHasher())),
-                new EvalMetricsCalculator(), new OverlapRatioCalculator(new ChunkTextHasher()),
+                answerGenerationService, finalAnswerJudgeService, corpusFingerprintFactory,
+                new EvalHitJudge(new OverlapRatioCalculator(new ChunkTextHasher())),
+                new EvalMetricsCalculator(), new FinalAnswerMetricsCalculator(),
+                new OverlapRatioCalculator(new ChunkTextHasher()),
                 bizIdGenerator, properties, evalExecutor, evalCaseExecutor);
     }
 
@@ -399,6 +416,73 @@ class EvalRunServiceTest {
     }
 
     @Test
+    void shouldGenerateJudgeAndAggregateFinalAnswersThroughTheFrozenApplicationSnapshot() {
+        EvalRun run = pendingRun();
+        AppConfigSnapshot snapshot = new AppConfigSnapshot();
+        snapshot.setKbRefs(List.of(KbRef.of(KB_ID)));
+        run.setAnswerEvalConfig(JsonUtil.toJson(new AnswerEvaluationConfig("av_1", snapshot)));
+        when(evalRunMapper.selectOne(any())).thenReturn(run);
+        EvalCase evalCase = spanCase();
+        evalCase.setExpectedAnswer("the expected answer");
+        when(evalCaseMapper.selectList(any())).thenReturn(List.of(evalCase));
+        when(bizIdGenerator.evalResultId()).thenReturn("evre_answer");
+        when(retrievalService.search(anyString(), any(RetrievalCommand.class)))
+                .thenReturn(new SearchOutcome(List.of(hitNode()), List.of(), null));
+        when(answerGenerationService.generate(any(), anyString(), any(), any()))
+                .thenReturn("the generated answer [1]");
+        FinalAnswerJudgment judgment = new FinalAnswerJudgment(5, 5, 5, 5, 5, 5, true, "fully supported");
+        when(finalAnswerJudgeService.judge(anyString(), anyBoolean(), anyBoolean(), anyString(), any()))
+                .thenReturn(new FinalAnswerJudgeService.JudgeOutcome(judgment, null));
+
+        service.execute("evr_run", false);
+
+        ArgumentCaptor<EvalResult> resultCaptor = ArgumentCaptor.forClass(EvalResult.class);
+        verify(evalResultMapper).insert(resultCaptor.capture());
+        assertEquals("the generated answer [1]", resultCaptor.getValue().getGeneratedAnswer());
+        assertEquals(5, resultCaptor.getValue().getAnswerScore());
+        assertTrue(Boolean.TRUE.equals(resultCaptor.getValue().getAnswerJudgeRequested()));
+        ArgumentCaptor<EvalRun> runCaptor = ArgumentCaptor.forClass(EvalRun.class);
+        verify(evalRunMapper, org.mockito.Mockito.atLeastOnce()).updateById(runCaptor.capture());
+        EvalRun finalState = runCaptor.getAllValues().get(runCaptor.getAllValues().size() - 1);
+        FinalAnswerMetrics metrics = JsonUtil.parse(finalState.getAnswerMetrics(), FinalAnswerMetrics.class);
+        assertEquals(1, metrics.evaluatedCases());
+        assertEquals(5.0d, metrics.score());
+    }
+
+    @Test
+    void shouldEstimateLegacyAndFinalAnswerJudgeCallsAgainstTheirOwnEligibleCases() {
+        when(evalDatasetService.require(DATASET_ID)).thenReturn(dataset());
+        EvalCase answerCase = spanCase("evc_answer");
+        answerCase.setExpectedAnswer("expected");
+        EvalCase refusalCase = spanCase("evc_refusal");
+        refusalCase.setExpectedRefusal(true);
+        when(evalCaseMapper.selectList(any())).thenReturn(List.of(answerCase, refusalCase));
+        when(evalJudgeService.isAvailable()).thenReturn(true);
+        when(answerGenerationService.isAvailable(any())).thenReturn(true);
+        when(finalAnswerJudgeService.isAvailable()).thenReturn(true);
+        AnswerEvaluationConfig answerConfig = answerConfig(KB_ID);
+
+        EvalRunService.EstimateResult estimate = service.estimate(DATASET_ID, 5,
+                List.of(configOf(EvalMode.BM25_ONLY)), true, answerConfig);
+
+        assertEquals(1, estimate.judgeCalls());
+        assertEquals(2, estimate.generationCalls());
+        assertEquals(2, estimate.answerJudgeCalls());
+    }
+
+    @Test
+    void shouldValidateTheWholeAnswerBatchBeforeCreatingAnyRun() {
+        when(evalDatasetService.require(DATASET_ID)).thenReturn(dataset());
+        List<EvalRunService.AnswerRunSpec> specs = List.of(
+                new EvalRunService.AnswerRunSpec(configOf(EvalMode.BM25_ONLY), answerConfig(KB_ID)),
+                new EvalRunService.AnswerRunSpec(configOf(EvalMode.BM25_ONLY), answerConfig("kb_other")));
+
+        assertThrows(BizException.class, () -> service.submitAnswerRuns(DATASET_ID, 5, specs, false));
+
+        verify(evalRunMapper, never()).insert(any(EvalRun.class));
+    }
+
+    @Test
     void shouldCompareTwoRunsOfTheSameRevisionAndCorpus() {
         EvalRun a = runWithState("evr_a", 3, "fp_1");
         EvalRun b = runWithState("evr_b", 3, "fp_1");
@@ -451,6 +535,12 @@ class EvalRunServiceTest {
         dataset.setKbId(KB_ID);
         dataset.setDatasetRevision(1);
         return dataset;
+    }
+
+    private AnswerEvaluationConfig answerConfig(String kbId) {
+        AppConfigSnapshot snapshot = new AppConfigSnapshot();
+        snapshot.setKbRefs(List.of(KbRef.of(kbId)));
+        return new AnswerEvaluationConfig("av_1", snapshot);
     }
 
     private EvalRetrievalConfig configOf(EvalMode mode) {

@@ -36,6 +36,11 @@ interface AppConfigFormValues {
   gate_threshold_enabled: boolean;
   min_hit_rate: number;
   min_recall: number;
+  answer_gate_enabled: boolean;
+  min_answer_score: number;
+  min_answer_faithfulness: number;
+  min_citation_correctness: number;
+  min_refusal_accuracy: number;
   changelog?: string;
 }
 
@@ -64,6 +69,11 @@ const DEFAULT_VALUES: AppConfigFormValues = {
   // against when there is no RELEASED predecessor to double-run against (M4c-CONTRACTS.md §2).
   min_hit_rate: 0.8,
   min_recall: 0.8,
+  answer_gate_enabled: false,
+  min_answer_score: 4,
+  min_answer_faithfulness: 4,
+  min_citation_correctness: 4,
+  min_refusal_accuracy: 0.9,
 };
 
 function configToFormValues(config: AppVersionConfig): AppConfigFormValues {
@@ -91,6 +101,12 @@ function configToFormValues(config: AppVersionConfig): AppConfigFormValues {
     gate_threshold_enabled: config.gate?.min_hit_rate != null || config.gate?.min_recall != null,
     min_hit_rate: config.gate?.min_hit_rate ?? DEFAULT_VALUES.min_hit_rate,
     min_recall: config.gate?.min_recall ?? DEFAULT_VALUES.min_recall,
+    answer_gate_enabled: config.answer_gate?.enabled ?? false,
+    min_answer_score: config.answer_gate?.min_score ?? DEFAULT_VALUES.min_answer_score,
+    min_answer_faithfulness: config.answer_gate?.min_faithfulness ?? DEFAULT_VALUES.min_answer_faithfulness,
+    min_citation_correctness:
+      config.answer_gate?.min_citation_correctness ?? DEFAULT_VALUES.min_citation_correctness,
+    min_refusal_accuracy: config.answer_gate?.min_refusal_accuracy ?? DEFAULT_VALUES.min_refusal_accuracy,
   };
 }
 
@@ -123,6 +139,13 @@ function formValuesToConfig(values: AppConfigFormValues): AppVersionConfig {
     gate: values.gate_threshold_enabled
       ? { min_hit_rate: values.min_hit_rate, min_recall: values.min_recall }
       : null,
+    answer_gate: {
+      enabled: values.answer_gate_enabled,
+      min_score: values.answer_gate_enabled ? values.min_answer_score : null,
+      min_faithfulness: values.answer_gate_enabled ? values.min_answer_faithfulness : null,
+      min_citation_correctness: values.answer_gate_enabled ? values.min_citation_correctness : null,
+      min_refusal_accuracy: values.answer_gate_enabled ? values.min_refusal_accuracy : null,
+    },
   };
 }
 
@@ -149,6 +172,7 @@ export default function AppConfigTab({ appId, kbs, latestVersion, onVersionCreat
   const leakGuardEnabled = Form.useWatch('leak_guard_enabled', form) ?? false;
   const routingEnabled = Form.useWatch('routing_enabled', form) ?? false;
   const gateThresholdEnabled = Form.useWatch('gate_threshold_enabled', form) ?? false;
+  const answerGateEnabled = Form.useWatch('answer_gate_enabled', form) ?? false;
   const kbRefs: KbRef[] = Form.useWatch('kb_refs', form) ?? [];
   // Shown as the placeholder for an empty chat_model, so "留空" has a concrete meaning on screen.
   const { modelStatus } = useModelStatus();
@@ -431,6 +455,33 @@ export default function AppConfigTab({ appId, kbs, latestVersion, onVersionCreat
             </Form.Item>
             <Form.Item name="min_recall" label="最低 Recall" rules={[{ required: true, message: '请输入最低 Recall' }]}>
               <InputNumber min={0} max={1} step={0.01} style={{ width: 160 }} />
+            </Form.Item>
+          </Space>
+        )}
+
+        <Typography.Title level={5} style={{ marginTop: 16 }}>
+          最终答案质量门禁
+        </Typography.Title>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+          开启后，发布双跑会复用候选版与正式版各自冻结的问答 prompt、生成模型，生成并评判最终答案。
+          评判失败或有效 case 不足时只记录、不自动放行；历史版本默认关闭，避免升级后改变原有发布行为。
+        </Typography.Paragraph>
+        <Form.Item name="answer_gate_enabled" label="启用最终答案质量门禁" valuePropName="checked">
+          <Switch />
+        </Form.Item>
+        {answerGateEnabled && (
+          <Space size="large" wrap>
+            <Form.Item name="min_answer_score" label="最低综合分" rules={[{ required: true }]}>
+              <InputNumber min={1} max={5} step={0.1} style={{ width: 150 }} />
+            </Form.Item>
+            <Form.Item name="min_answer_faithfulness" label="最低忠实度" rules={[{ required: true }]}>
+              <InputNumber min={1} max={5} step={0.1} style={{ width: 150 }} />
+            </Form.Item>
+            <Form.Item name="min_citation_correctness" label="最低引用正确性" rules={[{ required: true }]}>
+              <InputNumber min={1} max={5} step={0.1} style={{ width: 150 }} />
+            </Form.Item>
+            <Form.Item name="min_refusal_accuracy" label="最低答/拒准确率" rules={[{ required: true }]}>
+              <InputNumber min={0} max={1} step={0.01} style={{ width: 150 }} />
             </Form.Item>
           </Space>
         )}

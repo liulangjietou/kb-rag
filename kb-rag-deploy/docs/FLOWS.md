@@ -1,8 +1,8 @@
 # kb-rag 流程图文档
 
 
-> 版本：v1.5（基线与 `ARCHITECTURE.md` 相同 = M1-M20 及其后修复的状态，含记忆库租户隔离修复 V21；v1.4 基线为 M20，v1.3 基线为 M19，v1.2 基线为 M13）
-> 日期：2026-08-11
+> 版本：v1.6（基线与 `ARCHITECTURE.md` 相同 = M1-M21 及其后修复的状态；v1.5 基线为 M20 及记忆库租户隔离修复 V21，v1.4 基线为 M20，v1.3 基线为 M19，v1.2 基线为 M13）
+> 日期：2026-08-14
 > 作者：RichardFyoung / Claude
 >
 > 图使用 Mermaid 绘制（GitHub / 主流 IDE 原生渲染）。每张图标注对应的核心类与契约出处，与代码不一致时以代码为准并须在同一 PR 内修订本文档（项目铁律②）。
@@ -194,9 +194,11 @@ stateDiagram-v2
     TESTING --> GATING: 发起正式发布(绑定评测集时)
     TESTING --> RELEASED: 未绑定评测集直接发布(记"未经门禁")
     GATING --> GATE_PASSED: 门禁通过
-    GATING --> GATE_FAILED: 门禁拦截(可强制放行留痕)
+    GATING --> GATE_BLOCKED: 门禁拦截(可强制放行留痕)
+    GATING --> GATE_LOG_ONLY: 样本/Judge/运行异常(需人工确认)
     GATE_PASSED --> RELEASED: 冻结快照后生效
-    GATE_FAILED --> RELEASED: force 放行(留痕)
+    GATE_BLOCKED --> RELEASED: force 放行(留痕)
+    GATE_LOG_ONLY --> RELEASED: force 放行(留痕)
     RELEASED --> SUPERSEDED: 新版本发布/回滚时退位
     SUPERSEDED --> RELEASED: 回滚 = 历史版本重新置为正式版
     note right of RELEASED
@@ -215,7 +217,9 @@ sequenceDiagram
     participant AV as AppVersionService
     participant G as ReleaseGateService(GATE_EXECUTOR)
     participant EV as EvalRunService(EVAL_EXECUTOR)
-    participant J as ReleaseGateJudge(纯函数)
+    participant AG as AnswerGenerationService
+    participant AJ as FinalAnswerJudgeService
+    participant J as 双层 Gate Judge(纯函数)
     participant SN as AppReleaseSnapshotService
     participant E as ES/Qdrant
 
@@ -224,8 +228,13 @@ sequenceDiagram
     AV--)G: 异步启动门禁
     G->>EV: 提交 run A(候选配置) + run B(当前正式版配置)
     Note over EV: 同语料同时刻双跑, 离线档(超时10s)<br/>与 GATE 池分离防自等待死锁
-    EV-->>G: 两份指标
-    G->>J: GateMetricsRecomputer 在双方共判 case 交集重算<br/>裁决(容差 ε=max(2pp,1/N), 1e-9 浮点余量)
+    opt 候选版本显式开启 answer_gate(M21)
+        EV->>AG: 每个可判 case 复用生产 Prompt 生成最终答案
+        AG->>AJ: 参考答案 + 生成答案 + 召回段落
+        AJ-->>EV: 五维评分 + refusal_correct<br/>(失败保留 null, 不记 0 分)
+    end
+    EV-->>G: 两份检索指标 + 可选答案指标
+    G->>J: 两类 Recomputer 分别在双方共判 case 交集重算<br/>检索容差 ε=max(2pp,1/N)<br/>答案分容差默认 0.2, 答/拒=max(2pp,1/N)
     alt 通过 / force 放行
         J-->>AV: GATE_PASSED
         AV->>SN: 冻结发布快照
@@ -233,8 +242,8 @@ sequenceDiagram
         SN->>AV: 同时固化 index_snapshots + visible_version_ids
         AV->>AV: transition → RELEASED, 原正式版 → SUPERSEDED
     else 拦截
-        J-->>AV: GATE_FAILED(报告含双跑对比)
-    else 样本不足/含降级/待复核超阈
+        J-->>AV: GATE_BLOCKED(报告含检索 + 答案双跑对比)
+    else 样本不足/含降级/待复核超阈/Judge 失败
         J-->>AV: 仅记录不拦截(人工确认发布留痕)
     end
 ```

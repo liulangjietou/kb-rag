@@ -76,4 +76,48 @@ public class EvalResult extends BaseEntity {
     /** LLM-as-judge free text rationale. */
     @TableField("judge_reason")
     private String judgeReason;
+
+    /** Final answer produced through the same prompt/model path as the served chat endpoint. */
+    @TableField("generated_answer")
+    private String generatedAnswer;
+
+    /** Whether this case required generation and final-answer judgment. */
+    @TableField("answer_judge_requested")
+    private Boolean answerJudgeRequested;
+
+    /** Wall time of the generation call in milliseconds. */
+    @TableField("generation_latency_ms")
+    private Integer generationLatencyMs;
+
+    /** Rounded mean of the five final-answer judge dimensions. */
+    @TableField("answer_score")
+    private Integer answerScore;
+
+    /** Correctness of the generated answer against the expected answer. */
+    @TableField("answer_correctness")
+    private Integer answerCorrectness;
+
+    /** Degree to which claims are supported by the retrieved passages. */
+    @TableField("answer_faithfulness")
+    private Integer answerFaithfulness;
+
+    /** Coverage of the expected answer. */
+    @TableField("answer_completeness")
+    private Integer answerCompleteness;
+
+    /** Correctness of the generated answer's numbered citations. */
+    @TableField("citation_correctness")
+    private Integer citationCorrectness;
+
+    /** Coverage of claims that require a citation. */
+    @TableField("citation_completeness")
+    private Integer citationCompleteness;
+
+    /** Whether the answer made the expected refuse/answer decision. */
+    @TableField("refusal_correct")
+    private Boolean refusalCorrect;
+
+    /** Final-answer judge rationale or classified failure explanation. */
+    @TableField("answer_judge_reason")
+    private String answerJudgeReason;
 }

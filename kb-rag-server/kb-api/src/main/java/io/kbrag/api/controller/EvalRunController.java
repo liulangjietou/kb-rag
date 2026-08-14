@@ -16,6 +16,7 @@ import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.entity.EvalResult;
 import io.kbrag.domain.entity.EvalRun;
+import io.kbrag.domain.model.AnswerEvaluationConfig;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -64,8 +65,17 @@ public class EvalRunController {
     public Result<List<EvalRunResponse>> submit(@PathVariable String datasetId,
                                                 @Valid @RequestBody EvalRunSubmitRequest request) {
         kbResourceGuard.requireDatasetAccess(datasetId);
-        List<EvalRun> runs = evalRunService.submit(datasetId, request.k(), request.toConfigs(),
-                request.judgeEnabled());
+        List<EvalRun> runs;
+        if (request.answerEnabled()) {
+            AnswerEvaluationConfig answerConfig = evalRunService.answerConfig(datasetId,
+                    request.answerAppVersionId());
+            List<EvalRunService.AnswerRunSpec> specs = request.toConfigs().stream()
+                    .map(config -> new EvalRunService.AnswerRunSpec(config, answerConfig))
+                    .toList();
+            runs = evalRunService.submitAnswerRuns(datasetId, request.k(), specs, request.judgeEnabled());
+        } else {
+            runs = evalRunService.submit(datasetId, request.k(), request.toConfigs(), request.judgeEnabled());
+        }
         return Result.success(runs.stream().map(EvalRunResponse::from).toList());
     }
 
@@ -81,8 +91,10 @@ public class EvalRunController {
     public Result<EvalRunEstimateResponse> estimate(@PathVariable String datasetId,
                                                     @Valid @RequestBody EvalRunSubmitRequest request) {
         kbResourceGuard.requireDatasetAccess(datasetId);
+        AnswerEvaluationConfig answerConfig = request.answerEnabled()
+                ? evalRunService.answerConfig(datasetId, request.answerAppVersionId()) : null;
         return Result.success(EvalRunEstimateResponse.from(evalRunService.estimate(
-                datasetId, request.k(), request.toConfigs(), request.judgeEnabled())));
+                datasetId, request.k(), request.toConfigs(), request.judgeEnabled(), answerConfig)));
     }
 
     /**

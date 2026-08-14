@@ -18,6 +18,11 @@
 
 ### Added
 
+**M21 · 最终答案质量评测与发布门禁**（`docs/M21-CONTRACTS.md`）
+- 评测 case 表单新增“期望拒答”；运行表单可选择关联当前知识库的应用版本，预估并展示答案生成与答案 Judge 调用次数。
+- 评测报告新增最终答案五维评分、答/拒决策准确率、Judge 失败数与生成 P95 时延，case 下钻展示生成答案和评分，CSV 同步增加答案分。
+- 应用版本配置新增显式 `answer_gate` 与首发绝对阈值；门禁对比抽屉展示候选/正式版答案指标和答案门禁原因。历史版本默认关闭，升级不改变既有发布行为。
+
 **M20 · MCP 调试页面**（`docs/M20-CONTRACTS.md`）
 - 新增一级菜单「MCP 调试」（`/mcp`，`app:read` 或 `memory:read` 任一可见，位于「记忆库」与「评测中心」之间）：针对知识库应用与记忆库两个 MCP 端点的在线调试页（`pages/mcp/McpDebugPage.tsx`）——端点二选一（切换即清场）、粘贴明文 Key（kb-sk-* / kb-mk-*，与 API 调试 tab 同一约定）、initialize 握手、tools/list 拉取工具目录（选中工具自动按 inputSchema.required 预填参数模板）、tools/call 发起调用。
 - 响应区显式区分三种结果平面：JSON-RPC error（红，协议错误码）、isError=true（橙，业务失败文本）、成功（绿），并展示原始 JSON-RPC 响应全文；接入示例区随表单实时生成 curl 与 MCP 客户端 `mcpServers` 配置片段（streamable-http）。

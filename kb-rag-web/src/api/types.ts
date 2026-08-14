@@ -1256,6 +1256,7 @@ export interface EvalCase {
   query: string;
   messages: ChatMessage[] | null;
   expected_answer: string | null;
+  expected_refusal: boolean;
   anchor_type: AnchorType;
   evidences: EvalCaseEvidence[];
   status: CaseStatus;
@@ -1273,6 +1274,7 @@ export interface CreateEvalCaseRequest {
   query: string;
   messages?: ChatMessage[];
   expected_answer?: string;
+  expected_refusal?: boolean;
   anchor_type: AnchorType;
   evidences: EvalCaseEvidenceInput[];
   note?: string;
@@ -1364,12 +1366,18 @@ export interface EvalJudgeConfig {
   model?: string;
 }
 
+export interface EvalAnswerConfig {
+  enabled: boolean;
+  app_version_id: string;
+}
+
 /** POST /api/v1/eval-datasets/{datasetId}/runs and .../runs/estimate request body (M4b-CONTRACTS.md section 3.1). */
 export interface CreateEvalRunRequest {
   k: number;
   /** 1..6 entries; one run is created per entry (section 3.1). */
   configs: EvalRunConfig[];
   judge?: EvalJudgeConfig;
+  answer?: EvalAnswerConfig;
 }
 
 /**
@@ -1382,6 +1390,21 @@ export interface EvalRunEstimate {
   rerank_calls: number;
   rewrite_calls: number;
   judge_calls: number;
+  generation_calls: number;
+  answer_judge_calls: number;
+}
+
+export interface FinalAnswerMetrics {
+  score: number;
+  correctness: number;
+  faithfulness: number;
+  completeness: number;
+  citation_correctness: number;
+  citation_completeness: number;
+  refusal_accuracy: number;
+  evaluated_cases: number;
+  judge_failed_cases: number;
+  latency_p95_ms: number;
 }
 
 /** One (value, optional Wilson 95% CI) metric point (M4b-CONTRACTS.md section 3.3). CI is present only for proportion-type metrics (recall/precision/hit_rate), not MRR/NDCG. */
@@ -1427,6 +1450,10 @@ export interface EvalRun {
   retrieval_config: EvalRunConfig;
   judge_model: string | null;
   judge_prompt_version: string | null;
+  answer_evaluation: { app_version_id: string; generation_model: string | null } | null;
+  answer_judge_model: string | null;
+  answer_judge_prompt_version: string | null;
+  answer_metrics: FinalAnswerMetrics | null;
   status: RunStatus;
   metrics: EvalMetrics | null;
   case_total: number;
@@ -1451,6 +1478,17 @@ export interface EvalResult {
   retry_count: number;
   judge_score: number | null;
   judge_reason: string | null;
+  generated_answer: string | null;
+  answer_judge_requested: boolean;
+  generation_latency_ms: number | null;
+  answer_score: number | null;
+  answer_correctness: number | null;
+  answer_faithfulness: number | null;
+  answer_completeness: number | null;
+  citation_correctness: number | null;
+  citation_completeness: number | null;
+  refusal_correct: boolean | null;
+  answer_judge_reason: string | null;
 }
 
 /**
@@ -1559,6 +1597,15 @@ export interface AppGateThresholds {
   min_recall?: number | null;
 }
 
+/** Opt-in M21 quality gate over generated final answers. */
+export interface AppAnswerGateConfig {
+  enabled: boolean;
+  min_score?: number | null;
+  min_faithfulness?: number | null;
+  min_citation_correctness?: number | null;
+  min_refusal_accuracy?: number | null;
+}
+
 export interface AppVersionConfig {
   /** 1..15 entries (M5-CONTRACTS.md section 1), replacing M4c's single kb_id. */
   kb_refs: KbRef[];
@@ -1576,6 +1623,7 @@ export interface AppVersionConfig {
   chat_model?: string | null;
   /** Release gate floor; carried through for the same reason as chat_model above. */
   gate?: AppGateThresholds | null;
+  answer_gate?: AppAnswerGateConfig | null;
   /**
    * @deprecated M4c-era single-kb snapshot field. Present only on versions created before M5;
    * never populated by this web's write path. Do not read directly -- go through
@@ -1644,6 +1692,21 @@ export interface AppGateReport {
   baseline_run_id: string | null;
   evaluated_at: string;
   case_ids: string[];
+  answer_comparison?: {
+    candidate: FinalAnswerMetrics;
+    baseline: FinalAnswerMetrics | null;
+    effective_cases: number;
+    judge_failed_cases: number;
+    degraded_cases: number;
+    case_ids: string[];
+  } | null;
+  answer_decision?: {
+    verdict: string;
+    reason: string;
+    score_epsilon: number;
+    accuracy_epsilon: number;
+    deltas: Record<string, number> | null;
+  } | null;
 }
 
 /**
@@ -2550,5 +2613,4 @@ export interface MemoryAppKeyCreateRequest {
   name: string;
   qps_limit?: number;
 }
-
 

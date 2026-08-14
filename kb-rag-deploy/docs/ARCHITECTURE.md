@@ -1,13 +1,13 @@
 # kb-rag 架构文档
 
 
-> 版本：v2.3（基线 = v2.2 + Actuator 独立回环管理监听器与健康详情收敛，2026-08-14；v2.2 基线为角色行租户归属可辨识性修复，v2.1 基线为按 kbId 寻址的列表与批量入口租户解析修复，v2.0 基线为按资源自身 id 寻址入口的租户解析修复，v1.9 基线为异步池与应用版本租户解析修复，v1.8 基线为网页源租户解析修复，v1.7 基线为 V22，v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
+> 版本：v2.4（基线 = v2.3 + M21 最终答案质量评测与门禁，2026-08-14；v2.3 基线为 Actuator 独立回环管理监听器与健康详情收敛，v2.2 基线为角色行租户归属可辨识性修复，v2.1 基线为按 kbId 寻址的列表与批量入口租户解析修复，v2.0 基线为按资源自身 id 寻址入口的租户解析修复，v1.9 基线为异步池与应用版本租户解析修复，v1.8 基线为网页源租户解析修复，v1.7 基线为 V22，v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
 > 日期：2026-08-14
 > 作者：RichardFyoung / Claude
 >
 > **文档定位**：本文描述系统的实际实现架构（以代码为准），与以下文档互补——
 > - `知识库需求文档.md`：需求与设计决策的唯一事实源（"为什么做、做什么"）
-> - `M1~M20-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
+> - `M1~M21-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
 > - `openapi/kb-server.yaml`、`openapi/kb-parser.yaml`：HTTP 接口的唯一契约源
 > - `FLOWS.md`：核心流程图（与本文配套阅读）
 
@@ -183,10 +183,11 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 ### 3.6 应用发布与开放 API（`appcenter` + `openapi`）
 
 - `AppVersionService`：八状态机全部迁移收敛于 `transition` 一个方法，合法迁移定义在 `AppVersionStatus` 枚举上；"至多一个 RELEASED"由表上 `released_slot` 生成列 + 唯一索引双保险。
-- `ReleaseGateService`（`GATE_EXECUTOR`，与评测池分离防自等待死锁）：同语料同时刻双跑（候选配置 vs 当前正式版配置，复用 `EvalRunService`）；`ReleaseGateJudge`（纯函数，唯一裁决点，含 1e-9 浮点余量）三态裁决：通过 / 拦截 / 仅记录不拦截；`GateMetricsRecomputer` 在双方共同判定的 case 交集上重算指标，堵分母漂移。
+- `ReleaseGateService`（`GATE_EXECUTOR`，与评测池分离防自等待死锁）：同语料同时刻双跑（候选配置 vs 当前正式版配置，复用 `EvalRunService`）；`ReleaseGateJudge`（纯函数，唯一检索裁决点，含 1e-9 浮点余量）三态裁决；`GateMetricsRecomputer` 在双方共同判定的 case 交集上重算检索指标，堵分母漂移。M21 起应用版本显式开启 `answer_gate` 时，同一双跑继续经过 `AnswerGenerationService`（生产问答共用生成路径）与 `FinalAnswerJudgeService`，`FinalAnswerGateRecomputer` 只在双方结构化 Judge 均成功的 case 交集上重算，`FinalAnswerGateJudge` 再与检索结论按“非通过优先”合并；Judge 失败只产生 LOG_ONLY，不能伪装成质量回退。
 - `AppReleaseSnapshotService`：门禁裁决后、RELEASED 生效前，**同时冻结** `index_snapshots`（`IndexSnapshotService`：ES `_clone` / Qdrant scroll 游标拷贝，不挂别名）与 `visible_version_ids`——只冻结索引不冻结可见集正是"回滚后召回全空"缺陷的根源（v1.6 修复）。
 - 对外 API `/api/v1/knowledge/{search,chat}`：**独立的 `ApiKeyAuthFilter` servlet 过滤器链**（刻意不与管理台 Bearer 拦截器共用入口）；`ApiKeyFactory` 一把 Key 三形态（明文仅创建时返回一次 / SHA-256 digest 用于鉴权 / 前缀用于展示）；`ApiRateLimiter` 进程内令牌桶；`RequestOverridePolicy` 白名单只放 4 个响应形态参数（top_n/score_threshold/metadata_filter/max_content_length），越界拒绝而非忽略；`ApiAuditService` 异步落审计（拒绝也记录、401 不落 429 落）、`ApiAuditArchiveService` 定时归档 MinIO 后分批物理删除；`QueryDigestFactory` 对审计 query 无条件脱敏截断。
 - chat SSE 事件契约：`message_delta`* → `references`（元素为与 search nodes 同构的 RetrievalNode）→ `done`（含 request_id/用量/degraded）或 `error`；生成模型取应用版本快照配置，经 `ChatProviderFactory` 生效；`ChatPromptAssembler` 固定分隔符包裹检索内容（注入防线①）。
+- `AnswerGenerationService` 收口 `ChatProviderFactory` 解析、系统 Prompt 与消息装配：开放 chat、管理台预览和 M21 离线答案评测共用它，防止门禁测到一条线上永远不会执行的“近似 Prompt”。检索仍由调用方负责，评测因此能把配置矩阵实际召回的节点原样送入生成。
 
 ### 3.7 异步与定时（无 MQ 架构的支撑件）
 
@@ -249,6 +250,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V20（M19） | 记忆库 6 张表：`t_kb_memory_library` / `t_kb_memory_fragment_rule`（instruction_type/auto_update/expire_days/extract_version/builtin）/ `t_kb_memory_profile_rule`（fields 整体存 JSON 数组）/ `t_kb_memory_node`（idx_library_user）/ `t_kb_memory_profile`（uk_rule_user 唯一键 upsert）/ `t_kb_memory_app_key`（明文 `kb-mk-*`，只存 SHA-256 摘要 + 展示前缀）；权限种子 `memory:read`/`memory:write` |
 | V21（M19 后修复） | `t_kb_memory_library` 增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户）+ `idx_tenant` —— V20 建表时漏了 M16 的租户层，多租户部署下任何租户持 `memory:read` 即可列出全部署记忆库、`memory:write` 可改删他人的库与 Memory Key。记忆库是 memory 域的根聚合表，五张从属表（片段/画像规则、节点、画像、Key）经 `library_id` 归属租户，故只加这一列；配套把它加进 `KbTenantLineHandler.FENCED_TABLES`，并由 `MemoryLibraryGuard` 让每个管理端入口先解析库（见 §7.2） |
 | V22（M18 后修复） | `t_kb_web_credential` 增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户），`uk_host(host)` 收缩为 `uk_tenant_host(tenant_id, host)` —— V19 建表时漏了 M16 的租户层。缺陷两面：管理面任何租户持 `system:config` 可改删停用他人凭据；抓取面凭据按 host 全局查找，B 租户给自己的 WebSource 登记一个同 host URL，夜里的同步就会把 A 租户的密码发到那个请求上。配套把表加进 `KbTenantLineHandler.FENCED_TABLES`（只覆盖管理面），抓取面由 `WebCredentialService#resolveFor(tenantId, host)` 的显式租户谓词覆盖 —— 同步跑在无主体线程上，围栏在那条线程整条跳过（见 §7.2 与 M16 契约 §1.3） |
+| V23（M21） | 最终答案评测字段：`t_kb_eval_case.expected_refusal`；`t_kb_eval_run` 增应用配置快照、答案 Judge 身份与聚合指标；`t_kb_eval_result` 增生成答案、生成耗时、五维评分、答/拒结果与失败原因。全部新列可空或有兼容默认值，存量 run 不回填 |
 
 引擎侧可过滤字段全集（Qdrant 标量 / ES filter，建索引时显式声明）：`kb_id`、`doc_id`、`document_version_id`、`enabled`、`parent_id`、`chunk_type`、`tag_ids`、`session_id`、`sender`、`msg_time`、`chunk_seq`；其余 metadata 只存 MySQL。新增可过滤维度视为 schema 变更，走索引重建迁移。
 
@@ -351,7 +353,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | `scripts/benchmark.sh` | 纯 bash+curl 压测（P50/P95/P99），验收口径 P95<2s；`seed-bench.py` 零 Key 直灌 10 万分片种子数据 |
 | `demo/` | 4 篇原创文档（md/docx/pdf/xlsx 各一，字节级可复现生成）+ `eval-cases.json`（10 条，含文档级锚定图片 case，按文件名+content_hash 关联导入） |
 | `mappings/` | 聊天记录列名映射模板分发（memotrace 等） |
-| `docs/` | 需求文档、M1-M20 契约、OpenAPI（`kb-server.yaml` 0.20.0-m20（含 `mcp` tag 与两个 MCP path）/ `kb-parser.yaml` 0.12.0-m12，3 端点）、备份恢复手册、本文档与 `FLOWS.md`；调用方接入文档另见主仓 `docs/MCP接入指南.md` |
+| `docs/` | 需求文档、M1-M21 契约、OpenAPI（`kb-server.yaml` 0.23.0-m21 / `kb-parser.yaml` 0.12.0-m12）、备份恢复手册、本文档与 `FLOWS.md`；调用方接入文档另见主仓 `docs/MCP接入指南.md` |
 
 ---
 

@@ -2,7 +2,7 @@
 
 知识库 RAG 系统的前端管理台。技术栈：Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；静态检查用 oxlint；不引入 Redux/Zustand 等状态管理库（登录态与模型状态均用 React Context）。
 
-对应 `kb-rag-deploy/docs/ARCHITECTURE.md` 第 5 节（web 架构）与 `docs/M1~M13-CONTRACTS.md` 各里程碑契约。
+对应 `kb-rag-deploy/docs/ARCHITECTURE.md` 第 5 节（web 架构）与 `docs/M1~M21-CONTRACTS.md` 各里程碑契约。
 
 ## 快速开始
 
@@ -81,6 +81,6 @@ src/
 
 - 整体架构（web 一节）：`kb-rag-deploy/docs/ARCHITECTURE.md` 第 5 节
 - 关键流程时序图（含前端参与的每条链路）：`kb-rag-deploy/docs/FLOWS.md`
-- 各里程碑接口契约：`kb-rag-deploy/docs/M1~M13-CONTRACTS.md`
+- 各里程碑接口契约：`kb-rag-deploy/docs/M1~M21-CONTRACTS.md`
 - 参与贡献、提交规范：`CONTRIBUTING.md`
 - 安全问题上报：`SECURITY.md`

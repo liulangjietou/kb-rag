@@ -22,6 +22,16 @@ const METRIC_LABELS: Record<MetricNumberKey, string> = {
 
 const GROUP_OPTIONS: MetricGroupKey[] = ['all', 'span', 'document', 'single_turn', 'multi_turn'];
 
+const ANSWER_ROWS = [
+  ['score', '综合分'],
+  ['correctness', '正确性'],
+  ['faithfulness', '忠实度'],
+  ['completeness', '完整性'],
+  ['citation_correctness', '引用正确性'],
+  ['citation_completeness', '引用完整性'],
+  ['refusal_accuracy', '答/拒决策准确率'],
+] as const;
+
 function formatMetricValue(set: KMetricSet | undefined, key: MetricNumberKey): string {
   const value = set?.[key];
   if (value === undefined || value === null) {
@@ -119,6 +129,11 @@ export default function GateCompareDrawer({ version, onClose }: GateCompareDrawe
               <Descriptions.Item label="门禁结论" span={2}>
                 {version.gate_verdict || '暂无'}
               </Descriptions.Item>
+              {version.gate_report?.answer_decision && (
+                <Descriptions.Item label="最终答案门禁" span={2}>
+                  {version.gate_report.answer_decision.verdict} / {version.gate_report.answer_decision.reason}
+                </Descriptions.Item>
+              )}
             </Descriptions>
 
             {!runIds || runIds.length === 0 ? (
@@ -170,6 +185,42 @@ export default function GateCompareDrawer({ version, onClose }: GateCompareDrawe
                     })),
                   ]}
                 />
+
+                {version.gate_report?.answer_comparison && (
+                  <>
+                    <Typography.Title level={5} style={{ marginBottom: 0 }}>
+                      最终答案质量对比
+                    </Typography.Title>
+                    <Table
+                      size="small"
+                      rowKey="key"
+                      pagination={false}
+                      dataSource={ANSWER_ROWS.map(([key, label]) => ({ key, label }))}
+                      columns={[
+                        { title: '指标', dataIndex: 'label', width: 180 },
+                        {
+                          title: '本次候选',
+                          render: (_: unknown, row: { key: (typeof ANSWER_ROWS)[number][0] }) => {
+                            const value = version.gate_report?.answer_comparison?.candidate[row.key];
+                            return row.key === 'refusal_accuracy'
+                              ? `${((value ?? 0) * 100).toFixed(1)}%`
+                              : (value ?? 0).toFixed(2);
+                          },
+                        },
+                        {
+                          title: '对照（当前正式版）',
+                          render: (_: unknown, row: { key: (typeof ANSWER_ROWS)[number][0] }) => {
+                            const value = version.gate_report?.answer_comparison?.baseline?.[row.key];
+                            if (value === undefined || value === null) return '-';
+                            return row.key === 'refusal_accuracy'
+                              ? `${(value * 100).toFixed(1)}%`
+                              : value.toFixed(2);
+                          },
+                        },
+                      ]}
+                    />
+                  </>
+                )}
 
                 <Typography.Text type="secondary">
                   比较仅在双方有效 case 交集上重新计算；容差 ε = max(0.02, 1/N)，候选指标低于对照 − ε 才判定拦截。

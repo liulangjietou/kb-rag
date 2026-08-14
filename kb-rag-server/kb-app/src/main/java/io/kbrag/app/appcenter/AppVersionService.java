@@ -16,6 +16,7 @@ import io.kbrag.domain.enums.GateReason;
 import io.kbrag.domain.enums.GateVerdict;
 import io.kbrag.domain.mapper.AppVersionMapper;
 import io.kbrag.domain.model.AppConfigSnapshot;
+import io.kbrag.domain.model.AnswerGateConfig;
 import io.kbrag.domain.model.AppPromptConfig;
 import io.kbrag.domain.model.AppRoutingConfig;
 import io.kbrag.domain.model.KbRef;
@@ -481,6 +482,9 @@ public class AppVersionService {
         if (snapshot.getPrompt() == null) {
             snapshot.setPrompt(AppPromptConfig.defaults());
         }
+        if (snapshot.getAnswerGate() == null) {
+            snapshot.setAnswerGate(new AnswerGateConfig());
+        }
         return snapshot;
     }
 
@@ -609,6 +613,7 @@ public class AppVersionService {
         retrieval.setRewriteEnabled(defaults.isRewriteEnabled());
         snapshot.setRetrieval(retrieval);
         snapshot.setPrompt(AppPromptConfig.defaults());
+        snapshot.setAnswerGate(new AnswerGateConfig());
         return snapshot;
     }
 

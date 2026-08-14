@@ -6,6 +6,8 @@ import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.entity.EvalRun;
 import io.kbrag.domain.model.EvalMetricsAtK;
 import io.kbrag.domain.model.EvalRetrievalConfig;
+import io.kbrag.domain.model.AnswerEvaluationConfig;
+import io.kbrag.domain.model.FinalAnswerMetrics;
 
 import java.util.Map;
 
@@ -20,6 +22,10 @@ import java.util.Map;
  * @param retrievalConfig     label, mode and retrieval parameters this run used
  * @param judgeModel          LLM-as-judge model, {@code null} when judging was not requested
  * @param judgePromptVersion  judge prompt version, {@code null} when judging was not requested
+ * @param answerEvaluation final-answer evaluation summary, {@code null} for a retrieval-only run
+ * @param answerJudgeModel final-answer judge model
+ * @param answerJudgePromptVersion final-answer judge prompt version
+ * @param answerMetrics aggregated final-answer quality metrics
  * @param status              lifecycle state
  * @param metrics             grouped metrics with 95% CI; {@code null} until the run finishes
  * @param caseTotal           cases in the data set at run start
@@ -41,6 +47,10 @@ public record EvalRunResponse(
         @JsonProperty("retrieval_config") EvalRetrievalConfig retrievalConfig,
         @JsonProperty("judge_model") String judgeModel,
         @JsonProperty("judge_prompt_version") String judgePromptVersion,
+        @JsonProperty("answer_evaluation") AnswerEvaluationView answerEvaluation,
+        @JsonProperty("answer_judge_model") String answerJudgeModel,
+        @JsonProperty("answer_judge_prompt_version") String answerJudgePromptVersion,
+        @JsonProperty("answer_metrics") FinalAnswerMetrics answerMetrics,
         String status,
         Map<String, Map<String, EvalMetricsAtK>> metrics,
         @JsonProperty("case_total") Integer caseTotal,
@@ -67,6 +77,11 @@ public record EvalRunResponse(
                 JsonUtil.parse(run.getRetrievalConfig(), EvalRetrievalConfig.class),
                 run.getJudgeModel(),
                 run.getJudgePromptVersion(),
+                answerEvaluationOf(run),
+                run.getAnswerJudgeModel(),
+                run.getAnswerJudgePromptVersion(),
+                run.getAnswerMetrics() == null ? null
+                        : JsonUtil.parse(run.getAnswerMetrics(), FinalAnswerMetrics.class),
                 run.getStatus() == null ? null : run.getStatus().name(),
                 run.getMetrics() == null ? null
                         : JsonUtil.parse(run.getMetrics(), new TypeReference<Map<String, Map<String, EvalMetricsAtK>>>() {
@@ -78,5 +93,25 @@ public record EvalRunResponse(
                 run.getFailReason(),
                 run.getStartedAt() == null ? null : run.getStartedAt().toString(),
                 run.getFinishedAt() == null ? null : run.getFinishedAt().toString());
+    }
+
+    private static AnswerEvaluationView answerEvaluationOf(EvalRun run) {
+        if (run.getAnswerEvalConfig() == null) {
+            return null;
+        }
+        AnswerEvaluationConfig config = JsonUtil.parse(run.getAnswerEvalConfig(), AnswerEvaluationConfig.class);
+        return new AnswerEvaluationView(config.appVersionId(), config.snapshot().getChatModel());
+    }
+
+    /**
+     * Non-sensitive final-answer evaluation summary. The full frozen snapshot remains persisted on the run
+     * for reproducibility but is not repeated in every list response.
+     *
+     * @param appVersionId application version measured
+     * @param generationModel generation model frozen by that version
+     */
+    public record AnswerEvaluationView(
+            @JsonProperty("app_version_id") String appVersionId,
+            @JsonProperty("generation_model") String generationModel) {
     }
 }

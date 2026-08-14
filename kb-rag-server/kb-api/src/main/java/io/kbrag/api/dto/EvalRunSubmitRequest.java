@@ -21,13 +21,15 @@ import java.util.List;
  *                override it
  * @param configs 1 to 6 configurations to compare, one run produced per entry
  * @param judge   optional LLM-as-judge switch
+ * @param answer  optional final-answer evaluation configuration
  *
  * @author owlzhangfq@gmail.com
  */
 public record EvalRunSubmitRequest(
         @Min(value = 1, message = "must be at least 1") int k,
         @NotEmpty(message = "must contain between 1 and 6 entries") @Valid List<ConfigRequest> configs,
-        @Valid JudgeRequest judge) {
+        @Valid JudgeRequest judge,
+        @Valid AnswerRequest answer) {
 
     /**
      * Maps every configuration onto the domain model, the single fast-fail gate of this payload.
@@ -45,6 +47,24 @@ public record EvalRunSubmitRequest(
      */
     public boolean judgeEnabled() {
         return judge != null && judge.enabled();
+    }
+
+    /**
+     * Tells whether the production final-answer path should be evaluated.
+     *
+     * @return {@code true} when {@code answer.enabled} was set
+     */
+    public boolean answerEnabled() {
+        return answer != null && answer.enabled();
+    }
+
+    /**
+     * Application version selected for final-answer generation.
+     *
+     * @return version id, {@code null} when answer evaluation was not requested
+     */
+    public String answerAppVersionId() {
+        return answer == null ? null : answer.appVersionId();
     }
 
     /**
@@ -98,5 +118,15 @@ public record EvalRunSubmitRequest(
      *                configuration ({@code EVAL_JUDGE_MODEL}) and is not overridden per submission
      */
     public record JudgeRequest(boolean enabled, String model) {
+    }
+
+    /**
+     * Final-answer evaluation switch.
+     *
+     * @param enabled whether to generate and judge final answers
+     * @param appVersionId application version whose prompt and generation model are frozen into each run
+     */
+    public record AnswerRequest(boolean enabled,
+                                @JsonProperty("app_version_id") String appVersionId) {
     }
 }

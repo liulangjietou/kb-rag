@@ -7,6 +7,13 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### M21 · 最终答案质量评测与发布门禁
+
+- `[schema]` Flyway `V23__final_answer_evaluation.sql` 为评测用例增加期望拒答，为 run 冻结应用问答配置与答案 Judge 身份，为 case 结果记录生成答案、耗时、五维评分、答/拒结果和失败原因；存量行兼容，无需回填。
+- 新增 `AnswerGenerationService`，将开放问答、管理台预览和离线评测的 Provider 解析与 Prompt 装配收敛为同一路径；答案评测不再用自造 Prompt 近似生产行为。
+- 新增独立的 `FinalAnswerJudgeService`、聚合器与答案门禁纯函数。Judge 失败不折算 0 分；双跑只比较双方均成功 Judge 的共同 case；历史应用版本的答案门禁默认关闭。
+- 评测提交和费用预估支持绑定应用版本；发布门禁在显式开启时联合检索与答案结论，并新增 `GATE_ANSWER_SCORE_EPSILON`（默认 0.2）。完整契约见 `kb-rag-deploy/docs/M21-CONTRACTS.md`。
+
 ### 安全加固（Actuator 管理平面）
 
 - `/actuator/health`、`/actuator/info` 与 `/actuator/prometheus` 从 `20000` 业务监听器迁至

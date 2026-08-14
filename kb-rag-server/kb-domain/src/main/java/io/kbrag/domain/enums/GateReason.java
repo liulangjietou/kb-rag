@@ -45,7 +45,32 @@ public enum GateReason {
     ABSOLUTE_THRESHOLD_NOT_MET("首次发布无对照，未达到配置的绝对阈值，门禁拦截"),
 
     /** First release with no baseline and no absolute threshold: metrics recorded as the baseline. */
-    BASELINE_RECORDED("首次发布无对照且未配置绝对阈值，已记录本次结果作为后续基线并放行");
+    BASELINE_RECORDED("首次发布无对照且未配置绝对阈值，已记录本次结果作为后续基线并放行"),
+
+    /** Final-answer evaluation could not produce a trustworthy comparison. */
+    ANSWER_EVAL_UNAVAILABLE("最终答案评测未成功完成，门禁降级为仅记录"),
+
+    /** Too few final answers were successfully judged. */
+    ANSWER_INSUFFICIENT_CASES("最终答案有效评测 case 数不足，门禁降级为仅记录"),
+
+    /** At least one common case did not yield a valid structured answer judgment. */
+    ANSWER_JUDGE_FAILED("最终答案评判存在失败 case，指标不完整，门禁降级为仅记录"),
+
+    /** Candidate final-answer quality fell below the baseline tolerance band. */
+    ANSWER_METRICS_REGRESSED("候选版本最终答案质量低于对照减容差，门禁拦截"),
+
+    /** Candidate final-answer quality stayed inside the baseline tolerance band. */
+    ANSWER_WITHIN_TOLERANCE("候选版本最终答案质量未低于对照减容差，门禁通过"),
+
+    /** First release met its configured absolute answer thresholds. */
+    ANSWER_ABSOLUTE_THRESHOLD_MET("首次发布最终答案质量达到绝对阈值，门禁通过"),
+
+    /** First release missed at least one configured absolute answer threshold. */
+    ANSWER_ABSOLUTE_THRESHOLD_NOT_MET("首次发布最终答案质量未达到绝对阈值，门禁拦截"),
+
+    /** First release had no answer baseline or absolute answer threshold. */
+    ANSWER_BASELINE_RECORDED("首次发布已记录最终答案质量作为后续基线并放行");
+
 
     private final String message;
 

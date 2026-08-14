@@ -1324,6 +1324,9 @@ public class KbProperties {
          */
         private double epsilonPp = 2.0d;
 
+        /** Tolerance on final-answer judge scores, whose scale is one to five. */
+        private double answerScoreEpsilon = 0.2d;
+
         /** Pending review ratio above which the data set counts as invalid for gating purposes. */
         private double staleRatio = 0.15d;
 

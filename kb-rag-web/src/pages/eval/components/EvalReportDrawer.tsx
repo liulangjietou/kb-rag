@@ -30,6 +30,29 @@ interface DrilldownRow {
   perRun: Map<string, EvalResult | undefined>;
 }
 
+const ANSWER_METRIC_ROWS = [
+  { key: 'score', label: '综合分（1-5）' },
+  { key: 'correctness', label: '正确性（1-5）' },
+  { key: 'faithfulness', label: '忠实度（1-5）' },
+  { key: 'completeness', label: '完整性（1-5）' },
+  { key: 'citation_correctness', label: '引用正确性（1-5）' },
+  { key: 'citation_completeness', label: '引用完整性（1-5）' },
+  { key: 'refusal_accuracy', label: '答/拒决策准确率' },
+  { key: 'evaluated_cases', label: '有效答案 case' },
+  { key: 'judge_failed_cases', label: '评判失败 case' },
+  { key: 'latency_p95_ms', label: '生成 P95 时延' },
+] as const;
+
+function formatAnswerMetric(run: EvalRun, key: (typeof ANSWER_METRIC_ROWS)[number]['key']): string {
+  const metrics = run.answer_metrics;
+  if (!metrics) return '-';
+  const value = metrics[key];
+  if (key === 'refusal_accuracy') return `${(value * 100).toFixed(1)}%`;
+  if (key === 'latency_p95_ms') return `${value} ms`;
+  if (key === 'evaluated_cases' || key === 'judge_failed_cases') return String(value);
+  return value.toFixed(2);
+}
+
 function formatMetricValue(set: KMetricSet | undefined, key: MetricNumberKey): string {
   const value = set?.[key];
   if (value === undefined || value === null) {
@@ -172,6 +195,7 @@ export default function EvalReportDrawer({ datasetId, runIds, onClose }: EvalRep
       '锚定类型',
       ...runs.map((run) => `${run.retrieval_config.label}-hit`),
       ...runs.map((run) => `${run.retrieval_config.label}-hit_rank`),
+      ...runs.map((run) => `${run.retrieval_config.label}-answer_score`),
     ];
     const rows = drilldownRows.map((row) => [
       row.evalCase.case_id,
@@ -179,6 +203,7 @@ export default function EvalReportDrawer({ datasetId, runIds, onClose }: EvalRep
       row.evalCase.anchor_type,
       ...runs.map((run) => (row.perRun.get(run.run_id)?.hit ? '1' : '0')),
       ...runs.map((run) => String(row.perRun.get(run.run_id)?.hit_rank ?? '')),
+      ...runs.map((run) => String(row.perRun.get(run.run_id)?.answer_score ?? '')),
     ]);
     downloadCsv('eval-drilldown.csv', [header, ...rows]);
   };
@@ -266,6 +291,31 @@ export default function EvalReportDrawer({ datasetId, runIds, onClose }: EvalRep
               ]}
             />
 
+            {runs.some((run) => run.answer_metrics !== null) && (
+              <>
+                <Typography.Title level={5} style={{ marginBottom: 0 }}>
+                  最终答案质量
+                </Typography.Title>
+                <Table
+                  size="small"
+                  rowKey="key"
+                  pagination={false}
+                  dataSource={ANSWER_METRIC_ROWS}
+                  scroll={{ x: true }}
+                  columns={[
+                    { title: '指标', dataIndex: 'label', fixed: 'left', width: 180 },
+                    ...runs.map((run) => ({
+                      title: run.retrieval_config.label,
+                      key: run.run_id,
+                      width: 180,
+                      render: (_: unknown, row: (typeof ANSWER_METRIC_ROWS)[number]) =>
+                        formatAnswerMetric(run, row.key),
+                    })),
+                  ]}
+                />
+              </>
+            )}
+
             <Typography.Title level={5} style={{ marginBottom: 0 }}>
               命中明细下钻
             </Typography.Title>
@@ -292,6 +342,16 @@ export default function EvalReportDrawer({ datasetId, runIds, onClose }: EvalRep
                           {result.hit ? `命中 #${result.hit_rank ?? '-'}` : '未命中'}
                         </Tag>
                         {result.degraded.length > 0 && <Tag color="warning">降级</Tag>}
+                        {result.answer_judge_requested && (
+                          <Tag color={result.answer_score === null ? 'error' : 'blue'}>
+                            {result.answer_score === null ? '答案评判失败' : `答案 ${result.answer_score}/5`}
+                          </Tag>
+                        )}
+                        {result.generated_answer && (
+                          <Typography.Text ellipsis={{ tooltip: result.generated_answer }} style={{ maxWidth: 180 }}>
+                            {result.generated_answer}
+                          </Typography.Text>
+                        )}
                       </Space>
                     );
                   },
