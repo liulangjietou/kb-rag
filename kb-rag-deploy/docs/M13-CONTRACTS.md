@@ -8,7 +8,7 @@
 - **本期做**：①激活既有 actuator 的 `/actuator/prometheus` 端点（`management.endpoints.web.exposure.include` 早已含 prometheus，缺的只是 `micrometer-registry-prometheus` 依赖）；②新增业务指标门面 `KbMetrics`（kb-app），在既有横切汇聚点埋计数器/计时器；③任务积压 gauge。JVM/HTTP 等基础指标由 actuator 自动配置免费提供，不重造。
 - **本期不做**：Grafana 面板与告警规则文件（部署侧资产，属运维文档范畴）；指标持久化（Prometheus 拉走即可）；per-KB / per-key 维度标签（kb_id、key_id 是无界基数，Prometheus 反模式——需要按库统计时用 M10 洞察报表，按 key 统计时用 M4c 审计统计，各有专门端点）；`@Timed` AOP（项目横切惯例是显式调用，不引 AOP）。
 - **埋点原则（与 M10 洞察同一哲学）**：只在**既有的横切汇聚点**搭车，不进 `RetrievalService` 内部——评测运行与发布卡点复用检索管线，不能污染在线指标。指标失败绝不影响业务路径（micrometer 计数本身无 IO，不会失败；gauge 的 DB 查询包 try/catch）。
-- **兼容红线**：纯新增，无表变更、无端点行为变化、无新环境变量；`/actuator/prometheus` 与 health 同属管理端口面，当前无鉴权（与 health 一致，生产由部署侧网络隔离，权限属后期统一补充范畴）。
+- **M13 交付时的兼容红线**：纯新增，无表变更、无端点行为变化、无新环境变量；当时 `/actuator/prometheus` 与 health 同端口且无鉴权。v1.21 已将二者迁至默认只绑定 `127.0.0.1:20003` 的独立管理监听器，并隐藏 health 组件详情，现行部署边界见 `ACTUATOR-SECURITY.md`。
 
 ## 1. 依赖（版本一律由 Spring Boot BOM 管理）
 
@@ -57,7 +57,7 @@
 
 ## 6. 验收
 
-1. 启动 kb-rag-server → `curl :20000/actuator/prometheus` 可见 `kb_search_seconds_*`、`kb_task_backlog` 等指标及 JVM/HTTP 基础指标
+1. 启动 kb-rag-server → `curl 127.0.0.1:20003/actuator/prometheus` 可见 `kb_search_seconds_*`、`kb_task_backlog` 等指标及 JVM/HTTP 基础指标（M13 初版端口为 20000，v1.21 后为独立管理端口）
 2. 管理台执行一次检索 → `kb_search_seconds_count{source="console"}` 递增；零命中查询 → `zero_hit="true"` 系列递增
 3. 上传一篇文档索引完成 → `kb_task_completed_total{type="index",status="success"}` 递增
 4. 用错误 API Key 调开放接口 → `kb_openapi_rejected_total{error_code="INVALID_API_KEY"}` 递增

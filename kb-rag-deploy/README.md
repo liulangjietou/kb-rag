@@ -418,10 +418,12 @@ docker compose -f docker-compose.lite.yml --profile graph up -d
   注意 `DELETE /documents/{docId}` 语义已改为移入回收站（见 CHANGELOG 醒目提示）
 - **M12 URL 导入与增量同步**：网页登记即抓、定时增量同步（四态结果、hash 去重）、
   SSRF 防线；新增 `WEB_IMPORT_*` 六个变量；注意 `UPLOAD_ALLOWED_EXTENSIONS` 默认值已含 `html`
-- **M13 Prometheus 业务指标**：`/actuator/prometheus` 可抓取 `kb_search_seconds` /
+- **M13 Prometheus 业务指标**：默认从独立回环管理端口
+  `127.0.0.1:20003/actuator/prometheus` 抓取 `kb_search_seconds` /
   `kb_task_completed_total` / `kb_task_backlog` / `kb_openapi_rejected_total` /
-  `kb_websource_sync_total` 及 JVM/HTTP 基础指标；无新环境变量，该端点与 health 同口径
-  暂无鉴权，生产由部署侧网络隔离
+  `kb_websource_sync_total` 及 JVM/HTTP 基础指标；管理端口与 `20000` 业务端口分离，健康响应
+  不暴露组件详情。远程抓取必须显式修改管理地址并配置网络访问控制，见
+  [`docs/ACTUATOR-SECURITY.md`](docs/ACTUATOR-SECURITY.md)
 
 ## 竞品能力对齐（M14）
 

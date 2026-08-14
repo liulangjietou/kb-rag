@@ -16,9 +16,11 @@ import java.util.Optional;
 /**
  * Verifies the bearer token of every management call and binds the caller for the rest of the request.
  *
- * <p>The login endpoint and the actuator are excluded by the MVC registration; everything else needs a
- * valid token. Using a custom header instead of a cookie removes cross site request forgery from the
- * threat model entirely.
+ * <p>The login and single sign-on entry points are excluded by the MVC registration; everything else
+ * under the management API needs a valid token. Actuator runs on its own loopback-only management
+ * listener and is therefore outside this interceptor's {@code /api/**} and {@code /internal/**} scope.
+ * Using a custom header instead of a cookie removes cross site request forgery from the threat model
+ * entirely.
  *
  * <p>The permissions of the caller are resolved once here rather than wherever they happen to be needed,
  * so a single request cannot see a grant change take effect halfway through it.

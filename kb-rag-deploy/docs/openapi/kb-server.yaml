@@ -2652,7 +2652,10 @@ paths:
     get:
       tags:
       - system
-      summary: 健康检查（含 MySQL/ES/MinIO/Qdrant 探活）
+      summary: 独立管理端口健康检查
+      description: 默认仅监听 127.0.0.1:20003，返回聚合状态但不暴露组件名称与错误详情。
+      servers:
+      - url: http://127.0.0.1:20003
       security: []
       responses:
         '200':
@@ -4998,9 +5001,11 @@ components:
       scheme: bearer
       description: '自定义 Header：Authorization: Bearer <token>。服务端 token 表/内存缓存维护，
 
-        有效期 24h；除 /api/v1/auth/login、/api/v1/auth/sso-available、/api/v1/auth/sso/**（含
+        有效期 24h；业务监听器上除 /api/v1/auth/login、/api/v1/auth/sso-available、
 
-        oidc/saml/cas 的 login 与回调）与 /actuator/** 外全部拦截。
+        /api/v1/auth/sso/**（含 oidc/saml/cas 的 login 与回调）外全部拦截。Actuator 运行在独立管理监听器，
+
+        不属于该认证链。
 
         M15 起认证之后还有一道功能权限拦截：命中 @RequiresPermission 且主体不持有其中任一权限码时返回 403 FORBIDDEN。
 

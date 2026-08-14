@@ -1,8 +1,8 @@
 # kb-rag 架构文档
 
 
-> 版本：v2.2（基线 = 一期 M1-M7 + 二期 M8/M9 + 核心能力增强 M10-M13 + 竞品能力对齐 M14 + 企业化 M15/M16 + 网页抓取增强 M17/M18 + 记忆库 M19 + MCP 协议层 M20 + 记忆库租户隔离修复 V21 + 站点凭据租户隔离修复 V22 + 网页源租户解析修复 + 异步池形状与状态机修复 + 应用版本租户解析修复 + 按资源自身 id 寻址入口的租户解析修复 + 按 kbId 寻址的列表与批量入口租户解析修复 + 角色行租户归属可辨识性修复，2026-08-12；v2.1 基线为按 kbId 寻址的列表与批量入口租户解析修复，v2.0 基线为按资源自身 id 寻址入口的租户解析修复，v1.9 基线为异步池与应用版本租户解析修复，v1.8 基线为网页源租户解析修复，v1.7 基线为 V22，v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
-> 日期：2026-08-12
+> 版本：v2.3（基线 = v2.2 + Actuator 独立回环管理监听器与健康详情收敛，2026-08-14；v2.2 基线为角色行租户归属可辨识性修复，v2.1 基线为按 kbId 寻址的列表与批量入口租户解析修复，v2.0 基线为按资源自身 id 寻址入口的租户解析修复，v1.9 基线为异步池与应用版本租户解析修复，v1.8 基线为网页源租户解析修复，v1.7 基线为 V22，v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
+> 日期：2026-08-14
 > 作者：RichardFyoung / Claude
 >
 > **文档定位**：本文描述系统的实际实现架构（以代码为准），与以下文档互补——
@@ -378,8 +378,8 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 ### 7.3 可观测
 
 - `request_id` 全链路：`RequestIdFilter` 入口生成 → MDC → 响应头 → `X-Request-Id` 透传 parser 与 Provider 调用日志 → `TaskDecorator` 带入异步线程。
-- 健康：Actuator 组合探针（ES 必选；Qdrant/Neo4j 仅配置时注册；MinIO；parser `/health`）。
-- 指标（M13）：`/actuator/prometheus` 可直接抓取（micrometer-registry-prometheus，与 health 同口径暂不鉴权）；`KbMetrics` 门面承载四类业务指标——`kb_search_seconds`（Timer，source/zero_hit/degraded 标签）、`kb_task_completed_total`、`kb_openapi_rejected_total`、`kb_websource_sync_total`；`TaskBacklogMetrics` 提供 `kb_task_backlog`（pending/running 两支 gauge，DB 异常回 NaN 不失败抓取）；埋点全部骑在既有横切点上，记录失败绝不影响业务路径。
+- 健康：Actuator 组合探针（ES 必选；Qdrant/Neo4j 仅配置时注册；MinIO；parser `/health`）。Actuator 默认运行在独立回环监听器 `127.0.0.1:20003`，与业务端口分离；health 只返回聚合状态，不暴露组件名称和错误详情。
+- 指标（M13）：`/actuator/prometheus` 从独立管理端口抓取（micrometer-registry-prometheus）；`KbMetrics` 门面承载四类业务指标——`kb_search_seconds`（Timer，source/zero_hit/degraded 标签）、`kb_task_completed_total`、`kb_openapi_rejected_total`、`kb_websource_sync_total`；`TaskBacklogMetrics` 提供 `kb_task_backlog`（pending/running 两支 gauge，DB 异常回 NaN 不失败抓取）；埋点全部骑在既有横切点上，记录失败绝不影响业务路径。远程抓取需要显式开放管理地址，并由防火墙或带认证的反向代理限制来源。
 - 告警：`AlertEvaluator` 三类触发 + 静默期，Webhook 未配置降级界面红点；日志仅 info/error、英文、错误码占位符。
 
 ### 7.4 一致性手法汇总
