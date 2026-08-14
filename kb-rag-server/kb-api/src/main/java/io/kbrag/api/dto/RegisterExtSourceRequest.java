@@ -5,17 +5,17 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 /**
- * Payload of {@code POST /api/v1/kb/{kbId}/ext-sources}: registers one external object store
- * source, the M14 contract section 2.3.
+ * Payload of {@code POST /api/v1/kb/{kbId}/ext-sources}: registers one external source, the
+ * M14/M23 contract.
  *
- * @param sourceType  connector type routing key, {@code s3} in this milestone
+ * @param sourceType  connector type routing key ({@code s3}/{@code confluence})
  * @param name        operator facing display name, unique per knowledge base
- * @param endpoint    service endpoint of the object store
- * @param region      optional region hint of the object store
- * @param bucket      bucket the scan lists
- * @param prefix      optional key prefix narrowing the scan
- * @param accessKey   access key of the bucket credentials
- * @param secretKey   secret key of the bucket credentials
+ * @param endpoint    remote service endpoint
+ * @param region      optional connector-specific region hint
+ * @param bucket      bucket name or Confluence space key
+ * @param prefix      optional connector-specific listing prefix
+ * @param accessKey   access key or Atlassian account email
+ * @param secretKey   secret key or Atlassian API token
  * @param syncEnabled whether the scheduled pass should keep this source fresh, defaults to on
  *
  * @author owlzhangfq@gmail.com

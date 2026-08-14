@@ -15,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import okhttp3.OkHttpClient;
 import org.springframework.stereotype.Component;
 
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -38,6 +39,8 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 @Component
 public class S3CompatibleConnector implements ExternalConnector {
+
+    private static final int COPY_BUFFER_SIZE = 8192;
 
     /** Routing key stored in {@code t_kb_ext_source.source_type}. */
     static final String TYPE = "s3";
@@ -67,6 +70,7 @@ public class S3CompatibleConnector implements ExternalConnector {
                 }
                 objects.add(new RemoteObject(
                         item.objectName(),
+                        null,
                         stripQuotes(item.etag()),
                         item.size(),
                         lastModifiedOf(item)));
@@ -88,7 +92,7 @@ public class S3CompatibleConnector implements ExternalConnector {
                 .bucket(config.bucket())
                 .object(objectKey)
                 .build())) {
-            return stream.readAllBytes();
+            return readBounded(stream, config.maxContentBytes());
         } catch (Exception e) {
             log.error("fetch object failed, errorCode={}, bucket={}, object={}",
                     ErrorCode.INTERNAL_ERROR, config.bucket(), objectKey, e);
@@ -147,5 +151,19 @@ public class S3CompatibleConnector implements ExternalConnector {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** Reads one object without allowing a remote store to grow the process heap past upload policy. */
+    private byte[] readBounded(InputStream stream, long maxBytes) throws Exception {
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        byte[] buffer = new byte[COPY_BUFFER_SIZE];
+        int read;
+        while ((read = stream.read(buffer)) != -1) {
+            if ((long) body.size() + read > maxBytes) {
+                throw BizException.invalidParam("对象超过上传大小上限，读取已中止");
+            }
+            body.write(buffer, 0, read);
+        }
+        return body.toByteArray();
     }
 }

@@ -8,6 +8,10 @@
 
 ### Added
 
+- **Confluence Cloud 数据源连接器（M23，`docs/M23-CONTRACTS.md`）**：M14 ext-source API
+  新增 `source_type=confluence` 语义，按 Space Key 与 REST API v2 cursor 分页同步页面；OpenAPI
+  升至 `0.25.0-m23`。无新容器、环境变量、配置键、数据库迁移或第三方依赖。
+
 - **MCP 2026-07-28 双协议兼容（M22，`docs/M22-CONTRACTS.md`）**：同一 MCP POST 端点新增无握手
   逐请求元数据协议、`server/discover`、标准镜像头与 Origin 校验、现代 400/404 HTTP 语义，保留
   2025-03-26 / 2024-11-05 initialize 客户端。OpenAPI 升至 `0.24.0-m22`，调用指南改以现代版为

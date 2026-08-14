@@ -1,7 +1,7 @@
 # kb-rag 流程图文档
 
 
-> 版本：v1.7（基线与 `ARCHITECTURE.md` v2.5 相同 = M1-M22 及其后修复的状态；v1.6 基线为 M21）
+> 版本：v1.8（基线与 `ARCHITECTURE.md` v2.6 相同 = M1-M23 及其后修复的状态；v1.7 基线为 M22）
 > 日期：2026-08-14
 > 作者：RichardFyoung / Claude
 >
@@ -566,3 +566,32 @@ flowchart TD
 ```
 
 要点：协议错误仍由客户端框架修正，工具业务失败仍由模型读取 `isError: true` 后自纠；M22 只让现代协议的 HTTP 状态表达 transport 事实，不改变业务失败平面。`knowledge_chat` 的 `stream:true` 仍是 INVALID_PARAM 工具结果，流式生成继续走 REST SSE。
+
+---
+
+## 16. Confluence Cloud 增量同步（M23）
+
+对应：`ExtSourceController` / `ExtSourceService` / `ConnectorRouter` / `ConfluenceCloudConnector` / `DocumentService`（契约 M23）。
+
+```mermaid
+flowchart TD
+    R[登记 source_type=confluence<br/>Site URL + Space Key + email + API Token] --> V[validateConfig<br/>HTTPS 根地址、字段语义 fast-fail]
+    V --> A[异步首同步 / 手动同步 / 定时同步]
+    A --> S[GET spaces?keys=...<br/>Space Key → Space ID]
+    S --> L[GET spaces/id/pages<br/>status=current，cursor 分页<br/>最多 cap + 1]
+    L --> C{条数超过 cap?}
+    C -- 是 --> P[仅处理前 cap 条<br/>源状态至少 PARTIAL<br/>禁止消失判定]
+    C -- 否 --> F[完整列表<br/>允许标记未见旧 item 为 SKIPPED]
+    P & F --> E{pageId:version<br/>等于 item.etag?}
+    E -- 是 --> U[item = UNCHANGED<br/>不请求正文]
+    E -- 否 --> T{绑定文档在回收站?}
+    T -- 是 --> K[item = SKIPPED<br/>不写新版本]
+    T -- 否 --> G[GET pages/pageId<br/>body-format=storage]
+    G --> O[title 转义 + storage body<br/>物化 confluence/pageId.html]
+    O --> D[DocumentService.upload<br/>普通版本/治理/解析/索引链路]
+    D --> I[item = SUCCESS<br/>etag = pageId:version]
+    G -- 单页异常 --> X[item = FAILED<br/>其余页面继续]
+    U & K & I & X --> Z[汇总源 SUCCESS / PARTIAL / FAILED]
+```
+
+安全边界：JDK HttpClient 禁止自动重定向，body `_links.next` 与 HTTP Link header 都必须保持登记 Site URL 的同 origin 后才携带 Basic Token；列表/正文响应有体积上限。列表结构不完整、page 缺 id/version 或 cursor 循环直接判本轮失败，不能把上游异常翻译成“页面已删除”。

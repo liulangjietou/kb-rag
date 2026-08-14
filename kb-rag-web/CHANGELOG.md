@@ -18,6 +18,12 @@
 
 ### Added
 
+**M23 · Confluence Cloud 数据源**（`docs/M23-CONTRACTS.md`）
+- 知识库“外部数据源”表单由固定 S3/OSS 扩展为两种连接器；Confluence 表单使用 Site URL、
+  Space Key、Atlassian 账号邮箱与 API Token，列表和同步明细按类型展示同步范围与页面 Key。
+- 编辑时连接器类型不可变，secret 留空保留、定时开关、连接测试、手动同步和移除语义继续复用
+  M14 端点；没有新增前端 API 路径。
+
 **M22 · MCP 2026-07-28 双协议调试**（`docs/M22-CONTRACTS.md`）
 - MCP 调试页新增现代/旧版切换，默认 2026-07-28：现代首步为 `server/discover`，每次请求自动生成
   `_meta` 与版本/方法/名称镜像头；旧版继续使用 initialize。

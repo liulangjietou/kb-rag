@@ -7,11 +7,11 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * SPI of one external data source type, the M14 contract section 2.1.
+ * SPI of one external data source type, introduced by M14 and extended by M23.
  *
  * <p>Implementations declare themselves as beans and are collected by the router keyed on
  * {@link #type()}, the same plug-in shape as the text splitters: adding a Confluence or IM
- * connector later means adding one bean, not touching the sync engine.
+ * connector means adding one bean, not touching the sync engine.
  *
  * @author owlzhangfq@gmail.com
  */
@@ -23,6 +23,20 @@ public interface ExternalConnector {
      * @return connector type literal, lower case
      */
     String type();
+
+    /**
+     * Validates connector-specific field meaning without making a remote call.
+     *
+     * <p>The generic API can enforce field lengths and presence, but only the selected connector
+     * knows whether endpoint/bucket/accessKey mean a valid site/space/email combination. The
+     * application invokes this before persisting a registration or update, so configuration errors
+     * fail on the request instead of appearing later as an asynchronous sync failure.
+     *
+     * @param config connection details
+     */
+    default void validateConfig(ExtSourceConfig config) {
+        // Existing connectors whose generic DTO constraints are sufficient need no extra policy.
+    }
 
     /**
      * Lists the objects a sync pass should consider.
@@ -39,7 +53,7 @@ public interface ExternalConnector {
      * Fetches one object body.
      *
      * @param config    connection details
-     * @param objectKey key of the object to fetch
+     * @param objectKey stable key of the remote item to fetch
      * @return object bytes
      */
     byte[] fetchObject(ExtSourceConfig config, String objectKey);
@@ -55,11 +69,13 @@ public interface ExternalConnector {
     /**
      * One object surfaced by a listing.
      *
-     * @param key          object key inside the bucket
+     * @param key          stable item key inside the source
+     * @param displayName  operator-facing name used for the first document file name, {@code null}
+     *                     when the key already carries a useful name
      * @param etag         change marker of the object body, {@code null} when the store has none
-     * @param size         object size in bytes
+     * @param size         item size in bytes, {@code -1} when the remote API does not expose it
      * @param lastModified last modification time, {@code null} when the store has none
      */
-    record RemoteObject(String key, String etag, long size, LocalDateTime lastModified) {
+    record RemoteObject(String key, String displayName, String etag, long size, LocalDateTime lastModified) {
     }
 }

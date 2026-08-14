@@ -11,7 +11,7 @@ import type {
 } from './types';
 
 /**
- * POST /api/v1/kb/{kbId}/ext-sources (M14 contract section 2.3): registers one object-store source
+ * POST /api/v1/kb/{kbId}/ext-sources (M14/M23): registers one external source
  * and hands its first scan to the executor. Unlike the single-page web import, a bucket holds an
  * unbounded number of objects, so the request returns the registration row at once -- the first
  * scan's outcome appears on the row (and its item rows) once the scan finishes, watched by re-listing.

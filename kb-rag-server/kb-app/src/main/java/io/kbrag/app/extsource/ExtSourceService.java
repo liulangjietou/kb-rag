@@ -61,6 +61,8 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class ExtSourceService {
 
+    private static final int BYTES_PER_MB = 1024 * 1024;
+
     /** {@code sync_enabled} value that includes a source in the scheduled pass. */
     private static final int SYNC_ON = 1;
 
@@ -98,7 +100,8 @@ public class ExtSourceService {
         knowledgeBaseService.require(kbId);
         // Resolving up front rejects an unknown type at registration time instead of on the first
         // scan, when the operator is no longer looking.
-        connectorRouter.resolve(command.sourceType());
+        ExternalConnector connector = connectorRouter.resolve(command.sourceType());
+        connector.validateConfig(configOf(command, command.secretKey()));
         requireNameFree(kbId, command.name(), null);
         ExtSource source = new ExtSource();
         source.setSourceId(bizIdGenerator.extSourceId());
@@ -163,6 +166,10 @@ public class ExtSourceService {
      */
     public ExtSource update(String sourceId, ExtSourceCommand command) {
         ExtSource source = require(sourceId);
+        ExternalConnector connector = connectorRouter.resolve(source.getSourceType());
+        String effectiveSecret = command.secretKey() == null || command.secretKey().isBlank()
+                ? source.getSecretKey() : command.secretKey();
+        connector.validateConfig(configOf(command, effectiveSecret));
         if (!source.getName().equals(command.name())) {
             requireNameFree(source.getKbId(), command.name(), source.getId());
         }
@@ -329,8 +336,8 @@ public class ExtSourceService {
             log.info("ext source synced, sourceId={}, objects={}, failures={}, truncated={}",
                     source.getSourceId(), objects.size(), failures, truncated);
         } catch (Exception e) {
-            log.warn("ext source sync failed, sourceId={}, bucket={}, error={}",
-                    source.getSourceId(), source.getBucket(), e.getMessage());
+            log.error("ext source sync failed, errorCode={}, sourceId={}, collection={}",
+                    ErrorCode.INTERNAL_ERROR, source.getSourceId(), source.getBucket(), e);
             recordSource(source, ExtSourceSyncStatus.FAILED, e.getMessage());
         }
     }
@@ -363,7 +370,7 @@ public class ExtSourceService {
                 return true;
             }
             byte[] body = connector.fetchObject(config, object.key());
-            String fileName = deriveFileName(object.key(), keyHash, extension);
+            String fileName = uploadFileName(object, bound, keyHash, extension);
             UploadOutcome outcome = documentService.upload(source.getKbId(), fileName, body);
             // A purge breaks the binding; the upload above then created a fresh document and the
             // item follows it, the same weak binding semantics as the web source contract.
@@ -372,8 +379,8 @@ public class ExtSourceService {
             recordItem(item, ExtSourceItemStatus.SUCCESS, null);
             return true;
         } catch (Exception e) {
-            log.warn("ext source object sync failed, sourceId={}, object={}, error={}",
-                    source.getSourceId(), object.key(), e.getMessage());
+            log.error("ext source object sync failed, errorCode={}, sourceId={}, object={}",
+                    ErrorCode.INTERNAL_ERROR, source.getSourceId(), object.key(), e);
             recordItem(item, ExtSourceItemStatus.FAILED, e.getMessage());
             return false;
         }
@@ -479,7 +486,6 @@ public class ExtSourceService {
     }
 
     private ExtSourceConfig configOf(ExtSource source) {
-        KbProperties.ExtSource policy = properties.getExtSource();
         return new ExtSourceConfig(
                 source.getEndpoint(),
                 source.getRegion(),
@@ -487,8 +493,30 @@ public class ExtSourceService {
                 source.getPrefix(),
                 source.getAccessKey(),
                 source.getSecretKey(),
-                policy.getMaxObjectsPerSource(),
-                policy.getFetchTimeoutMs());
+                maxObjectsPerSource(),
+                properties.getExtSource().getFetchTimeoutMs(),
+                maxContentBytes());
+    }
+
+    private ExtSourceConfig configOf(ExtSourceCommand command, String effectiveSecret) {
+        return new ExtSourceConfig(
+                command.endpoint(),
+                command.region(),
+                command.bucket(),
+                command.prefix(),
+                command.accessKey(),
+                effectiveSecret,
+                maxObjectsPerSource(),
+                properties.getExtSource().getFetchTimeoutMs(),
+                maxContentBytes());
+    }
+
+    private int maxObjectsPerSource() {
+        return properties.getExtSource().getMaxObjectsPerSource();
+    }
+
+    private long maxContentBytes() {
+        return (long) properties.getUpload().getMaxFileSizeMb() * BYTES_PER_MB;
     }
 
     private String partialError(int failures, boolean truncated, int cap) {
@@ -534,6 +562,23 @@ public class ExtSourceService {
             base = base.substring(0, room);
         }
         return base + suffix;
+    }
+
+    /**
+     * Chooses the first display name while keeping the bound document's name as version identity.
+     *
+     * <p>Confluence exposes a useful page title separately from the stable page id. The title makes
+     * the first document recognisable, but a later title edit must still add a version to that same
+     * document. S3 has no separate display name and continues to derive from its object key.
+     */
+    static String uploadFileName(ExternalConnector.RemoteObject object, Document bound,
+                                 String keyHash, String extension) {
+        if (bound != null) {
+            return bound.getFileName();
+        }
+        String namingKey = object.displayName() == null || object.displayName().isBlank()
+                ? object.key() : object.displayName() + "." + extension;
+        return deriveFileName(namingKey, keyHash, extension);
     }
 
     /** Lower-cases a name and collapses every non-alphanumeric run into a single dash. */

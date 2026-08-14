@@ -7,6 +7,16 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### M23 · Confluence Cloud 数据源连接器
+
+- M14 `ExternalConnector` SPI 新增 `source_type=confluence`：Space Key 解析、REST API v2
+  cursor 分页、`pageId:version` 增量判断与 storage HTML 正文获取；页面继续复用普通上传、治理、
+  版本和索引链路，无数据库迁移、配置键或第三方依赖。
+- 新增连接器特定配置 fast-fail；分页 `_links.next` / Link header 均受同源约束且禁自动重定向，
+  Basic API Token 不会发往其他 origin。响应体受上传大小约束，S3 对象读取同步补齐有界读取。
+- 管理台外部数据源表单支持 S3/OSS 与 Confluence Cloud 两种类型，字段标签、同步范围和页面明细
+  按连接器切换。完整契约见 `kb-rag-deploy/docs/M23-CONTRACTS.md`。
+
 ### M22 · MCP 2026-07-28 双协议兼容
 
 - `McpServerEngine` 在同一端点按单次请求识别协议时代：新增现代 `server/discover`、逐请求 `_meta`、

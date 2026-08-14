@@ -7,22 +7,28 @@ import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.ExtSource;
 import io.kbrag.domain.entity.ExtSourceItem;
+import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.mapper.ExtSourceItemMapper;
 import io.kbrag.domain.mapper.ExtSourceMapper;
+import io.kbrag.domain.port.ExternalConnector;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.ConnectorRouter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.Executable;
 
+import java.time.LocalDateTime;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -108,6 +114,37 @@ class ExtSourceTenantIsolationTest {
 
         assertThrows(BizException.class, () -> service.register(KB_ID, command()));
         verify(extSourceMapper, never()).insert(any(ExtSource.class));
+    }
+
+    @Test
+    void shouldValidateConnectorSpecificFieldsBeforePersistingARegistration() {
+        KnowledgeBase base = new KnowledgeBase();
+        base.setKbId(KB_ID);
+        when(knowledgeBaseService.require(KB_ID)).thenReturn(base);
+        ExternalConnector connector = mock(ExternalConnector.class);
+        when(connectorRouter.resolve("s3")).thenReturn(connector);
+        doThrow(BizException.invalidParam("invalid connector config"))
+                .when(connector).validateConfig(any());
+
+        assertEquals(ErrorCode.INVALID_PARAM,
+                assertThrows(BizException.class, () -> service.register(KB_ID, command())).getErrorCode());
+
+        verify(extSourceMapper, never()).insert(any(ExtSource.class));
+    }
+
+    @Test
+    void shouldUseThePageTitleOnceThenKeepTheBoundDocumentNameAcrossTitleChanges() {
+        String keyHash = "1234567890abcdef";
+        ExternalConnector.RemoteObject first = new ExternalConnector.RemoteObject(
+                "confluence/101.html", "Architecture Guide", "101:v1", -1L, LocalDateTime.now());
+        String firstName = ExtSourceService.uploadFileName(first, null, keyHash, "html");
+        assertEquals("architecture-guide-12345678.html", firstName);
+
+        Document bound = new Document();
+        bound.setFileName(firstName);
+        ExternalConnector.RemoteObject renamed = new ExternalConnector.RemoteObject(
+                "confluence/101.html", "Platform Guide", "101:v2", -1L, LocalDateTime.now());
+        assertEquals(firstName, ExtSourceService.uploadFileName(renamed, bound, keyHash, "html"));
     }
 
     private void givenSourceRow() {

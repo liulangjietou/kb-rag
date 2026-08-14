@@ -2262,8 +2262,8 @@ export interface UpdateWebCredentialRequest {
 }
 
 // ---------------------------------------------------------------------------
-// External data source connector (M14 contract section 2.3): S3/OSS compatible
-// object store, scanned into the knowledge base as documents.
+// External data source connectors (M14/M23): S3/OSS objects or Confluence Cloud
+// pages, scanned into the knowledge base as ordinary documents.
 // ---------------------------------------------------------------------------
 
 /**
@@ -2281,7 +2281,7 @@ export type ExtSourceSyncStatus = 'SUCCESS' | 'PARTIAL' | 'FAILED';
 export type ExtSourceItemStatus = 'SUCCESS' | 'UNCHANGED' | 'SKIPPED' | 'FAILED';
 
 /**
- * t_kb_ext_source row (M14 contract section 2.3): one registered object-store source and the
+ * t_kb_ext_source row (M14/M23): one registered external source and the
  * outcome of its last sync pass. secret_key is always the fixed mask on the way out; the update
  * endpoint treats a blank secret as "keep the stored one" so this view round-trips through an edit
  * form without destroying the credential. Binding is weak -- removing the source never touches the
@@ -2290,8 +2290,8 @@ export type ExtSourceItemStatus = 'SUCCESS' | 'UNCHANGED' | 'SKIPPED' | 'FAILED'
 export interface ExtSource {
   source_id: string;
   kb_id: string;
-  /** Connector type routing key, `s3` in this milestone. */
-  source_type: string;
+  /** Connector type routing key. */
+  source_type: 's3' | 'confluence';
   name: string;
   endpoint: string;
   region: string | null;
@@ -2322,8 +2322,8 @@ export interface ExtSourceItem {
 
 /** POST /api/v1/kb/{kbId}/ext-sources request body (M14 contract section 2.3). */
 export interface RegisterExtSourceRequest {
-  /** Connector type routing key, `s3` in this milestone. */
-  source_type: string;
+  /** Connector type routing key. */
+  source_type: 's3' | 'confluence';
   name: string;
   endpoint: string;
   region?: string;
@@ -2613,4 +2613,3 @@ export interface MemoryAppKeyCreateRequest {
   name: string;
   qps_limit?: number;
 }
-

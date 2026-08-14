@@ -1,13 +1,13 @@
 # kb-rag 架构文档
 
 
-> 版本：v2.5（基线 = v2.4 + M22 MCP 2026-07-28 双协议兼容，2026-08-14；v2.4 基线为 M21 最终答案质量评测与门禁，其余历史见 Git）
+> 版本：v2.6（基线 = v2.5 + M23 Confluence Cloud 数据源连接器，2026-08-14；v2.5 基线为 M22 MCP 双协议兼容，其余历史见 Git）
 > 日期：2026-08-14
 > 作者：RichardFyoung / Claude
 >
 > **文档定位**：本文描述系统的实际实现架构（以代码为准），与以下文档互补——
 > - `知识库需求文档.md`：需求与设计决策的唯一事实源（"为什么做、做什么"）
-> - `M1~M22-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
+> - `M1~M23-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
 > - `openapi/kb-server.yaml`、`openapi/kb-parser.yaml`：HTTP 接口的唯一契约源
 > - `FLOWS.md`：核心流程图（与本文配套阅读）
 
@@ -121,7 +121,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `VersionPinChecker` | `AppVersionPinChecker` | 被应用版本可见集引用的文档版本禁止归档（已下线版本同样 pin——chunk 正文只在 MySQL） |
 | `WebPageFetcher`（M12） | `HttpWebPageFetcher` | 网页抓取（URL 导入/增量同步）：SSRF 防护由调用侧经 kb-domain 的 `UrlGuard` 前置校验，Content-Type 白名单、体积上限、超时控制 |
 | `MultimodalEmbeddingProvider`（M14） | `DashScopeMultimodalEmbeddingProvider` / `NoopMultimodalEmbeddingProvider` | 视觉理解整页索引与以图搜图的共用向量通道（DashScope multimodal-embedding-v1）；未配置时注入 Noop 实现，开关置灰、多模态路跳过并记 `mm_route_unavailable`；开启但多模态权重为 0 时跳过并记 `mm_route_skipped` |
-| `ExternalConnector`（M14） | `S3CompatibleConnector` | 外部数据源 SPI：扫描 S3/OSS 兼容对象存储、拉取对象体馈入普通上传链；source_type 为路由键，本期仅 s3 一种实现 |
+| `ExternalConnector`（M14/M23） | `S3CompatibleConnector` / `ConfluenceCloudConnector` | 外部数据源 SPI：按 source_type 路由；S3/OSS 以 object key + ETag 增量，Confluence Cloud 以稳定 pageId + version 增量，两者均只把正文馈入普通上传链。连接器特定字段校验在登记/更新前 fast-fail |
 | `DirectoryAuthenticator`（M15） | `LdapDirectoryAuthenticator` | 单点登录目录认证：裸 JNDI simple bind，不引入 Spring LDAP；目录账号首登自动建号 |
 | `OidcClient`（M16） | `NimbusOidcClient` | OIDC 授权码模式：发现文档/code 换 token/JWKS 验签 |
 | `SamlProcessor`（M16） | `XmlDsigSamlProcessor` | SAML 2.0 Response 签名验证（自实现 XML-DSig，不引入 Spring Security SAML） |
@@ -318,7 +318,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | 路由 | 页面 |
 |---|---|
 | `/login`、`/change-password` | 登录（防爆破提示）、首登强制改密 |
-| `/kb`、`/kb/:kbId` | 知识库列表；详情（文档上传/状态轮询/审核与有效期操作/分片标注 ChunkDrawer/版本 VersionDrawer/索引配置/聊天导入向导；图谱 GraphTab / 反馈管理 / 检索洞察 / 回收站 / 网页导入等 Tab） |
+| `/kb`、`/kb/:kbId` | 知识库列表；详情（文档上传/状态轮询/审核与有效期操作/分片标注 ChunkDrawer/版本 VersionDrawer/索引配置/聊天导入向导；图谱 / 反馈 / 洞察 / 回收站 / 网页导入 / S3 与 Confluence 外部数据源等 Tab） |
 | `/search` | 检索调试（参数面板、分数明细、degraded 告警、收进评测集） |
 | `/chat` | 问答调试（JWT 走 `/apps/{id}/chat-preview` SSE） |
 | `/apps`、`/apps/:appId` | 应用中心（配置 / 版本与门禁 / API 调试三 tab） |
@@ -354,7 +354,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | `scripts/benchmark.sh` | 纯 bash+curl 压测（P50/P95/P99），验收口径 P95<2s；`seed-bench.py` 零 Key 直灌 10 万分片种子数据 |
 | `demo/` | 4 篇原创文档（md/docx/pdf/xlsx 各一，字节级可复现生成）+ `eval-cases.json`（10 条，含文档级锚定图片 case，按文件名+content_hash 关联导入） |
 | `mappings/` | 聊天记录列名映射模板分发（memotrace 等） |
-| `docs/` | 需求文档、M1-M22 契约、OpenAPI（`kb-server.yaml` 0.24.0-m22 / `kb-parser.yaml` 0.12.0-m12）、备份恢复手册、本文档与 `FLOWS.md`；调用方接入文档另见主仓 `docs/MCP接入指南.md` |
+| `docs/` | 需求文档、M1-M23 契约、OpenAPI（`kb-server.yaml` 0.25.0-m23 / `kb-parser.yaml` 0.12.0-m12）、备份恢复手册、本文档与 `FLOWS.md`；调用方接入文档另见主仓 `docs/MCP接入指南.md` |
 
 ---
 

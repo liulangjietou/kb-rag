@@ -12,12 +12,12 @@ import jakarta.validation.constraints.Size;
  * nothing real to echo back - a blank value means "keep the stored secret".
  *
  * @param name        operator facing display name, unique per knowledge base
- * @param endpoint    service endpoint of the object store
- * @param region      optional region hint of the object store
- * @param bucket      bucket the scan lists
- * @param prefix      optional key prefix narrowing the scan
- * @param accessKey   access key of the bucket credentials
- * @param secretKey   new secret key, blank or absent keeps the stored one
+ * @param endpoint    remote service endpoint
+ * @param region      optional connector-specific region hint
+ * @param bucket      bucket name or Confluence space key
+ * @param prefix      optional connector-specific listing prefix
+ * @param accessKey   access key or Atlassian account email
+ * @param secretKey   new secret credential, blank or absent keeps the stored one
  * @param syncEnabled whether the scheduled pass includes this source, absent keeps current
  *
  * @author owlzhangfq@gmail.com

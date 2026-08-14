@@ -258,8 +258,17 @@ info:
 
     M22-CONTRACTS.md。
 
+
+    0.25.0-m23 增量：外部数据源新增 source_type=confluence。沿用 ext-source 端点与字段，
+
+    endpoint/bucket/access_key/secret_key 分别表示 Confluence Site URL、Space Key、账号邮箱与
+
+    API Token；页面按 pageId:version 增量同步并复用普通文档入库链路。无新端点或 schema 字段，
+
+    详见 M23-CONTRACTS.md。
+
     '
-  version: 0.24.0-m22
+  version: 0.25.0-m23
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -2056,8 +2065,8 @@ paths:
       tags:
       - ext-source
       summary: 登记外部数据源并异步触发首同步
-      description: 'M14-CONTRACTS.md §2.3：落行后异步受理首次扫描（对象数不可控，不同步阻塞登记，
-        与 M12 登记即抓的差异点）；同 KB 重名 INVALID_PARAM。secret_key 明文落库、读 API 恒脱敏。'
+      description: 'M14/M23：连接器特定字段先 fast-fail，落行后异步受理首次扫描（对象或页面数不可控，
+        不同步阻塞登记）；同 KB 重名 INVALID_PARAM。secret_key 明文落库、读 API 恒脱敏。'
       requestBody:
         required: true
         content:
@@ -2069,29 +2078,33 @@ paths:
                 source_type:
                   type: string
                   maxLength: 16
-                  description: 连接器类型路由键，本期仅 s3
+                  enum: [s3, confluence]
+                  description: 连接器类型路由键
                 name:
                   type: string
                   maxLength: 128
                 endpoint:
                   type: string
                   maxLength: 512
-                  description: 对象存储服务端点，不过 UrlGuard（管理员配置项，合法场景即内网 MinIO/OSS）
+                  description: S3/OSS 服务端点；或 Confluence Cloud Site URL（HTTPS 根地址或 /wiki）
                 region:
                   type: string
                   maxLength: 64
                 bucket:
                   type: string
                   maxLength: 128
+                  description: S3/OSS Bucket；或 Confluence Space Key
                 prefix:
                   type: string
                   maxLength: 512
                 access_key:
                   type: string
                   maxLength: 256
+                  description: S3/OSS Access Key；或 Atlassian 账号邮箱
                 secret_key:
                   type: string
                   maxLength: 512
+                  description: S3/OSS Secret Key；或 Atlassian API Token
                 sync_enabled:
                   type: boolean
                   default: true
@@ -2168,7 +2181,7 @@ paths:
     get:
       tags:
       - ext-source
-      summary: 对象明细（逐对象同步结果可见）
+      summary: 同步明细（逐对象或逐页面结果可见）
       parameters:
       - name: page
         in: query
@@ -6281,7 +6294,7 @@ components:
           description: keyword_match 规则的词表
     ExtSource:
       type: object
-      description: '外部数据源登记行（M14-CONTRACTS.md §2.3）。secret_key 恒返回掩码 ******，从不
+      description: '外部数据源登记行（M14/M23）。secret_key 恒返回掩码 ******，从不
 
         下发真实值；登记与文档弱绑定，移除源不删文档。'
       properties:
@@ -6291,7 +6304,8 @@ components:
           type: string
         source_type:
           type: string
-          description: 连接器类型路由键，本期仅 s3
+          enum: [s3, confluence]
+          description: 连接器类型路由键
         name:
           type: string
         endpoint:
@@ -6301,11 +6315,13 @@ components:
           nullable: true
         bucket:
           type: string
+          description: S3/OSS Bucket；或 Confluence Space Key
         prefix:
           type: string
           nullable: true
         access_key:
           type: string
+          description: S3/OSS Access Key；或 Atlassian 账号邮箱
         secret_key:
           type: string
           description: 恒为掩码 ******，从不下发真实值
@@ -6332,7 +6348,7 @@ components:
           format: date-time
     ExtSourceItem:
       type: object
-      description: 外部数据源逐对象同步结果行（M14-CONTRACTS.md §2.3）
+      description: 外部数据源逐对象或逐页面同步结果行（M14/M23）
       properties:
         object_key:
           type: string
@@ -6411,7 +6427,7 @@ components:
             properties:
               up:
                 type: boolean
-                description: 对象存储应答且 bucket 存在时 true
+                description: 远端服务应答且 bucket / Confluence space 可访问时 true
               detail:
                 type: string
                 description: 探测详情

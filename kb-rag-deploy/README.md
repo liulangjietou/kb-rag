@@ -9,8 +9,9 @@ OpenAPI 接口契约、备份/预检脚本与总体文档。
 React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch 与 Qdrant（检索引擎）/
 MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 docker-compose 一键拉起中间件。**
 
-> 本仓库当前状态：**M1-M22 已实现**；其中 M15/M16 为权限与企业化，M17/M18 为网页抓取增强，
-> M19 为 Agent 长期记忆，M20 为 MCP 工具层，M21 为最终答案质量门禁，M22 为 MCP 双协议兼容。
+> 本仓库当前状态：**M1-M23 已实现**；其中 M15/M16 为权限与企业化，M17/M18 为网页抓取增强，
+> M19 为 Agent 长期记忆，M20 为 MCP 工具层，M21 为最终答案质量门禁，M22 为 MCP 双协议兼容，
+> M23 为 Confluence Cloud 数据源连接器。
 > 一期交付上传解析→混合检索（向量+BM25+图路三路融合）→分片标注→评测闭环→应用发布→
 > 多知识库路由→索引快照回滚→GraphRAG 的完整链路；二期增强聊天记录导入
 > （TXT/HTML 格式、本地 OCR 兜底、重叠滑窗归并、映射档案维护界面，M8）与标注
@@ -21,7 +22,7 @@ MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 dock
 > [核心能力增强（M10-M13）](#核心能力增强m10-m13)与
 > [竞品能力对齐（M14）](#竞品能力对齐m14)。
 > 各里程碑契约见 [`docs/M1-CONTRACTS.md`](docs/M1-CONTRACTS.md) 至
-> [`docs/M22-CONTRACTS.md`](docs/M22-CONTRACTS.md)；系统整体架构与核心流程图见
+> [`docs/M23-CONTRACTS.md`](docs/M23-CONTRACTS.md)；系统整体架构与核心流程图见
 > [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 与 [`docs/FLOWS.md`](docs/FLOWS.md)。
 
 ## 目录
@@ -42,6 +43,7 @@ MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 dock
 - [聊天记录格式扩展与映射维护（M8）](#聊天记录格式扩展与映射维护m8)
 - [核心能力增强（M10-M13）](#核心能力增强m10-m13)
 - [竞品能力对齐（M14）](#竞品能力对齐m14)
+- [Confluence Cloud 数据源（M23）](#confluence-cloud-数据源m23)
 - [接口契约（OpenAPI）](#接口契约openapi)
 - [开源工程文档](#开源工程文档)
 
@@ -447,6 +449,17 @@ docker compose -f docker-compose.lite.yml --profile graph up -d
 以上六项新增约 12 个环境变量，详见 [`.env.example`](.env.example) 中 M14 分节与
 模型状态接口的 `multimodal_configured` 字段。
 
+## Confluence Cloud 数据源（M23）
+
+M23 在 M14 的 `ExternalConnector` SPI 上新增 `source_type=confluence`，按 Space Key
+分页列举当前页面，以 `pageId:version` 做增量判断，只在版本变化时读取 storage HTML 正文。
+页面继续走普通文档上传、治理、版本和索引链路；无新表、无新配置键、无新增依赖。
+
+控制台“外部数据源”选择 Confluence Cloud 后填写 Site URL、Space Key、Atlassian 账号邮箱
+与 API Token。Site URL 仅接受 HTTPS 站点根地址或 `/wiki`；分页 next URL 必须保持同源，
+HTTP 客户端不跟随重定向。API Token 适用于自托管受控运维集成，面向多客户分发前应迁移到
+OAuth 2.0 3LO。完整边界见 [`docs/M23-CONTRACTS.md`](docs/M23-CONTRACTS.md)。
+
 ## 接口契约（OpenAPI）
 
 - [`docs/openapi/kb-server.yaml`](docs/openapi/kb-server.yaml)：kb-rag-server 管理台
@@ -486,6 +499,6 @@ python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb
 - [知识库需求文档（v1.14，唯一事实源）](docs/知识库需求文档.md)
 - [系统架构总览（ARCHITECTURE.md）](docs/ARCHITECTURE.md) /
   [核心流程图（FLOWS.md）](docs/FLOWS.md)
-- [M1](docs/M1-CONTRACTS.md) ~ [M22 开发契约](docs/M22-CONTRACTS.md)（按里程碑记录
+- [M1](docs/M1-CONTRACTS.md) ~ [M23 开发契约](docs/M23-CONTRACTS.md)（按里程碑记录
   实现细节与已接受偏离）
 - [OpenAPI 定义](docs/openapi/)
