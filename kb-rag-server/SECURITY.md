@@ -52,9 +52,12 @@ kb-rag-server 是自托管（self-hosted）开源知识库 / RAG 系统的主服
 - 管理台面（`/api/v1/**`，Bearer token）与对外开放面（`/api/v1/knowledge/**`，API Key）走
   **两条完全独立的鉴权链路**：前者是 MVC 拦截器，后者是 servlet 过滤器，刻意不共用入口
 - API Key 带 `app_scope` 授权范围（越权 403）与按 Key 的令牌桶限流（超限 429 + `Retry-After`）
-- 免鉴权路径只有三条：`/api/v1/auth/login`、`/actuator/**`、`/internal/dict/ik/**`。第三条是
-  给 Elasticsearch 的 ik 插件轮询词典用的（插件从 ES 进程内发起纯 HTTP 请求，无法携带 Bearer
-  Token），它只回运维手动录入的领域词，不含任何文档内容或配置
+- 业务监听器上的免控制台 Token 入口仅限登录 / SSO 流程与 `/internal/dict/ik/**`。后者供
+  Elasticsearch 的 ik 插件轮询词典（插件从 ES 进程内发起纯 HTTP 请求，无法携带 Bearer
+  Token），只返回运维手动录入的领域词，不含任何文档内容或配置
+- Actuator 运行在默认只绑定 `127.0.0.1:20003` 的独立管理监听器，业务端口不承载
+  `/actuator/**`；health 只返回聚合状态。远程开放管理地址前必须配置网络来源限制或带认证的
+  反向代理
 
 **输入与外部调用**
 

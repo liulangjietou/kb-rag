@@ -48,13 +48,20 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 management:
+  server:
+    # Actuator is an operations surface, not a business API. Keep it on a separate loopback-only
+    # listener by default so health details and metrics are not published with the console API.
+    port: ${MANAGEMENT_SERVER_PORT:20003}
+    address: ${MANAGEMENT_SERVER_ADDRESS:127.0.0.1}
   endpoints:
     web:
       exposure:
         include: health,info,prometheus
   endpoint:
     health:
-      show-details: always
+      # Component names and failure details reveal deployment topology. The aggregate status is
+      # sufficient for probes; operators should use logs to diagnose a DOWN response.
+      show-details: never
   health:
     defaults:
       enabled: true

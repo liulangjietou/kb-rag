@@ -8,11 +8,15 @@
 
 ### Added
 
+- 新增 `docs/ACTUATOR-SECURITY.md`，说明独立管理端口的安全默认值与远程 Prometheus 抓取边界。
 - 新增 `scripts/validate_config.py` 与单元测试，统一拦截 `.env.example` 重复键、开发机绝对路径和
   两份需求文档漂移；校验已接入 monorepo 根级 CI。
 
 ### Changed
 
+- `.env.example` 新增 `MANAGEMENT_SERVER_PORT=20003` 与
+  `MANAGEMENT_SERVER_ADDRESS=127.0.0.1`；OpenAPI 健康检查条目改为独立管理端口，需求文档升至
+  v1.21。远程开放管理地址时必须同时配置防火墙、服务网格或带认证的反向代理。
 - 四个历史子仓库工作流收敛为根目录单一 CI 入口，Java、Python、Web 与部署契约并行验证。
 
 ### Fixed

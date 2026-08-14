@@ -123,6 +123,8 @@ Query 改写 → 多库路由 → 双路/三路召回（子片粒度）→ 库�
 
 ```bash
 SERVER_PORT=20000                            # 应用端口，parser 为 20001
+MANAGEMENT_SERVER_PORT=20003                 # Actuator 独立管理端口
+MANAGEMENT_SERVER_ADDRESS=127.0.0.1          # 默认仅允许本机访问
 MYSQL_HOST=127.0.0.1  MYSQL_PORT=13306  MYSQL_DB=kb_rag  MYSQL_USER=kbrag  MYSQL_PASSWORD=
 ES_URI=http://127.0.0.1:9200
 QDRANT_URI=                                  # 轻量模式留空
@@ -191,11 +193,21 @@ CI 配置见仓库根目录 `../.github/workflows/ci.yml`（Temurin 17）。
 | 管理台 | `/api/v1/**` | `Authorization: Bearer <token>`（登录签发，默认 24h，落 `t_kb_auth_token` 只存 SHA-256 摘要） | `WebMvcConfig` 拦截器 |
 | 对外开放 | `/api/v1/knowledge/**` | `Authorization: Bearer kb-sk-***`（API Key，库里只存 SHA-256 摘要与展示前缀） | `ApiKeyAuthFilter` servlet 过滤器 |
 
-免鉴权的只有 `/api/v1/auth/login`、`/internal/dict/ik/**` 与 `/actuator/**`。
+业务监听器上，登录与 SSO 入口按流程免控制台 Token；`/internal/dict/ik/**` 是供 Elasticsearch
+轮询的显式例外。Actuator 不属于这条鉴权链，它运行在独立管理监听器上。
 
 统一响应体：成功 `{"code":"OK","message":"success","data":...,"request_id":"..."}`，失败 `{"code":"...","message":"...","request_id":"..."}`。`request_id` 在入口过滤器生成（可由 `X-Request-Id` 请求头指定），写入日志 MDC，透传给 parser 服务，并随异步线程池的 `TaskDecorator` 传到 worker 线程。
 
-`/actuator` 的暴露白名单为 `health,info,prometheus`；健康探针含 MySQL、Elasticsearch、MinIO，配置了 Qdrant / Neo4j 时各自增加一项。M13 起依赖里已包含 micrometer 的 Prometheus registry，`/actuator/prometheus` 可直接抓取：业务指标为 `kb_search_seconds`（Timer，source / zero_hit / degraded 标签）、`kb_task_completed_total`、`kb_openapi_rejected_total`、`kb_websource_sync_total` 三个 Counter 与 `kb_task_backlog`（pending / running 两支 gauge，数据库不可用时回 NaN 不失败）。该端点与 health 同口径暂不鉴权。
+`/actuator` 的暴露白名单为 `health,info,prometheus`，默认监听
+`127.0.0.1:20003`（`MANAGEMENT_SERVER_ADDRESS` / `MANAGEMENT_SERVER_PORT` 可改），不再随
+`20000` 业务端口对外暴露。健康探针含 MySQL、Elasticsearch、MinIO，配置了 Qdrant / Neo4j
+时各自增加一项；响应只返回聚合状态，不返回组件名称和错误详情。M13 起依赖里已包含
+micrometer 的 Prometheus registry，`/actuator/prometheus` 可直接抓取：业务指标为
+`kb_search_seconds`（Timer，source / zero_hit / degraded 标签）、`kb_task_completed_total`、
+`kb_openapi_rejected_total`、`kb_websource_sync_total` 三个 Counter 与 `kb_task_backlog`
+（pending / running 两支 gauge，数据库不可用时回 NaN 不失败）。需要远程抓取时必须在防火墙
+或带认证的反向代理后显式开放管理地址，详见
+`kb-rag-deploy/docs/ACTUATOR-SECURITY.md`。
 
 ## 文档导航
 
@@ -208,6 +220,7 @@ CI 配置见仓库根目录 `../.github/workflows/ci.yml`（Temurin 17）。
 | `M1~M13-CONTRACTS.md` | 各里程碑的开发契约与「实现期修订」——实现与契约的偏离都记在这里 |
 | `openapi/kb-server.yaml` | 本服务的 API 契约 |
 | `openapi/kb-parser.yaml` | parser 服务的 API 契约 |
+| [`ACTUATOR-SECURITY.md`](../kb-rag-deploy/docs/ACTUATOR-SECURITY.md) | Actuator 独立管理端口与远程 Prometheus 安全部署指南 |
 | `backup-restore.md` | 备份与恢复演练步骤、RPO/RTO |
 | `知识库需求文档.md` | 需求唯一事实源 |
 

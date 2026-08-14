@@ -37,7 +37,6 @@ public class WebMvcConfig implements WebMvcConfigurer {
             "/api/v1/auth/oidc/**",
             "/api/v1/auth/saml/**",
             "/api/v1/auth/cas/**",
-            "/actuator/**",
             // The open API has its own authentication chain (ApiKeyAuthFilter): an API key is not a console
             // session, and letting the console interceptor see these paths would reject every external call
             // for missing a token it is not supposed to have.

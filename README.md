@@ -221,7 +221,7 @@ npm run dev
 
 ```bash
 curl -fsS http://127.0.0.1:20001/health
-curl -fsS http://127.0.0.1:20000/actuator/health
+curl -fsS http://127.0.0.1:20003/actuator/health
 ```
 
 两个接口分别返回 `{"status":"UP"}` 和整体状态 `UP` 后，打开
@@ -229,6 +229,10 @@ curl -fsS http://127.0.0.1:20000/actuator/health
 初始密码，可搜索日志关键字 `bootstrap administrator created`；该密码只打印一次，首次登录后
 系统会强制修改密码，请在首次启动时立即保存。若密码丢失，只能由另一名具备 `user:manage`
 权限的管理员在用户管理中重置；当前没有未登录密码恢复入口，重启服务也不会重新生成密码。
+
+`20003` 是默认只绑定 `127.0.0.1` 的独立管理端口，不与 `20000` 业务端口共同暴露。
+远程 Prometheus 抓取方式与生产安全要求见
+[`kb-rag-deploy/docs/ACTUATOR-SECURITY.md`](kb-rag-deploy/docs/ACTUATOR-SECURITY.md)。
 
 完成登录后，按下面的最短路径验证零 Key 闭环：
 

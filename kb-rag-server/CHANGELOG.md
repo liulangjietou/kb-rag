@@ -7,6 +7,15 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 安全加固（Actuator 管理平面）
+
+- `/actuator/health`、`/actuator/info` 与 `/actuator/prometheus` 从 `20000` 业务监听器迁至
+  独立管理监听器，默认地址为 `127.0.0.1:20003`，避免管理信息随业务 API 对外暴露。
+- `management.endpoint.health.show-details` 从 `always` 收敛为 `never`，探针只得到聚合状态，
+  组件拓扑与错误详情改由应用日志承载。
+- 新增 `MANAGEMENT_SERVER_PORT` / `MANAGEMENT_SERVER_ADDRESS` 配置契约单测；远程抓取必须
+  显式开放监听地址并在防火墙或带认证的反向代理处限制来源。
+
 ### 工程修复（monorepo 配置基线）
 
 - `kb.demo.data-dir` 的默认值由个人开发机绝对路径改为 monorepo 相对路径
@@ -217,7 +226,7 @@
 ### 新增（M13）
 
 - Prometheus 业务指标：`kb-api/pom.xml` 补齐 `micrometer-registry-prometheus` 依赖，激活既有 actuator 的 `/actuator/prometheus` 端点（JVM/HTTP 基础指标随自动配置免费提供）。业务指标经 `KbMetrics` 门面单点注册：`kb_search_seconds`（Timer，标签 source=console/open_api、zero_hit、degraded；chat-preview 管理流量不计入）、`kb_task_completed_total`（Counter，type × success/failed）、`kb_openapi_rejected_total`（Counter，按 error_code）、`kb_websource_sync_total`（Counter，按 M12 同步四态）、`kb_task_backlog`（`TaskBacklogMetrics` gauge，pending/running 两支，抓取时实查 DB，DB 异常返回 NaN 不使抓取失败）
-- 纯新增：无表变更、无新环境变量、无既有端点行为变化；该端点与 health 同口径暂不鉴权，生产由部署侧网络隔离
+- M13 交付时为纯新增：无表变更、无新环境变量、无既有端点行为变化；当时该端点与 health 同端口且依赖网络隔离。后续 Actuator 安全加固条目已将其迁至独立回环管理监听器
 
 ### 新增（M12）
 
