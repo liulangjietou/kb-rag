@@ -1,13 +1,13 @@
 # kb-rag 架构文档
 
 
-> 版本：v2.3（基线 = v2.2 + Actuator 独立回环管理监听器与健康详情收敛，2026-08-14；v2.2 基线为角色行租户归属可辨识性修复，v2.1 基线为按 kbId 寻址的列表与批量入口租户解析修复，v2.0 基线为按资源自身 id 寻址入口的租户解析修复，v1.9 基线为异步池与应用版本租户解析修复，v1.8 基线为网页源租户解析修复，v1.7 基线为 V22，v1.6 基线为 V21，v1.5 基线为 M20，v1.4 基线为 M19，v1.3 基线为 M14，v1.2 基线为 M13，v1.1 基线为 M9，v1.0 基线为 M8）
+> 版本：v2.7（基线 = v2.6 + M24 模型 Token 成本台账与租户配额，2026-08-14；v2.6 基线为 M23，其余历史见 Git）
 > 日期：2026-08-14
 > 作者：RichardFyoung / Claude
 >
 > **文档定位**：本文描述系统的实际实现架构（以代码为准），与以下文档互补——
 > - `知识库需求文档.md`：需求与设计决策的唯一事实源（"为什么做、做什么"）
-> - `M1~M20-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
+> - `M1~M24-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
 > - `openapi/kb-server.yaml`、`openapi/kb-parser.yaml`：HTTP 接口的唯一契约源
 > - `FLOWS.md`：核心流程图（与本文配套阅读）
 
@@ -95,14 +95,14 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | 模块 | 职责 | 关键内容 |
 |---|---|---|
 | **kb-common** | 无 Spring 依赖的基础件 | `Result` 统一响应信封、`ErrorCode`、`BizException`/`ProviderException`、`JsonUtil`/`HashUtil`、`RequestIdHolder`、`KbConstants`（业务 ID 前缀与 `kb-sk-` Key 前缀） |
-| **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 43 张业务表一一对应）、30+ 枚举、60+ 领域模型、**21 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
+| **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 46 张业务表对应）、30+ 枚举、60+ 领域模型、**22 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
 | **kb-infrastructure** | 端口实现，按外部依赖分包 | `search.es` / `search.qdrant` / `graph` / `provider.{chat,embedding,rerank,vision}` / `connector` / `storage` / `parser` / `notify` / `web` / `auth`（LDAP/OIDC/SAML/CAS）/ `config` |
-| **kb-app** | 应用编排层（架构主体） | 23 个业务域包：`kb` / `document` / `index` / `retrieval` / `graph` / `annotation` / `eval` / `appcenter` / `openapi` / `chat` / `alert` / `dict` / `auth` / `audit` / `system` / `config` / `feedback` / `insight` / `governance` / `websource` / `extsource` / `memory` / `metrics` |
-| **kb-api** | HTTP 边界与装配点 | 35 个 Controller、过滤器/拦截器、SSE、MCP 协议层（`api.mcp`，§3.9）、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
+| **kb-app** | 应用编排层（架构主体） | 24 个业务域包：既有索引/检索/评测/开放平台等 23 域 + `modelusage` 用量编排 |
+| **kb-api** | HTTP 边界与装配点 | 36 个 Controller、过滤器/拦截器、SSE、MCP 协议层（`api.mcp`，§3.9）、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
 
 分层规则：Controller 只依赖 kb-app 的 Service 与 kb-domain 的 model/enum；kb-app 只依赖端口接口，**从不依赖 kb-infrastructure 具体类**；kb-infrastructure 实现端口，与 kb-app 互不感知。
 
-### 3.2 领域端口与实现（21 个）
+### 3.2 领域端口与实现（22 个）
 
 | 端口 | 实现（默认 / 降级） | 说明 |
 |---|---|---|
@@ -121,12 +121,13 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `VersionPinChecker` | `AppVersionPinChecker` | 被应用版本可见集引用的文档版本禁止归档（已下线版本同样 pin——chunk 正文只在 MySQL） |
 | `WebPageFetcher`（M12） | `HttpWebPageFetcher` | 网页抓取（URL 导入/增量同步）：SSRF 防护由调用侧经 kb-domain 的 `UrlGuard` 前置校验，Content-Type 白名单、体积上限、超时控制 |
 | `MultimodalEmbeddingProvider`（M14） | `DashScopeMultimodalEmbeddingProvider` / `NoopMultimodalEmbeddingProvider` | 视觉理解整页索引与以图搜图的共用向量通道（DashScope multimodal-embedding-v1）；未配置时注入 Noop 实现，开关置灰、多模态路跳过并记 `mm_route_unavailable`；开启但多模态权重为 0 时跳过并记 `mm_route_skipped` |
-| `ExternalConnector`（M14） | `S3CompatibleConnector` | 外部数据源 SPI：扫描 S3/OSS 兼容对象存储、拉取对象体馈入普通上传链；source_type 为路由键，本期仅 s3 一种实现 |
+| `ExternalConnector`（M14/M23） | `S3CompatibleConnector` / `ConfluenceCloudConnector` | 外部数据源 SPI：按 source_type 路由；S3/OSS 以 object key + ETag 增量，Confluence Cloud 以稳定 pageId + version 增量，两者均只把正文馈入普通上传链。连接器特定字段校验在登记/更新前 fast-fail |
 | `DirectoryAuthenticator`（M15） | `LdapDirectoryAuthenticator` | 单点登录目录认证：裸 JNDI simple bind，不引入 Spring LDAP；目录账号首登自动建号 |
 | `OidcClient`（M16） | `NimbusOidcClient` | OIDC 授权码模式：发现文档/code 换 token/JWKS 验签 |
 | `SamlProcessor`（M16） | `XmlDsigSamlProcessor` | SAML 2.0 Response 签名验证（自实现 XML-DSig，不引入 Spring Security SAML） |
 | `CasValidator`（M16） | `HttpCasValidator` | CAS ticket 服务端二次校验 |
 | `MemoryStore`（M19） | `EsMemoryStore` | 记忆节点检索副本：单物理索引 `kb_memory_nodes_v1` 所有记忆库共用（隔离靠 `library_id`+`user_id` filter）；vector mapping 懒加载（首个带 embedding 的写入按维度 putMapping）；kNN+BM25 并联，零 Key 降级 BM25 单路；过期节点查询期过滤 |
+| `ModelCallMeter`（M24） | `ModelUsageService` / 测试用 `NOOP` | Provider HTTP 出站前做租户月配额原子预占，响应后以供应商 usage 或保守估算结算；适配器不知道数据库细节 |
 
 **零 Key / 能力开关统一装置**：`ModelProviderConfig` 是唯一读模型凭据的地方，凭据为空即注入 `Unconfigured*` 实现；`GraphStoreConfig`（NEO4J_URI 空 → `DisabledGraphStore`）与 `QdrantClientConfig`（QDRANT_URI 空 → 不建 client、不注册健康探针）镜像同一模式。上游代码只写 `isConfigured()/isEnabled()` 一个分支，全链路无 null 检查——这是需求 §5"防御式编程只做一处且高复用"的落地点。
 
@@ -183,14 +184,15 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 ### 3.6 应用发布与开放 API（`appcenter` + `openapi`）
 
 - `AppVersionService`：八状态机全部迁移收敛于 `transition` 一个方法，合法迁移定义在 `AppVersionStatus` 枚举上；"至多一个 RELEASED"由表上 `released_slot` 生成列 + 唯一索引双保险。
-- `ReleaseGateService`（`GATE_EXECUTOR`，与评测池分离防自等待死锁）：同语料同时刻双跑（候选配置 vs 当前正式版配置，复用 `EvalRunService`）；`ReleaseGateJudge`（纯函数，唯一裁决点，含 1e-9 浮点余量）三态裁决：通过 / 拦截 / 仅记录不拦截；`GateMetricsRecomputer` 在双方共同判定的 case 交集上重算指标，堵分母漂移。
+- `ReleaseGateService`（`GATE_EXECUTOR`，与评测池分离防自等待死锁）：同语料同时刻双跑（候选配置 vs 当前正式版配置，复用 `EvalRunService`）；`ReleaseGateJudge`（纯函数，唯一检索裁决点，含 1e-9 浮点余量）三态裁决；`GateMetricsRecomputer` 在双方共同判定的 case 交集上重算检索指标，堵分母漂移。M21 起应用版本显式开启 `answer_gate` 时，同一双跑继续经过 `AnswerGenerationService`（生产问答共用生成路径）与 `FinalAnswerJudgeService`，`FinalAnswerGateRecomputer` 只在双方结构化 Judge 均成功的 case 交集上重算，`FinalAnswerGateJudge` 再与检索结论按“非通过优先”合并；Judge 失败只产生 LOG_ONLY，不能伪装成质量回退。
 - `AppReleaseSnapshotService`：门禁裁决后、RELEASED 生效前，**同时冻结** `index_snapshots`（`IndexSnapshotService`：ES `_clone` / Qdrant scroll 游标拷贝，不挂别名）与 `visible_version_ids`——只冻结索引不冻结可见集正是"回滚后召回全空"缺陷的根源（v1.6 修复）。
 - 对外 API `/api/v1/knowledge/{search,chat}`：**独立的 `ApiKeyAuthFilter` servlet 过滤器链**（刻意不与管理台 Bearer 拦截器共用入口）；`ApiKeyFactory` 一把 Key 三形态（明文仅创建时返回一次 / SHA-256 digest 用于鉴权 / 前缀用于展示）；`ApiRateLimiter` 进程内令牌桶；`RequestOverridePolicy` 白名单只放 4 个响应形态参数（top_n/score_threshold/metadata_filter/max_content_length），越界拒绝而非忽略；`ApiAuditService` 异步落审计（拒绝也记录、401 不落 429 落）、`ApiAuditArchiveService` 定时归档 MinIO 后分批物理删除；`QueryDigestFactory` 对审计 query 无条件脱敏截断。
 - chat SSE 事件契约：`message_delta`* → `references`（元素为与 search nodes 同构的 RetrievalNode）→ `done`（含 request_id/用量/degraded）或 `error`；生成模型取应用版本快照配置，经 `ChatProviderFactory` 生效；`ChatPromptAssembler` 固定分隔符包裹检索内容（注入防线①）。
+- `AnswerGenerationService` 收口 `ChatProviderFactory` 解析、系统 Prompt 与消息装配：开放 chat、管理台预览和 M21 离线答案评测共用它，防止门禁测到一条线上永远不会执行的“近似 Prompt”。检索仍由调用方负责，评测因此能把配置矩阵实际召回的节点原样送入生成。
 
 ### 3.7 异步与定时（无 MQ 架构的支撑件）
 
-线程池（`AsyncConfig`，统一 `TaskDecorator` 透传 requestId 到 worker 线程）：
+线程池（`AsyncConfig`，统一 `TaskDecorator` 透传 requestId 与 M24 计量上下文到 worker 线程）：
 
 **池形状只有一条规则：要么队列为 0，要么 core == max。** `ThreadPoolTaskExecutor` 只有在队列**满**之后才扩容到 max，所以"深队列 + 更大的 max"这个组合里的 max 永远到不了——写下的上限是个不会发生的数字，而后面每个读代码的人都会信它。这条已经踩过两次（索引池 `core=2,max=4` 挂 200 深队列常年只有 2；评测池 `core=2,max=6` 挂 50 深队列常年只有 2，而它自己的 javadoc 写着"6 个 run 并行"）。检索池与流式池的 0 队列是刻意的例外：没有队列可填，扩容到 max 是**第一件**发生的事，正是它们要的"先吸收突发、再拒绝"。其余每个池的 core 就是真实并发，只有一个数字要读，`AsyncConfigTest` 用反射遍历全部 `@Bean` 钉住这条规则，防止出现第三次。
 
@@ -220,8 +222,13 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `AlertEvaluator` | fixedDelay 60s | 任务连续失败 / 降级率 / 双写积压三类触发 + 静默期 |
 | `ApiAuditArchiveService` | cron 03:30 | 审计日志归档 MinIO → 分批物理删除 |
 | `AppSnapshotRetentionService` | cron 04:15 | SUPERSEDED 版本快照按保留数清理（RELEASED 永不清理） |
+| `WebSourceService` / `ExtSourceService` | cron 02:30 / 03:00 | 按源同步网页与外部连接器内容；模型消费显式归属知识库租户 |
+| `ModelUsageService` | cron 每小时 05 分 | 将超时 RESERVED 预占保守结算为 estimated；乐观锁保证多实例重复扫描安全 |
 
-### 3.8 数据模型（43 张业务表，Flyway V1-V20）
+通用持久化任务调度当前仍不投入：`t_kb_task` 是状态事实而非竞争消费队列，其他定时器在多实例下也没有
+统一 lease/owner/heartbeat 语义。量化立项门槛和未来最小协议见 `DURABLE-SCHEDULING-DECISION.md`。
+
+### 3.8 数据模型（46 张业务表，Flyway V1-V24）
 
 全部 InnoDB，统一 `id / created_at / updated_at / lock_version / deleted`，审计字段由 `AuditFieldFiller` 填充，业务 ID 带类型前缀（kb/doc/dv/ck/task/img/upt/an/evds/evc/evr/evre/app/av/ak/aud/smp/rfb/si/ws/wcred/exts/usr/role/tnt/opa/ml/mfr/mpr/mn/mak）。
 
@@ -249,23 +256,26 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V20（M19） | 记忆库 6 张表：`t_kb_memory_library` / `t_kb_memory_fragment_rule`（instruction_type/auto_update/expire_days/extract_version/builtin）/ `t_kb_memory_profile_rule`（fields 整体存 JSON 数组）/ `t_kb_memory_node`（idx_library_user）/ `t_kb_memory_profile`（uk_rule_user 唯一键 upsert）/ `t_kb_memory_app_key`（明文 `kb-mk-*`，只存 SHA-256 摘要 + 展示前缀）；权限种子 `memory:read`/`memory:write` |
 | V21（M19 后修复） | `t_kb_memory_library` 增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户）+ `idx_tenant` —— V20 建表时漏了 M16 的租户层，多租户部署下任何租户持 `memory:read` 即可列出全部署记忆库、`memory:write` 可改删他人的库与 Memory Key。记忆库是 memory 域的根聚合表，五张从属表（片段/画像规则、节点、画像、Key）经 `library_id` 归属租户，故只加这一列；配套把它加进 `KbTenantLineHandler.FENCED_TABLES`，并由 `MemoryLibraryGuard` 让每个管理端入口先解析库（见 §7.2） |
 | V22（M18 后修复） | `t_kb_web_credential` 增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户），`uk_host(host)` 收缩为 `uk_tenant_host(tenant_id, host)` —— V19 建表时漏了 M16 的租户层。缺陷两面：管理面任何租户持 `system:config` 可改删停用他人凭据；抓取面凭据按 host 全局查找，B 租户给自己的 WebSource 登记一个同 host URL，夜里的同步就会把 A 租户的密码发到那个请求上。配套把表加进 `KbTenantLineHandler.FENCED_TABLES`（只覆盖管理面），抓取面由 `WebCredentialService#resolveFor(tenantId, host)` 的显式租户谓词覆盖 —— 同步跑在无主体线程上，围栏在那条线程整条跳过（见 §7.2 与 M16 契约 §1.3） |
+| V23（M21） | 最终答案评测字段：`t_kb_eval_case.expected_refusal`；`t_kb_eval_run` 增应用配置快照、答案 Judge 身份与聚合指标；`t_kb_eval_result` 增生成答案、生成耗时、五维评分、答/拒结果与失败原因。全部新列可空或有兼容默认值，存量 run 不回填 |
+| V24（M24） | `t_kb_tenant.monthly_token_quota`（0=不限）；`t_kb_model_usage_monthly`（租户+月份原子 used/reserved 计数器）；`t_kb_model_usage`（不含客户内容的调用台账与价格快照）；`t_kb_model_price`（provider+capability+model 唯一价格） |
 
 引擎侧可过滤字段全集（Qdrant 标量 / ES filter，建索引时显式声明）：`kb_id`、`doc_id`、`document_version_id`、`enabled`、`parent_id`、`chunk_type`、`tag_ids`、`session_id`、`sender`、`msg_time`、`chunk_seq`；其余 metadata 只存 MySQL。新增可过滤维度视为 schema 变更，走索引重建迁移。
 
-### 3.9 MCP 协议层（M20）
+### 3.9 MCP 双协议层（M20 / M22）
 
-知识库应用与记忆库的开放能力在 REST 之外新增 **MCP（Model Context Protocol）** 第二种 transport：任何 MCP 兼容客户端（Claude Desktop / Cursor / Cline / 自研 Agent）配一个 URL 加一把既有 Key 即可接入，无需定制胶水代码（契约 M20）。
+知识库应用与记忆库的开放能力在 REST 之外提供 **MCP（Model Context Protocol）** 第二种 transport：任何 MCP 兼容客户端配一个 URL 加一把既有 Key 即可接入。M22 在 M20 工具与身份不变的基础上，让同一 URL 同时服务 `2026-07-28` 逐请求元数据协议和旧版 initialize 协议。
 
 | 端点 | server name | 工具集 | 凭证与过滤器链 |
 |---|---|---|---|
 | `POST /api/v1/knowledge/mcp` | `kb-rag-knowledge` | `knowledge_search` / `knowledge_chat` | `Bearer kb-sk-*`，`ApiKeyAuthFilter`（鉴权、app_scope、令牌桶限流、调用审计全部复用） |
 | `POST /api/v1/memory/mcp` | `kb-rag-memory` | `memory_add` / `memory_search` / `memory_list` / `memory_update` / `memory_delete` / `memory_get_profile` | `Bearer kb-mk-*`，`MemoryKeyAuthFilter`（鉴权、库绑定、限流全部复用） |
 
-- **`McpServerEngine`（kb-api `api.mcp`，手写零依赖）**：JSON-RPC 2.0 子集引擎，方法表 `initialize`（版本协商 `2025-03-26`，客户端报 `2024-11-05` 时向下回显）/ `ping` / `tools/list` / `tools/call` / `notifications/*`（202 无 body）。刻意不引 MCP SDK——协议面就是"一个 POST 上的 JSON-RPC 2.0 子集"，Jackson 手写 226 行闭合；SDK 附带的会话存储与 SSE 管线本期恰恰都不要。
-- **无状态设计**：不签发也不要求 `Mcp-Session-Id`，每个请求自带完整上下文（身份来自 `Authorization` 头，逐请求过滤器验证）——每 Controller 一个引擎实例持有不可变工具目录即并发安全。不做 SSE 流式（tools/call 本就是单次请求应答，chat 流式指路 REST 孪生端点的 SSE）、不做 resources/prompts/sampling（capabilities 只声明 tools）、拒绝 JSON-RPC 批量数组（2025-03-26 修订已移除，-32600）。
-- **两个失败平面（核心不变式）**：协议违规 → JSON-RPC error（坏 JSON -32700、批量/缺 id -32600、方法不存在 -32601、未知工具/参数形态 -32602）；业务失败 → tools/call **成功响应**里 `isError: true` 的工具结果（`BizException` 映射为 `错误码: 消息` 文本）——对 Agent 而言"参数不对/记忆不存在"是应自行修正重试的工具反馈，不是协议层故障。HTTP 状态恒 200（通知 202），非 200 只可能来自过滤器链（401/429，信封同 REST）。
+- **`McpServerEngine`（手写零 SDK 依赖）**：按当前请求自识别时代。现代版方法表为 `server/discover` / `ping` / `tools/list` / `tools/call`；旧版保留 `initialize` / `notifications/*`。现代请求逐次校验 `_meta` 与 `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name`，不从上一个请求推断能力。
+- **无状态设计**：不签发也不要求 `Mcp-Session-Id`；身份和协议版本都在每个 POST 内自足。现代成功 result 必含 `resultType=complete` 和 serverInfo；discover 与工具目录给出 5 分钟 public 缓存提示，现代目录按名称稳定排序。
+- **状态语义按时代隔离**：现代头体不一致为 HTTP 400/-32020、版本不支持为 400/-32022、方法未实现为 404/-32601；旧版协议错误继续由 HTTP 200 body 承载。业务失败在两时代都只进入 `tools/call.result.isError=true`，不抛成协议错误。
+- **Origin 前置校验**：`McpOriginValidationFilter` 位于两条 Key 鉴权过滤器之前。无 Origin 的服务间客户端放行；浏览器 Origin 必须命中既有 `CORS_ALLOWED_ORIGINS`，否则 403。来源规则只有这一份，不另造 MCP 白名单。
 - **成功结果双形态**：`content[0].text`（JSON 文本，给只读 text 的老客户端）+ `structuredContent`（同 REST `data` 结构）同源产出。
-- **鉴权：第二种 transport，不是第二种身份**：两个端点路径刻意落在既有过滤器链的 URL 前缀之下，请求进 Controller 前已过完全同一条鉴权/限流/审计管线，零过滤器改动；Controller 只从 request attribute 读过滤器放入的 principal，读不到即 500 级装配故障。记忆库隔离红线原样成立：工具操作的库来自 principal（Key 绑定关系），arguments 无法指定 library_id，越权继续 404。
+- **鉴权：第二种 transport，不是第二种身份**：通过 Origin 后仍进入既有 Key 鉴权/限流/审计管线；Controller 只从 request attribute 读 principal。记忆库操作的库来自 Key 绑定关系，arguments 无法指定 library_id，越权继续 404。
 - **参数绑定**：`McpArgumentBinder` 用 Jackson `treeToValue` + jakarta Validator 显式校验（tree 转换不触发 bean validation，手动补上这一刀）；知识库两工具复用 REST 的 `KnowledgeCallRequest`，记忆库 list/update/delete/profile 的 GET/path 形态参数收敛为 Controller 内部 record。`knowledge_chat` 带 `stream: true` 直接 INVALID_PARAM 并指路 REST SSE。
 
 ---
@@ -315,12 +325,12 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | 路由 | 页面 |
 |---|---|
 | `/login`、`/change-password` | 登录（防爆破提示）、首登强制改密 |
-| `/kb`、`/kb/:kbId` | 知识库列表；详情（文档上传/状态轮询/审核与有效期操作/分片标注 ChunkDrawer/版本 VersionDrawer/索引配置/聊天导入向导；图谱 GraphTab / 反馈管理 / 检索洞察 / 回收站 / 网页导入等 Tab） |
+| `/kb`、`/kb/:kbId` | 知识库列表；详情（文档上传/状态轮询/审核与有效期操作/分片标注 ChunkDrawer/版本 VersionDrawer/索引配置/聊天导入向导；图谱 / 反馈 / 洞察 / 回收站 / 网页导入 / S3 与 Confluence 外部数据源等 Tab） |
 | `/search` | 检索调试（参数面板、分数明细、degraded 告警、收进评测集） |
 | `/chat` | 问答调试（JWT 走 `/apps/{id}/chat-preview` SSE） |
 | `/apps`、`/apps/:appId` | 应用中心（配置 / 版本与门禁 / API 调试三 tab） |
 | `/memory`、`/memory/:libraryId` | 记忆库（M19，`memory:read` 可见）：库列表；详情五 Tab（片段规则 / 画像规则 / 记忆数据 / 检索调试 / Memory Key） |
-| `/mcp` | MCP 调试（M20，`app:read` 或 `memory:read` 任一可见）：端点二选一（切换即清场）→ 粘贴明文 Key → initialize 握手 / tools/list 目录（按 inputSchema.required 预填参数模板）→ tools/call 调试；响应区显式区分三种结果平面（JSON-RPC error 红 / isError 橙 / 成功绿）；随表单实时生成 curl 与 `mcpServers` 配置片段 |
+| `/mcp` | MCP 调试（M20/M22，`app:read` 或 `memory:read` 任一可见）：端点与协议时代二选一（切换即清场）→ 现代 server/discover 或旧版 initialize → tools/list / tools/call；现代请求自动生成 `_meta` 与镜像头，响应区区分 HTTP、JSON-RPC、isError 三个平面，并生成等价 curl 与客户端配置 |
 | `/eval` | 评测中心（数据集 / case 标注 / 证据复核 / 运行报告四 tab） |
 | `/settings` | 系统设置（模型状态 / ik 词典 / API Key / 审计 / 告警 / 导入映射） |
 
@@ -351,7 +361,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | `scripts/benchmark.sh` | 纯 bash+curl 压测（P50/P95/P99），验收口径 P95<2s；`seed-bench.py` 零 Key 直灌 10 万分片种子数据 |
 | `demo/` | 4 篇原创文档（md/docx/pdf/xlsx 各一，字节级可复现生成）+ `eval-cases.json`（10 条，含文档级锚定图片 case，按文件名+content_hash 关联导入） |
 | `mappings/` | 聊天记录列名映射模板分发（memotrace 等） |
-| `docs/` | 需求文档、M1-M20 契约、OpenAPI（`kb-server.yaml` 0.20.0-m20（含 `mcp` tag 与两个 MCP path）/ `kb-parser.yaml` 0.12.0-m12，3 端点）、备份恢复手册、本文档与 `FLOWS.md`；调用方接入文档另见主仓 `docs/MCP接入指南.md` |
+| `docs/` | 需求文档、M1-M24 契约、OpenAPI（`kb-server.yaml` 0.26.0-m24 / `kb-parser.yaml` 0.12.0-m12）、持久化调度投入决策、备份恢复手册、本文档与 `FLOWS.md`；调用方接入文档另见主仓 `docs/MCP接入指南.md` |
 
 ---
 
@@ -371,7 +381,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
   > **另一半是「入口自带 `kb_id` 却仍未解析」**：这类最容易被误判为安全，因为路径里那个 `kbId` 看着就是作用域本身——可它是**调用方声明的**作用域，不是被证实的。文档列表、回收站、检索洞察与统计、批量删除与重建、批量确认、全库重建与状态、文档密级读写共 15 个入口原先只有 Controller 里那行数据范围调用，链路上一次 `t_kb_knowledge_base` 查询都没有，报一个别家的 `kbId` 就能把按 `kb_id` 过滤的语句照常跑完。修复一律落在服务层方法首行（服务方法是所有调用方的必经之路），并把 28 处 Controller 的数据范围调用换成 `KbResourceGuard#requireKb`，**判定顺序由此在全域统一**。文档密级那两条另有一层教训：原先只校验「文档挂在这个 `kbId` 下」，跨租户调用方把别家的 `kbId` 与该库下的 `docId` 一起传进来完全对得上——**「从属行属于这个父」和「这个父属于你」是两个问题**。判据：这条链路上有没有一次对根表的查询？没有 → 未守，`kbId` 在路径里也一样。
 - **收口点越靠近数据，新入口自动继承的概率越高**（M4c 后修复，应用版本）：`t_kb_app_version` 同样是不带 `tenant_id` 的从属表（经 `app_id` 归属 `t_kb_app`），而 `/app-versions/{vid}` 的五个端点只有功能权限码——任何租户持 `app:release` 就能**发布或回滚别家的应用版本**，直接改变别人对外 API 被服务的内容；持 `app:read` 就能读它的配置快照；发布还会在门禁执行器上对别家知识库启动同语料双跑，花掉他们的检索与模型调用。补法与前三处同构，但守卫落点不同：`AppVersionGuard` 放在 `AppVersionService#require` **背后**而不是各入口前面，因为那个方法是 11 处调用方的唯一入口（本服务自调用 5、`ReleaseGateService` 5、控制台预览 1），放入口必漏。**404 收口要连措辞一起收**：跨租户与"版本不存在"共用同一错误码同一文案、文案不含 `appId`，第二跳报成 `APP_NOT_FOUND` 就等于用错误码差异告诉调用方"你猜的 id 是真的、只是在别人那里"。对外 `search`/`chat` 走 `resolveForCall` 不经该方法、由 API Key 的 `app_scope` 把关，门禁执行器与预览流线程无控制台主体、围栏本就整条跳过，两者行为均零变化。详见 M16 契约 §1.3.2。
 - **围栏放行分支的代价不是隔离，是可辨识性**（M15/M16 后修复，角色列表）：`t_kb_admin_user` 与 `t_kb_role` 是 `OPERATOR_UNFENCED_TABLES` 的两张表，持 `tenant:manage` 的平台运维读它们不带租户条件——这个放行是必需的（不放行，新建的租户就没人能给它建首个账号、授首个角色），也是安全的（写侧仍各自解析）。漏的是**返回体让运维认不出自己在看谁家的行**：`TenantService#copyBuiltinRoles` 给每个新租户照抄五个内置角色，`SUPER_ADMIN`/`KB_ADMIN`/`EDITOR`/`REVIEWER`/`VIEWER` 于是每户一份、`code` 与 `name` 全同，而 `RoleResponse` 只有 `role_id` 能区分——控制台角色管理页因此呈现为一张"每个内置角色重复 N 遍"的表，编辑哪一行全凭运气。补 `tenant_id` 并在持 `tenant:manage` 时多渲染一列"所属租户"。**判据**：凡是给某类调用方开了跨租户可见的口子，就要检查返回体里有没有一个字段能把看到的行归属回去；隔离做对了、可辨识性没做，用户侧的观感是"系统出了重复数据"，而运维的下一步操作是在猜。用户表本来就带 `tenant_id`（M16 随移户功能一并给了列），角色表是同一条规则漏掉的那一半。
-- **MCP 是第二种 transport，不是第二种身份**（M20）：`/api/v1/knowledge/mcp` 与 `/api/v1/memory/mcp` 刻意落在上述后两条过滤器链的 URL 前缀之下，凭证仍是既有 `kb-sk-*` / `kb-mk-*`，鉴权、授权范围、限流、审计与 REST 完全同一条管线，零过滤器改动、无新增凭据面；协议层错误（JSON-RPC error / `isError`）全部在 HTTP 200 的 body 里，401/429 信封同 REST（见 §3.9）。
+- **MCP 是第二种 transport，不是第二种身份**（M20/M22）：两个 MCP 路径先经专用 Origin 白名单过滤，再进入既有 `kb-sk-*` / `kb-mk-*` 鉴权、授权范围、限流与审计管线；无新增凭据面。旧版协议错误保持 HTTP 200，现代版按规范使用 400/404，401/429 仍为 REST 信封（见 §3.9）。
 - **Prompt 注入四防线**：①生成/judge prompt 固定分隔符包裹资料原文；②LLM 切分输出强校验（非法降级按长度切）；③路由白名单交集裁决；④改写结果仅作检索词。
 - 解析侧基线：magic number 校验、zip-slip/炸弹、XXE（defusedxml）、SSRF（解析期零出站）；前端零 `dangerouslySetInnerHTML`；聊天导入默认脱敏（手机号/身份证/银行卡 16-19 位）；审计 query 无条件脱敏；MinIO 私有桶 + 限时预签名 URL。
 

@@ -120,6 +120,27 @@ public class KbProperties {
     /** External data source policy: scan limits and the scheduled sync pass, the M14 contract section 2.4. */
     private ExtSource extSource = new ExtSource();
 
+    /** Model Token ledger reservation recovery policy. */
+    private ModelUsage modelUsage = new ModelUsage();
+
+    /**
+     * Crash recovery of in-flight model quota reservations.
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class ModelUsage {
+
+        /** Age after which a still-reserved model call is known to have lost its process. */
+        private int reservationTimeoutMinutes = 60;
+
+        /** Reserved ledger rows one recovery pass claims at most. */
+        private int reconcileBatchSize = 200;
+
+        /** Cron expression of the reservation recovery pass. */
+        private String reconcileCron = "0 5 * * * *";
+    }
+
     /**
      * Content governance policy, the M11 contract section 2.3.
      */
@@ -1323,6 +1344,9 @@ public class KbProperties {
          * {@code max(this / 100, 1 / effectiveCases)}, so a small data set automatically gets a wider band.
          */
         private double epsilonPp = 2.0d;
+
+        /** Tolerance on final-answer judge scores, whose scale is one to five. */
+        private double answerScoreEpsilon = 0.2d;
 
         /** Pending review ratio above which the data set counts as invalid for gating purposes. */
         private double staleRatio = 0.15d;

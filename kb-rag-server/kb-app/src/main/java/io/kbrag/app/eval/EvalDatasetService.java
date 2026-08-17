@@ -370,6 +370,7 @@ public class EvalDatasetService {
         evalCase.setMessages(CollectionUtils.isEmpty(command.getMessages())
                 ? null : JsonUtil.toJson(command.getMessages()));
         evalCase.setExpectedAnswer(command.getExpectedAnswer());
+        evalCase.setExpectedRefusal(command.isExpectedRefusal());
         evalCase.setAnchorType(command.getAnchorType());
         evalCase.setEvidences(JsonUtil.toJson(resolveEvidences(command.getEvidences(), command.getAnchorType())));
         evalCase.setSource(source);

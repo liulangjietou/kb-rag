@@ -32,6 +32,9 @@ public class EvalCaseCommand {
     /** Reference answer, optional. */
     private final String expectedAnswer;
 
+    /** Whether the correct final-answer behaviour is to refuse. */
+    private final boolean expectedRefusal;
+
     /** Anchoring granularity. */
     private final AnchorType anchorType;
 

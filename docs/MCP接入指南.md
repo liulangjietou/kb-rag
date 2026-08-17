@@ -1,129 +1,202 @@
-# MCP 接入指南（让任何 Agent 直接调用知识库与记忆库）
+# MCP 接入指南（2026-07-28 / 旧版双协议）
 
-> 面向对象：使用 MCP（Model Context Protocol）兼容客户端的接入方——Claude Desktop / Cursor / Cline / 各类自研 Agent 框架。
-> 一句话：配一个 URL、带一把既有 Key，知识库检索问答与记忆库读写就成为你 Agent 的工具，零胶水代码。
+> 适用于 Claude Desktop、Cursor、Cline 与自研 Agent。只需一个 URL 和一把既有 Key，
+> 即可把知识检索、RAG 问答和长期记忆读写作为 MCP 工具调用。
 
-## 1. 一分钟总览
+## 1. 端点与凭证
 
-1. kb-rag 暴露两个 MCP 服务端点，凭证与 REST 开放 API **完全同一把 Key**：
+| MCP 服务 | Streamable HTTP 端点 | 凭证来源 |
+| --- | --- | --- |
+| `kb-rag-knowledge` | `POST /api/v1/knowledge/mcp` | 应用中心签发的 `Bearer kb-sk-*` |
+| `kb-rag-memory` | `POST /api/v1/memory/mcp` | 记忆库详情签发的 `Bearer kb-mk-*` |
 
-| MCP 服务 | 端点 | 凭证 | Key 从哪来 |
-| --- | --- | --- | --- |
-| `kb-rag-knowledge`（知识库应用） | `POST /api/v1/knowledge/mcp` | `Authorization: Bearer kb-sk-*` | 控制台「应用中心」→ API Key |
-| `kb-rag-memory`（记忆库） | `POST /api/v1/memory/mcp` | `Authorization: Bearer kb-mk-*` | 控制台「记忆库」详情页 → Memory Key |
+MCP 与 REST 复用同一身份、授权范围、限流和审计。Key 禁用或轮换立即生效；记忆库由
+Memory Key 绑定关系确定，工具参数不能另行指定库。
 
-2. 传输形态：MCP **Streamable HTTP**——单个 JSON-RPC 2.0 请求，单个 JSON 响应（不开 SSE 流）。协议版本 `2025-03-26`，兼容 `2024-11-05`。
-3. 鉴权、限流、审计与 REST 端点走同一条过滤器链：Key 被禁用/轮换即刻生效，超 QPS 返回 429。
-4. 控制台「MCP 调试」页面可在线做 initialize 握手、查看工具目录、发起 tools/call，并自动生成 curl 与客户端配置片段。
+服务端同时支持：
 
-## 2. 客户端配置
+- `2026-07-28`：推荐。无 initialize、无 session，每个请求自带协议元数据；
+- `2025-03-26` / `2024-11-05`：兼容既有客户端，继续使用 initialize 握手。
 
-MCP 客户端（Claude Desktop / Cursor / Cline 等）的 `mcpServers` 配置：
+## 2. 标准客户端配置
 
 ```json
 {
   "mcpServers": {
     "kb-rag-knowledge": {
       "type": "streamable-http",
-      "url": "http(s)://<你的部署地址>/api/v1/knowledge/mcp",
+      "url": "https://<部署地址>/api/v1/knowledge/mcp",
       "headers": { "Authorization": "Bearer kb-sk-xxxxxxxxxxxxxxxx" }
     },
     "kb-rag-memory": {
       "type": "streamable-http",
-      "url": "http(s)://<你的部署地址>/api/v1/memory/mcp",
+      "url": "https://<部署地址>/api/v1/memory/mcp",
       "headers": { "Authorization": "Bearer kb-mk-xxxxxxxxxxxxxxxx" }
     }
   }
 }
 ```
 
-两个服务相互独立，按需接一个或两个。明文 Key 仅在签发/轮换时展示一次，请自行留存。
+配置里只放稳定的 Authorization。`MCP-Protocol-Version`、`Mcp-Method`、`Mcp-Name` 会随
+每次请求变化，应由支持 2026-07-28 的客户端动态生成，不能写死在静态配置中。
 
-## 3. 工具目录
+## 3. 2026-07-28 推荐流程
 
-### 3.1 kb-rag-knowledge（2 个工具）
+现代请求必须同时满足：
 
-| 工具 | 对应 REST 端点 | 说明 |
-| --- | --- | --- |
-| `knowledge_search` | `POST /api/v1/knowledge/search` | 纯检索：返回最相关的知识分片，不生成回答 |
-| `knowledge_chat` | `POST /api/v1/knowledge/chat` | RAG 问答：检索 + 生成带引用的回答（仅非流式；要流式请直接调 REST 的 SSE） |
+1. `Accept: application/json, text/event-stream`；
+2. `MCP-Protocol-Version: 2026-07-28` 与 body `_meta` 中版本相同；
+3. `Mcp-Method` 与 JSON-RPC `method` 相同；
+4. `tools/call` 还需 `Mcp-Name` 与 `params.name` 相同；
+5. `_meta.io.modelcontextprotocol/clientCapabilities` 必须是对象，`clientInfo` 建议填写。
 
-两工具参数一致（同 REST 请求体）：必填 `app_id`、`query`；可选 `app_version`（缺省当前正式版）、`messages`（多轮历史）、`top_n` / `score_threshold` / `max_content_length`（覆盖白名单）。
+以下示例预先设置：
 
-### 3.2 kb-rag-memory（6 个工具）
+```bash
+BASE=https://<部署地址>
+API_KEY=kb-sk-xxxxxxxxxxxxxxxx
+```
 
-| 工具 | 对应 REST 端点 | 必填参数 |
-| --- | --- | --- |
-| `memory_add` | `POST /api/v1/memory/add` | `user_id`（`messages` 与 `custom_content` 至少一个） |
-| `memory_search` | `POST /api/v1/memory/search` | `user_id`、`query` |
-| `memory_list` | `GET /api/v1/memory/memory_nodes` | `user_id`（可选 `rule_id` / `page_num` / `page_size`） |
-| `memory_update` | `PATCH /api/v1/memory/memory_nodes/{nodeId}` | `memory_node_id`、`user_id`、`custom_content` |
-| `memory_delete` | `DELETE /api/v1/memory/memory_nodes/{nodeId}` | `memory_node_id`、`user_id` |
-| `memory_get_profile` | `GET /api/v1/memory/profiles` | `user_id`（可选 `rule_id`） |
-
-参数语义与《记忆库接入指南》完全一致；操作的记忆库由 Key 绑定关系决定，参数无需也无法指定库。各工具参数的权威定义以 `tools/list` 返回的 `inputSchema` 为准。
-
-## 4. 协议交互（curl 示例）
-
-以下以知识库端点为例，记忆库端点只需换 URL 与 Key。
-
-### 4.1 initialize 握手
+### 3.1 能力发现
 
 ```bash
 curl -X POST "$BASE/api/v1/knowledge/mcp" \
-  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"my-agent","version":"1.0.0"}}}'
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: server/discover" \
+  -d '{
+    "jsonrpc":"2.0","id":1,"method":"server/discover","params":{
+      "_meta":{
+        "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities":{},
+        "io.modelcontextprotocol/clientInfo":{"name":"my-agent","version":"1.0.0"}
+      }
+    }
+  }'
 ```
 
-返回 `result.protocolVersion`、`result.capabilities.tools` 与 `result.serverInfo`。随后客户端通常会发 `notifications/initialized` 通知（无 `id`），服务端回 **202 无响应体**。
+返回 `supportedVersions`、`capabilities.tools`、`ttlMs=300000` 与 `cacheScope=public`。
 
-### 4.2 tools/list 工具目录
+### 3.2 列出工具
 
 ```bash
 curl -X POST "$BASE/api/v1/knowledge/mcp" \
-  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: tools/list" \
+  -d '{
+    "jsonrpc":"2.0","id":2,"method":"tools/list","params":{
+      "_meta":{
+        "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities":{}
+      }
+    }
+  }'
 ```
 
-### 4.3 tools/call 执行工具
+工具目录按名称稳定排序，可按返回的 `ttlMs` 缓存。工具 inputSchema 不含租户私有数据，因此
+`cacheScope=public`；实际调用结果绝不可按该规则共享缓存。
+
+### 3.3 调用工具
 
 ```bash
 curl -X POST "$BASE/api/v1/knowledge/mcp" \
-  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"knowledge_search","arguments":{"app_id":"app0001","query":"什么是混合检索？"}}}'
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "MCP-Protocol-Version: 2026-07-28" \
+  -H "Mcp-Method: tools/call" \
+  -H "Mcp-Name: knowledge_search" \
+  -d '{
+    "jsonrpc":"2.0","id":3,"method":"tools/call","params":{
+      "name":"knowledge_search",
+      "arguments":{"app_id":"app0001","query":"什么是混合检索？"},
+      "_meta":{
+        "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities":{}
+      }
+    }
+  }'
 ```
 
-成功响应的 `result`：
+成功 result 同时提供文本与结构化数据：
 
 ```json
 {
+  "resultType": "complete",
+  "_meta": {
+    "io.modelcontextprotocol/serverInfo": {"name": "kb-rag-knowledge", "version": "0.24.0"}
+  },
   "content": [{"type": "text", "text": "{...JSON 文本...}"}],
-  "structuredContent": { "nodes": [ ... ], "request_id": "...", "degraded": [] },
+  "structuredContent": {"nodes": [], "request_id": "...", "degraded": []},
   "isError": false
 }
 ```
 
-`structuredContent` 与 REST 响应的 `data` 结构一致；`content[0].text` 是同一份数据的 JSON 文本（给只读文本的客户端）。
+若工具名含非 ASCII、首尾空白或本身形如 sentinel，`Mcp-Name` 必须使用
+`=?base64?{工具名 UTF-8 字节的 Base64}?=`；body 仍保留原工具名。
 
-## 5. 两个失败平面（务必区分）
+## 4. 旧版兼容流程
 
-| 平面 | 表现 | 含义与处理 |
+旧客户端可继续按 M20 流程调用，不需要现代 `_meta` 与三个镜像头：
+
+```bash
+curl -X POST "$BASE/api/v1/knowledge/mcp" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+    "protocolVersion":"2025-03-26","capabilities":{},
+    "clientInfo":{"name":"legacy-agent","version":"1.0.0"}
+  }}'
+```
+
+随后调用 `tools/list` / `tools/call`。旧版未知方法、非法参数等 JSON-RPC 错误仍使用 HTTP 200；
+现代客户端不得先 initialize，应该先 `server/discover` 或直接发送带 `_meta` 的业务请求。
+
+## 5. 工具目录
+
+### 5.1 知识库
+
+| 工具 | REST 孪生端点 | 必填参数 |
 | --- | --- | --- |
-| 协议错误 | 响应带 `error`：`-32700` 解析错 / `-32600` 非法请求（批量数组、缺 id）/ `-32601` 方法不存在 / `-32602` 工具不存在或 arguments 非对象 | 客户端实现问题，修请求 |
-| 业务失败 | `tools/call` 成功响应但 `result.isError: true`，`content[0].text` 形如 `INVALID_PARAM: app_id must not be blank` | 给 Agent 的工具反馈：修正参数后重试即可（记忆不存在、参数校验失败、越权 404 语义等都在这一平面） |
+| `knowledge_search` | `POST /api/v1/knowledge/search` | `app_id`、`query` |
+| `knowledge_chat` | `POST /api/v1/knowledge/chat` | `app_id`、`query` |
 
-HTTP 状态恒为 200（通知 202）；非 200/202 只可能来自鉴权/限流层，错误信封与 REST 相同：
+可选参数包括 `app_version`、`messages`、`top_n`、`score_threshold`、`max_content_length`。
+`knowledge_chat` 在 MCP 中只返回单次 JSON；需要 token 流时调用 REST SSE。传 `stream:true`
+会得到工具业务错误，而不是协议错误。
 
-| HTTP | code | 含义 |
+### 5.2 记忆库
+
+| 工具 | 作用 | 必填参数 |
 | --- | --- | --- |
-| 401 | `INVALID_API_KEY` | Key 缺失/格式错/已轮换 |
-| 401 | `API_KEY_DISABLED` | Key 已被禁用 |
-| 429 | `RATE_LIMITED` | 超过该 Key 的 QPS 上限，按 `Retry-After` 退避 |
+| `memory_add` | 抽取或直接写入长期记忆 | `user_id`，且 messages/custom_content 至少一个 |
+| `memory_search` | 语义召回记忆与画像 | `user_id`、`query` |
+| `memory_list` | 分页读取记忆 | `user_id` |
+| `memory_update` | 更新一条记忆 | `memory_node_id`、`user_id`、`custom_content` |
+| `memory_delete` | 删除一条记忆 | `memory_node_id`、`user_id` |
+| `memory_get_profile` | 读取结构化画像 | `user_id` |
 
-## 6. 边界与最佳实践
+权威参数结构始终以当前端点 `tools/list` 返回的 `inputSchema` 为准。
 
-- **chat 不支持流式**：`tools/call` 是单次请求应答，`knowledge_chat` 传 `stream: true` 会得到 `isError: true` 的反馈；需要 token 级流式渲染时直接调 REST `POST /api/v1/knowledge/chat`（SSE）。
-- **无会话状态**：服务端不签发 `Mcp-Session-Id`，每个请求自带完整上下文，可任意水平扩展与重试。
-- **不支持批量**：JSON-RPC 批量数组按 2025-03-26 修订直接拒绝（-32600），一次一个请求。
-- **典型 Agent 编排**：会话开始 `memory_search` 召回长期记忆拼进系统提示词 → 过程中按需 `knowledge_search` / `knowledge_chat` 查资料 → 会话结束 `memory_add` 写回本轮对话抽取新记忆。
-- 调试请优先用控制台「MCP 调试」页面：三种结果平面（协议错/业务错/成功）有显式标注，且能一键生成与你表单等价的 curl。
+## 6. 错误平面与处理
+
+| 时代/平面 | HTTP / JSON-RPC | 处理 |
+| --- | --- | --- |
+| 现代头缺失、畸形或头体不一致 | 400 / `-32020` | 修正版本、方法或名称镜像头 |
+| 现代版本不支持 | 400 / `-32022` | 从 `error.data.supported` 选择版本重试 |
+| 现代方法未实现 | 404 / `-32601` | 不要调用未声明能力 |
+| 现代参数形态错误 | 400 / `-32602` | 按 schema 修请求 |
+| 旧版协议错误 | 200 / `-32700`、`-32600`、`-32601`、`-32602` | 修正 JSON-RPC 请求 |
+| 工具业务失败 | 200 / result.`isError=true` | 让 Agent 阅读 content 并修参数重试 |
+| Origin 不在白名单 | 403 / 空 body | 配置 `CORS_ALLOWED_ORIGINS` 或移除伪造 Origin |
+| Key 无效/禁用 | 401 / REST 错误信封 | 重新签发或启用 Key |
+| 超 QPS | 429 / REST 错误信封 | 按 `Retry-After` 退避 |
+
+服务端无会话状态，不签发 `Mcp-Session-Id`。每个请求都重新认证，可安全重试和水平扩展。
+控制台「MCP 调试」支持现代/旧版切换，会展示 HTTP 状态、JSON-RPC error、工具业务错误与
+实际 curl，建议先在该页完成接入验证。

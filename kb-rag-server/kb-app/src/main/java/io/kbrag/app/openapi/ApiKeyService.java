@@ -203,7 +203,7 @@ public class ApiKeyService {
             throw new BizException(ErrorCode.API_KEY_DISABLED, "API Key 已被禁用");
         }
         touchAsync(key.getKeyId());
-        return new ApiKeyPrincipal(key.getKeyId(), key.getName(),
+        return new ApiKeyPrincipal(key.getKeyId(), key.getTenantId(), key.getName(),
                 key.getQpsLimit() == null ? properties.getOpenApi().getRateLimitDefault() : key.getQpsLimit(),
                 scopeOf(key));
     }

@@ -17,6 +17,7 @@ import java.util.List;
  * @param query          user query
  * @param messages       conversation history, {@code null} for a single turn case
  * @param expectedAnswer reference answer
+ * @param expectedRefusal whether the correct final answer should refuse
  * @param anchorType     anchoring granularity
  * @param evidences      evidence anchors
  * @param status         lifecycle state
@@ -32,6 +33,7 @@ public record EvalCaseResponse(
         String query,
         List<MessageView> messages,
         @JsonProperty("expected_answer") String expectedAnswer,
+        @JsonProperty("expected_refusal") boolean expectedRefusal,
         @JsonProperty("anchor_type") String anchorType,
         List<EvalEvidenceResponse> evidences,
         String status,
@@ -58,6 +60,7 @@ public record EvalCaseResponse(
                 evalCase.getQuery(),
                 messages == null ? null : messages.stream().map(MessageView::from).toList(),
                 evalCase.getExpectedAnswer(),
+                Boolean.TRUE.equals(evalCase.getExpectedRefusal()),
                 evalCase.getAnchorType() == null ? null : evalCase.getAnchorType().name(),
                 evidences == null ? List.of() : evidences.stream().map(EvalEvidenceResponse::from).toList(),
                 evalCase.getStatus() == null ? null : evalCase.getStatus().name(),

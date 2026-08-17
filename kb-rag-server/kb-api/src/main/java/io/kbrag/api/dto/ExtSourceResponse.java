@@ -16,11 +16,11 @@ import java.time.LocalDateTime;
  * @param kbId           knowledge base the fetched objects land in
  * @param sourceType     connector type routing key
  * @param name           operator facing display name
- * @param endpoint       service endpoint of the object store
- * @param region         optional region hint
- * @param bucket         bucket the scan lists
- * @param prefix         optional key prefix narrowing the scan
- * @param accessKey      access key of the credentials
+ * @param endpoint       remote service endpoint
+ * @param region         optional connector-specific region hint
+ * @param bucket         bucket name or Confluence space key
+ * @param prefix         optional connector-specific listing prefix
+ * @param accessKey      access key or Atlassian account email
  * @param secretKey      fixed mask, never the stored value
  * @param syncEnabled    whether the scheduled pass includes this source
  * @param lastSyncStatus outcome of the last sync pass, {@code null} before the first one

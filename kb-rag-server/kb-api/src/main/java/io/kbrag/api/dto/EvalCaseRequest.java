@@ -21,6 +21,7 @@ import java.util.List;
  * @param query          user query
  * @param messages       optional conversation history, absent keeps the case single turn
  * @param expectedAnswer reference answer, optional
+ * @param expectedRefusal whether the correct final answer should refuse
  * @param anchorType     {@code SPAN} or {@code DOCUMENT}, case insensitive
  * @param evidences      evidence anchors, at least one required
  * @param note           free text operator note
@@ -31,6 +32,7 @@ public record EvalCaseRequest(
         @NotBlank(message = "must not be blank") String query,
         List<MessageRequest> messages,
         @JsonProperty("expected_answer") String expectedAnswer,
+        @JsonProperty("expected_refusal") boolean expectedRefusal,
         @JsonProperty("anchor_type") @NotBlank(message = "must not be blank") String anchorType,
         @NotEmpty(message = "at least one evidence is required") @Valid List<EvalEvidenceRequest> evidences,
         String note) {
@@ -47,6 +49,7 @@ public record EvalCaseRequest(
                 .query(query)
                 .messages(toMessages())
                 .expectedAnswer(expectedAnswer)
+                .expectedRefusal(expectedRefusal)
                 .anchorType(parsedAnchorType)
                 .evidences(parsedEvidences)
                 .note(note)

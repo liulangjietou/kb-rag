@@ -298,6 +298,15 @@ public class BizIdGenerator {
         return generate(KbConstants.MEMORY_APP_KEY_ID_PREFIX);
     }
 
+    /**
+     * Generates a model usage ledger id.
+     *
+     * @return prefixed identifier
+     */
+    public String modelUsageId() {
+        return generate(KbConstants.MODEL_USAGE_ID_PREFIX);
+    }
+
     private String generate(String prefix) {
         String random = UUID.randomUUID().toString().replace("-", "").substring(0, RANDOM_LENGTH);
         return prefix + KbConstants.ID_SEPARATOR + random;

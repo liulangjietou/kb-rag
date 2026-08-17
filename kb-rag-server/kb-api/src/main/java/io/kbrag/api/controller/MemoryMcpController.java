@@ -11,6 +11,7 @@ import io.kbrag.api.dto.MemorySearchRequest;
 import io.kbrag.api.dto.MemorySearchResponse;
 import io.kbrag.api.filter.MemoryKeyAuthFilter;
 import io.kbrag.api.mcp.McpArgumentBinder;
+import io.kbrag.api.mcp.McpHttpRequestHeaders;
 import io.kbrag.api.mcp.McpJsonSchemas;
 import io.kbrag.api.mcp.McpServerEngine;
 import io.kbrag.api.mcp.McpToolSpec;
@@ -35,8 +36,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The memory library's MCP endpoint, the M20 contract: the six memory open API operations as MCP
- * tools, so any MCP capable agent maintains long term user memories without bespoke glue code.
+ * 记忆库的 MCP 双协议端点，把六个开放操作暴露为长期记忆工具。
  *
  * <p>Lives under the memory API prefix on purpose: {@link MemoryKeyAuthFilter} authenticates and
  * rate limits it with the very same {@code kb-mk-*} credential, library binding and token bucket
@@ -66,11 +66,11 @@ public class MemoryMcpController {
     /** Tool reading the user's profiles, the GetUserProfile twin. */
     public static final String TOOL_GET_PROFILE = "memory_get_profile";
 
-    /** Server name advertised on {@code initialize}. */
+    /** 在现代 discover 元数据与旧版 initialize 中公布的服务名。 */
     private static final String SERVER_NAME = "kb-rag-memory";
 
-    /** Server version advertised on {@code initialize}, follows the OpenAPI contract version. */
-    private static final String SERVER_VERSION = "0.20.0";
+    /** 随服务信息公布的版本，与 OpenAPI 契约版本一致。 */
+    private static final String SERVER_VERSION = "0.24.0";
 
     /** Contract defaults of the list tool, same as the REST twin's query parameter defaults. */
     private static final int DEFAULT_PAGE_NUM = 1;
@@ -117,7 +117,7 @@ public class MemoryMcpController {
     @PostMapping(value = "/api/v1/memory/mcp", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<String> handle(@RequestBody String body, HttpServletRequest httpRequest) {
         MemoryKeyPrincipal principal = principalOf(httpRequest);
-        McpServerEngine.McpReply reply = engine.handle(body,
+        McpServerEngine.McpReply reply = engine.handle(body, McpHttpRequestHeaders.from(httpRequest),
                 (toolName, arguments) -> execute(principal, toolName, arguments));
         return ResponseEntity.status(reply.status()).body(reply.body());
     }

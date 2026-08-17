@@ -44,6 +44,10 @@ public class Tenant extends BaseEntity {
     @TableField("builtin")
     private Integer builtin;
 
+    /** Monthly model Token quota; zero means unlimited. */
+    @TableField("monthly_token_quota")
+    private Long monthlyTokenQuota;
+
     /**
      * Tells whether the tenant is shipped with the product.
      *

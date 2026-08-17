@@ -29,6 +29,8 @@ import java.util.List;
  * @param candidateRunId  evaluation run of the candidate configuration
  * @param baselineRunId   evaluation run of the released configuration, {@code null} on a first release
  * @param evaluatedAt     ISO timestamp the gate finished at
+ * @param answerComparison final-answer common-case metrics, {@code null} when the answer gate is disabled
+ * @param answerDecision final-answer verdict details, {@code null} when disabled
  *
  * @author owlzhangfq@gmail.com
  */
@@ -50,5 +52,7 @@ public record GateReport(
         @JsonProperty("candidate_run_id") String candidateRunId,
         @JsonProperty("baseline_run_id") String baselineRunId,
         @JsonProperty("evaluated_at") String evaluatedAt,
-        @JsonProperty("case_ids") List<String> caseIds) {
+        @JsonProperty("case_ids") List<String> caseIds,
+        @JsonProperty("answer_comparison") FinalAnswerGateComparison answerComparison,
+        @JsonProperty("answer_decision") FinalAnswerGateDecision answerDecision) {
 }

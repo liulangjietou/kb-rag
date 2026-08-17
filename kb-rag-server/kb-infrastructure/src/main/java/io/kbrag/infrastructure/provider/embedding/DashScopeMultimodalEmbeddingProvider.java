@@ -8,8 +8,11 @@ import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.model.HealthStatus;
 import io.kbrag.domain.model.ImageInput;
+import io.kbrag.domain.model.ModelCallSpec;
 import io.kbrag.domain.port.MultimodalEmbeddingProvider;
+import io.kbrag.domain.port.ModelCallMeter;
 import io.kbrag.infrastructure.provider.DashScopeHttp;
+import io.kbrag.infrastructure.provider.ModelUsageSupport;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.web.client.RestClient;
@@ -66,9 +69,16 @@ public class DashScopeMultimodalEmbeddingProvider implements MultimodalEmbedding
 
     private final KbProperties.MultimodalEmbedding config;
     private final RestClient restClient;
+    private final ModelCallMeter modelCallMeter;
 
     public DashScopeMultimodalEmbeddingProvider(KbProperties properties) {
+        this(properties, ModelCallMeter.NOOP);
+    }
+
+    /** Builds the production adapter with durable quota and usage metering. */
+    public DashScopeMultimodalEmbeddingProvider(KbProperties properties, ModelCallMeter modelCallMeter) {
         this.config = properties.getMultimodalEmbedding();
+        this.modelCallMeter = modelCallMeter;
         this.restClient = DashScopeHttp.client(null, config.getApiKey(), config.getTimeoutMs());
     }
 
@@ -106,7 +116,7 @@ public class DashScopeMultimodalEmbeddingProvider implements MultimodalEmbedding
         for (String text : texts) {
             contents.add(Map.of(FIELD_TEXT, text));
         }
-        return embed(contents);
+        return embed(contents, ModelUsageSupport.textUpperBound(texts));
     }
 
     @Override
@@ -118,7 +128,8 @@ public class DashScopeMultimodalEmbeddingProvider implements MultimodalEmbedding
         for (ImageInput image : images) {
             contents.add(Map.of(FIELD_IMAGE, dataUrl(image.content(), image.mediaType())));
         }
-        return embed(contents);
+        return embed(contents, ModelUsageSupport.imageUpperBound(
+                images.stream().map(ImageInput::content).toList()));
     }
 
     @Override
@@ -139,7 +150,7 @@ public class DashScopeMultimodalEmbeddingProvider implements MultimodalEmbedding
      * @param contents request items, texts or images, size already bounded by the caller
      * @return one vector per content in submitted order
      */
-    private List<float[]> embed(List<Map<String, Object>> contents) {
+    private List<float[]> embed(List<Map<String, Object>> contents, long reservedTokens) {
         if (contents.size() > maxBatchSize()) {
             throw new ProviderException(PROVIDER_NAME, ProviderErrorType.UNKNOWN,
                     "batch size exceeds the provider limit of " + maxBatchSize());
@@ -150,8 +161,12 @@ public class DashScopeMultimodalEmbeddingProvider implements MultimodalEmbedding
         payload.put(FIELD_MODEL, config.getModel());
         payload.put(FIELD_INPUT, input);
 
-        String body = DashScopeHttp.post(restClient, config.getUrl(), payload, PROVIDER_NAME, STAGE);
-        return parseVectors(body, contents.size());
+        return ModelUsageSupport.execute(modelCallMeter,
+                new ModelCallSpec(ModelUsageSupport.billingProvider(config.getProvider(), PROVIDER_NAME),
+                        ModelCallSpec.MULTIMODAL_EMBEDDING,
+                        config.getModel(), reservedTokens),
+                () -> DashScopeHttp.post(restClient, config.getUrl(), payload, PROVIDER_NAME, STAGE),
+                body -> parseVectors(body, contents.size()));
     }
 
     /**

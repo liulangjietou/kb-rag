@@ -5,6 +5,7 @@ import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ChatProviderFactory;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.MultimodalEmbeddingProvider;
+import io.kbrag.domain.port.ModelCallMeter;
 import io.kbrag.domain.port.RerankProvider;
 import io.kbrag.domain.port.VisionProvider;
 import io.kbrag.infrastructure.provider.UnconfiguredChatProvider;
@@ -43,7 +44,7 @@ public class ModelProviderConfig {
      * @return configured provider, or the unconfigured placeholder in zero key mode
      */
     @Bean
-    public EmbeddingProvider embeddingProvider(KbProperties properties) {
+    public EmbeddingProvider embeddingProvider(KbProperties properties, ModelCallMeter modelCallMeter) {
         KbProperties.Embedding config = properties.getEmbedding();
         if (config.getApiKey() == null || config.getApiKey().isBlank()) {
             log.info("embedding provider not configured, running in zero key mode, "
@@ -52,7 +53,7 @@ public class ModelProviderConfig {
         }
         log.info("embedding provider configured, provider={}, model={}, dimension={}",
                 config.getProvider(), config.getModel(), config.getDimension());
-        return new DashScopeEmbeddingProvider(properties);
+        return new DashScopeEmbeddingProvider(properties, modelCallMeter);
     }
 
     /**
@@ -68,7 +69,8 @@ public class ModelProviderConfig {
      * @return configured provider, or the noop placeholder in zero key mode
      */
     @Bean
-    public MultimodalEmbeddingProvider multimodalEmbeddingProvider(KbProperties properties) {
+    public MultimodalEmbeddingProvider multimodalEmbeddingProvider(KbProperties properties,
+                                                                   ModelCallMeter modelCallMeter) {
         KbProperties.MultimodalEmbedding config = properties.getMultimodalEmbedding();
         if (config.getApiKey() == null || config.getApiKey().isBlank()) {
             log.info("multimodal embedding provider not configured, multimodal route disabled");
@@ -76,7 +78,7 @@ public class ModelProviderConfig {
         }
         log.info("multimodal embedding provider configured, provider={}, model={}, dimension={}",
                 config.getProvider(), config.getModel(), config.getDimension());
-        return new DashScopeMultimodalEmbeddingProvider(properties);
+        return new DashScopeMultimodalEmbeddingProvider(properties, modelCallMeter);
     }
 
     /**
@@ -89,7 +91,7 @@ public class ModelProviderConfig {
      * @return configured provider, or the unconfigured placeholder
      */
     @Bean
-    public RerankProvider rerankProvider(KbProperties properties) {
+    public RerankProvider rerankProvider(KbProperties properties, ModelCallMeter modelCallMeter) {
         KbProperties.Rerank config = properties.getRerank();
         if (config.getApiKey() == null || config.getApiKey().isBlank()) {
             log.info("rerank provider not configured, rerank stage disabled");
@@ -97,7 +99,7 @@ public class ModelProviderConfig {
         }
         log.info("rerank provider configured, provider={}, model={}, timeoutMs={}",
                 config.getProvider(), config.getModel(), config.getTimeoutMs());
-        return new DashScopeRerankProvider(properties);
+        return new DashScopeRerankProvider(properties, modelCallMeter);
     }
 
     /**
@@ -113,14 +115,14 @@ public class ModelProviderConfig {
      */
     @Primary
     @Bean
-    public ChatProvider chatProvider(KbProperties properties) {
+    public ChatProvider chatProvider(KbProperties properties, ModelCallMeter modelCallMeter) {
         KbProperties.Chat config = properties.getChat();
         if (config.getApiKey() == null || config.getApiKey().isBlank()) {
             log.info("chat provider not configured, query rewrite disabled");
             return new UnconfiguredChatProvider();
         }
         log.info("chat provider configured, provider={}, model={}", config.getProvider(), config.getModel());
-        return new DashScopeChatProvider(config);
+        return new DashScopeChatProvider(config, modelCallMeter);
     }
 
     /**
@@ -134,8 +136,8 @@ public class ModelProviderConfig {
      * @return factory resolving providers by model name
      */
     @Bean
-    public ChatProviderFactory chatProviderFactory(KbProperties properties) {
-        return new ModelChatProviderFactory(properties);
+    public ChatProviderFactory chatProviderFactory(KbProperties properties, ModelCallMeter modelCallMeter) {
+        return new ModelChatProviderFactory(properties, modelCallMeter);
     }
 
     /**
@@ -150,7 +152,7 @@ public class ModelProviderConfig {
      * @return configured provider, or the unconfigured placeholder
      */
     @Bean
-    public ChatProvider judgeChatProvider(KbProperties properties) {
+    public ChatProvider judgeChatProvider(KbProperties properties, ModelCallMeter modelCallMeter) {
         KbProperties.Chat chatConfig = properties.getChat();
         if (chatConfig.getApiKey() == null || chatConfig.getApiKey().isBlank()) {
             log.info("judge chat provider not configured, LLM-as-judge disabled");
@@ -163,7 +165,7 @@ public class ModelProviderConfig {
         // not be.
         KbProperties.Chat judgeConfig = withModelAndZeroTemperature(chatConfig, effectiveModel);
         log.info("judge chat provider configured, model={}", judgeConfig.getModel());
-        return new DashScopeChatProvider(judgeConfig);
+        return new DashScopeChatProvider(judgeConfig, modelCallMeter);
     }
 
     /**
@@ -179,7 +181,7 @@ public class ModelProviderConfig {
      * @return configured provider, or the unconfigured placeholder
      */
     @Bean
-    public ChatProvider graphExtractionChatProvider(KbProperties properties) {
+    public ChatProvider graphExtractionChatProvider(KbProperties properties, ModelCallMeter modelCallMeter) {
         KbProperties.Chat chatConfig = properties.getChat();
         if (chatConfig.getApiKey() == null || chatConfig.getApiKey().isBlank()) {
             log.info("graph extraction chat provider not configured, extraction disabled");
@@ -191,7 +193,7 @@ public class ModelProviderConfig {
         log.info("graph extraction chat provider configured, model={}, maxTokens={}, inheritedModel={}",
                 extractConfig.getModel(), extractConfig.getMaxTokens(),
                 graphConfig.getExtractModel() == null || graphConfig.getExtractModel().isBlank());
-        return new DashScopeChatProvider(extractConfig);
+        return new DashScopeChatProvider(extractConfig, modelCallMeter);
     }
 
     /**
@@ -256,7 +258,7 @@ public class ModelProviderConfig {
      * @return configured provider, or the unconfigured placeholder
      */
     @Bean
-    public VisionProvider visionProvider(KbProperties properties) {
+    public VisionProvider visionProvider(KbProperties properties, ModelCallMeter modelCallMeter) {
         KbProperties.Vision config = properties.getVision();
         if (config.getApiKey() == null || config.getApiKey().isBlank()) {
             log.info("vision provider not configured, image text proxies skipped");
@@ -264,6 +266,6 @@ public class ModelProviderConfig {
         }
         log.info("vision provider configured, provider={}, model={}, timeoutMs={}",
                 config.getProvider(), config.getModel(), config.getTimeoutMs());
-        return new DashScopeVisionProvider(properties);
+        return new DashScopeVisionProvider(properties, modelCallMeter);
     }
 }

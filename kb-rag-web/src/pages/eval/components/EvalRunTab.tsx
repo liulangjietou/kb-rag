@@ -12,6 +12,7 @@ import {
   Input,
   InputNumber,
   Pagination,
+  Select,
   Space,
   Switch,
   Table,
@@ -20,8 +21,10 @@ import {
   message,
 } from 'antd';
 import { createEvalRuns, estimateEvalRun, listEvalRuns } from '../../../api/evalRun';
-import type { CreateEvalRunRequest, EvalDataset, EvalMode, EvalRun, EvalRunConfig, EvalRunEstimate } from '../../../api/types';
+import { listApps, listAppVersions } from '../../../api/app';
+import type { AppVersion, CreateEvalRunRequest, EvalDataset, EvalMode, EvalRun, EvalRunConfig, EvalRunEstimate } from '../../../api/types';
 import { EVAL_MODE_META, RUN_STATUS_META, metaOf } from '../../../utils/statusMeta';
+import { resolveKbRefs } from '../../../utils/kbRefs';
 import EvalReportDrawer from './EvalReportDrawer';
 
 interface EvalRunTabProps {
@@ -38,6 +41,13 @@ interface RunFormValues {
   rewrite_enabled: boolean;
   judge_enabled: boolean;
   judge_model?: string;
+  answer_enabled: boolean;
+  answer_app_version_id?: string;
+}
+
+interface AppVersionOption {
+  label: string;
+  value: string;
 }
 
 const ALL_MODES: EvalMode[] = ['BM25_ONLY', 'VECTOR_ONLY', 'HYBRID', 'HYBRID_RERANK'];
@@ -62,6 +72,9 @@ function buildPayload(values: RunFormValues): CreateEvalRunRequest {
     k: values.k,
     configs,
     judge: values.judge_enabled ? { enabled: true, model: values.judge_model || undefined } : undefined,
+    answer: values.answer_enabled && values.answer_app_version_id
+      ? { enabled: true, app_version_id: values.answer_app_version_id }
+      : undefined,
   };
 }
 
@@ -79,7 +92,9 @@ export default function EvalRunTab({ dataset }: EvalRunTabProps) {
   const [loading, setLoading] = useState(false);
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [reportRunIds, setReportRunIds] = useState<string[] | null>(null);
+  const [appVersionOptions, setAppVersionOptions] = useState<AppVersionOption[]>([]);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const answerEnabled = Form.useWatch('answer_enabled', form) ?? false;
 
   const loadRuns = useCallback(async () => {
     if (!datasetId) {
@@ -103,6 +118,31 @@ export default function EvalRunTab({ dataset }: EvalRunTabProps) {
     setEstimate(null);
     setEstimatedSnapshot(null);
   }, [datasetId]);
+
+  useEffect(() => {
+    if (!dataset) {
+      setAppVersionOptions([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const apps = await listApps();
+      const versionsByApp = await Promise.all(apps.map(async (app) => ({ app, versions: await listAppVersions(app.app_id) })));
+      if (cancelled) return;
+      const options: AppVersionOption[] = versionsByApp.flatMap(({ app, versions }) =>
+        versions
+          .filter((version: AppVersion) => resolveKbRefs(version.config).some((ref) => ref.kb_id === dataset.kb_id))
+          .map((version: AppVersion) => ({
+            label: `${app.name} / ${version.version}（${version.status}）`,
+            value: version.app_version_id,
+          })),
+      );
+      setAppVersionOptions(options);
+    })().catch(() => setAppVersionOptions([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [dataset]);
 
   useEffect(() => {
     loadRuns();
@@ -179,6 +219,7 @@ export default function EvalRunTab({ dataset }: EvalRunTabProps) {
             score_threshold: 0.5,
             rewrite_enabled: false,
             judge_enabled: false,
+            answer_enabled: false,
           }}
           onValuesChange={() => {
             // Any change invalidates the previous estimate; submit re-locks until re-estimated.
@@ -221,7 +262,7 @@ export default function EvalRunTab({ dataset }: EvalRunTabProps) {
               },
               {
                 key: 'judge',
-                label: 'LLM-as-judge（可选）',
+                label: '检索上下文 Judge（可选）',
                 children: (
                   <Space direction="vertical" style={{ width: '100%' }}>
                     <Form.Item name="judge_enabled" label="启用 judge 打分" valuePropName="checked" style={{ marginBottom: 8 }}>
@@ -230,6 +271,33 @@ export default function EvalRunTab({ dataset }: EvalRunTabProps) {
                     <Form.Item name="judge_model" label="judge 模型（可选，留空用系统默认）" style={{ marginBottom: 0 }}>
                       <Input placeholder="留空使用 EVAL_JUDGE_MODEL 默认配置" style={{ width: 280 }} />
                     </Form.Item>
+                  </Space>
+                ),
+              },
+              {
+                key: 'answer',
+                label: '最终答案质量评测（可选）',
+                children: (
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Form.Item name="answer_enabled" label="启用最终答案生成与五维评判" valuePropName="checked" style={{ marginBottom: 8 }}>
+                      <Switch />
+                    </Form.Item>
+                    {answerEnabled && (
+                      <Form.Item
+                        name="answer_app_version_id"
+                        label="应用版本（冻结 prompt 与生成模型）"
+                        rules={[{ required: true, message: '请选择应用版本' }]}
+                        style={{ marginBottom: 0 }}
+                      >
+                        <Select
+                          showSearch
+                          optionFilterProp="label"
+                          placeholder={appVersionOptions.length === 0 ? '没有关联当前知识库的应用版本' : '请选择应用版本'}
+                          options={appVersionOptions}
+                          style={{ width: 360 }}
+                        />
+                      </Form.Item>
+                    )}
                   </Space>
                 ),
               },
@@ -258,6 +326,8 @@ export default function EvalRunTab({ dataset }: EvalRunTabProps) {
               <Descriptions.Item label="重排调用次数">{estimate.rerank_calls}</Descriptions.Item>
               <Descriptions.Item label="改写调用次数">{estimate.rewrite_calls}</Descriptions.Item>
               <Descriptions.Item label="judge 调用次数">{estimate.judge_calls}</Descriptions.Item>
+              <Descriptions.Item label="答案生成次数">{estimate.generation_calls}</Descriptions.Item>
+              <Descriptions.Item label="答案评判次数">{estimate.answer_judge_calls}</Descriptions.Item>
             </Descriptions>
           )}
         </Form>
@@ -279,6 +349,12 @@ export default function EvalRunTab({ dataset }: EvalRunTabProps) {
           rowSelection={{ selectedRowKeys: selectedRunIds, onChange: (keys) => setSelectedRunIds(keys as string[]) }}
           columns={[
             { title: '配置', dataIndex: 'retrieval_config', width: 140, render: (config: EvalRunConfig) => config.label },
+            {
+              title: '答案评测',
+              dataIndex: 'answer_evaluation',
+              width: 110,
+              render: (answer: EvalRun['answer_evaluation']) => answer ? <Tag color="blue">已开启</Tag> : '-',
+            },
             {
               title: '状态',
               dataIndex: 'status',

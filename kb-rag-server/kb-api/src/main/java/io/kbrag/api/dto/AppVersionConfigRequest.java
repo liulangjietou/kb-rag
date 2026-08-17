@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.AppPromptConfig;
 import io.kbrag.domain.model.AppRoutingConfig;
+import io.kbrag.domain.model.AnswerGateConfig;
 import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import jakarta.validation.Valid;
@@ -32,6 +33,7 @@ import java.util.List;
  * @param retrieval     retrieval parameters
  * @param prompt        question answering prompt configuration
  * @param gate          absolute gate thresholds, only consulted on a first release
+ * @param answerGate final-answer gate opt-in and first-release thresholds
  * @param chatModel     generation model frozen into the snapshot, blank keeps the deployment default
  * @param gateDatasetId baseline evaluation data set of the release gate
  * @param changelog     version description
@@ -45,6 +47,7 @@ public record AppVersionConfigRequest(
         @Valid RetrievalRequest retrieval,
         @Valid PromptRequest prompt,
         @Valid GateThresholdRequest gate,
+        @JsonProperty("answer_gate") @Valid AnswerGateRequest answerGate,
         @JsonProperty("chat_model") String chatModel,
         @JsonProperty("gate_dataset_id") String gateDatasetId,
         @Size(max = 1024, message = "must be at most 1024 characters") String changelog) {
@@ -140,6 +143,31 @@ public record AppVersionConfigRequest(
     }
 
     /**
+     * Opt-in final-answer gate configuration.
+     *
+     * @param enabled explicitly enables generated-answer evaluation during release
+     * @param minScore minimum first-release overall score
+     * @param minFaithfulness minimum first-release faithfulness score
+     * @param minCitationCorrectness minimum first-release citation correctness
+     * @param minRefusalAccuracy minimum first-release answer/refuse decision accuracy
+     */
+    public record AnswerGateRequest(
+            boolean enabled,
+            @JsonProperty("min_score")
+            @DecimalMin(value = "1.0", message = "must be at least 1")
+            @DecimalMax(value = "5.0", message = "must be at most 5") Double minScore,
+            @JsonProperty("min_faithfulness")
+            @DecimalMin(value = "1.0", message = "must be at least 1")
+            @DecimalMax(value = "5.0", message = "must be at most 5") Double minFaithfulness,
+            @JsonProperty("min_citation_correctness")
+            @DecimalMin(value = "1.0", message = "must be at least 1")
+            @DecimalMax(value = "5.0", message = "must be at most 5") Double minCitationCorrectness,
+            @JsonProperty("min_refusal_accuracy")
+            @DecimalMin(value = "0.0", message = "must be at least 0")
+            @DecimalMax(value = "1.0", message = "must be at most 1") Double minRefusalAccuracy) {
+    }
+
+    /**
      * Maps the transport shape onto the configuration snapshot, or {@code null} when the payload carried no
      * configuration at all and the newest version's should be inherited.
      *
@@ -147,7 +175,7 @@ public record AppVersionConfigRequest(
      */
     public AppConfigSnapshot toSnapshot() {
         if (kbId == null && kbRefs == null && routing == null && retrieval == null && prompt == null
-                && gate == null && chatModel == null) {
+                && gate == null && answerGate == null && chatModel == null) {
             return null;
         }
         AppConfigSnapshot snapshot = new AppConfigSnapshot();
@@ -158,7 +186,21 @@ public record AppVersionConfigRequest(
         snapshot.setChatModel(chatModel);
         snapshot.setGate(gate == null ? null
                 : new AppConfigSnapshot.GateThresholds(gate.minHitRate(), gate.minRecall()));
+        snapshot.setAnswerGate(toAnswerGate());
         return snapshot;
+    }
+
+    private AnswerGateConfig toAnswerGate() {
+        if (answerGate == null) {
+            return null;
+        }
+        AnswerGateConfig config = new AnswerGateConfig();
+        config.setEnabled(answerGate.enabled());
+        config.setMinScore(answerGate.minScore());
+        config.setMinFaithfulness(answerGate.minFaithfulness());
+        config.setMinCitationCorrectness(answerGate.minCitationCorrectness());
+        config.setMinRefusalAccuracy(answerGate.minRefusalAccuracy());
+        return config;
     }
 
     /**

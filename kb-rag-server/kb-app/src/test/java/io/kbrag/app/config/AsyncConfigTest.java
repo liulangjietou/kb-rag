@@ -2,6 +2,8 @@ package io.kbrag.app.config;
 
 import io.kbrag.common.context.RequestIdHolder;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.context.ModelUsageContextHolder;
+import io.kbrag.domain.model.ModelUsageContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.Bean;
@@ -38,6 +40,7 @@ class AsyncConfigTest {
     @AfterEach
     void tearDown() {
         RequestIdHolder.clear();
+        ModelUsageContextHolder.clear();
     }
 
     /**
@@ -125,5 +128,33 @@ class AsyncConfigTest {
         assertEquals(CALLER_REQUEST_ID, seenInsideTheTask.get());
         assertEquals(CALLER_REQUEST_ID, RequestIdHolder.get(),
                 "the caller runs policy left the submitting thread without the request id it arrived with");
+    }
+
+    @Test
+    void shouldCarryAndRestoreModelUsageAttributionIndependentlyFromAuthorisation() {
+        ModelUsageContext submitter = new ModelUsageContext(
+                "tnt_acme", ModelUsageContext.SOURCE_SCHEDULED, "ws_1");
+        ModelUsageContextHolder.set(submitter);
+        AtomicReference<ModelUsageContext> seen = new AtomicReference<>();
+        Runnable decorated = new AsyncConfig().requestIdPropagatingDecorator()
+                .decorate(() -> seen.set(ModelUsageContextHolder.get()));
+
+        AtomicReference<ModelUsageContext> leftOnWorker = new AtomicReference<>(submitter);
+        Thread worker = new Thread(() -> {
+            ModelUsageContextHolder.clear();
+            decorated.run();
+            leftOnWorker.set(ModelUsageContextHolder.get());
+        });
+        worker.start();
+        try {
+            worker.join(HAND_OFF_TIMEOUT_MILLIS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(e);
+        }
+
+        assertEquals(submitter, seen.get());
+        assertNull(leftOnWorker.get());
+        assertEquals(submitter, ModelUsageContextHolder.get());
     }
 }

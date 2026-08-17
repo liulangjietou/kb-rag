@@ -7,7 +7,10 @@ import io.kbrag.common.exception.ProviderException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.model.HealthStatus;
+import io.kbrag.domain.model.ModelCallSpec;
 import io.kbrag.domain.port.EmbeddingProvider;
+import io.kbrag.domain.port.ModelCallMeter;
+import io.kbrag.infrastructure.provider.ModelUsageSupport;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.http.HttpHeaders;
@@ -59,9 +62,16 @@ public class DashScopeEmbeddingProvider implements EmbeddingProvider {
 
     private final KbProperties.Embedding config;
     private final RestClient restClient;
+    private final ModelCallMeter modelCallMeter;
 
     public DashScopeEmbeddingProvider(KbProperties properties) {
+        this(properties, ModelCallMeter.NOOP);
+    }
+
+    /** Builds the production adapter with durable quota and usage metering. */
+    public DashScopeEmbeddingProvider(KbProperties properties, ModelCallMeter modelCallMeter) {
         this.config = properties.getEmbedding();
+        this.modelCallMeter = modelCallMeter;
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         Duration timeout = Duration.ofMillis(config.getTimeoutMs());
         factory.setConnectTimeout(timeout);
@@ -113,8 +123,11 @@ public class DashScopeEmbeddingProvider implements EmbeddingProvider {
         payload.put(FIELD_DIMENSIONS, config.getDimension());
         payload.put(FIELD_ENCODING_FORMAT, ENCODING_FLOAT);
 
-        String body = call(payload);
-        return parseVectors(body, texts.size());
+        return ModelUsageSupport.execute(modelCallMeter,
+                new ModelCallSpec(ModelUsageSupport.billingProvider(config.getProvider(), PROVIDER_NAME),
+                        ModelCallSpec.EMBEDDING, config.getModel(),
+                        ModelUsageSupport.textUpperBound(texts)),
+                () -> call(payload), body -> parseVectors(body, texts.size()));
     }
 
     @Override

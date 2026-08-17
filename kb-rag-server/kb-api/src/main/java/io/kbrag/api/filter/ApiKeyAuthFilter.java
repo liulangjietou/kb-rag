@@ -12,6 +12,8 @@ import io.kbrag.common.context.RequestIdHolder;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
+import io.kbrag.domain.context.ModelUsageContextHolder;
+import io.kbrag.domain.model.ModelUsageContext;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -89,7 +91,14 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
             return;
         }
         request.setAttribute(ATTR_PRINCIPAL, principal);
-        filterChain.doFilter(request, response);
+        ModelUsageContext previous = ModelUsageContextHolder.get();
+        ModelUsageContextHolder.set(new ModelUsageContext(principal.getTenantId(),
+                ModelUsageContext.SOURCE_KNOWLEDGE_API, principal.getKeyId()));
+        try {
+            filterChain.doFilter(request, response);
+        } finally {
+            ModelUsageContextHolder.set(previous);
+        }
     }
 
     /**

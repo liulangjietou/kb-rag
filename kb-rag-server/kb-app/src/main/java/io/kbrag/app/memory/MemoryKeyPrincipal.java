@@ -1,5 +1,6 @@
 package io.kbrag.app.memory;
 
+import io.kbrag.domain.constant.BuiltinTenants;
 import lombok.Getter;
 import lombok.ToString;
 
@@ -20,6 +21,9 @@ public final class MemoryKeyPrincipal {
     /** Memory key row business id, for log lines and the rate limiter bucket. */
     private final String keyId;
 
+    /** Tenant whose quota and cost ledger this key spends. */
+    private final String tenantId;
+
     /** The one library this key may read and write. */
     private final String libraryId;
 
@@ -29,10 +33,16 @@ public final class MemoryKeyPrincipal {
     /** Token bucket rate of this key. */
     private final int qpsLimit;
 
-    public MemoryKeyPrincipal(String keyId, String libraryId, String name, int qpsLimit) {
+    public MemoryKeyPrincipal(String keyId, String tenantId, String libraryId, String name, int qpsLimit) {
         this.keyId = keyId;
+        this.tenantId = tenantId;
         this.libraryId = libraryId;
         this.name = name;
         this.qpsLimit = qpsLimit;
+    }
+
+    /** Backward-compatible constructor for direct unit tests predating tenant metering. */
+    public MemoryKeyPrincipal(String keyId, String libraryId, String name, int qpsLimit) {
+        this(keyId, BuiltinTenants.DEFAULT_TENANT_ID, libraryId, name, qpsLimit);
     }
 }

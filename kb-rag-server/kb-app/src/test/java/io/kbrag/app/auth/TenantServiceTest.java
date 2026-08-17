@@ -173,6 +173,18 @@ class TenantServiceTest {
         assertThrows(BizException.class, () -> service.get("tnt_missing"));
     }
 
+    @Test
+    void shouldUpdateMonthlyModelQuotaWithoutCancellingTheTenant() {
+        when(tenantMapper.selectOne(any())).thenReturn(tenant("ACME", 0, TenantStatus.ENABLED));
+
+        service.updateModelQuota(NEW_TENANT_ID, 5_000_000L);
+
+        ArgumentCaptor<Tenant> updated = ArgumentCaptor.forClass(Tenant.class);
+        verify(tenantMapper).updateById(updated.capture());
+        assertEquals(5_000_000L, updated.getValue().getMonthlyTokenQuota());
+        assertEquals(TenantStatus.ENABLED, updated.getValue().getStatus());
+    }
+
     private List<Role> builtinTemplates() {
         return List.of(
                 template("role_t1", "SUPER_ADMIN", 1),

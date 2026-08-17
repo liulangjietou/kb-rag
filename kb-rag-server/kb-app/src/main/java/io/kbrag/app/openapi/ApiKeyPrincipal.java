@@ -2,6 +2,7 @@ package io.kbrag.app.openapi;
 
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.constant.BuiltinTenants;
 import lombok.Getter;
 import lombok.ToString;
 import org.apache.commons.collections4.CollectionUtils;
@@ -24,6 +25,9 @@ public final class ApiKeyPrincipal {
     /** API key row business id, the audit dimension. */
     private final String keyId;
 
+    /** Tenant whose quota and cost ledger this key spends. */
+    private final String tenantId;
+
     /** Display name of the caller, for log lines. */
     private final String name;
 
@@ -33,11 +37,17 @@ public final class ApiKeyPrincipal {
     /** Allowed application ids; empty means every application is allowed. */
     private final List<String> appScope;
 
-    public ApiKeyPrincipal(String keyId, String name, int qpsLimit, List<String> appScope) {
+    public ApiKeyPrincipal(String keyId, String tenantId, String name, int qpsLimit, List<String> appScope) {
         this.keyId = keyId;
+        this.tenantId = tenantId;
         this.name = name;
         this.qpsLimit = qpsLimit;
         this.appScope = appScope == null ? List.of() : List.copyOf(appScope);
+    }
+
+    /** Backward-compatible constructor for tests and callers predating tenant metering. */
+    public ApiKeyPrincipal(String keyId, String name, int qpsLimit, List<String> appScope) {
+        this(keyId, BuiltinTenants.DEFAULT_TENANT_ID, name, qpsLimit, appScope);
     }
 
     /**

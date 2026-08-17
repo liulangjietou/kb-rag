@@ -1,6 +1,8 @@
 package io.kbrag.app.config;
 
 import io.kbrag.common.context.RequestIdHolder;
+import io.kbrag.domain.context.ModelUsageContextHolder;
+import io.kbrag.domain.model.ModelUsageContext;
 import io.kbrag.domain.config.KbProperties;
 import org.slf4j.MDC;
 import org.springframework.context.annotation.Bean;
@@ -405,14 +407,18 @@ public class AsyncConfig {
         return runnable -> {
             // Read on the submitting thread: TaskDecorator#decorate runs at submission time.
             String submittedRequestId = RequestIdHolder.get();
+            ModelUsageContext submittedUsageContext = ModelUsageContextHolder.get();
             return () -> {
                 String previous = RequestIdHolder.get();
+                ModelUsageContext previousUsageContext = ModelUsageContextHolder.get();
                 if (submittedRequestId != null) {
                     MDC.put(RequestIdHolder.MDC_KEY, submittedRequestId);
                 }
+                ModelUsageContextHolder.set(submittedUsageContext);
                 try {
                     runnable.run();
                 } finally {
+                    ModelUsageContextHolder.set(previousUsageContext);
                     if (previous == null) {
                         RequestIdHolder.clear();
                     } else {

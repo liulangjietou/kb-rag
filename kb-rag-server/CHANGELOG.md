@@ -7,6 +7,42 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### M24 · 模型 Token 成本台账与租户月度配额
+
+- `[schema]` Flyway V24 为租户增加 `monthly_token_quota`，新增月度原子计数器、调用明细台账与
+  provider/capability/model 价格表；0 配额表示不限，升级不锁存量租户。
+- 全部真实模型 Provider 在 HTTP 出站边界统一先预占后调用，按供应商 usage 结算；缺失 usage 与崩溃
+  遗留预占保守估算，明确的上游调用失败才释放。管理台、开放 Key、Memory Key 与后台任务均传播租户归属。
+- 新增平台级用量汇总/明细/价格接口及租户配额更新，拒绝码为 429 `MODEL_QUOTA_EXCEEDED`。
+  完整契约见 `kb-rag-deploy/docs/M24-CONTRACTS.md`。
+
+### M23 · Confluence Cloud 数据源连接器
+
+- M14 `ExternalConnector` SPI 新增 `source_type=confluence`：Space Key 解析、REST API v2
+  cursor 分页、`pageId:version` 增量判断与 storage HTML 正文获取；页面继续复用普通上传、治理、
+  版本和索引链路，无数据库迁移、配置键或第三方依赖。
+- 新增连接器特定配置 fast-fail；分页 `_links.next` / Link header 均受同源约束且禁自动重定向，
+  Basic API Token 不会发往其他 origin。响应体受上传大小约束，S3 对象读取同步补齐有界读取。
+- 管理台外部数据源表单支持 S3/OSS 与 Confluence Cloud 两种类型，字段标签、同步范围和页面明细
+  按连接器切换。完整契约见 `kb-rag-deploy/docs/M23-CONTRACTS.md`。
+
+### M22 · MCP 2026-07-28 双协议兼容
+
+- `McpServerEngine` 在同一端点按单次请求识别协议时代：新增现代 `server/discover`、逐请求 `_meta`、
+  `resultType` / serverInfo、工具目录 TTL/cacheScope 与稳定排序；原 2025-03-26 / 2024-11-05
+  initialize、工具与业务错误平面保持兼容。
+- 现代 transport 严格校验 `MCP-Protocol-Version` / `Mcp-Method` / `Mcp-Name`（含 Base64 sentinel）：
+  头体不一致 400/-32020、版本不支持 400/-32022、方法未实现 404/-32601。
+- 新增 `McpOriginValidationFilter`，在 Key 鉴权前复用 CORS 白名单阻断非法浏览器 Origin；无 Origin 的
+  服务间客户端不受影响。零新增 Maven 依赖、配置键和数据库迁移。
+
+### M21 · 最终答案质量评测与发布门禁
+
+- `[schema]` Flyway `V23__final_answer_evaluation.sql` 为评测用例增加期望拒答，为 run 冻结应用问答配置与答案 Judge 身份，为 case 结果记录生成答案、耗时、五维评分、答/拒结果和失败原因；存量行兼容，无需回填。
+- 新增 `AnswerGenerationService`，将开放问答、管理台预览和离线评测的 Provider 解析与 Prompt 装配收敛为同一路径；答案评测不再用自造 Prompt 近似生产行为。
+- 新增独立的 `FinalAnswerJudgeService`、聚合器与答案门禁纯函数。Judge 失败不折算 0 分；双跑只比较双方均成功 Judge 的共同 case；历史应用版本的答案门禁默认关闭。
+- 评测提交和费用预估支持绑定应用版本；发布门禁在显式开启时联合检索与答案结论，并新增 `GATE_ANSWER_SCORE_EPSILON`（默认 0.2）。完整契约见 `kb-rag-deploy/docs/M21-CONTRACTS.md`。
+
 ### 安全加固（Actuator 管理平面）
 
 - `/actuator/health`、`/actuator/info` 与 `/actuator/prometheus` 从 `20000` 业务监听器迁至

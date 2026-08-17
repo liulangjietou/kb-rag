@@ -34,6 +34,7 @@ interface EvalCaseFormValues {
   anchor_type: AnchorType;
   evidences: EvalCaseEvidenceInput[];
   expected_answer?: string;
+  expected_refusal: boolean;
   note?: string;
 }
 
@@ -77,11 +78,12 @@ export default function EvalCaseFormModal({
         anchor_type: editingCase.anchor_type,
         evidences: editingCase.evidences.map((evidence) => ({ doc_id: evidence.doc_id, span: evidence.span ?? '' })),
         expected_answer: editingCase.expected_answer ?? undefined,
+        expected_refusal: editingCase.expected_refusal,
         note: editingCase.note ?? undefined,
       });
     } else {
       form.resetFields();
-      form.setFieldsValue({ anchor_type: 'SPAN', multi_turn: false, evidences: [{ ...EMPTY_EVIDENCE }] });
+      form.setFieldsValue({ anchor_type: 'SPAN', multi_turn: false, expected_refusal: false, evidences: [{ ...EMPTY_EVIDENCE }] });
     }
   }, [open, editingCase, form]);
 
@@ -95,6 +97,7 @@ export default function EvalCaseFormModal({
       query: values.query,
       messages: values.multi_turn ? values.messages : undefined,
       expected_answer: values.expected_answer || undefined,
+      expected_refusal: values.expected_refusal,
       anchor_type: values.anchor_type,
       evidences: values.evidences.map((evidence) => ({
         doc_id: evidence.doc_id,
@@ -216,8 +219,15 @@ export default function EvalCaseFormModal({
           )}
         </Form.List>
 
-        <Form.Item name="expected_answer" label="期望答案（可选，供 LLM-as-judge 使用）">
-          <TextArea rows={2} placeholder="选填" />
+        <Form.Item name="expected_answer" label="期望答案（答案评测时作为参考答案）">
+          <TextArea rows={2} placeholder="普通问答 case 建议填写；期望拒答时可留空" />
+        </Form.Item>
+        <Form.Item
+          name="expected_refusal"
+          label="期望拒答（资料不足时，正确行为是明确拒绝回答）"
+          valuePropName="checked"
+        >
+          <Switch />
         </Form.Item>
         <Form.Item name="note" label="备注">
           <Input placeholder="选填" maxLength={256} />

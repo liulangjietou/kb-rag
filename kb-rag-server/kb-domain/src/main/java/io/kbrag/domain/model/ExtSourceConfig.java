@@ -7,15 +7,17 @@ package io.kbrag.domain.model;
  * sees row identity, sync bookkeeping or the credential update rules - it receives exactly what a
  * remote call needs and nothing it could accidentally persist.
  *
- * @param endpoint   service endpoint of the object store
- * @param region     optional region hint, {@code null} when the store does not need one
- * @param bucket     bucket to list and fetch from
- * @param prefix     optional key prefix narrowing a listing, {@code null} for the whole bucket
- * @param accessKey  access key of the credentials
- * @param secretKey  secret key of the credentials
+ * @param endpoint   remote service endpoint
+ * @param region     optional region hint, {@code null} when the connector does not need one
+ * @param bucket     connector-specific collection identifier: an object-store bucket or a
+ *                   Confluence space key
+ * @param prefix     optional connector-specific listing scope, {@code null} for the whole source
+ * @param accessKey  public half of the credentials: an object-store access key or Atlassian email
+ * @param secretKey  secret half of the credentials: a secret key or Atlassian API token
  * @param maxObjects listing cap per scan; one object beyond it may be returned so the caller can
  *                   tell a full listing from a truncated one
  * @param timeoutMs  connect and read budget of one remote call
+ * @param maxContentBytes largest remote body the upload pipeline accepts
  *
  * @author owlzhangfq@gmail.com
  */
@@ -27,5 +29,6 @@ public record ExtSourceConfig(
         String accessKey,
         String secretKey,
         int maxObjects,
-        int timeoutMs) {
+        int timeoutMs,
+        long maxContentBytes) {
 }

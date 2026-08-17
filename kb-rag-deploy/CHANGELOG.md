@@ -8,6 +8,22 @@
 
 ### Added
 
+- **模型 Token 成本台账与租户月度配额（M24，`docs/M24-CONTRACTS.md`）**：Flyway V24
+  新增月度原子计数器、调用台账和价格配置；全部模型 Provider 在出站边界先预占后结算，控制台提供
+  租户配额、用量与价格管理。OpenAPI 升至 `0.26.0-m24`，新增三个恢复配置键。
+- **持久化任务调度投入决策**：`docs/DURABLE-SCHEDULING-DECISION.md` 记录当前延后结论、真实多实例
+  压力触发器和未来 lease/idempotency/接管测试约束，本期不新增调度中间件。
+
+- **Confluence Cloud 数据源连接器（M23，`docs/M23-CONTRACTS.md`）**：M14 ext-source API
+  新增 `source_type=confluence` 语义，按 Space Key 与 REST API v2 cursor 分页同步页面；OpenAPI
+  升至 `0.25.0-m23`。无新容器、环境变量、配置键、数据库迁移或第三方依赖。
+
+- **MCP 2026-07-28 双协议兼容（M22，`docs/M22-CONTRACTS.md`）**：同一 MCP POST 端点新增无握手
+  逐请求元数据协议、`server/discover`、标准镜像头与 Origin 校验、现代 400/404 HTTP 语义，保留
+  2025-03-26 / 2024-11-05 initialize 客户端。OpenAPI 升至 `0.24.0-m22`，调用指南改以现代版为
+  主流程并单列旧版兼容。无新增容器、环境变量、配置键或数据库迁移。
+- **M21 最终答案质量评测与发布门禁**：新增 `docs/M21-CONTRACTS.md`、Flyway V23 数据字典说明与最终答案双跑流程；`.env.example` 新增 `GATE_ANSWER_SCORE_EPSILON=0.2`。OpenAPI `kb-server.yaml` 升 `0.23.0-m21`，补齐期望拒答、答案评测提交/预估/run/result、应用 `answer_gate` 和门禁答案对比 schema。历史应用版本默认关闭答案门禁，升级行为不变。
+
 - 新增 `docs/ACTUATOR-SECURITY.md`，说明独立管理端口的安全默认值与远程 Prometheus 抓取边界。
 - 新增 `scripts/validate_config.py` 与单元测试，统一拦截 `.env.example` 重复键、开发机绝对路径和
   两份需求文档漂移；校验已接入 monorepo 根级 CI。

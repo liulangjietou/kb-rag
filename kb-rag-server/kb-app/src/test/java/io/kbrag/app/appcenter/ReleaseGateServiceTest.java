@@ -16,6 +16,7 @@ import io.kbrag.domain.enums.RunStatus;
 import io.kbrag.domain.mapper.EvalResultMapper;
 import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.AppIndexSnapshot;
+import io.kbrag.domain.model.AnswerGateConfig;
 import io.kbrag.domain.model.EvalRetrievalConfig;
 import io.kbrag.domain.model.GateDecision;
 import io.kbrag.domain.model.GateReport;
@@ -23,6 +24,9 @@ import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.RerankProvider;
 import io.kbrag.domain.service.GateMetricsRecomputer;
+import io.kbrag.domain.service.FinalAnswerGateJudge;
+import io.kbrag.domain.service.FinalAnswerGateRecomputer;
+import io.kbrag.domain.service.FinalAnswerMetricsCalculator;
 import io.kbrag.domain.service.ReleaseGateJudge;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -122,7 +126,9 @@ class ReleaseGateServiceTest {
      */
     private ReleaseGateService newService(Executor gateExecutor) {
         return new ReleaseGateService(appVersionService, releaseSnapshotService, evalRunService,
-                evalResultMapper, new GateMetricsRecomputer(), new ReleaseGateJudge(), embeddingProvider,
+                evalResultMapper, new GateMetricsRecomputer(),
+                new FinalAnswerGateRecomputer(new FinalAnswerMetricsCalculator()),
+                new FinalAnswerGateJudge(), new ReleaseGateJudge(), embeddingProvider,
                 rerankProvider, properties, gateExecutor);
     }
 
@@ -306,6 +312,46 @@ class ReleaseGateServiceTest {
         assertEquals(GateReason.METRICS_REGRESSED, decision.reason());
         assertEquals(-1.0d, decision.hitRateDelta(), 1e-9d);
         verify(appVersionService, never()).promote(anyString(), anyBoolean(), any(), any());
+    }
+
+    @Test
+    void shouldRunTheFinalAnswerDualRunAndBlockARegressionWhenTheVersionOptsIn() {
+        AppVersion version = versionOf(AppVersionStatus.GATING, DATASET_ID);
+        AppVersion baseline = baselineVersion();
+        AppConfigSnapshot candidateSnapshot = snapshot();
+        AnswerGateConfig answerGate = new AnswerGateConfig();
+        answerGate.setEnabled(true);
+        candidateSnapshot.setAnswerGate(answerGate);
+        AppConfigSnapshot baselineSnapshot = snapshot();
+        when(appVersionService.require(VERSION_ID)).thenReturn(version);
+        when(appVersionService.parseConfig(version)).thenReturn(candidateSnapshot);
+        when(appVersionService.parseConfig(baseline)).thenReturn(baselineSnapshot);
+        when(appVersionService.currentReleased(APP_ID)).thenReturn(baseline);
+        EvalRun candidateRun = runOf(CANDIDATE_RUN, RunStatus.SUCCESS);
+        EvalRun baselineRun = runOf(BASELINE_RUN, RunStatus.SUCCESS);
+        when(evalRunService.submitAnswerRuns(eq(DATASET_ID), anyInt(), anyList(), eq(false)))
+                .thenReturn(List.of(candidateRun, baselineRun));
+        when(evalRunService.requireRun(CANDIDATE_RUN)).thenReturn(candidateRun);
+        when(evalRunService.requireRun(BASELINE_RUN)).thenReturn(baselineRun);
+        when(evalRunService.compare(anyList()))
+                .thenReturn(new EvalRunService.CompareResult(true, null, List.of()));
+        List<EvalResult> candidateResults = List.of(answerResult("c1", 4, 3), answerResult("c2", 4, 3));
+        List<EvalResult> baselineResults = List.of(answerResult("c1", 4, 5), answerResult("c2", 4, 5));
+        when(evalResultMapper.selectList(any()))
+                .thenReturn(candidateResults, baselineResults, candidateResults, baselineResults);
+
+        GateDecision decision = service.runGate(VERSION_ID);
+
+        assertEquals(GateVerdict.BLOCKED, decision.verdict());
+        assertEquals(GateReason.ANSWER_METRICS_REGRESSED, decision.reason());
+        verify(evalRunService).submitAnswerRuns(eq(DATASET_ID), anyInt(), anyList(), eq(false));
+        verify(appVersionService, never()).promote(anyString(), anyBoolean(), any(), any());
+        ArgumentCaptor<String> reportCaptor = ArgumentCaptor.forClass(String.class);
+        verify(appVersionService).recordGate(any(), eq(AppVersionStatus.GATE_BLOCKED), eq(GateVerdict.BLOCKED),
+                eq(GateReason.ANSWER_METRICS_REGRESSED), reportCaptor.capture(), anyString());
+        GateReport report = JsonUtil.parse(reportCaptor.getValue(), GateReport.class);
+        assertEquals(2, report.answerComparison().effectiveCases());
+        assertEquals(-2.0d, report.answerDecision().deltas().faithfulness());
     }
 
     @Test
@@ -689,6 +735,20 @@ class ReleaseGateServiceTest {
         result.setEvidenceHitCount(evidenceHits);
         result.setEvidenceTotalCount(evidenceTotal);
         result.setDegraded(JsonUtil.toJson(new ArrayList<String>()));
+        return result;
+    }
+
+    private EvalResult answerResult(String caseId, int score, int faithfulness) {
+        EvalResult result = result(caseId, true, 1, 1);
+        result.setAnswerJudgeRequested(true);
+        result.setAnswerScore(score);
+        result.setAnswerCorrectness(score);
+        result.setAnswerFaithfulness(faithfulness);
+        result.setAnswerCompleteness(score);
+        result.setCitationCorrectness(score);
+        result.setCitationCompleteness(score);
+        result.setRefusalCorrect(true);
+        result.setGenerationLatencyMs(100);
         return result;
     }
 }

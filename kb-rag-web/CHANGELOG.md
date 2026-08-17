@@ -18,6 +18,28 @@
 
 ### Added
 
+**M24 · 模型 Token 台账与租户配额**（`docs/M24-CONTRACTS.md`）
+- 租户管理页新增月度 Token 配额编辑、当月用量抽屉与模型价格配置抽屉；汇总区分已用/在途/剩余、
+  估算调用和未定价调用，成本始终按币种分别展示。
+- 用量明细只展示安全业务维度，不展示 prompt、回答、图片、凭据或异常正文。
+
+**M23 · Confluence Cloud 数据源**（`docs/M23-CONTRACTS.md`）
+- 知识库“外部数据源”表单由固定 S3/OSS 扩展为两种连接器；Confluence 表单使用 Site URL、
+  Space Key、Atlassian 账号邮箱与 API Token，列表和同步明细按类型展示同步范围与页面 Key。
+- 编辑时连接器类型不可变，secret 留空保留、定时开关、连接测试、手动同步和移除语义继续复用
+  M14 端点；没有新增前端 API 路径。
+
+**M22 · MCP 2026-07-28 双协议调试**（`docs/M22-CONTRACTS.md`）
+- MCP 调试页新增现代/旧版切换，默认 2026-07-28：现代首步为 `server/discover`，每次请求自动生成
+  `_meta` 与版本/方法/名称镜像头；旧版继续使用 initialize。
+- curl 预览按所选时代输出真实 transport 头；新增请求构造单测，覆盖现代元数据、Unicode
+  `Mcp-Name` Base64 sentinel 与旧版形态不回归。
+
+**M21 · 最终答案质量评测与发布门禁**（`docs/M21-CONTRACTS.md`）
+- 评测 case 表单新增“期望拒答”；运行表单可选择关联当前知识库的应用版本，预估并展示答案生成与答案 Judge 调用次数。
+- 评测报告新增最终答案五维评分、答/拒决策准确率、Judge 失败数与生成 P95 时延，case 下钻展示生成答案和评分，CSV 同步增加答案分。
+- 应用版本配置新增显式 `answer_gate` 与首发绝对阈值；门禁对比抽屉展示候选/正式版答案指标和答案门禁原因。历史版本默认关闭，升级不改变既有发布行为。
+
 **M20 · MCP 调试页面**（`docs/M20-CONTRACTS.md`）
 - 新增一级菜单「MCP 调试」（`/mcp`，`app:read` 或 `memory:read` 任一可见，位于「记忆库」与「评测中心」之间）：针对知识库应用与记忆库两个 MCP 端点的在线调试页（`pages/mcp/McpDebugPage.tsx`）——端点二选一（切换即清场）、粘贴明文 Key（kb-sk-* / kb-mk-*，与 API 调试 tab 同一约定）、initialize 握手、tools/list 拉取工具目录（选中工具自动按 inputSchema.required 预填参数模板）、tools/call 发起调用。
 - 响应区显式区分三种结果平面：JSON-RPC error（红，协议错误码）、isError=true（橙，业务失败文本）、成功（绿），并展示原始 JSON-RPC 响应全文；接入示例区随表单实时生成 curl 与 MCP 客户端 `mcpServers` 配置片段（streamable-http）。

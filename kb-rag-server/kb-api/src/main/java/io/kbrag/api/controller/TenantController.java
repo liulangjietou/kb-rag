@@ -5,6 +5,7 @@ import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.SaveTenantRequest;
 import io.kbrag.api.dto.TenantResponse;
 import io.kbrag.api.dto.UpdateTenantStatusRequest;
+import io.kbrag.api.dto.UpdateTenantModelQuotaRequest;
 import io.kbrag.app.auth.TenantService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
@@ -108,6 +109,16 @@ public class TenantController {
         TenantStatus status = parseStatus(request.status());
         tenantService.updateStatus(tenantId, status);
         return Result.success(null);
+    }
+
+    /** Updates the monthly model Token quota; zero keeps a tenant unlimited. */
+    @PutMapping("/{tenantId}/model-quota")
+    @AuditedOperation(module = "TENANT", action = "UPDATE_MODEL_QUOTA",
+            targetType = "TENANT", targetId = "#tenantId")
+    public Result<TenantResponse> updateModelQuota(@PathVariable String tenantId,
+                                                   @Valid @RequestBody UpdateTenantModelQuotaRequest request) {
+        tenantService.updateModelQuota(tenantId, request.monthlyTokenQuota());
+        return Result.success(TenantResponse.from(tenantService.get(tenantId)));
     }
 
     private TenantStatus parseStatus(String status) {

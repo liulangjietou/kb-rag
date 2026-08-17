@@ -7,8 +7,11 @@ import io.kbrag.common.exception.ProviderException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.model.HealthStatus;
+import io.kbrag.domain.model.ModelCallSpec;
 import io.kbrag.domain.port.VisionProvider;
+import io.kbrag.domain.port.ModelCallMeter;
 import io.kbrag.infrastructure.provider.DashScopeHttp;
+import io.kbrag.infrastructure.provider.ModelUsageSupport;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.client.RestClient;
 
@@ -78,9 +81,16 @@ public class DashScopeVisionProvider implements VisionProvider {
 
     private final KbProperties.Vision config;
     private final RestClient restClient;
+    private final ModelCallMeter modelCallMeter;
 
     public DashScopeVisionProvider(KbProperties properties) {
+        this(properties, ModelCallMeter.NOOP);
+    }
+
+    /** Builds the production adapter with durable quota and usage metering. */
+    public DashScopeVisionProvider(KbProperties properties, ModelCallMeter modelCallMeter) {
         this.config = properties.getVision();
+        this.modelCallMeter = modelCallMeter;
         this.restClient = DashScopeHttp.client(config.getBaseUrl(), config.getApiKey(), config.getTimeoutMs());
     }
 
@@ -111,8 +121,12 @@ public class DashScopeVisionProvider implements VisionProvider {
         payload.put(FIELD_TEMPERATURE, config.getTemperature());
         payload.put(FIELD_MAX_TOKENS, config.getMaxTokens());
 
-        String body = DashScopeHttp.post(restClient, COMPLETIONS_PATH, payload, PROVIDER_NAME, STAGE);
-        return parseContent(body);
+        return ModelUsageSupport.execute(modelCallMeter,
+                new ModelCallSpec(ModelUsageSupport.billingProvider(config.getProvider(), PROVIDER_NAME),
+                        ModelCallSpec.VISION, config.getModel(),
+                        ModelUsageSupport.visionUpperBound(PROMPT, content, config.getMaxTokens())),
+                () -> DashScopeHttp.post(restClient, COMPLETIONS_PATH, payload, PROVIDER_NAME, STAGE),
+                this::parseContent);
     }
 
     @Override

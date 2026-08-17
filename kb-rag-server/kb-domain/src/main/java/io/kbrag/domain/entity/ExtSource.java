@@ -10,8 +10,8 @@ import lombok.ToString;
 import java.time.LocalDateTime;
 
 /**
- * A registered external object store source, the M14 contract section 1: connection details of one
- * S3/OSS compatible bucket, the sync switch and the outcome of the last sync pass.
+ * A registered external source, the M14/M23 contract: connection details of an S3/OSS bucket or a
+ * Confluence Cloud space, the sync switch and the outcome of the last sync pass.
  *
  * <p>The binding to the documents it produced is deliberately weak, the same shape as
  * {@link WebSource}: removing the registration leaves the documents alone, and trashing a document
@@ -35,7 +35,7 @@ public class ExtSource extends BaseEntity {
     @TableField("kb_id")
     private String kbId;
 
-    /** Connector type routing key, {@code s3} in this milestone. */
+    /** Connector type routing key: {@code s3} or {@code confluence}. */
     @TableField("source_type")
     private String sourceType;
 
@@ -43,27 +43,27 @@ public class ExtSource extends BaseEntity {
     @TableField("name")
     private String name;
 
-    /** Service endpoint of the object store. */
+    /** Remote service endpoint. */
     @TableField("endpoint")
     private String endpoint;
 
-    /** Optional region hint of the object store. */
+    /** Optional connector-specific region hint. */
     @TableField("region")
     private String region;
 
-    /** Bucket the scan lists. */
+    /** Connector collection identifier: bucket name or Confluence space key. */
     @TableField("bucket")
     private String bucket;
 
-    /** Optional key prefix narrowing the scan. */
+    /** Optional connector-specific listing prefix. */
     @TableField("prefix")
     private String prefix;
 
-    /** Access key of the bucket credentials. */
+    /** Public credential half: object-store access key or Atlassian account email. */
     @TableField("access_key")
     private String accessKey;
 
-    /** Secret key of the bucket credentials; stored in clear, never returned by the read API. */
+    /** Secret credential half; stored in clear, never returned by the read API. */
     @TableField("secret_key")
     private String secretKey;
 
