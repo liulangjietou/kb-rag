@@ -320,3 +320,11 @@ python3 scripts/validate_config.py
 双重授权。分发或以网络服务形式部署前，请先阅读
 [`kb-rag-parser/README.md`](kb-rag-parser/README.md#许可注意) 与
 [`kb-rag-parser/NOTICE`](kb-rag-parser/NOTICE)，并根据实际使用方式完成许可证合规评估。
+
+## 关注作者
+
+如果你对 AI 及本项目感兴趣，欢迎关注我的微信公众号 **AI赛博炼丹炉**，将带来更多高质量文章和干货。
+
+<p align="center">
+  <img src="docs/assets/wechat-qr.png" alt="微信公众号：AI赛博炼丹炉" width="420">
+</p>
