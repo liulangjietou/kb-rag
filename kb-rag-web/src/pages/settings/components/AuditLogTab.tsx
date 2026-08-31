@@ -81,8 +81,8 @@ export default function AuditLogTab() {
   };
 
   return (
-    <div>
-      <Form<FilterFormValues> form={form} layout="inline" style={{ marginBottom: 16, rowGap: 12 }}>
+    <div className="audit-log-workbench">
+      <Form<FilterFormValues> className="management-filter" form={form} layout="inline">
         <Form.Item name="key_id" label="API Key">
           <Select
             style={{ width: 220 }}
@@ -108,31 +108,32 @@ export default function AuditLogTab() {
       </Form>
 
       {stats && (
-        <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={6}>
+        <Row className="metric-grid" gutter={[16, 16]}>
+          <Col xs={24} sm={12} xl={6}>
             <Card size="small">
               <Statistic title="调用量" value={stats.total_calls} />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} xl={6}>
             <Card size="small">
               <Statistic title="平均耗时 (ms)" value={stats.avg_latency_ms} precision={0} />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} xl={6}>
             <Card size="small">
-              <Statistic title="降级次数" value={stats.degraded_calls} valueStyle={{ color: stats.degraded_calls > 0 ? '#faad14' : undefined }} />
+              <Statistic title="降级次数" value={stats.degraded_calls} valueStyle={{ color: stats.degraded_calls > 0 ? 'var(--kb-color-warning)' : undefined }} />
             </Card>
           </Col>
-          <Col span={6}>
+          <Col xs={24} sm={12} xl={6}>
             <Card size="small">
-              <Statistic title="错误次数" value={stats.error_calls} valueStyle={{ color: stats.error_calls > 0 ? '#ff4d4f' : undefined }} />
+              <Statistic title="错误次数" value={stats.error_calls} valueStyle={{ color: stats.error_calls > 0 ? 'var(--kb-color-danger)' : undefined }} />
             </Card>
           </Col>
         </Row>
       )}
 
       <Table<ApiAuditLogEntry>
+        className="management-table"
         rowKey="audit_log_id"
         loading={loading}
         dataSource={logs}

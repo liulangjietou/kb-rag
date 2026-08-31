@@ -28,6 +28,7 @@ import {
 import type { MemoryLibrary, MemoryLibraryUpsertRequest } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
+import PageHeader from '../../components/PageHeader';
 
 const PAGE_SIZE = 12;
 
@@ -107,29 +108,31 @@ export default function MemoryLibraryListPage() {
   };
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          记忆库
-        </Typography.Title>
-        <Space>
-          <Input
-            allowClear
-            prefix={<SearchOutlined />}
-            placeholder="按名称搜索"
-            style={{ width: 220 }}
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            onPressEnter={() => load(1, keyword)}
-            onClear={() => load(1, '')}
-          />
-          {canWrite && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-              新建记忆库
-            </Button>
-          )}
-        </Space>
-      </div>
+    <div className="catalog-eval-page catalog-list-page">
+      <PageHeader
+        eyebrow="AGENT MEMORY / 智能体记忆"
+        title="记忆库"
+        description="沉淀可检索的长期记忆、结构化实体与画像规则，并通过 Memory Key 安全接入智能体。"
+        actions={
+          <Space className="catalog-page-tools">
+            <Input
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder="按名称搜索"
+              style={{ width: 220 }}
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              onPressEnter={() => load(1, keyword)}
+              onClear={() => load(1, '')}
+            />
+            {canWrite && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                新建记忆库
+              </Button>
+            )}
+          </Space>
+        }
+      />
 
       <Spin spinning={loading}>
         {!loading && libraries.length === 0 ? (
@@ -152,23 +155,22 @@ export default function MemoryLibraryListPage() {
               <Col key={library.library_id} xs={24} sm={12} md={8} lg={6}>
                 <Card
                   hoverable
+                  className="catalog-resource-card catalog-memory-card"
                   title={library.name}
-                  onClick={() => navigate(`/memory/${library.library_id}`)}
                   actions={[
-                    <span key="detail" onClick={() => navigate(`/memory/${library.library_id}`)}>
+                    <Button key="detail" type="text" size="small" onClick={() => navigate(`/memory/${library.library_id}`)}>
                       查看详情
-                    </span>,
+                    </Button>,
                     ...(canWrite
                       ? [
-                          <span
+                          <Button
                             key="edit"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEdit(library);
-                            }}
+                            type="text"
+                            size="small"
+                            onClick={() => openEdit(library)}
                           >
                             编辑
-                          </span>,
+                          </Button>,
                           <Popconfirm
                             key="delete"
                             title="确认删除该记忆库？"
@@ -176,18 +178,19 @@ export default function MemoryLibraryListPage() {
                             okText="删除"
                             okType="danger"
                             cancelText="取消"
-                            onConfirm={(e) => {
-                              e?.stopPropagation();
-                              handleDelete(library.library_id);
-                            }}
-                            onCancel={(e) => e?.stopPropagation()}
+                            onConfirm={() => handleDelete(library.library_id)}
                           >
-                            <span onClick={(e) => e.stopPropagation()}>删除</span>
+                            <Button type="text" size="small" danger>
+                              删除
+                            </Button>
                           </Popconfirm>,
                         ]
                       : []),
                   ]}
                 >
+                  <Typography.Text className="catalog-resource-card__id" type="secondary">
+                    {library.library_id}
+                  </Typography.Text>
                   <Typography.Paragraph ellipsis={{ rows: 2 }} type="secondary" style={{ minHeight: 44 }}>
                     {library.description || '暂无描述'}
                   </Typography.Paragraph>
@@ -226,6 +229,7 @@ export default function MemoryLibraryListPage() {
       )}
 
       <Modal
+        rootClassName="catalog-eval-modal"
         title={editing ? '编辑记忆库' : '新建记忆库'}
         open={upsertOpen}
         onOk={handleSubmit}

@@ -20,7 +20,7 @@ interface CardSpec {
 /** One embedding/rerank/chat model status card (M2-CONTRACTS.md section 5 "模型状态卡片"). */
 function ModelCard({ title, status, unconfiguredHint }: Omit<CardSpec, 'key'>) {
   return (
-    <Card title={title} size="small">
+    <Card className={`model-status-card${status.configured ? ' is-ready' : ' is-missing'}`} title={title} size="small">
       <Typography.Paragraph style={{ marginBottom: 8 }}>
         {status.configured ? <Tag color="success">已配置</Tag> : <Tag color="warning">未配置</Tag>}
       </Typography.Paragraph>
@@ -70,12 +70,12 @@ export default function ModelStatusCards({ vectorEngine, embedding, rerank, chat
 
   return (
     <>
-      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+      <Typography.Paragraph className="model-engine-label" type="secondary">
         向量引擎：{vectorEngine}
       </Typography.Paragraph>
       <Row gutter={[16, 16]}>
         {cards.map((card) => (
-          <Col key={card.key} xs={24} md={6}>
+          <Col key={card.key} xs={24} sm={12} xl={6}>
             <ModelCard title={card.title} status={card.status} unconfiguredHint={card.unconfiguredHint} />
           </Col>
         ))}

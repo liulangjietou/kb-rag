@@ -187,6 +187,7 @@ export default function MemoryKeysTab({ libraryId, canWrite }: Props) {
       />
 
       <Modal
+        rootClassName="catalog-eval-modal"
         title="签发 Memory Key"
         open={createOpen}
         onOk={handleCreate}
@@ -207,6 +208,7 @@ export default function MemoryKeysTab({ libraryId, canWrite }: Props) {
       </Modal>
 
       <Modal
+        rootClassName="catalog-eval-modal catalog-secret-modal"
         title="密钥明文（仅展示一次）"
         open={secretModal !== null}
         onCancel={() => setSecretModal(null)}

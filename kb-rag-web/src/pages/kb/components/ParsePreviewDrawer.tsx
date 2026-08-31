@@ -146,17 +146,7 @@ export default function ParsePreviewDrawer({ doc, onClose, onConfirmed }: ParseP
             )}
 
             <Typography.Title level={5}>markdown 预览（纯文本，不做 HTML 渲染）</Typography.Title>
-            <pre
-              style={{
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                background: 'rgba(0,0,0,0.02)',
-                padding: 12,
-                borderRadius: 4,
-                maxHeight: 480,
-                overflow: 'auto',
-              }}
-            >
+            <pre className="parse-preview-markdown">
               {preview.markdown}
             </pre>
           </>

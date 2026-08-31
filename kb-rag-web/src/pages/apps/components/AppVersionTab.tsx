@@ -143,7 +143,7 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
   };
 
   return (
-    <div>
+    <div className="catalog-data-surface">
       <Table<AppVersion>
         rowKey="app_version_id"
         loading={loading}
@@ -330,6 +330,7 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
       />
 
       <Modal
+        rootClassName="catalog-eval-modal"
         title="强制发布确认"
         open={forceModalVersion !== null}
         onCancel={() => setForceModalVersion(null)}

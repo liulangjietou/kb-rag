@@ -214,7 +214,7 @@ export default function AppConfigTab({ appId, kbs, latestVersion, onVersionCreat
   const kbOptions = kbs.map((kb) => ({ label: kb.name, value: kb.kb_id }));
 
   return (
-    <Card>
+    <Card className="catalog-form-surface catalog-config-form">
       <Alert
         type="info"
         showIcon
@@ -266,7 +266,10 @@ export default function AppConfigTab({ appId, kbs, latestVersion, onVersionCreat
                     <InputNumber min={1} precision={0} style={{ width: 100 }} />
                   </Form.Item>
                   <MinusCircleOutlined
-                    style={{ marginTop: 8, color: fields.length <= MIN_KB_REFS ? '#00000040' : undefined }}
+                    style={{
+                      marginTop: 8,
+                      color: fields.length <= MIN_KB_REFS ? 'var(--kb-color-text-tertiary)' : undefined,
+                    }}
                     onClick={() => fields.length > MIN_KB_REFS && remove(field.name)}
                   />
                 </Space>

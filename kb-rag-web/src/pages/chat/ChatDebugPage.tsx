@@ -5,6 +5,8 @@ import { Alert, Button, Card, Empty, Input, Select, Space, Switch, Tag, Typograp
 import { chatPreview, listApps, streamChatPreview } from '../../api/app';
 import { listKnowledgeBases } from '../../api/kb';
 import ImagePicker, { toImagesPayload, type PickedImage } from '../../components/ImagePicker';
+import PageHeader from '../../components/PageHeader';
+import RetrievalPipeline from '../../components/RetrievalPipeline';
 import type { ChatMessage, KbApp, KnowledgeBase, RetrievalNode } from '../../api/types';
 import { kbNameOf } from '../../utils/kbRefs';
 import { describeDegradedReason } from '../../utils/statusMeta';
@@ -126,14 +128,18 @@ export default function ChatDebugPage() {
   };
 
   return (
-    <div>
-      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }} wrap>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          问答调试
-        </Typography.Title>
-        <Space wrap>
+    <div className="knowledge-workbench-page chat-workbench-page">
+      <PageHeader
+        eyebrow="ANSWER STUDIO"
+        title="问答调试"
+        description="观察一条问题如何经过路由、检索与生成，并直接核验引用、降级原因和 request_id。"
+        before={<RetrievalPipeline />}
+      />
+
+      <Card className="workbench-toolbar-card chat-settings-card" size="small">
+        <Space className="chat-settings" wrap>
           <Select
-            style={{ width: 220 }}
+            className="chat-app-select"
             placeholder="请选择应用"
             value={appId ?? undefined}
             options={apps.map((app) => ({ label: app.name, value: app.app_id }))}
@@ -143,40 +149,37 @@ export default function ChatDebugPage() {
             }}
           />
           <Input
-            style={{ width: 160 }}
+            className="chat-version-input"
             placeholder="app_version（留空=当前正式版）"
             value={appVersion}
             onChange={(e) => setAppVersion(e.target.value)}
           />
-          <Space>
+          <Space className="chat-stream-toggle">
             <Typography.Text>流式</Typography.Text>
-            <Switch checked={streamEnabled} onChange={setStreamEnabled} />
+            <Switch aria-label="启用流式回答" checked={streamEnabled} onChange={setStreamEnabled} />
           </Space>
         </Space>
-      </Space>
+      </Card>
 
       {!appId ? (
-        <Alert type="info" showIcon message="请先在「应用中心」创建应用后再使用问答调试" />
+        <Alert
+          className="chat-prerequisite"
+          type="info"
+          showIcon
+          message="请先在「应用中心」创建应用后再使用问答调试"
+        />
       ) : (
-        <Card style={{ minHeight: 420, marginBottom: 16 }}>
+        <Card className="chat-transcript-card">
           {turns.length === 0 ? (
             <Empty description="输入问题开始调试对话（内部走管理鉴权，复用对外 chat 生成逻辑）" />
           ) : (
-            <Space direction="vertical" style={{ width: '100%' }} size={16}>
+            <Space className="chat-transcript" direction="vertical" size={18}>
               {turns.map((turn, index) => (
-                <div key={index} style={{ textAlign: turn.role === 'user' ? 'right' : 'left' }}>
-                  <Tag color={turn.role === 'user' ? 'blue' : 'default'}>{turn.role === 'user' ? '我' : '助手'}</Tag>
-                  <div
-                    style={{
-                      display: 'inline-block',
-                      maxWidth: '80%',
-                      textAlign: 'left',
-                      background: turn.role === 'user' ? '#e6f4ff' : '#f5f5f5',
-                      borderRadius: 8,
-                      padding: '8px 12px',
-                      whiteSpace: 'pre-wrap',
-                    }}
-                  >
+                <div key={index} className={`chat-turn chat-turn--${turn.role}`}>
+                  <div className="chat-turn__identity">
+                    <Tag color={turn.role === 'user' ? 'blue' : 'default'}>{turn.role === 'user' ? '我' : '助手'}</Tag>
+                  </div>
+                  <div className="chat-turn__bubble">
                     {turn.content || (turn.error ? '' : '生成中...')}
                   </div>
                   {turn.error && (
@@ -210,9 +213,10 @@ export default function ChatDebugPage() {
                     </Space>
                   )}
                   {turn.references && turn.references.length > 0 && (
-                    <Space direction="vertical" style={{ width: '100%', marginTop: 8 }}>
+                    <Space className="chat-reference-list" direction="vertical">
                       {turn.references.map((ref) => (
                         <Card
+                          className="chat-reference-card"
                           key={ref.chunk_id}
                           size="small"
                           title={
@@ -248,10 +252,10 @@ export default function ChatDebugPage() {
         </Card>
       )}
 
-      <div style={{ marginBottom: 8 }}>
+      <div className="chat-image-picker">
         <ImagePicker value={images} onChange={setImages} disabled={!appId} />
       </div>
-      <Space.Compact style={{ width: '100%' }}>
+      <Space.Compact className="chat-composer">
         <Input.TextArea
           rows={2}
           placeholder="输入问题，回车发送（Shift+回车换行）"
@@ -265,7 +269,14 @@ export default function ChatDebugPage() {
           }}
           disabled={!appId}
         />
-        <Button type="primary" icon={<SendOutlined />} loading={sending} disabled={!appId} onClick={handleSend}>
+        <Button
+          className="chat-send-button"
+          type="primary"
+          icon={<SendOutlined />}
+          loading={sending}
+          disabled={!appId}
+          onClick={handleSend}
+        >
           发送
         </Button>
       </Space.Compact>

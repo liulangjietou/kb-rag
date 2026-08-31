@@ -1,14 +1,13 @@
 // Author: owlzhangfq@gmail.com
-// Landing page for a session that authenticated successfully but holds no console permission at all --
-// the usual case being an LDAP account whose first login just created it with a viewer role that has not
-// been granted anything yet. Telling the operator that plainly beats an empty shell or a redirect loop.
-import { LogoutOutlined } from '@ant-design/icons';
-import { Button, Result } from 'antd';
+import { LogoutOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import { Button, Typography } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import AuthShell from '../components/AuthShell';
 
+/** 账号已认证但没有任何控制台权限时的明确终点，避免空壳或重定向循环。 */
 export default function NoAccessPage() {
-  const { displayName, logout } = useAuth();
+  const { displayName, username, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -17,17 +16,24 @@ export default function NoAccessPage() {
   };
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-      <Result
-        status="warning"
-        title="账号暂无可访问的功能"
-        subTitle={`当前登录账号${displayName ? `（${displayName}）` : ''}尚未被授予任何权限，请联系管理员分配角色。`}
-        extra={
-          <Button icon={<LogoutOutlined />} onClick={handleLogout}>
-            退出登录
-          </Button>
-        }
-      />
-    </div>
+    <AuthShell
+      eyebrow="ACCESS REQUIRED"
+      headline="权限透明，才能让协作边界清晰。"
+      description="平台会同时在页面、路由和服务端校验访问范围，确保每一份知识只对正确的人开放。"
+      compactCard
+    >
+      <div className="auth-status-icon auth-status-icon--warning"><SafetyCertificateOutlined /></div>
+      <Typography.Title level={2}>当前账号没有可用页面</Typography.Title>
+      <Typography.Paragraph type="secondary">
+        账号已成功登录，但尚未被授予知识库、评测或平台管理权限。请联系管理员分配角色。
+      </Typography.Paragraph>
+      <div className="auth-account-row">
+        <span>当前账号</span>
+        <strong>{displayName ?? username ?? '已登录账号'}</strong>
+      </div>
+      <Button type="primary" size="large" block icon={<LogoutOutlined />} onClick={handleLogout}>
+        退出并返回登录页
+      </Button>
+    </AuthShell>
   );
 }

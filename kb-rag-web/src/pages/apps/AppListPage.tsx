@@ -7,6 +7,7 @@ import { deleteApp, listApps } from '../../api/app';
 import type { KbApp } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
+import PageHeader from '../../components/PageHeader';
 import CreateAppModal from './components/CreateAppModal';
 import EditAppModal from './components/EditAppModal';
 
@@ -42,17 +43,19 @@ export default function AppListPage() {
   };
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          应用中心
-        </Typography.Title>
-        {canWrite && (
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
-            新建应用
-          </Button>
-        )}
-      </div>
+    <div className="catalog-eval-page catalog-list-page">
+      <PageHeader
+        eyebrow="APP CATALOG / 应用编排"
+        title="应用中心"
+        description="将检索策略、知识库与问答模型固化为可发布、可回滚的应用版本。"
+        actions={
+          canWrite ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+              新建应用
+            </Button>
+          ) : undefined
+        }
+      />
 
       <Spin spinning={loading}>
         {!loading && apps.length === 0 ? (
@@ -73,23 +76,22 @@ export default function AppListPage() {
               <Col key={app.app_id} xs={24} sm={12} md={8} lg={6}>
                 <Card
                   hoverable
+                  className="catalog-resource-card"
                   title={app.name}
-                  onClick={() => navigate(`/apps/${app.app_id}`)}
                   actions={[
-                    <span key="detail" onClick={() => navigate(`/apps/${app.app_id}`)}>
+                    <Button key="detail" type="text" size="small" onClick={() => navigate(`/apps/${app.app_id}`)}>
                       查看详情
-                    </span>,
+                    </Button>,
                     ...(canWrite
                       ? [
-                          <span
+                          <Button
                             key="edit"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingApp(app);
-                            }}
+                            type="text"
+                            size="small"
+                            onClick={() => setEditingApp(app)}
                           >
                             编辑
-                          </span>,
+                          </Button>,
                           <Popconfirm
                             key="delete"
                             title="确认删除该应用？"
@@ -97,18 +99,19 @@ export default function AppListPage() {
                             okText="删除"
                             okType="danger"
                             cancelText="取消"
-                            onConfirm={(e) => {
-                              e?.stopPropagation();
-                              handleDelete(app.app_id);
-                            }}
-                            onCancel={(e) => e?.stopPropagation()}
+                            onConfirm={() => handleDelete(app.app_id)}
                           >
-                            <span onClick={(e) => e.stopPropagation()}>删除</span>
+                            <Button type="text" size="small" danger>
+                              删除
+                            </Button>
                           </Popconfirm>,
                         ]
                       : []),
                   ]}
                 >
+                  <Typography.Text className="catalog-resource-card__id" type="secondary">
+                    {app.app_id}
+                  </Typography.Text>
                   <Typography.Paragraph ellipsis={{ rows: 2 }} type="secondary">
                     {app.description || '暂无描述'}
                   </Typography.Paragraph>

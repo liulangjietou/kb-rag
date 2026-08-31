@@ -169,6 +169,7 @@ export default function ProfileRulesTab({ libraryId, canWrite, onChanged }: Prop
       />
 
       <Modal
+        rootClassName="catalog-eval-modal"
         title={editing ? '编辑用户画像规则' : '新建用户画像规则'}
         open={upsertOpen}
         onOk={handleSubmit}

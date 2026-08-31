@@ -16,6 +16,7 @@ import {
   type McpRpcOutcome,
   type McpToolInfo,
 } from '../../api/mcp';
+import PageHeader from '../../components/PageHeader';
 
 /** Per-endpoint copy: which credential unlocks it and where that credential is issued. */
 const ENDPOINT_META: Record<McpEndpoint, { label: string; keyPrefix: string; keyHint: string }> = {
@@ -208,56 +209,62 @@ export default function McpDebugPage() {
   const businessError = result?.isError === true;
 
   return (
-    <Space direction="vertical" size="large" style={{ width: '100%' }}>
-      <Card>
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          <Alert
-            type="info"
-            showIcon
-            message="MCP（Model Context Protocol）调试"
-            description={`两个 MCP 端点与 REST 开放接口共用凭证、鉴权、限流与审计。${meta.keyHint}`}
-          />
-          <Radio.Group
-            value={endpoint}
-            onChange={(event) => switchEndpoint(event.target.value as McpEndpoint)}
-            options={(Object.keys(ENDPOINT_META) as McpEndpoint[]).map((key) => ({
-              label: ENDPOINT_META[key].label,
-              value: key,
-            }))}
-            optionType="button"
-            buttonStyle="solid"
-          />
-          <Radio.Group
-            value={protocolEra}
-            onChange={(event) => switchProtocol(event.target.value as McpProtocolEra)}
-            options={[
-              { label: '2026-07-28（逐请求元数据）', value: 'modern' },
-              { label: '2025-03-26（initialize 兼容）', value: 'legacy' },
-            ]}
-            optionType="button"
-            buttonStyle="solid"
-          />
-          <Input.Password
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            placeholder={`${meta.keyPrefix}...（明文密钥仅在创建/轮换时展示一次，需自行留存）`}
-            autoComplete="off"
-            style={{ maxWidth: 480 }}
-          />
-          <Space wrap>
-            <Button icon={<ApiOutlined />} loading={busy} onClick={handleDiscovery}>
-              {protocolEra === 'modern' ? 'server/discover 能力发现' : 'initialize 握手'}
-            </Button>
-            <Button icon={<UnorderedListOutlined />} loading={busy} onClick={handleListTools}>
-              tools/list 列出工具
-            </Button>
+    <div className="knowledge-workbench-page mcp-workbench-page">
+      <PageHeader
+        eyebrow="PROTOCOL CONSOLE"
+        title="MCP 调试"
+        description="在同一控制台验证端点能力、工具清单、调用参数与 JSON-RPC 响应平面。"
+      />
+      <Space className="mcp-workbench-stack" direction="vertical" size="large">
+        <Card className="workbench-config-card mcp-connection-card">
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Alert
+              type="info"
+              showIcon
+              message="MCP（Model Context Protocol）调试"
+              description={`两个 MCP 端点与 REST 开放接口共用凭证、鉴权、限流与审计。${meta.keyHint}`}
+            />
+            <Radio.Group
+              value={endpoint}
+              onChange={(event) => switchEndpoint(event.target.value as McpEndpoint)}
+              options={(Object.keys(ENDPOINT_META) as McpEndpoint[]).map((key) => ({
+                label: ENDPOINT_META[key].label,
+                value: key,
+              }))}
+              optionType="button"
+              buttonStyle="solid"
+            />
+            <Radio.Group
+              value={protocolEra}
+              onChange={(event) => switchProtocol(event.target.value as McpProtocolEra)}
+              options={[
+                { label: '2026-07-28（逐请求元数据）', value: 'modern' },
+                { label: '2025-03-26（initialize 兼容）', value: 'legacy' },
+              ]}
+              optionType="button"
+              buttonStyle="solid"
+            />
+            <Input.Password
+              className="mcp-key-input"
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder={`${meta.keyPrefix}...（明文密钥仅在创建/轮换时展示一次，需自行留存）`}
+              autoComplete="off"
+            />
+            <Space wrap>
+              <Button icon={<ApiOutlined />} loading={busy} onClick={handleDiscovery}>
+                {protocolEra === 'modern' ? 'server/discover 能力发现' : 'initialize 握手'}
+              </Button>
+              <Button icon={<UnorderedListOutlined />} loading={busy} onClick={handleListTools}>
+                tools/list 列出工具
+              </Button>
+            </Space>
           </Space>
-        </Space>
-      </Card>
+        </Card>
 
-      <Row gutter={16}>
+        <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
-          <Card title="tools/call 调试" size="small">
+          <Card className="mcp-panel-card" title="tools/call 调试" size="small">
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
               <Select
                 placeholder="先 tools/list 再选择工具"
@@ -275,7 +282,7 @@ export default function McpDebugPage() {
                 value={argsText}
                 onChange={(event) => setArgsText(event.target.value)}
                 rows={10}
-                style={{ fontFamily: 'monospace' }}
+                className="technical-text"
               />
               <Button type="primary" icon={<SendOutlined />} loading={busy} onClick={handleCall}>
                 发起 tools/call
@@ -283,7 +290,7 @@ export default function McpDebugPage() {
               {activeTool && (
                 <>
                   <Typography.Text type="secondary">inputSchema：</Typography.Text>
-                  <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, overflowX: 'auto', maxHeight: 240 }}>
+                  <pre className="mcp-code-block mcp-code-block--schema">
                     {JSON.stringify(activeTool.inputSchema, null, 2)}
                   </pre>
                 </>
@@ -292,7 +299,7 @@ export default function McpDebugPage() {
           </Card>
         </Col>
         <Col xs={24} lg={12}>
-          <Card title="响应" size="small">
+          <Card className="mcp-panel-card" title="响应" size="small">
             <Space direction="vertical" size="middle" style={{ width: '100%' }}>
               {outcome && (
                 <Descriptions size="small" bordered column={1}>
@@ -320,7 +327,7 @@ export default function McpDebugPage() {
                 />
               )}
               {outcome ? (
-                <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, overflowX: 'auto', maxHeight: 420 }}>
+                <pre className="mcp-code-block mcp-code-block--response">
                   {JSON.stringify(outcome.response, null, 2)}
                 </pre>
               ) : (
@@ -329,23 +336,24 @@ export default function McpDebugPage() {
             </Space>
           </Card>
         </Col>
-      </Row>
+        </Row>
 
-      <Card title="接入示例" size="small">
-        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          <Typography.Text type="secondary">
-            curl（协议版本 {MCP_PROTOCOL_VERSIONS[protocolEra]}，Streamable HTTP，单次 JSON 响应）：
-          </Typography.Text>
-          <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, overflowX: 'auto' }}>
-            {buildCurl(endpoint, apiKey, protocolEra, callBody, 'tools/call', callParams)}
-          </pre>
-          <Typography.Text type="secondary">MCP 客户端配置（Claude Desktop / Cursor / Cline 等的 mcpServers）：</Typography.Text>
-          <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, overflowX: 'auto' }}>
-            {buildClientConfig(endpoint, apiKey)}
-          </pre>
-        </Space>
-      </Card>
-    </Space>
+        <Card className="mcp-panel-card mcp-examples-card" title="接入示例" size="small">
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Typography.Text type="secondary">
+              curl（协议版本 {MCP_PROTOCOL_VERSIONS[protocolEra]}，Streamable HTTP，单次 JSON 响应）：
+            </Typography.Text>
+            <pre className="mcp-code-block">
+              {buildCurl(endpoint, apiKey, protocolEra, callBody, 'tools/call', callParams)}
+            </pre>
+            <Typography.Text type="secondary">
+              MCP 客户端配置（Claude Desktop / Cursor / Cline 等的 mcpServers）：
+            </Typography.Text>
+            <pre className="mcp-code-block">{buildClientConfig(endpoint, apiKey)}</pre>
+          </Space>
+        </Card>
+      </Space>
+    </div>
   );
 }
 

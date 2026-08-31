@@ -77,7 +77,7 @@ export default function EvalCaseTab({ kbId, dataset, onDatasetChanged }: EvalCas
   }
 
   return (
-    <div>
+    <div className="catalog-data-surface">
       <Alert
         type="info"
         showIcon

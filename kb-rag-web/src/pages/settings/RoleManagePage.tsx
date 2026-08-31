@@ -26,6 +26,7 @@ import { listTenants } from '../../api/tenant';
 import type { KnowledgeBase, PermissionCatalogueItem, RoleSummary, TenantSummary } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
+import PageHeader from '../../components/PageHeader';
 
 interface RoleFormValues {
   code: string;
@@ -244,9 +245,12 @@ export default function RoleManagePage() {
   ];
 
   return (
-    <Card
-      title="角色管理"
-      extra={
+    <div className="management-page roles-page">
+      <PageHeader
+        eyebrow="ROLE GOVERNANCE"
+        title="角色管理"
+        description="将功能权限与知识库数据范围分别建模，明确每个角色能做什么、能看到哪些知识。"
+        actions={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>
             刷新
@@ -256,8 +260,10 @@ export default function RoleManagePage() {
           </Button>
         </Space>
       }
-    >
+      />
+      <Card className="management-panel">
       <Table<RoleSummary>
+        className="management-table"
         rowKey="role_id"
         loading={loading}
         columns={columns}
@@ -336,10 +342,10 @@ export default function RoleManagePage() {
             功能权限
           </Divider>
           <Form.Item name="permission_codes" noStyle>
-            <Checkbox.Group style={{ width: '100%' }}>
+            <Checkbox.Group className="permission-groups">
               {modules.map((group) => (
-                <div key={group.moduleName} style={{ marginBottom: 16 }}>
-                  <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                <div key={group.moduleName} className="permission-group">
+                  <Typography.Text type="secondary" className="permission-group__title">
                     {group.moduleName}
                   </Typography.Text>
                   <Space size={[16, 8]} wrap>
@@ -355,6 +361,7 @@ export default function RoleManagePage() {
           </Form.Item>
         </Form>
       </Drawer>
-    </Card>
+      </Card>
+    </div>
   );
 }

@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
-import { Button, Card, Col, Empty, Popconfirm, Row, Space, Spin, Tooltip, Typography, message } from 'antd';
+import { Button, Card, Col, Empty, Popconfirm, Row, Space, Spin, Tag, Tooltip, Typography, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { deleteKnowledgeBase, listKnowledgeBases } from '../../api/kb';
 import { getDemoStatus, importDemo } from '../../api/system';
 import type { DemoStatus, KnowledgeBase } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
+import PageHeader from '../../components/PageHeader';
+import RetrievalPipeline from '../../components/RetrievalPipeline';
 import CreateKbModal from './components/CreateKbModal';
 import EditKbModal from './components/EditKbModal';
 
@@ -65,68 +67,70 @@ export default function KbListPage() {
   };
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          知识库
-        </Typography.Title>
-        {canWrite && (
+    <div className="knowledge-workbench-page kb-overview-page">
+      <PageHeader
+        eyebrow="KNOWLEDGE WORKSPACE"
+        title="知识库"
+        description="集中管理知识资产、解析策略与检索质量，从原始文档一路追踪到可验证的回答。"
+        before={<RetrievalPipeline compact />}
+        actions={canWrite ? (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
             新建知识库
           </Button>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       <Spin spinning={loading}>
         {!loading && kbs.length === 0 ? (
-          <Empty
-            description={
-              canWrite
-                ? '还没有知识库，点击右上角「新建知识库」开始创建，上传文档后即可在此进行检索调试'
-                : '当前账号暂无可访问的知识库，如需开通请联系管理员'
-            }
-          >
-            {canWrite && (
-              <Space>
-                <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
-                  立即新建
-                </Button>
-                <Tooltip title={demoStatus && !demoStatus.available ? '未找到 Demo 素材目录，暂不可用' : undefined}>
-                  <Button
-                    icon={<ThunderboltOutlined />}
-                    loading={demoImporting}
-                    disabled={!demoStatus?.available}
-                    onClick={handleDemoImport}
-                  >
-                    {demoStatus?.imported ? '查看 Demo 知识库' : '一键导入 Demo 知识库'}
+          <Card className="workbench-empty-card">
+            <Empty
+              description={
+                canWrite
+                  ? '还没有知识库。创建后上传文档，即可开始解析、检索与质量评测。'
+                  : '当前账号暂无可访问的知识库，如需开通请联系管理员。'
+              }
+            >
+              {canWrite && (
+                <Space wrap>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+                    立即新建
                   </Button>
-                </Tooltip>
-              </Space>
-            )}
-          </Empty>
+                  <Tooltip title={demoStatus && !demoStatus.available ? '未找到 Demo 素材目录，暂不可用' : undefined}>
+                    <Button
+                      icon={<ThunderboltOutlined />}
+                      loading={demoImporting}
+                      disabled={!demoStatus?.available}
+                      onClick={handleDemoImport}
+                    >
+                      {demoStatus?.imported ? '查看 Demo 知识库' : '导入 Demo 知识库'}
+                    </Button>
+                  </Tooltip>
+                </Space>
+              )}
+            </Empty>
+          </Card>
         ) : (
-          <Row gutter={[16, 16]}>
+          <Row className="knowledge-card-grid" gutter={[18, 18]}>
             {kbs.map((kb) => (
               <Col key={kb.kb_id} xs={24} sm={12} md={8} lg={6}>
                 <Card
                   hoverable
+                  className="knowledge-card"
                   title={kb.name}
-                  onClick={() => navigate(`/kb/${kb.kb_id}`)}
                   actions={[
-                    <span key="detail" onClick={() => navigate(`/kb/${kb.kb_id}`)}>
+                    <Button key="detail" type="text" size="small" onClick={() => navigate(`/kb/${kb.kb_id}`)}>
                       查看详情
-                    </span>,
+                    </Button>,
                     ...(canWrite
                       ? [
-                          <span
+                          <Button
                             key="edit"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingKb(kb);
-                            }}
+                            type="text"
+                            size="small"
+                            onClick={() => setEditingKb(kb)}
                           >
                             编辑
-                          </span>,
+                          </Button>,
                           <Popconfirm
                             key="delete"
                             title="确认删除该知识库？"
@@ -134,18 +138,22 @@ export default function KbListPage() {
                             okText="删除"
                             okType="danger"
                             cancelText="取消"
-                            onConfirm={(e) => {
-                              e?.stopPropagation();
-                              handleDelete(kb.kb_id);
-                            }}
-                            onCancel={(e) => e?.stopPropagation()}
+                            onConfirm={() => handleDelete(kb.kb_id)}
                           >
-                            <span onClick={(e) => e.stopPropagation()}>删除</span>
+                            <Button type="text" size="small" danger>
+                              删除
+                            </Button>
                           </Popconfirm>,
                         ]
                       : []),
                   ]}
                 >
+                  <Space className="knowledge-card__meta" wrap size={[4, 6]}>
+                    <Tag color={kb.graph_enabled ? 'processing' : 'default'}>
+                      {kb.graph_enabled ? 'GraphRAG' : '标准检索'}
+                    </Tag>
+                    {kb.review_required && <Tag color="warning">入库审核</Tag>}
+                  </Space>
                   <Typography.Paragraph ellipsis={{ rows: 2 }} type="secondary">
                     {kb.description || '暂无描述'}
                   </Typography.Paragraph>

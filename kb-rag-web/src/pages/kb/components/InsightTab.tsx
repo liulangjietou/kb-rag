@@ -104,29 +104,29 @@ export default function InsightTab({ kbId }: InsightTabProps) {
         <Typography.Text type="secondary">统计默认最近 7 天，可通过时间范围调整</Typography.Text>
       </Space>
 
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}>
+      <Row className="insight-stat-grid" gutter={[16, 16]}>
+        <Col xs={24} sm={12} xl={6}>
           <Card size="small" loading={statsLoading}>
             <Statistic title="总检索次数" value={stats?.total ?? 0} />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} xl={6}>
           <Card size="small" loading={statsLoading}>
             <Statistic
               title="零命中率"
               value={(stats?.zero_hit_rate ?? 0) * 100}
               precision={1}
               suffix="%"
-              valueStyle={(stats?.zero_hit_rate ?? 0) > 0.2 ? { color: '#cf1322' } : undefined}
+              valueStyle={(stats?.zero_hit_rate ?? 0) > 0.2 ? { color: 'var(--kb-color-danger)' } : undefined}
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} xl={6}>
           <Card size="small" loading={statsLoading}>
             <Statistic title="零命中次数" value={stats?.zero_hit_count ?? 0} />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col xs={24} sm={12} xl={6}>
           <Card size="small" loading={statsLoading}>
             <Statistic title="降级次数" value={stats?.degraded_count ?? 0} />
           </Card>

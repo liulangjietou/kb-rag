@@ -72,8 +72,8 @@ export default function RetrievalNodeCard({
   const isChatLog = node.chunk_type === 'chat_log';
 
   return (
-    <Card size="small" style={{ marginBottom: 12 }}>
-      <Space wrap style={{ marginBottom: 8 }}>
+    <Card className={`retrieval-result-card${selected ? ' is-selected' : ''}`} size="small">
+      <Space className="retrieval-result-card__signals" wrap>
         {onSelectChange && (
           <Checkbox checked={!!selected} onChange={(e) => onSelectChange(e.target.checked)} />
         )}
@@ -90,6 +90,7 @@ export default function RetrievalNodeCard({
                 size="small"
                 type={feedback === 'GOOD' ? 'primary' : 'text'}
                 icon={<LikeOutlined />}
+                aria-label="标为好结果"
                 onClick={() => onFeedback('GOOD')}
               />
             </Tooltip>
@@ -99,6 +100,7 @@ export default function RetrievalNodeCard({
                 danger={feedback === 'BAD'}
                 type={feedback === 'BAD' ? 'primary' : 'text'}
                 icon={<DislikeOutlined />}
+                aria-label="标为坏结果"
                 onClick={() => onFeedback('BAD')}
               />
             </Tooltip>
@@ -106,7 +108,7 @@ export default function RetrievalNodeCard({
         )}
       </Space>
       {isChatLog && metadata && (
-        <Space wrap style={{ marginBottom: 8 }}>
+        <Space className="retrieval-result-card__context" wrap>
           {metadata.session_name && <Tag>会话：{metadata.session_name}</Tag>}
           {metadata.sender && <Tag>发送人：{metadata.sender}</Tag>}
           {metadata.msg_time !== undefined && <Tag>{formatEpochMillis(metadata.msg_time)}</Tag>}
@@ -149,7 +151,7 @@ export default function RetrievalNodeCard({
         </Typography.Paragraph>
       )}
       {node.image_urls.length > 0 && (
-        <div style={{ marginBottom: 8 }}>
+        <div className="retrieval-result-card__images">
           <Image.PreviewGroup>
             <Space wrap>
               {node.image_urls.map((url) => (
@@ -160,7 +162,7 @@ export default function RetrievalNodeCard({
         </div>
       )}
       {metadata && (
-        <div style={{ marginBottom: 8 }}>
+        <div className="retrieval-result-card__scores">
           <RouteScoreTags source={metadata} />
         </div>
       )}
@@ -170,7 +172,7 @@ export default function RetrievalNodeCard({
       >
         {node.content}
       </Typography.Paragraph>
-      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+      <Typography.Text className="retrieval-result-card__identity" type="secondary">
         doc_id: {node.doc_id} · chunk_id: {node.chunk_id}
       </Typography.Text>
       {children.length > 0 && (

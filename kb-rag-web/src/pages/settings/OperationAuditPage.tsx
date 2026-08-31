@@ -17,6 +17,7 @@ import type { ColumnsType } from 'antd/es/table';
 import type { Dayjs } from 'dayjs';
 import { listOperationAudits } from '../../api/operationAudit';
 import type { OperationAuditEntry } from '../../api/types';
+import PageHeader from '../../components/PageHeader';
 
 const PAGE_SIZE = 20;
 
@@ -113,8 +114,14 @@ export default function OperationAuditPage() {
   ];
 
   return (
-    <Card title="操作审计">
-      <Space style={{ marginBottom: 16 }} wrap>
+    <div className="management-page audit-page">
+      <PageHeader
+        eyebrow="AUDIT EVIDENCE"
+        title="操作审计"
+        description="按操作者、模块和时间追溯写操作。审计记录只读保存，确保平台治理证据不会被页面自身改写。"
+      />
+      <Card className="management-panel">
+      <Space className="management-filter audit-filter" wrap>
         <Input
           allowClear
           placeholder="模块，如 KB / USER"
@@ -150,6 +157,7 @@ export default function OperationAuditPage() {
       </Space>
 
       <Table<OperationAuditEntry>
+        className="management-table"
         rowKey="audit_id"
         loading={loading}
         columns={columns}
@@ -184,13 +192,14 @@ export default function OperationAuditPage() {
             <Descriptions.Item label="来源 IP">{detail.client_ip ?? '-'}</Descriptions.Item>
             <Descriptions.Item label="请求 ID">{detail.request_id ?? '-'}</Descriptions.Item>
             <Descriptions.Item label="请求详情">
-              <Typography.Text code style={{ wordBreak: 'break-all' }}>
+              <Typography.Text code className="technical-text audit-detail-text">
                 {detail.detail ?? '-'}
               </Typography.Text>
             </Descriptions.Item>
           </Descriptions>
         )}
       </Drawer>
-    </Card>
+      </Card>
+    </div>
   );
 }

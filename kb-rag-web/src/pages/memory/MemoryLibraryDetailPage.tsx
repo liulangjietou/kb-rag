@@ -1,12 +1,13 @@
 // Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useState } from 'react';
 import { ApiOutlined, ArrowLeftOutlined } from '@ant-design/icons';
-import { Button, Space, Spin, Tabs, Tag, Typography } from 'antd';
+import { Button, Space, Spin, Tabs, Tag } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getMemoryLibrary } from '../../api/memory';
 import type { MemoryLibraryDetail } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
+import PageHeader from '../../components/PageHeader';
 import ApiCallDrawer from './components/ApiCallDrawer';
 import EntitiesTab from './components/EntitiesTab';
 import FragmentRulesTab from './components/FragmentRulesTab';
@@ -44,30 +45,39 @@ export default function MemoryLibraryDetailPage() {
   }
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <Space>
-          <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/memory')} />
-          <Typography.Title level={4} style={{ margin: 0 }}>
-            {detail.name}
-          </Typography.Title>
-          <Tag>{detail.library_id}</Tag>
-        </Space>
-        <Space size="large">
-          <Typography.Text type="secondary">记忆节点 {detail.node_count}</Typography.Text>
-          <Typography.Text type="secondary">记忆实体 {detail.entity_count}</Typography.Text>
-          <Button icon={<ApiOutlined />} onClick={() => setApiDrawerOpen(true)}>
-            API 调用
+    <div className="catalog-eval-page catalog-detail-page">
+      <PageHeader
+        eyebrow="MEMORY WORKSPACE / 记忆工作台"
+        title={detail.name}
+        description={detail.description || '配置记忆采集规则、实体关系、检索调试与智能体访问密钥。'}
+        before={
+          <Button
+            type="text"
+            className="catalog-back-button"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate('/memory')}
+          >
+            返回记忆库
           </Button>
-        </Space>
-      </div>
-      {detail.description && (
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-          {detail.description}
-        </Typography.Paragraph>
-      )}
+        }
+        actions={
+          <Space className="catalog-context-actions" size="middle" wrap>
+            <span className="catalog-context-metric">
+              <b>{detail.node_count}</b> 记忆节点
+            </span>
+            <span className="catalog-context-metric">
+              <b>{detail.entity_count}</b> 记忆实体
+            </span>
+            <Button icon={<ApiOutlined />} onClick={() => setApiDrawerOpen(true)}>
+              API 调用
+            </Button>
+          </Space>
+        }
+      />
+      <Tag className="catalog-context-id">{detail.library_id}</Tag>
 
       <Tabs
+        className="catalog-workbench-tabs"
         defaultActiveKey="fragment-rules"
         items={[
           {

@@ -122,6 +122,7 @@ export default function EvalCaseFormModal({
 
   return (
     <Modal
+      rootClassName="catalog-eval-modal catalog-eval-case-modal"
       title={editingCase ? '编辑评测 case' : '新增评测 case'}
       open={open}
       onOk={handleSubmit}

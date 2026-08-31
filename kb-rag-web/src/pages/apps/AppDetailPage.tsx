@@ -1,11 +1,12 @@
 // Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeftOutlined } from '@ant-design/icons';
-import { Button, Space, Spin, Tabs, Typography } from 'antd';
+import { Button, Spin, Tabs, Typography } from 'antd';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getApp, listAppVersions } from '../../api/app';
 import { listKnowledgeBases } from '../../api/kb';
 import type { AppVersion, KbApp, KnowledgeBase } from '../../api/types';
+import PageHeader from '../../components/PageHeader';
 import AppConfigTab from './components/AppConfigTab';
 import AppVersionTab from './components/AppVersionTab';
 import ApiDebugTab from './components/ApiDebugTab';
@@ -45,19 +46,27 @@ export default function AppDetailPage() {
   const latestVersion = versions[0] ?? null;
 
   return (
-    <div>
-      <Space style={{ marginBottom: 16 }}>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/apps')}>
-          返回列表
-        </Button>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          {app?.name ?? '应用详情'}
-        </Typography.Title>
-      </Space>
-      {app?.description && <Typography.Paragraph type="secondary">{app.description}</Typography.Paragraph>}
+    <div className="catalog-eval-page catalog-detail-page">
+      <PageHeader
+        eyebrow="APP WORKSPACE / 应用工作台"
+        title={app?.name ?? '应用详情'}
+        description={app?.description || '编辑应用配置、管理版本发布门禁，并通过真实 API 请求验证效果。'}
+        before={
+          <Button
+            type="text"
+            className="catalog-back-button"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate('/apps')}
+          >
+            返回应用中心
+          </Button>
+        }
+        actions={app ? <Typography.Text className="catalog-context-id">{app.app_id}</Typography.Text> : undefined}
+      />
 
       <Spin spinning={loading}>
         <Tabs
+          className="catalog-workbench-tabs"
           items={[
             {
               key: 'config',

@@ -115,7 +115,14 @@ export default function GateCompareDrawer({ version, onClose }: GateCompareDrawe
   const runLabels = ['本次候选', '对照（当前正式版）'];
 
   return (
-    <Drawer title="发布门禁双跑对比" open={version !== null} onClose={onClose} width={880} destroyOnClose>
+    <Drawer
+      rootClassName="catalog-eval-drawer"
+      title="发布门禁双跑对比"
+      open={version !== null}
+      onClose={onClose}
+      width={880}
+      destroyOnClose
+    >
       <Spin spinning={loading}>
         {version && (
           <Space direction="vertical" style={{ width: '100%' }} size={16}>
