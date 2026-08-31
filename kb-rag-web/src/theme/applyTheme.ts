@@ -12,6 +12,8 @@ function paletteToCssVariables(palette: ThemePalette): Readonly<Record<ThemeCssV
     '--kb-color-surface': palette.surface,
     '--kb-color-surface-raised': palette.surfaceRaised,
     '--kb-color-surface-subtle': palette.surfaceSubtle,
+    '--kb-code-bg': palette.codeBackground,
+    '--kb-code-text': palette.codeText,
     '--kb-color-text': palette.text,
     '--kb-color-text-secondary': palette.textSecondary,
     '--kb-color-text-tertiary': palette.textTertiary,

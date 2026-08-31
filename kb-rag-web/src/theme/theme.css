@@ -8,6 +8,12 @@
   box-shadow: none;
 }
 
+.theme-preset-switcher__menu {
+  max-height: min(68vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .theme-preset-switcher__button-content {
   display: inline-flex;
   align-items: center;

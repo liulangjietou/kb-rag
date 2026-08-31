@@ -1,6 +1,15 @@
 (() => {
   const fallback = 'atlas';
-  const modes = { atlas: 'light', ocean: 'light', violet: 'light', night: 'dark' };
+  const modes = {
+    atlas: 'light',
+    ocean: 'light',
+    violet: 'light',
+    cinder: 'light',
+    moss: 'light',
+    rose: 'light',
+    graphite: 'light',
+    night: 'dark',
+  };
   try {
     const stored = localStorage.getItem('kb-rag-web:theme-preset');
     const theme = Object.prototype.hasOwnProperty.call(modes, stored) ? stored : fallback;
