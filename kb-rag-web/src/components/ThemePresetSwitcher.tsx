@@ -59,6 +59,7 @@ export default function ThemePresetSwitcher({ compact = false }: ThemePresetSwit
         onClick={cyclePreset}
         menu={{
           id: menuId,
+          className: 'theme-preset-switcher__menu',
           items,
           selectable: true,
           selectedKeys: [presetId],

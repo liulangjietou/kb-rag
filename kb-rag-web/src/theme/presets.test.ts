@@ -28,6 +28,8 @@ function expectedCssVariables(palette: ThemePalette): Record<string, string> {
     '--kb-color-surface': palette.surface,
     '--kb-color-surface-raised': palette.surfaceRaised,
     '--kb-color-surface-subtle': palette.surfaceSubtle,
+    '--kb-code-bg': palette.codeBackground,
+    '--kb-code-text': palette.codeText,
     '--kb-color-text': palette.text,
     '--kb-color-text-secondary': palette.textSecondary,
     '--kb-color-text-tertiary': palette.textTertiary,
@@ -66,11 +68,14 @@ function contrastRatio(first: string, second: string): number {
 }
 
 describe('theme presets', () => {
-  it('provides four distinct presets with Atlas as the default', () => {
-    expect(THEME_PRESETS.map((preset) => preset.id)).toEqual(['atlas', 'ocean', 'violet', 'night']);
+  const presetIds = ['atlas', 'ocean', 'violet', 'cinder', 'moss', 'rose', 'graphite', 'night'] as const;
+
+  it('provides eight distinct presets with Atlas as the default', () => {
+    expect(THEME_PRESETS.map((preset) => preset.id)).toEqual(presetIds);
     expect(new Set(THEME_PRESETS.map((preset) => preset.id)).size).toBe(THEME_PRESETS.length);
     expect(DEFAULT_THEME_PRESET_ID).toBe('atlas');
     expect(THEME_PRESETS.find((preset) => preset.id === 'night')?.mode).toBe('dark');
+    expect(THEME_PRESETS.filter((preset) => preset.mode === 'light')).toHaveLength(7);
   });
 
   it('falls back to Atlas for missing or invalid persisted values', () => {
@@ -78,19 +83,41 @@ describe('theme presets', () => {
     expect(resolveThemePresetId('')).toBe('atlas');
     expect(resolveThemePresetId('unknown-theme')).toBe('atlas');
     expect(resolveThemePresetId('night')).toBe('night');
+    expect(resolveThemePresetId('rose')).toBe('rose');
   });
 
   it('cycles through every preset and wraps back to Atlas', () => {
-    expect(getNextThemePresetId('atlas')).toBe('ocean');
-    expect(getNextThemePresetId('ocean')).toBe('violet');
-    expect(getNextThemePresetId('violet')).toBe('night');
-    expect(getNextThemePresetId('night')).toBe('atlas');
+    for (const [index, presetId] of presetIds.entries()) {
+      expect(getNextThemePresetId(presetId)).toBe(presetIds[(index + 1) % presetIds.length]);
+    }
   });
 
   it('keeps white text on every primary button above WCAG AA contrast', () => {
     for (const preset of THEME_PRESETS) {
       expect(contrastRatio(preset.palette.primary, '#FFFFFF'), preset.id).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(preset.palette.primaryHover, '#FFFFFF'), `${preset.id} hover`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('keeps workbench, code block, and sidebar copy above WCAG AA contrast', () => {
+    for (const preset of THEME_PRESETS) {
+      expect(contrastRatio(preset.palette.text, preset.palette.background), `${preset.id} text`).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(preset.palette.textSecondary, preset.palette.background),
+        `${preset.id} secondary text`,
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(preset.palette.sidebarText, preset.palette.sidebar),
+        `${preset.id} sidebar text`,
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(preset.palette.sidebarMuted, preset.palette.sidebar),
+        `${preset.id} sidebar muted text`,
+      ).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(preset.palette.codeText, preset.palette.codeBackground),
+        `${preset.id} code text`,
+      ).toBeGreaterThanOrEqual(4.5);
     }
   });
 
