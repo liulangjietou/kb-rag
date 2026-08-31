@@ -72,7 +72,7 @@ export default function EvalDatasetTab({
   };
 
   return (
-    <div>
+    <div className="catalog-data-surface">
       <Space style={{ marginBottom: 16 }}>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
           新建评测集
@@ -141,6 +141,7 @@ export default function EvalDatasetTab({
       />
 
       <Modal
+        rootClassName="catalog-eval-modal"
         title="新建评测集"
         open={createOpen}
         onOk={handleCreate}

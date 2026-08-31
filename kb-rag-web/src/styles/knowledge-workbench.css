@@ -1,0 +1,607 @@
+/* 知识与调试工作台：只定义本领域页面的结构与语义外观，颜色全部来自主题预设。 */
+
+.knowledge-workbench-page {
+  min-width: 0;
+}
+
+.knowledge-workbench-page .retrieval-pipeline {
+  padding: 24px 22px 14px;
+  background: var(--kb-color-sidebar);
+  border: 1px solid color-mix(in srgb, var(--kb-color-sidebar-muted) 28%, transparent);
+  border-radius: var(--kb-radius-lg);
+  box-shadow: 0 12px 26px color-mix(in srgb, var(--kb-color-sidebar) 16%, transparent);
+}
+
+.knowledge-workbench-page .retrieval-pipeline li {
+  padding-top: 16px;
+}
+
+.knowledge-workbench-page .retrieval-pipeline i {
+  background: var(--kb-color-sidebar);
+}
+
+.knowledge-workbench-page .retrieval-pipeline--compact {
+  padding: 18px 18px 12px;
+}
+
+.knowledge-workbench-page .retrieval-pipeline--compact li {
+  padding-top: 13px;
+}
+
+.workbench-config-card,
+.workbench-toolbar-card {
+  margin-bottom: 18px;
+  border-top: 3px solid var(--kb-color-primary);
+}
+
+.workbench-empty-card {
+  min-height: 310px;
+}
+
+.workbench-empty-card .ant-card-body {
+  display: grid;
+  min-height: 308px;
+  place-items: center;
+}
+
+/* 知识库总览 */
+
+.knowledge-card-grid > .ant-col {
+  display: flex;
+}
+
+.knowledge-card {
+  width: 100%;
+  min-height: 224px;
+  overflow: hidden;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.knowledge-card:hover,
+.knowledge-card:focus-visible {
+  border-color: color-mix(in srgb, var(--kb-color-primary) 56%, var(--kb-color-border));
+  box-shadow: var(--kb-shadow);
+  transform: translateY(-2px);
+}
+
+.knowledge-card .ant-card-head-title {
+  overflow: hidden;
+  font-size: 16px;
+  text-overflow: ellipsis;
+}
+
+.knowledge-card .ant-card-body {
+  min-height: 100px;
+}
+
+.knowledge-card__meta {
+  margin-bottom: 12px;
+}
+
+.knowledge-card .ant-card-actions {
+  background: color-mix(in srgb, var(--kb-color-surface-subtle) 52%, var(--kb-color-surface));
+  border-top-color: var(--kb-color-border);
+}
+
+.knowledge-card .ant-card-actions > li > span {
+  font-weight: 620;
+}
+
+/* 知识库详情 */
+
+.page-back-button {
+  height: 30px;
+  padding-inline: 0;
+  color: var(--kb-color-text-secondary);
+}
+
+.page-back-button:hover {
+  color: var(--kb-color-primary) !important;
+  background: transparent !important;
+}
+
+.kb-detail-actions {
+  justify-content: flex-end;
+}
+
+.kb-review-toggle {
+  min-height: 38px;
+  padding: 0 11px;
+  background: var(--kb-color-surface-subtle);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-md);
+}
+
+.kb-detail-tabs > .ant-tabs-nav {
+  margin-bottom: 18px;
+}
+
+.kb-detail-tabs > .ant-tabs-nav::before {
+  border-bottom-color: var(--kb-color-border);
+}
+
+.kb-detail-tabs > .ant-tabs-nav .ant-tabs-tab {
+  padding-block: 12px;
+  font-weight: 650;
+}
+
+.kb-detail-tabs,
+.kb-detail-tabs > .ant-tabs-content-holder,
+.kb-detail-tabs > .ant-tabs-content-holder > .ant-tabs-content,
+.kb-detail-tabs .ant-tabs-tabpane,
+.document-management-table {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.document-upload-zone {
+  margin-bottom: 24px;
+  background: color-mix(in srgb, var(--kb-color-primary-soft) 42%, var(--kb-color-surface));
+  border-color: color-mix(in srgb, var(--kb-color-primary) 44%, var(--kb-color-border)) !important;
+}
+
+.document-upload-zone:hover {
+  background: color-mix(in srgb, var(--kb-color-primary-soft) 64%, var(--kb-color-surface));
+}
+
+.document-management-table .ant-table-content,
+.kb-detail-page .ant-table-content {
+  overflow-x: auto !important;
+  overscroll-behavior-inline: contain;
+}
+
+.document-management-table .ant-table-cell:first-child {
+  max-width: 280px;
+}
+
+.document-row-actions {
+  row-gap: 4px;
+}
+
+.parse-preview-markdown {
+  max-height: 480px;
+  padding: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+}
+
+.knowledge-graph-canvas {
+  width: 100%;
+  height: 480px;
+  background:
+    linear-gradient(var(--kb-color-border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--kb-color-border) 1px, transparent 1px),
+    var(--kb-color-surface-subtle);
+  background-size: 28px 28px;
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-lg);
+  touch-action: none;
+}
+
+.knowledge-graph-canvas g[style*='cursor'] circle {
+  filter: drop-shadow(0 2px 3px color-mix(in srgb, var(--kb-color-text) 18%, transparent));
+}
+
+.insight-stat-grid {
+  margin-bottom: 16px;
+}
+
+.insight-stat-grid .ant-card {
+  height: 100%;
+}
+
+/* 检索实验台 */
+
+.search-config-card .ant-card-body {
+  padding: clamp(18px, 2.5vw, 30px);
+}
+
+.retrieval-parameter-panel {
+  margin-bottom: 18px;
+}
+
+.retrieval-parameter-panel > .ant-collapse-item > .ant-collapse-header {
+  min-height: 48px;
+  align-items: center;
+}
+
+.retrieval-parameter-panel .ant-collapse-header-text::before {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 9px;
+  background: var(--kb-color-primary);
+  border-radius: 50%;
+  vertical-align: 2px;
+  content: '';
+}
+
+.workbench-primary-action {
+  margin-bottom: 0;
+}
+
+.search-result-toolbar {
+  display: flex;
+  width: 100%;
+  margin: 2px 0 12px;
+  padding: 10px 12px;
+  justify-content: space-between;
+  background: var(--kb-color-surface-subtle);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-md);
+}
+
+.search-result-list {
+  display: block;
+}
+
+.retrieval-result-card {
+  margin-bottom: 12px;
+  border-left: 3px solid transparent;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.retrieval-result-card:hover {
+  border-left-color: color-mix(in srgb, var(--kb-color-primary) 55%, var(--kb-color-border));
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--kb-color-text) 7%, transparent);
+}
+
+.retrieval-result-card.is-selected {
+  border-color: color-mix(in srgb, var(--kb-color-primary) 60%, var(--kb-color-border));
+  border-left-color: var(--kb-color-primary);
+}
+
+.retrieval-result-card__signals,
+.retrieval-result-card__context,
+.retrieval-result-card__images,
+.retrieval-result-card__scores {
+  margin-bottom: 9px;
+}
+
+.retrieval-result-card__identity,
+.image-picker__hint {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* 图片检索输入 */
+
+.image-picker,
+.image-picker__items {
+  max-width: 100%;
+}
+
+.image-picker__preview {
+  position: relative;
+  padding: 3px;
+  background: var(--kb-color-surface);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-md);
+}
+
+.image-picker__image {
+  object-fit: cover;
+  border-radius: calc(var(--kb-radius-md) - 3px);
+}
+
+.image-picker__remove {
+  position: absolute;
+  z-index: 1;
+  top: -9px;
+  right: -9px;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  line-height: 22px;
+  background: var(--kb-color-surface-raised);
+  border: 1px solid color-mix(in srgb, var(--kb-color-danger) 40%, var(--kb-color-border));
+  border-radius: 50%;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--kb-color-text) 15%, transparent);
+}
+
+/* 对话调试 */
+
+.chat-settings-card .ant-card-body {
+  padding: 13px 16px;
+}
+
+.chat-settings {
+  display: flex;
+  width: 100%;
+  align-items: center;
+}
+
+.chat-app-select {
+  width: min(260px, 100%);
+}
+
+.chat-version-input {
+  width: min(230px, 100%);
+}
+
+.chat-stream-toggle {
+  margin-left: auto;
+  padding-inline: 4px;
+}
+
+.chat-prerequisite {
+  margin-bottom: 16px;
+}
+
+.chat-transcript-card {
+  min-height: 430px;
+  margin-bottom: 14px;
+}
+
+.chat-transcript {
+  width: 100%;
+}
+
+.chat-turn {
+  width: min(86%, 920px);
+}
+
+.chat-turn--user {
+  margin-left: auto;
+  text-align: right;
+}
+
+.chat-turn--assistant {
+  margin-right: auto;
+  text-align: left;
+}
+
+.chat-turn__identity {
+  margin-bottom: 5px;
+}
+
+.chat-turn--user .chat-turn__identity .ant-tag {
+  margin-inline: 0;
+}
+
+.chat-turn__bubble {
+  display: inline-block;
+  max-width: 100%;
+  padding: 11px 14px;
+  color: var(--kb-color-text);
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--kb-color-surface-subtle);
+  border: 1px solid var(--kb-color-border);
+  border-radius: 4px var(--kb-radius-lg) var(--kb-radius-lg) var(--kb-radius-lg);
+}
+
+.chat-turn--user .chat-turn__bubble {
+  color: var(--kb-color-text);
+  background: var(--kb-color-primary-soft);
+  border-color: color-mix(in srgb, var(--kb-color-primary) 34%, var(--kb-color-border));
+  border-radius: var(--kb-radius-lg) 4px var(--kb-radius-lg) var(--kb-radius-lg);
+}
+
+.chat-turn > .ant-alert,
+.chat-turn > .ant-space {
+  width: 100%;
+  margin-top: 8px;
+  text-align: left;
+}
+
+.chat-reference-list {
+  width: 100%;
+  margin-top: 9px;
+}
+
+.chat-reference-card {
+  width: 100%;
+  text-align: left;
+}
+
+.chat-reference-card .ant-card-head {
+  min-height: 42px;
+}
+
+.chat-image-picker {
+  margin-bottom: 9px;
+}
+
+.chat-composer {
+  display: flex;
+  width: 100%;
+  align-items: stretch;
+  padding: 5px;
+  background: var(--kb-color-surface);
+  border: 1px solid var(--kb-color-border-strong);
+  border-radius: var(--kb-radius-lg);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--kb-color-text) 6%, transparent);
+}
+
+.chat-composer textarea.ant-input {
+  min-height: 72px;
+  resize: vertical;
+  border: 0;
+  box-shadow: none !important;
+}
+
+.chat-send-button {
+  align-self: stretch;
+  height: auto;
+  border-radius: var(--kb-radius-md) !important;
+}
+
+/* MCP 协议控制台 */
+
+.mcp-workbench-stack {
+  width: 100%;
+}
+
+.mcp-connection-card .ant-radio-group {
+  max-width: 100%;
+}
+
+.mcp-key-input {
+  max-width: 560px;
+}
+
+.mcp-panel-card {
+  height: 100%;
+}
+
+.mcp-code-block {
+  max-height: 360px;
+  margin: 0;
+  padding: 14px;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre;
+  overflow: auto;
+}
+
+.mcp-code-block--schema {
+  max-height: 240px;
+}
+
+.mcp-code-block--response {
+  max-height: 420px;
+}
+
+@media (max-width: 720px) {
+  .knowledge-workbench-page .retrieval-pipeline {
+    padding-inline: 15px;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .knowledge-workbench-page .retrieval-pipeline li {
+    flex: 0 0 88px;
+  }
+
+  .kb-detail-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .kb-detail-tabs > .ant-tabs-nav {
+    max-width: calc(100vw - 40px);
+  }
+
+  .kb-detail-tabs > .ant-tabs-nav .ant-tabs-nav-wrap {
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .knowledge-graph-canvas {
+    height: 390px;
+  }
+
+  .search-result-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .search-result-toolbar .ant-btn {
+    width: 100%;
+  }
+
+  .chat-settings > .ant-space-item,
+  .chat-app-select,
+  .chat-version-input {
+    width: 100%;
+  }
+
+  .chat-stream-toggle {
+    width: 100%;
+    margin-left: 0;
+    justify-content: space-between;
+  }
+
+  .chat-turn {
+    width: 94%;
+  }
+
+  .mcp-connection-card .ant-radio-group {
+    display: grid;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mcp-connection-card .ant-radio-button-wrapper {
+    height: auto;
+    min-height: 38px;
+    padding-block: 7px;
+    line-height: 1.45;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 480px) {
+  .knowledge-workbench-page .retrieval-pipeline {
+    margin-inline: 0;
+    border-radius: var(--kb-radius-md);
+  }
+
+  .knowledge-card {
+    min-height: 0;
+  }
+
+  .knowledge-card:hover,
+  .knowledge-card:focus-visible {
+    transform: none;
+  }
+
+  .kb-detail-actions > .ant-space-item,
+  .kb-detail-actions .ant-btn,
+  .kb-review-toggle {
+    width: 100%;
+  }
+
+  .kb-review-toggle {
+    justify-content: space-between;
+  }
+
+  .document-upload-zone .ant-upload {
+    padding-inline: 12px;
+  }
+
+  .knowledge-graph-canvas {
+    height: 330px;
+  }
+
+  .retrieval-result-card .ant-card-body {
+    padding: 14px;
+  }
+
+  .workbench-primary-action .ant-btn {
+    width: 100%;
+  }
+
+  .chat-turn {
+    width: 100%;
+  }
+
+  .chat-transcript-card .ant-card-body {
+    padding-inline: 12px;
+  }
+
+  .chat-composer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .chat-send-button {
+    min-height: 42px;
+  }
+
+  .mcp-code-block {
+    max-width: calc(100vw - 60px);
+    font-size: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .knowledge-card,
+  .retrieval-result-card {
+    transition: none;
+  }
+}

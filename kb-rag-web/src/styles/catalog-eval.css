@@ -1,0 +1,548 @@
+/* 应用、记忆与评测工作台共享视觉层。领域组件仍负责状态与数据，本文件只组织展示。 */
+
+.catalog-eval-page {
+  position: relative;
+  min-width: 0;
+}
+
+.catalog-eval-page::before {
+  position: absolute;
+  z-index: -1;
+  top: -30px;
+  right: 0;
+  width: min(430px, 42vw);
+  height: 150px;
+  background:
+    linear-gradient(90deg, transparent 31px, color-mix(in srgb, var(--kb-color-primary) 7%, transparent) 32px),
+    linear-gradient(transparent 31px, color-mix(in srgb, var(--kb-color-primary) 7%, transparent) 32px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(90deg, transparent, #000 44%, #000);
+  pointer-events: none;
+  content: '';
+}
+
+.catalog-page-tools {
+  max-width: 100%;
+}
+
+.catalog-page-tools .ant-input-affix-wrapper {
+  width: 220px;
+}
+
+.catalog-back-button {
+  height: 30px;
+  margin-left: -10px;
+  padding-inline: 9px;
+  color: var(--kb-color-text-secondary);
+  font-size: 12px;
+}
+
+.catalog-back-button:hover {
+  color: var(--kb-color-primary) !important;
+  background: var(--kb-color-primary-soft) !important;
+}
+
+.catalog-context-id,
+.catalog-resource-card__id {
+  max-width: min(360px, 44vw);
+  overflow: hidden;
+  color: var(--kb-color-text-tertiary) !important;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.025em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-context-id {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  margin: 0 0 16px;
+  padding: 5px 10px;
+  background: var(--kb-color-surface-subtle);
+  border: 1px solid var(--kb-color-border);
+  border-radius: 999px;
+}
+
+.page-header__actions .catalog-context-id {
+  margin-bottom: 0;
+}
+
+.catalog-context-actions {
+  justify-content: flex-end;
+}
+
+.catalog-context-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-height: 34px;
+  padding: 6px 10px;
+  color: var(--kb-color-text-secondary);
+  background: var(--kb-color-surface);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-sm);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.catalog-context-metric b {
+  color: var(--kb-color-text);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.catalog-context-select {
+  width: min(300px, 52vw);
+}
+
+/* 资源目录卡：顶部色轨对应可发布资源，底部动作保持清晰层级。 */
+
+.catalog-list-page .ant-row {
+  align-items: stretch;
+}
+
+.catalog-list-page .ant-col {
+  display: flex;
+}
+
+.catalog-resource-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 198px;
+  overflow: hidden;
+  border-top: 3px solid var(--kb-color-primary);
+  border-radius: var(--kb-radius-md);
+  box-shadow: var(--kb-shadow);
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.catalog-resource-card > .ant-card-body {
+  flex: 1 1 auto;
+}
+
+.catalog-resource-card::after {
+  position: absolute;
+  top: 19px;
+  right: 17px;
+  width: 9px;
+  height: 9px;
+  background: var(--kb-color-primary-soft);
+  border: 2px solid var(--kb-color-primary);
+  border-radius: 50%;
+  content: '';
+}
+
+.catalog-resource-card.ant-card-hoverable:hover,
+.catalog-resource-card:focus-visible {
+  border-color: var(--kb-color-primary);
+  box-shadow: var(--kb-shadow-strong);
+  transform: translateY(-2px);
+}
+
+.catalog-resource-card .ant-card-head {
+  padding-right: 44px;
+  background: linear-gradient(180deg, var(--kb-color-surface-raised), var(--kb-color-surface));
+}
+
+.catalog-resource-card .ant-card-head-title {
+  font-size: 16px;
+}
+
+.catalog-resource-card__id {
+  display: block;
+  max-width: 100%;
+  margin: -2px 0 10px;
+}
+
+.catalog-resource-card .ant-card-actions {
+  background: color-mix(in srgb, var(--kb-color-surface-subtle) 55%, var(--kb-color-surface));
+  border-top-color: var(--kb-color-border);
+}
+
+.catalog-resource-card .ant-card-actions > li {
+  margin-block: 10px;
+}
+
+.catalog-resource-card .ant-card-actions span:hover {
+  color: var(--kb-color-primary);
+}
+
+.catalog-memory-card {
+  min-height: 256px;
+}
+
+.catalog-memory-card .ant-statistic {
+  min-width: 0;
+  padding: 8px 6px;
+  background: var(--kb-color-surface-subtle);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-sm);
+  text-align: center;
+}
+
+.catalog-memory-card .ant-statistic-title {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 工作台 Tab 是页面级导航，不与表单内的局部 Tab 争抢层级。 */
+
+.catalog-workbench-tabs > .ant-tabs-nav {
+  margin-bottom: 20px;
+  padding: 5px;
+  background: var(--kb-color-surface);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-md);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--kb-color-text) 5%, transparent);
+}
+
+.catalog-workbench-tabs > .ant-tabs-nav::before {
+  border-bottom: 0;
+}
+
+.catalog-workbench-tabs > .ant-tabs-nav .ant-tabs-nav-list {
+  gap: 4px;
+}
+
+.catalog-workbench-tabs > .ant-tabs-nav .ant-tabs-tab {
+  margin: 0;
+  padding: 8px 13px;
+  border-radius: var(--kb-radius-sm);
+}
+
+.catalog-workbench-tabs > .ant-tabs-nav .ant-tabs-tab-active {
+  background: var(--kb-color-primary-soft);
+}
+
+.catalog-workbench-tabs > .ant-tabs-nav .ant-tabs-ink-bar {
+  display: none;
+}
+
+.catalog-workbench-tabs > .ant-tabs-content-holder {
+  min-width: 0;
+}
+
+/* 表单与数据面：表单段落使用轻底色，宽表在窄屏安全滚动。 */
+
+.catalog-form-surface,
+.catalog-table-surface {
+  border-radius: var(--kb-radius-md);
+  box-shadow: var(--kb-shadow);
+}
+
+.catalog-form-surface {
+  border-top: 3px solid var(--kb-color-primary);
+}
+
+.catalog-form-surface > .ant-card-body {
+  padding: clamp(18px, 2.5vw, 28px);
+}
+
+.catalog-form-surface .ant-divider {
+  margin-block: 24px 18px;
+  color: var(--kb-color-text);
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.catalog-form-surface .ant-divider::before,
+.catalog-form-surface .ant-divider::after {
+  border-color: var(--kb-color-border);
+}
+
+.catalog-form-surface .ant-collapse,
+.catalog-form-surface .ant-form-list {
+  border-radius: var(--kb-radius-sm);
+}
+
+.catalog-data-surface {
+  min-width: 0;
+}
+
+.catalog-data-surface > .ant-space:first-child {
+  min-height: 46px;
+  margin-bottom: 14px !important;
+  padding: 8px 10px;
+  background: var(--kb-color-surface);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-sm);
+}
+
+.catalog-eval-page .ant-table-wrapper {
+  overflow: hidden;
+  background: var(--kb-color-surface);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-md);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--kb-color-text) 5%, transparent);
+}
+
+.catalog-eval-page .ant-table-wrapper .ant-table-content,
+.catalog-eval-page .ant-table-wrapper .ant-table-body {
+  overflow-x: auto !important;
+}
+
+.catalog-eval-page .ant-table-wrapper .ant-table-thead > tr > th {
+  background: color-mix(in srgb, var(--kb-color-surface-subtle) 72%, var(--kb-color-surface));
+}
+
+.catalog-eval-page .ant-table-wrapper .ant-table-row-expand-icon-cell,
+.catalog-eval-page .ant-table-wrapper .ant-table-cell-fix-left,
+.catalog-eval-page .ant-table-wrapper .ant-table-cell-fix-right {
+  background: var(--kb-color-surface);
+}
+
+.catalog-eval-page .ant-pagination {
+  padding-inline: 2px;
+}
+
+.catalog-code-block {
+  margin: 0;
+  padding: 14px 16px;
+  color: var(--kb-code-text);
+  background: var(--kb-code-bg);
+  border-radius: var(--kb-radius-sm);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: auto;
+}
+
+/* Portal surfaces require explicit root classes because they render outside the page DOM. */
+
+.catalog-eval-modal .ant-modal-content,
+.catalog-eval-drawer .ant-drawer-content {
+  border: 1px solid var(--kb-color-border);
+  box-shadow: var(--kb-shadow-strong);
+}
+
+.catalog-eval-modal .ant-modal-header,
+.catalog-eval-drawer .ant-drawer-header {
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--kb-color-border);
+}
+
+.catalog-eval-modal .ant-modal-title,
+.catalog-eval-drawer .ant-drawer-title {
+  color: var(--kb-color-text);
+  font-size: 17px;
+}
+
+.catalog-eval-drawer .ant-drawer-body {
+  background: color-mix(in srgb, var(--kb-color-bg) 45%, var(--kb-color-surface));
+}
+
+.catalog-eval-drawer .ant-descriptions-bordered .ant-descriptions-item-label,
+.catalog-eval-drawer .ant-table-thead > tr > th {
+  background: var(--kb-color-surface-subtle) !important;
+}
+
+.catalog-eval-drawer .ant-table-wrapper {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-sm);
+}
+
+.catalog-eval-drawer .ant-table-content,
+.catalog-eval-drawer .ant-table-body {
+  overflow-x: auto !important;
+}
+
+.catalog-eval-drawer .ant-radio-group {
+  display: inline-flex;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.catalog-snippet {
+  margin-bottom: 16px;
+  overflow: hidden;
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-sm);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--kb-color-text) 5%, transparent);
+}
+
+.catalog-snippet__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  background: var(--kb-color-surface-subtle);
+  border-bottom: 1px solid var(--kb-color-border);
+}
+
+.catalog-snippet__body {
+  margin: 0;
+  padding: 14px;
+  color: var(--kb-code-text);
+  background: var(--kb-code-bg);
+  border: 0;
+  border-radius: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-x: auto;
+}
+
+.catalog-code-line {
+  min-width: max-content;
+  white-space: pre;
+}
+
+.catalog-code-placeholder {
+  color: color-mix(in srgb, var(--kb-color-primary) 58%, #ffffff);
+  font-weight: 720;
+}
+
+.catalog-secret-modal .ant-typography code {
+  display: block;
+  max-width: 100%;
+  padding: 12px;
+  color: var(--kb-code-text);
+  background: var(--kb-code-bg);
+  border: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 720px) {
+  .catalog-eval-page::before {
+    width: 72vw;
+    opacity: 0.75;
+  }
+
+  .catalog-page-tools {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto;
+    width: 100%;
+  }
+
+  .catalog-page-tools .ant-space-item:first-child,
+  .catalog-page-tools .ant-input-affix-wrapper {
+    width: 100%;
+  }
+
+  .catalog-context-select {
+    width: min(100%, 360px);
+  }
+
+  .catalog-context-actions {
+    justify-content: flex-start;
+  }
+
+  .catalog-workbench-tabs > .ant-tabs-nav {
+    max-width: calc(100vw - 40px);
+    margin-bottom: 16px;
+  }
+
+  .catalog-workbench-tabs > .ant-tabs-nav .ant-tabs-nav-wrap {
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .catalog-eval-page .ant-space-item,
+  .catalog-eval-modal .ant-space-item,
+  .catalog-eval-drawer .ant-space-item {
+    max-width: 100%;
+  }
+
+  .catalog-eval-page .ant-form-item[style*='min-width'] {
+    min-width: min(100%, 320px) !important;
+  }
+
+  .catalog-eval-page .ant-table-wrapper .ant-table,
+  .catalog-eval-drawer .ant-table-wrapper .ant-table {
+    min-width: 760px;
+  }
+
+  .catalog-eval-page .ant-table-wrapper .ant-table-small,
+  .catalog-eval-drawer .ant-table-wrapper .ant-table-small {
+    min-width: 640px;
+  }
+
+  .catalog-eval-modal .ant-input[style],
+  .catalog-eval-modal .ant-select[style],
+  .catalog-eval-modal .ant-input-number[style] {
+    max-width: 100% !important;
+  }
+
+  .catalog-eval-drawer .ant-descriptions-view {
+    overflow-x: auto;
+  }
+
+  .catalog-eval-drawer .ant-descriptions table {
+    min-width: 540px;
+  }
+}
+
+@media (max-width: 480px) {
+  .catalog-page-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .catalog-page-tools .ant-btn {
+    width: 100%;
+  }
+
+  .catalog-resource-card,
+  .catalog-memory-card {
+    min-height: 0;
+  }
+
+  .catalog-context-id,
+  .catalog-resource-card__id {
+    max-width: 100%;
+  }
+
+  .catalog-context-metric {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .catalog-workbench-tabs > .ant-tabs-nav {
+    max-width: calc(100vw - 28px);
+    padding: 4px;
+  }
+
+  .catalog-workbench-tabs > .ant-tabs-nav .ant-tabs-tab {
+    padding-inline: 10px;
+  }
+
+  .catalog-form-surface > .ant-card-body {
+    padding: 16px;
+  }
+
+  .catalog-eval-modal .ant-modal-footer {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .catalog-eval-modal .ant-modal-footer .ant-btn {
+    flex: 1 1 120px;
+    margin-inline-start: 0;
+  }
+
+  .catalog-snippet__header {
+    padding-inline: 10px;
+  }
+
+  .catalog-snippet__body,
+  .catalog-code-block {
+    padding: 12px;
+    font-size: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .catalog-resource-card {
+    transition: none;
+  }
+}

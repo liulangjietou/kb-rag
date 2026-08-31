@@ -47,6 +47,7 @@ import { PUBLISH_STATUS_META } from '../../api/types';
 import type { KbDocument, KnowledgeBase, RebuildStatus } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
+import PageHeader from '../../components/PageHeader';
 import { formatFileSize } from '../../utils/format';
 import { PROCESS_STATUS_META, metaOf } from '../../utils/statusMeta';
 import ChatImportWizard from './components/ChatImportWizard';
@@ -388,41 +389,42 @@ export default function KbDetailPage() {
   };
 
   return (
-    <div>
-      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }}>
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/kb')}>
-            返回列表
+    <div className="knowledge-workbench-page kb-detail-page">
+      <PageHeader
+        eyebrow="KNOWLEDGE OPERATIONS"
+        title={kb?.name ?? '知识库详情'}
+        description={kb?.description || '管理文档生命周期、索引策略、知识图谱与检索质量。'}
+        before={
+          <Button className="page-back-button" type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/kb')}>
+            返回知识库
           </Button>
-          <Typography.Title level={4} style={{ margin: 0 }}>
-            {kb?.name ?? '知识库详情'}
-          </Typography.Title>
-        </Space>
-        <Space>
-          <Tooltip title="开启后，之后上传的新文档默认为草稿，需提交审核并通过后才参与检索；已有文档不受影响">
-            <Space size={4}>
-              <Typography.Text type="secondary">新文档需审核</Typography.Text>
-              <Switch
-                size="small"
-                checked={kb?.review_required ?? false}
-                loading={governanceSaving}
-                onChange={handleGovernanceToggle}
-              />
-            </Space>
-          </Tooltip>
-          <Button icon={<MessageOutlined />} onClick={() => setChatImportOpen(true)}>
-            导入聊天记录
-          </Button>
-          <Button icon={<SettingOutlined />} onClick={() => setIndexConfigOpen(true)}>
-            索引配置
-          </Button>
-        </Space>
-      </Space>
-      {kb?.description && (
-        <Typography.Paragraph type="secondary">{kb.description}</Typography.Paragraph>
-      )}
+        }
+        actions={
+          <Space className="kb-detail-actions" wrap>
+            <Tooltip title="开启后，之后上传的新文档默认为草稿，需提交审核并通过后才参与检索；已有文档不受影响">
+              <Space className="kb-review-toggle" size={6}>
+                <Typography.Text type="secondary">新文档需审核</Typography.Text>
+                <Switch
+                  size="small"
+                  checked={kb?.review_required ?? false}
+                  loading={governanceSaving}
+                  aria-label="新文档需审核"
+                  onChange={handleGovernanceToggle}
+                />
+              </Space>
+            </Tooltip>
+            <Button icon={<MessageOutlined />} onClick={() => setChatImportOpen(true)}>
+              导入聊天记录
+            </Button>
+            <Button icon={<SettingOutlined />} onClick={() => setIndexConfigOpen(true)}>
+              索引配置
+            </Button>
+          </Space>
+        }
+      />
 
       <Tabs
+        className="kb-detail-tabs"
         items={[
           {
             key: 'documents',
@@ -494,7 +496,7 @@ export default function KbDetailPage() {
                   />
                 )}
 
-                <Upload.Dragger {...uploadProps} style={{ marginBottom: 24 }}>
+                <Upload.Dragger {...uploadProps} className="document-upload-zone">
                   <p className="ant-upload-drag-icon">
                     <InboxOutlined />
                   </p>
@@ -551,9 +553,11 @@ export default function KbDetailPage() {
                 )}
 
                 <Table<KbDocument>
+                  className="document-management-table"
                   rowKey="doc_id"
                   loading={loading}
                   dataSource={documents}
+                  scroll={{ x: 1180 }}
                   pagination={{
                     current: docPage,
                     pageSize: docPageSize,
@@ -656,7 +660,7 @@ export default function KbDetailPage() {
                       title: '操作',
                       width: 380,
                       render: (_, record: KbDocument) => (
-                        <Space wrap>
+                        <Space className="document-row-actions" wrap>
                           <Button size="small" onClick={() => setChunkDoc(record)}>
                             查看分片
                           </Button>

@@ -24,6 +24,7 @@ export interface NavEntry {
   key: string;
   label: string;
   icon: ReactNode;
+  section: NavSection;
   /**
    * Codes that admit the entry, any one of them being enough -- the same rule the server's
    * @RequiresPermission applies. The list mirrors what the screen's endpoints actually declare, so a
@@ -32,44 +33,56 @@ export interface NavEntry {
   anyOf: string[];
 }
 
+export type NavSection = 'workspace' | 'platform';
+
+export const NAV_SECTIONS: Array<{ key: NavSection; label: string }> = [
+  { key: 'workspace', label: '知识工作台' },
+  { key: 'platform', label: '平台管理' },
+];
+
 export const NAV_ENTRIES: NavEntry[] = [
-  { key: '/kb', icon: <DatabaseOutlined />, label: '知识库', anyOf: [PERMISSIONS.KB_READ] },
-  { key: '/search', icon: <SearchOutlined />, label: '检索调试', anyOf: [PERMISSIONS.SEARCH_DEBUG] },
+  { key: '/kb', icon: <DatabaseOutlined />, label: '知识库', section: 'workspace', anyOf: [PERMISSIONS.KB_READ] },
+  { key: '/search', icon: <SearchOutlined />, label: '检索调试', section: 'workspace', anyOf: [PERMISSIONS.SEARCH_DEBUG] },
   {
     key: '/chat',
     icon: <MessageOutlined />,
     label: '问答调试',
+    section: 'workspace',
     anyOf: [PERMISSIONS.APP_READ, PERMISSIONS.SEARCH_DEBUG],
   },
-  { key: '/apps', icon: <AppstoreOutlined />, label: '应用中心', anyOf: [PERMISSIONS.APP_READ] },
-  { key: '/memory', icon: <BulbOutlined />, label: '记忆库', anyOf: [PERMISSIONS.MEMORY_READ] },
+  { key: '/apps', icon: <AppstoreOutlined />, label: '应用中心', section: 'workspace', anyOf: [PERMISSIONS.APP_READ] },
+  { key: '/memory', icon: <BulbOutlined />, label: '记忆库', section: 'workspace', anyOf: [PERMISSIONS.MEMORY_READ] },
   {
     key: '/mcp',
     icon: <ApiOutlined />,
     label: 'MCP 调试',
+    section: 'workspace',
     anyOf: [PERMISSIONS.APP_READ, PERMISSIONS.MEMORY_READ],
   },
-  { key: '/eval', icon: <ExperimentOutlined />, label: '评测中心', anyOf: [PERMISSIONS.EVAL_READ] },
-  { key: '/users', icon: <TeamOutlined />, label: '用户管理', anyOf: [PERMISSIONS.USER_MANAGE] },
+  { key: '/eval', icon: <ExperimentOutlined />, label: '评测中心', section: 'workspace', anyOf: [PERMISSIONS.EVAL_READ] },
+  { key: '/users', icon: <TeamOutlined />, label: '用户管理', section: 'platform', anyOf: [PERMISSIONS.USER_MANAGE] },
   {
     key: '/roles',
     icon: <SafetyCertificateOutlined />,
     label: '角色管理',
+    section: 'platform',
     anyOf: [PERMISSIONS.ROLE_MANAGE],
   },
   {
     key: '/settings/tenants',
     icon: <ApartmentOutlined />,
     label: '租户管理',
+    section: 'platform',
     anyOf: [PERMISSIONS.TENANT_MANAGE],
   },
   {
     key: '/settings/operation-audits',
     icon: <AuditOutlined />,
     label: '操作审计',
+    section: 'platform',
     anyOf: [PERMISSIONS.AUDIT_READ],
   },
-  { key: '/settings', icon: <SettingOutlined />, label: '系统设置', anyOf: [PERMISSIONS.SYSTEM_CONFIG] },
+  { key: '/settings', icon: <SettingOutlined />, label: '系统设置', section: 'platform', anyOf: [PERMISSIONS.SYSTEM_CONFIG] },
 ];
 
 /** Path a session lands on when it asks for "/" or for something that does not exist. */

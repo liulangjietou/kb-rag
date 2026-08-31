@@ -47,6 +47,7 @@ export default function EditAppModal({ app, onClose, onUpdated }: EditAppModalPr
 
   return (
     <Modal
+      rootClassName="catalog-eval-modal"
       title="编辑应用"
       open={!!app}
       onOk={handleOk}

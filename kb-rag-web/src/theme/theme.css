@@ -1,0 +1,71 @@
+.theme-preset-switcher {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.theme-preset-switcher .ant-btn {
+  box-shadow: none;
+}
+
+.theme-preset-switcher__button-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.theme-preset-switcher__swatch,
+.theme-preset-option__swatch {
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(19, 46, 50, 0.12);
+}
+
+.theme-preset-switcher__swatch {
+  width: 13px;
+  height: 13px;
+}
+
+.theme-preset-option {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 210px;
+  padding-block: 2px;
+}
+
+.theme-preset-option__swatch {
+  width: 16px;
+  height: 16px;
+}
+
+.theme-preset-option__copy {
+  display: grid;
+  gap: 1px;
+}
+
+.theme-preset-option__name {
+  color: var(--kb-color-text);
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.theme-preset-option__description {
+  color: var(--kb-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.theme-preset-switcher__status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

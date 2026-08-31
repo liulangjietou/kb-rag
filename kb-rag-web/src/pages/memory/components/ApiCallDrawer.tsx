@@ -50,10 +50,10 @@ function CodeBlock({ title, code, tags }: { title: string; code: string; tags: L
     const tag = tags.find((t) => line.includes(t.match));
     const parts = line.split(KEY_PLACEHOLDER);
     return (
-      <div key={index} style={{ whiteSpace: 'pre' }}>
+      <div key={index} className="catalog-code-line">
         {parts.map((part, i) => (
           <span key={i}>
-            {i > 0 && <span style={{ color: '#eb2f96' }}>{KEY_PLACEHOLDER}</span>}
+            {i > 0 && <span className="catalog-code-placeholder">{KEY_PLACEHOLDER}</span>}
             {part}
           </span>
         ))}
@@ -67,24 +67,14 @@ function CodeBlock({ title, code, tags }: { title: string; code: string; tags: L
   };
 
   return (
-    <div style={{ border: '1px solid #f0f0f0', borderRadius: 6, marginBottom: 16 }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '4px 12px',
-          borderBottom: '1px solid #f0f0f0',
-          background: '#fafafa',
-          borderRadius: '6px 6px 0 0',
-        }}
-      >
+    <div className="catalog-snippet">
+      <div className="catalog-snippet__header">
         <Typography.Text strong style={{ fontSize: 13 }}>
           {title}
         </Typography.Text>
         <Button type="text" size="small" icon={<CopyOutlined />} onClick={handleCopy} />
       </div>
-      <pre style={{ margin: 0, padding: 12, fontSize: 12, overflowX: 'auto', background: '#fff', borderRadius: '0 0 6px 6px' }}>
+      <pre className="catalog-snippet__body">
         {code.split('\n').map(renderLine)}
       </pre>
     </div>
@@ -352,7 +342,7 @@ export default function ApiCallDrawer({ open, onClose, detail }: Props) {
   }, [detail]);
 
   return (
-    <Drawer title="API 调用" width={720} open={open} onClose={onClose}>
+    <Drawer rootClassName="catalog-eval-drawer catalog-api-drawer" title="API 调用" width={720} open={open} onClose={onClose}>
       <Alert
         type="info"
         showIcon

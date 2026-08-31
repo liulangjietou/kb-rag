@@ -168,6 +168,7 @@ export default function EntitiesTab({ libraryId, canWrite, onChanged }: Props) {
       />
 
       <Drawer
+        rootClassName="catalog-eval-drawer"
         title={
           <Space>
             记忆实体

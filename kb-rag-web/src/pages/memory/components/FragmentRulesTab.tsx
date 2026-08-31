@@ -218,6 +218,7 @@ export default function FragmentRulesTab({ libraryId, canWrite, onChanged }: Pro
       />
 
       <Modal
+        rootClassName="catalog-eval-modal"
         title={editing ? '编辑记忆片段规则' : '新建记忆片段规则'}
         open={upsertOpen}
         onOk={handleSubmit}

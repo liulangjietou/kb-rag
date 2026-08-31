@@ -1,9 +1,10 @@
 // Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Select, Space, Tabs, Typography } from 'antd';
+import { Alert, Select, Tabs } from 'antd';
 import { listEvalDatasets } from '../../api/evalDataset';
 import { listKnowledgeBases } from '../../api/kb';
 import type { EvalDataset, KnowledgeBase } from '../../api/types';
+import PageHeader from '../../components/PageHeader';
 import EvalCaseTab from './components/EvalCaseTab';
 import EvalDatasetTab from './components/EvalDatasetTab';
 import EvalReviewTab from './components/EvalReviewTab';
@@ -58,24 +59,27 @@ export default function EvalCenterPage() {
   };
 
   return (
-    <div>
-      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }} wrap>
-        <Typography.Title level={4} style={{ margin: 0 }}>
-          评测中心
-        </Typography.Title>
-        <Select
-          style={{ width: 280 }}
-          placeholder="请选择知识库"
-          value={kbId ?? undefined}
-          options={kbs.map((kb) => ({ label: kb.name, value: kb.kb_id }))}
-          onChange={(value) => setKbId(value)}
-        />
-      </Space>
+    <div className="catalog-eval-page catalog-detail-page catalog-eval-center">
+      <PageHeader
+        eyebrow="QUALITY LAB / 质量评测"
+        title="评测中心"
+        description="围绕同一知识库建立语料集、完成证据标注，并用可比的运行报告守住应用发布质量。"
+        actions={
+          <Select
+            className="catalog-context-select"
+            placeholder="请选择知识库"
+            value={kbId ?? undefined}
+            options={kbs.map((kb) => ({ label: kb.name, value: kb.kb_id }))}
+            onChange={(value) => setKbId(value)}
+          />
+        }
+      />
 
       {!kbId ? (
         <Alert type="info" showIcon message="请先创建知识库后再使用评测中心" />
       ) : (
         <Tabs
+          className="catalog-workbench-tabs"
           activeKey={activeTab}
           onChange={setActiveTab}
           items={[

@@ -28,6 +28,8 @@ import type { FusionMode, KnowledgeBase, MetadataFilter, RerankMode, SearchReque
 import { useModelStatus } from '../../context/ModelStatusContext';
 import { GRAPH_FUSION_MUTEX_HINT, describeDegradedReason, describeThresholdApplied } from '../../utils/statusMeta';
 import ImagePicker, { toImagesPayload, type PickedImage } from '../../components/ImagePicker';
+import PageHeader from '../../components/PageHeader';
+import RetrievalPipeline from '../../components/RetrievalPipeline';
 import AppliedInfoBar from './components/AppliedInfoBar';
 import CollectToEvalModal from './components/CollectToEvalModal';
 import RetrievalNodeCard from './components/RetrievalNodeCard';
@@ -199,8 +201,15 @@ export default function SearchPage() {
   const thresholdTag = result ? describeThresholdApplied(result.applied.threshold_applied_on, result.degraded) : null;
 
   return (
-    <div>
-      <Card style={{ marginBottom: 16 }}>
+    <div className="knowledge-workbench-page search-workbench-page">
+      <PageHeader
+        eyebrow="RETRIEVAL LAB"
+        title="检索调试"
+        description="逐段配置召回、融合、重排与过滤参数，并把每次结果沉淀为可复用的评测样本。"
+        before={<RetrievalPipeline />}
+      />
+
+      <Card className="workbench-config-card search-config-card">
         <Form<SearchFormValues>
           form={form}
           layout="vertical"
@@ -236,7 +245,7 @@ export default function SearchPage() {
           </Form.Item>
 
           <Collapse
-            style={{ marginBottom: 16 }}
+            className="retrieval-parameter-panel"
             defaultActiveKey={['recall', 'fusion', 'rerank', 'filter', 'return']}
             items={[
               {
@@ -414,8 +423,8 @@ export default function SearchPage() {
               style={{ marginBottom: 16 }}
             />
           )}
-          <Form.Item>
-            <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={loading}>
+          <Form.Item className="workbench-primary-action">
+            <Button type="primary" size="large" htmlType="submit" icon={<SearchOutlined />} loading={loading}>
               开始检索
             </Button>
           </Form.Item>
@@ -435,15 +444,17 @@ export default function SearchPage() {
       {result && <AppliedInfoBar applied={result.applied} degraded={result.degraded} originalQuery={searchedQuery} />}
 
       {result && result.nodes.length > 0 && (
-        <Space style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }}>
-          <Typography.Text type="secondary">已选 {selectedChunkIds.length} 项</Typography.Text>
+        <Space className="search-result-toolbar" wrap>
+          <Typography.Text type="secondary">
+            共 {result.nodes.length} 条结果 · 已选 {selectedChunkIds.length} 项
+          </Typography.Text>
           <Button disabled={selectedChunkIds.length === 0} onClick={() => setCollectModalOpen(true)}>
             收进评测集
           </Button>
         </Space>
       )}
 
-      <Spin spinning={loading}>
+      <Spin className="search-result-list" spinning={loading}>
         {hasSearched && result && result.nodes.length === 0 && <Empty description="未检索到相关结果" />}
         {result?.nodes.map((node, index) => (
           <RetrievalNodeCard

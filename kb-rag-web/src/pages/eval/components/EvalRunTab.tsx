@@ -205,8 +205,8 @@ export default function EvalRunTab({ dataset }: EvalRunTabProps) {
   }
 
   return (
-    <div>
-      <Card title="新建评测运行" style={{ marginBottom: 16 }}>
+    <div className="catalog-data-surface catalog-run-workbench">
+      <Card className="catalog-form-surface" title="新建评测运行" style={{ marginBottom: 16 }}>
         <Form<RunFormValues>
           form={form}
           layout="vertical"
@@ -334,6 +334,7 @@ export default function EvalRunTab({ dataset }: EvalRunTabProps) {
       </Card>
 
       <Card
+        className="catalog-table-surface"
         title="运行历史"
         extra={
           <Button type="primary" disabled={selectedRunIds.length < 2} onClick={() => setReportRunIds(selectedRunIds)}>

@@ -35,6 +35,7 @@ export default function CreateAppModal({ open, onClose, onCreated }: CreateAppMo
 
   return (
     <Modal
+      rootClassName="catalog-eval-modal"
       title="新建应用"
       open={open}
       onOk={handleOk}

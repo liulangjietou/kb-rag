@@ -209,7 +209,14 @@ export default function EvalReportDrawer({ datasetId, runIds, onClose }: EvalRep
   };
 
   return (
-    <Drawer title="评测报告" open={runIds !== null} onClose={onClose} width={960} destroyOnClose>
+    <Drawer
+      rootClassName="catalog-eval-drawer catalog-report-drawer"
+      title="评测报告"
+      open={runIds !== null}
+      onClose={onClose}
+      width={960}
+      destroyOnClose
+    >
       <Spin spinning={loading}>
         {!comparable ? (
           <Alert

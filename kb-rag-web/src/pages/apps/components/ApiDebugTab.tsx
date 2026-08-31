@@ -163,7 +163,7 @@ export default function ApiDebugTab({ appId, kbs }: ApiDebugTabProps) {
   };
 
   return (
-    <Card>
+    <Card className="catalog-form-surface catalog-api-debug">
       <Alert
         type="info"
         showIcon
@@ -229,7 +229,7 @@ export default function ApiDebugTab({ appId, kbs }: ApiDebugTabProps) {
                   <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
                     curl 示例：
                   </Typography.Paragraph>
-                  <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, overflowX: 'auto' }}>
+                  <pre className="catalog-code-block">
                     {buildCurl('search', apiKeyValue, commonBody)}
                   </pre>
                   {searchResult && !searchResult.ok && (
@@ -304,7 +304,7 @@ export default function ApiDebugTab({ appId, kbs }: ApiDebugTabProps) {
                   <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
                     curl 示例：
                   </Typography.Paragraph>
-                  <pre style={{ background: '#f5f5f5', padding: 12, borderRadius: 4, overflowX: 'auto' }}>
+                  <pre className="catalog-code-block">
                     {buildCurl('chat', apiKeyValue, { ...commonBody, stream: streamEnabled })}
                   </pre>
                   {chatError && (

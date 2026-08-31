@@ -1,5 +1,6 @@
-import { Card, Tabs, Typography } from 'antd';
+import { Card, Grid, Tabs, Typography } from 'antd';
 import { useModelStatus } from '../../context/ModelStatusContext';
+import PageHeader from '../../components/PageHeader';
 import AlertConfigTab from './components/AlertConfigTab';
 import ApiKeyTab from './components/ApiKeyTab';
 import AuditLogTab from './components/AuditLogTab';
@@ -14,17 +15,24 @@ import WebCredentialTab from './components/WebCredentialTab';
  */
 export default function SettingsPage() {
   const { modelStatus, loading } = useModelStatus();
+  const screens = Grid.useBreakpoint();
 
   return (
-    <div>
-      <Typography.Title level={4}>系统设置</Typography.Title>
+    <div className="management-page settings-page">
+      <PageHeader
+        eyebrow="PLATFORM CONFIGURATION"
+        title="系统设置"
+        description="集中维护模型能力、调用凭据、导入规则与运行告警。设置变更继续沿用各模块原有校验与保存边界。"
+      />
       <Tabs
+        className="settings-tabs"
+        tabPosition={screens.lg === false ? 'top' : 'left'}
         items={[
           {
             key: 'model-status',
             label: '模型状态',
             children: (
-              <Card loading={loading}>
+              <Card className="settings-panel" loading={loading}>
                 {modelStatus ? (
                   <ModelStatusCards
                     vectorEngine={modelStatus.vector_engine}
@@ -43,7 +51,7 @@ export default function SettingsPage() {
             key: 'ik-dict',
             label: 'ik 词典',
             children: (
-              <Card>
+              <Card className="settings-panel">
                 <IkDictTab />
               </Card>
             ),
@@ -52,7 +60,7 @@ export default function SettingsPage() {
             key: 'alert',
             label: '告警',
             children: (
-              <Card>
+              <Card className="settings-panel">
                 <AlertConfigTab />
               </Card>
             ),
@@ -61,7 +69,7 @@ export default function SettingsPage() {
             key: 'api-key',
             label: 'API Key 管理',
             children: (
-              <Card>
+              <Card className="settings-panel">
                 <ApiKeyTab />
               </Card>
             ),
@@ -70,7 +78,7 @@ export default function SettingsPage() {
             key: 'audit-log',
             label: '审计日志查询',
             children: (
-              <Card>
+              <Card className="settings-panel">
                 <AuditLogTab />
               </Card>
             ),
@@ -79,7 +87,7 @@ export default function SettingsPage() {
             key: 'source-mapping',
             label: '导入映射',
             children: (
-              <Card>
+              <Card className="settings-panel">
                 <SourceMappingTab />
               </Card>
             ),
@@ -88,7 +96,7 @@ export default function SettingsPage() {
             key: 'web-credential',
             label: '站点凭据',
             children: (
-              <Card>
+              <Card className="settings-panel">
                 <WebCredentialTab />
               </Card>
             ),

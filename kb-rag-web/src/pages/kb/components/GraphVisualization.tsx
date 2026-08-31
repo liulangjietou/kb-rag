@@ -196,19 +196,19 @@ export default function GraphVisualization({ entities, onEntityClick }: GraphVis
   }
 
   return (
-    <div>
+    <div className="knowledge-graph-visualization">
       <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
         节点大小 = 来源分片数；可拖拽节点调整位置；点击节点查看该实体的来源分片
       </Typography.Text>
       <svg
+        className="knowledge-graph-canvas"
         ref={svgRef}
         viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
-        style={{ width: '100%', height: 480, background: '#fafafa', borderRadius: 8, touchAction: 'none' }}
         onPointerMove={handlePointerMove}
         onPointerUp={stopDrag}
         onPointerLeave={stopDrag}
       >
-        <g stroke="#b0b0b0" strokeWidth={1} opacity={0.6}>
+        <g stroke="var(--kb-color-border-strong)" strokeWidth={1} opacity={0.72}>
           {edges.map((edge, index) => {
             const a = positionOf(edge.source);
             const b = positionOf(edge.target);
@@ -230,7 +230,7 @@ export default function GraphVisualization({ entities, onEntityClick }: GraphVis
                 }}
                 onClick={() => onEntityClick(entity.name)}
               >
-                <circle r={r} fill={colorForType(entity.type)} stroke="#fff" strokeWidth={1.5}>
+                <circle r={r} fill={colorForType(entity.type)} stroke="var(--kb-color-surface)" strokeWidth={1.5}>
                   <title>
                     {entity.name}（{entity.type || '未分类'}） · 来源分片 {entity.source_chunk_count}
                   </title>
@@ -240,7 +240,7 @@ export default function GraphVisualization({ entities, onEntityClick }: GraphVis
                   y={r + 12}
                   textAnchor="middle"
                   fontSize={11}
-                  fill="#333"
+                  fill="var(--kb-color-text)"
                   style={{ pointerEvents: 'none', userSelect: 'none' }}
                 >
                   {entity.name.length > 8 ? `${entity.name.slice(0, 8)}…` : entity.name}

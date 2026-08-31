@@ -19,6 +19,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { createTenant, listTenants, renameTenant, updateTenantModelQuota, updateTenantStatus } from '../../api/tenant';
 import type { TenantSummary } from '../../api/types';
+import PageHeader from '../../components/PageHeader';
 import ModelPriceDrawer from './components/ModelPriceDrawer';
 import ModelUsageDrawer from './components/ModelUsageDrawer';
 
@@ -184,9 +185,12 @@ export default function TenantManagePage() {
   ];
 
   return (
-    <Card
-      title="租户管理"
-      extra={
+    <div className="management-page tenants-page">
+      <PageHeader
+        eyebrow="TENANT BOUNDARIES"
+        title="租户管理"
+        description="租户是账号、知识库与物理索引的隔离边界。停用只阻断访问，不删除历史数据和审计归属。"
+        actions={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>
             刷新
@@ -199,8 +203,10 @@ export default function TenantManagePage() {
           </Button>
         </Space>
       }
-    >
+      />
+      <Card className="management-panel">
       <Table<TenantSummary>
+        className="management-table"
         rowKey="tenant_id"
         loading={loading}
         columns={columns}
@@ -263,6 +269,7 @@ export default function TenantManagePage() {
 
       <ModelUsageDrawer tenant={usageTenant} onClose={() => setUsageTenant(null)} />
       <ModelPriceDrawer open={priceOpen} onClose={() => setPriceOpen(false)} />
-    </Card>
+      </Card>
+    </div>
   );
 }

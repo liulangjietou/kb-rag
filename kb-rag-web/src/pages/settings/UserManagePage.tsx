@@ -34,6 +34,7 @@ import type { ListUsersParams } from '../../api/user';
 import type { PageResult, RoleSummary, TenantSummary, UserSummary } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
+import PageHeader from '../../components/PageHeader';
 
 const EMPTY_PAGE: PageResult<UserSummary> = { items: [], page: 1, size: 10, total: 0 };
 
@@ -316,9 +317,12 @@ export default function UserManagePage() {
   ];
 
   return (
-    <Card
-      title="用户管理"
-      extra={
+    <div className="management-page users-page">
+      <PageHeader
+        eyebrow="IDENTITY & ACCESS"
+        title="用户管理"
+        description="管理平台账号、域账号映射、角色与租户归属。当前账号的自保护规则和后端权限边界保持不变。"
+        actions={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>
             刷新
@@ -328,8 +332,9 @@ export default function UserManagePage() {
           </Button>
         </Space>
       }
-    >
-      <Space style={{ marginBottom: 16 }} wrap>
+      />
+      <Card className="management-panel">
+      <Space className="management-filter" wrap>
         <Input.Search
           allowClear
           placeholder="用户名 / 姓名 / 邮箱"
@@ -359,6 +364,7 @@ export default function UserManagePage() {
       </Space>
 
       <Table<UserSummary>
+        className="management-table"
         rowKey="user_id"
         loading={loading}
         columns={columns}
@@ -488,6 +494,7 @@ export default function UserManagePage() {
           </Form.Item>
         </Form>
       </Modal>
-    </Card>
+      </Card>
+    </div>
   );
 }

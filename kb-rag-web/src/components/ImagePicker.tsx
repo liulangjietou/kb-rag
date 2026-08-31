@@ -59,17 +59,18 @@ export default function ImagePicker({ value, onChange, disabled }: ImagePickerPr
   };
 
   return (
-    <Space direction="vertical" size={4}>
-      <Space wrap align="start">
+    <Space className="image-picker" direction="vertical" size={6}>
+      <Space className="image-picker__items" wrap align="start">
         {value.map((img) => (
-          <div key={img.uid} style={{ position: 'relative' }}>
-            <Image src={img.dataUrl} width={64} height={64} style={{ objectFit: 'cover', borderRadius: 4 }} />
+          <div className="image-picker__preview" key={img.uid}>
+            <Image className="image-picker__image" alt={img.name} src={img.dataUrl} width={68} height={68} />
             <Button
+              className="image-picker__remove"
               size="small"
               danger
               type="text"
               disabled={disabled}
-              style={{ position: 'absolute', top: -10, right: -10, minWidth: 20, height: 20, padding: 0, lineHeight: '20px' }}
+              aria-label={`移除图片 ${img.name}`}
               onClick={() => onChange(value.filter((item) => item.uid !== img.uid))}
             >
               ×
@@ -84,7 +85,7 @@ export default function ImagePicker({ value, onChange, disabled }: ImagePickerPr
           </Upload>
         )}
       </Space>
-      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+      <Typography.Text className="image-picker__hint" type="secondary">
         最多 {IMAGE_QUERY_MAX_COUNT} 张，单张建议 ≤{formatFileSize(IMAGE_QUERY_MAX_BYTES)}（前置提示，权威校验在服务端）
       </Typography.Text>
     </Space>
