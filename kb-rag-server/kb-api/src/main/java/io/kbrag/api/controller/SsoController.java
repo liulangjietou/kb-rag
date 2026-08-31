@@ -1,6 +1,7 @@
 package io.kbrag.api.controller;
 
 import io.kbrag.api.dto.SsoProvidersResponse;
+import io.kbrag.api.security.ClientIpResolver;
 import io.kbrag.app.auth.AuthService;
 import io.kbrag.app.auth.LoginTicket;
 import io.kbrag.app.auth.SsoStateStore;
@@ -24,7 +25,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -52,8 +52,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class SsoController {
 
-    private static final String HEADER_FORWARDED_FOR = "X-Forwarded-For";
-    private static final String FORWARDED_SEPARATOR = ",";
     private static final String OIDC_CALLBACK_PATH = "/api/v1/auth/oidc/callback";
     private static final String SAML_ACS_PATH = "/api/v1/auth/saml/acs";
     private static final String CAS_CALLBACK_PATH = "/api/v1/auth/cas/callback";
@@ -75,6 +73,7 @@ public class SsoController {
     private final SamlProcessor samlProcessor;
     private final CasValidator casValidator;
     private final KbProperties properties;
+    private final ClientIpResolver clientIpResolver;
 
     /**
      * Tells the login page which single sign on buttons to render.
@@ -216,7 +215,8 @@ public class SsoController {
             return errorRedirect(MSG_REJECTED);
         }
         try {
-            LoginTicket ticket = authService.completeExternalLogin(source, outcome.identity(), clientIp(servlet));
+            LoginTicket ticket = authService.completeExternalLogin(
+                    source, outcome.identity(), clientIpResolver.resolve(servlet));
             return redirect(webBaseUrl() + TOKEN_FRAGMENT
                     + URLEncoder.encode(ticket.token(), StandardCharsets.UTF_8));
         } catch (BizException e) {
@@ -236,14 +236,14 @@ public class SsoController {
     }
 
     /**
-     * Absolute callback URL derived from the current request.
+     * Absolute callback URL rooted at the explicitly configured public console origin.
      *
-     * <p>Derived rather than configured: the IdP already pins the acceptable callback on its own
-     * side, and a second copy in our configuration would be one more value to drift. Behind a
-     * reverse proxy the derivation follows the forwarded headers the server is told to trust.
+     * <p>The API and console share one public origin. Using that deployment contract keeps the
+     * redirect URI stable behind a TLS-terminating proxy without trusting attacker-controlled
+     * forwarded host or scheme headers.
      */
     private String callbackUrl(String path) {
-        return ServletUriComponentsBuilder.fromCurrentContextPath().path(path).toUriString();
+        return webBaseUrl() + path;
     }
 
     private String webBaseUrl() {
@@ -259,14 +259,4 @@ public class SsoController {
         }
     }
 
-    /**
-     * Resolves the caller address, honouring a single reverse proxy hop, same as the login endpoint.
-     */
-    private String clientIp(HttpServletRequest servlet) {
-        String forwarded = servlet.getHeader(HEADER_FORWARDED_FOR);
-        if (forwarded != null && !forwarded.isBlank()) {
-            return forwarded.split(FORWARDED_SEPARATOR)[0].trim();
-        }
-        return servlet.getRemoteAddr();
-    }
 }

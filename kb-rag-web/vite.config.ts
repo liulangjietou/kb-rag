@@ -19,6 +19,8 @@ export default defineConfig({
       '/api': {
         target: BACKEND_ORIGIN,
         changeOrigin: true,
+        // 后端只在 loopback 被列为可信代理时读取该链，并从右向左剥离可信 hop。
+        xfwd: true,
       },
       '/actuator': {
         target: BACKEND_ORIGIN,

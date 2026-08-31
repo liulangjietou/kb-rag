@@ -37,6 +37,42 @@ export interface LoginRequest {
   mode?: LoginMode;
 }
 
+/** 口令登录必须携带滑块验证签发的一次性凭证。 */
+export interface CaptchaLoginRequest extends LoginRequest {
+  captcha_proof: string;
+}
+
+/** POST /auth/captcha/challenge 返回的短时滑块挑战。 */
+export interface CaptchaChallengeResponse {
+  challenge_id: string;
+  track_scale: number;
+  expires_in_seconds: number;
+  background_image: string;
+  piece_image: string;
+  image_width: number;
+  image_height: number;
+  piece_width: number;
+  piece_height: number;
+  piece_y: number;
+}
+
+/** 归一化后的单个滑动轨迹点。 */
+export interface CaptchaTrackPoint {
+  x: number;
+  y: number;
+  elapsed_ms: number;
+}
+
+export interface CaptchaVerifyRequest {
+  challenge_id: string;
+  track: CaptchaTrackPoint[];
+}
+
+export interface CaptchaVerifyResponse {
+  captcha_proof: string;
+  expires_in_seconds: number;
+}
+
 export interface LoginResponse {
   token: string;
   must_change_password: boolean;

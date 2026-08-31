@@ -115,7 +115,7 @@
 | kb.auth.oidc.enabled / issuer / client-id / client-secret / scopes | AUTH_OIDC_* | false / 空 / 空 / 空 / `openid profile email` | issuer 用于发现文档 `{issuer}/.well-known/openid-configuration` |
 | kb.auth.saml.enabled / idp-entity-id / idp-sso-url / idp-certificate / sp-entity-id | AUTH_SAML_* | false / 空 / 空 / 空(PEM) / `kb-rag` | 证书是验签唯一信任锚，PEM 直接进环境变量 —— 引一个 metadata 拉取器就要处理它的可用性 |
 | kb.auth.cas.enabled / server-url | AUTH_CAS_* | false / 空 | server-url 如 `https://cas.corp.example.com/cas`，校验走 `/p3/serviceValidate` |
-| kb.auth.sso.web-base-url | AUTH_SSO_WEB_BASE_URL | 空 | 回调成功后重定向的前端地址，如 `https://kb.corp.example.com`；空则三协议即使 enabled 也判未配置 |
+| kb.auth.sso.web-base-url | AUTH_SSO_WEB_BASE_URL | 空 | 控制台公网 Origin，也是 OIDC/SAML/CAS 注册回调地址的根，如 `https://kb.corp.example.com`；必须填代理外部地址，空则三协议即使 enabled 也判未配置 |
 | kb.audit.operation-retention-days | AUDIT_OPERATION_RETENTION_DAYS | 180 | 操作审计保留期，对齐 M6 API 审计的 180 天 |
 
 - 三协议彼此独立开关，可同时开 —— `GET /auth/sso/providers` 返回已就绪列表（enabled 且必填项非空），登录页有几个渲染几个按钮。LDAP 页签沿用 M15 `sso-available`，两者并存：LDAP 是"输本地页面的域凭据"，三协议是"跳出去认证"。
@@ -154,6 +154,7 @@
 
 - **零重框架**：OIDC 引 `nimbus-jose-jwt`（只为 JWKS 验签，纯库无传递依赖）；SAML 用 JDK 自带 `javax.xml.crypto.dsig` 验签 + DOM 解析，**XML 解析器必须关外部实体**（XXE 是 SAML 的第一号历史漏洞）；CAS 纯 HTTP + DOM，零新依赖。
 - 每协议一个 kb-domain port 风格的独立组件（`OidcClient` / `SamlProcessor` / `CasValidator`，kb-infrastructure 实现），失败三态对齐 M15 `DirectoryBindResult`：断言无效 = INVALID_CREDENTIALS，IdP 不可达 = SERVICE_UNAVAILABLE（不计锁定，沿用 §M15-5.2）。
+- OIDC `redirect_uri`、SAML ACS、CAS `service` 都固定由 `{web-base-url}` 加协议路径组成，不从请求 Host/Scheme 或转发头推导。这样 TLS 在代理终止时仍与 IdP 注册值一致，也不会让伪造转发头改变认证回调。
 - 回调成功后 302 到 `{web-base-url}/login#sso_token={token}`：token 放 **fragment 不放 query** —— fragment 不进服务器日志、不进 Referer。前端 LoginPage 挂载时检出 hash、存 token、清 hash、进控制台。
 
 ### 3.5 SSO 统一落地（三协议与 LDAP 共用）

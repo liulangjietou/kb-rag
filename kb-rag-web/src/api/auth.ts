@@ -1,16 +1,27 @@
 // Author: owlzhangfq@gmail.com
 import { apiGet, apiPost } from './request';
 import type {
+  CaptchaChallengeResponse,
+  CaptchaLoginRequest,
+  CaptchaVerifyRequest,
+  CaptchaVerifyResponse,
   ChangePasswordRequest,
   CurrentUser,
-  LoginRequest,
   LoginResponse,
   SsoAvailability,
   SsoProviders,
 } from './types';
 
-export function login(payload: LoginRequest): Promise<LoginResponse> {
+export function login(payload: CaptchaLoginRequest): Promise<LoginResponse> {
   return apiPost<LoginResponse>('/auth/login', payload);
+}
+
+export function createCaptchaChallenge(): Promise<CaptchaChallengeResponse> {
+  return apiPost<CaptchaChallengeResponse>('/auth/captcha/challenge');
+}
+
+export function verifyCaptcha(payload: CaptchaVerifyRequest): Promise<CaptchaVerifyResponse> {
+  return apiPost<CaptchaVerifyResponse>('/auth/captcha/verify', payload);
 }
 
 /**

@@ -352,12 +352,73 @@ tags:
 security:
 - bearerAuth: []
 paths:
+  /api/v1/auth/captcha/challenge:
+    post:
+      tags:
+      - auth
+      summary: 签发登录滑块挑战
+      description: '免认证；返回服务端随机生成的 PNG 拼图、短时 challenge 和前端轨迹归一化坐标范围，
+        不返回横向目标值。challenge 与可信代理规则解析出的客户端地址、User-Agent 摘要绑定，且只能消费一次。
+        滑块只覆盖 LOCAL 平台口令和 SSO 目录口令登录。'
+      security: []
+      responses:
+        '200':
+          description: challenge 签发成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginCaptchaChallengeResult'
+        '429':
+          description: 验证码请求过于频繁（RATE_LIMITED）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/auth/captcha/verify:
+    post:
+      tags:
+      - auth
+      summary: 校验登录滑块轨迹
+      description: '免认证；在 32KB 请求体硬上限内原子消费可识别的 challenge，校验随机拼图落点、
+        服务端实测耗时和归一化轨迹，成功后签发短时一次性 captcha_proof。进入应用校验后，无论拼图、
+        轨迹、绑定或限流判断成功还是失败，原 challenge 都不能重放；无法解析的 JSON 或缺少必填字段
+        会在应用服务前拒绝。'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginCaptchaVerifyRequest'
+      responses:
+        '200':
+          description: 轨迹校验成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginCaptchaProofResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '413':
+          description: 请求体超过验证码接口 32KB 上限（PAYLOAD_TOO_LARGE）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 验证码请求过于频繁（RATE_LIMITED）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/auth/login:
     post:
       tags:
       - auth
       summary: 管理员登录（本地口令 / 单点登录）
-      description: 'mode=LOCAL 校验本地口令；mode=SSO 走目录 bind，目录账号首登自动建号并授予配置的默认角色。
+      description: '必须先通过滑块并携带短时一次性 captcha_proof；proof 在密码或目录认证前原子消费，
+        登录成功、凭据失败或接口重试后都必须重新滑动。请求体在 JSON 反序列化前受 8KB 硬上限保护。
+        mode=LOCAL 校验本地口令；mode=SSO 走目录 bind，目录账号首登自动建号并授予配置的默认角色。
 
         登录失败记入 t_kb_login_audit；连续失败 5 次锁定 15 分钟，但目录不可达（DIRECTORY_UNAVAILABLE）不计入失败次数。'
       security: []
@@ -378,6 +439,18 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '400':
           $ref: '#/components/responses/InvalidParam'
+        '413':
+          description: 请求体超过登录接口 8KB 上限（PAYLOAD_TOO_LARGE）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 登录 proof 消费过于频繁（RATE_LIMITED）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/auth/change-password:
     post:
       tags:
@@ -434,7 +507,7 @@ paths:
       - auth
       summary: 可用的浏览器重定向 SSO 协议（M16）
       description: 免认证；登录页据此渲染协议按钮。某协议为 true 需同时满足 enabled、必填项非空
-        与 kb.auth.sso.web-base-url 已配置（回调不知道把令牌送去哪里就不算就绪）。
+        与 kb.auth.sso.web-base-url 已配置；该值同时作为三协议注册回调地址的公网 Origin。
       security: []
       responses:
         '200':
@@ -5420,12 +5493,13 @@ components:
   schemas:
     ErrorCode:
       type: string
-      description: M1 错误码子集 + M4c 对外开放 API 新增错误码 + M15 FORBIDDEN，HTTP 状态码见括注
+      description: M1 错误码子集 + M4c 对外开放 API 新增错误码 + M15 FORBIDDEN + 登录验证码请求体上限，HTTP 状态码见各端点响应
       enum:
       - INVALID_PARAM
       - UNAUTHORIZED
       - FORBIDDEN
       - NOT_FOUND
+      - PAYLOAD_TOO_LARGE
       - INVALID_API_KEY
       - API_KEY_DISABLED
       - APP_ACCESS_DENIED
@@ -5484,20 +5558,144 @@ components:
       required:
       - username
       - password
+      - captcha_proof
       properties:
         username:
           type: string
+          maxLength: 128
         password:
           type: string
           format: password
+          maxLength: 512
         mode:
           type: string
+          maxLength: 16
           nullable: true
           enum:
           - LOCAL
           - SSO
-          description: 进来的入口；M15 新增，缺省读作 LOCAL，既有客户端不需改动。两个入口互不串用：
-            本地账号走 SSO、目录账号走本地口令均拒绝
+          description: 进来的入口；M15 新增，缺省读作 LOCAL。两个入口互不串用：本地账号走 SSO、
+            目录账号走本地口令均拒绝。注意登录请求现在仍必须先取得 captcha_proof
+        captcha_proof:
+          type: string
+          minLength: 43
+          maxLength: 43
+          description: 由 /api/v1/auth/captcha/verify 签发、与当前请求来源绑定的短时一次性凭证
+    LoginCaptchaChallengeData:
+      type: object
+      required:
+      - challenge_id
+      - track_scale
+      - expires_in_seconds
+      - background_image
+      - piece_image
+      - image_width
+      - image_height
+      - piece_width
+      - piece_height
+      - piece_y
+      properties:
+        challenge_id:
+          type: string
+        track_scale:
+          type: integer
+          enum:
+          - 1000
+          description: 前端上报轨迹时使用的横坐标归一化上限
+        expires_in_seconds:
+          type: integer
+          format: int64
+          example: 120
+        background_image:
+          type: string
+          pattern: '^data:image/png;base64,'
+          description: 服务端随机生成且已经挖出缺口的背景 PNG Data URL
+        piece_image:
+          type: string
+          pattern: '^data:image/png;base64,'
+          description: 与缺口匹配的透明拼图片 PNG Data URL
+        image_width:
+          type: integer
+          enum:
+          - 320
+        image_height:
+          type: integer
+          enum:
+          - 160
+        piece_width:
+          type: integer
+          enum:
+          - 48
+        piece_height:
+          type: integer
+          enum:
+          - 48
+        piece_y:
+          type: integer
+          minimum: 0
+          maximum: 112
+          description: 拼图片纵向展示位置；横向答案不进入响应
+    LoginCaptchaChallengeResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/LoginCaptchaChallengeData'
+    LoginCaptchaTrackPoint:
+      type: object
+      required:
+      - x
+      - y
+      - elapsed_ms
+      properties:
+        x:
+          type: integer
+          minimum: 0
+          maximum: 1000
+          description: 拼图片横向位置；最后一个点需命中服务端保存的随机缺口
+        y:
+          type: integer
+          minimum: -100
+          maximum: 100
+        elapsed_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 15000
+    LoginCaptchaVerifyRequest:
+      type: object
+      required:
+      - challenge_id
+      - track
+      properties:
+        challenge_id:
+          type: string
+        track:
+          type: array
+          minItems: 3
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/LoginCaptchaTrackPoint'
+    LoginCaptchaProofData:
+      type: object
+      required:
+      - captcha_proof
+      - expires_in_seconds
+      properties:
+        captcha_proof:
+          type: string
+        expires_in_seconds:
+          type: integer
+          format: int64
+          example: 60
+    LoginCaptchaProofResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/LoginCaptchaProofData'
     LoginData:
       type: object
       properties:
