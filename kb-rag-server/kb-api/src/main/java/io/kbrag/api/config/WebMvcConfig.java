@@ -27,6 +27,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
     private static final String INTERNAL_PATTERN = "/internal/**";
     private static final List<String> PUBLIC_PATHS = List.of(
             "/api/v1/auth/login",
+            // challenge 和 verify 是登录前置步骤，各自有来源绑定、一次性消费和专用限流。
+            "/api/v1/auth/captcha/challenge",
+            "/api/v1/auth/captcha/verify",
             // Tells the login page whether to offer the single sign-on tab. It has to be answerable before
             // anybody is authenticated, and it discloses one boolean about the deployment's own wiring.
             "/api/v1/auth/sso-available",

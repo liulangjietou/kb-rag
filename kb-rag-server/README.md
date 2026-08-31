@@ -143,6 +143,7 @@ CHAT_MODEL=qwen-plus                         # 留空 CHAT_API_KEY 即关闭 Que
 VISION_MODEL=qwen-vl-max                     # 留空 VISION_API_KEY 即不生成图片文本代理
 PARSER_BASE_URL=http://127.0.0.1:20001
 CORS_ALLOWED_ORIGINS=http://localhost:20002  # 管理台地址
+TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128     # 可提供 X-Forwarded-For 的代理；生产替换为实际网关 CIDR
 ```
 
 `kb.*` 的主要段落（完整清单见 `kb-api/src/main/resources/application.yml`，每个键都带一行说明为什么是这个默认值）：

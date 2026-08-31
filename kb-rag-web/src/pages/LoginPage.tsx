@@ -1,13 +1,15 @@
 // Author: owlzhangfq@gmail.com
 import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from '@ant-design/icons';
-import { App as AntApp, Button, Divider, Form, Input, Space, Tabs, Typography } from 'antd';
+import { App as AntApp, Button, Checkbox, Divider, Form, Input, Space, Tabs, Typography } from 'antd';
 import type { FormEvent } from 'react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getSsoAvailability, getSsoProviders, login } from '../api/auth';
 import type { LoginMode, SsoProviders } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import AuthShell from '../components/AuthShell';
+import LoginSliderCaptcha from '../components/LoginSliderCaptcha';
+import { clearLoginMemory, loadLoginMemory, saveLoginMemory, storePasswordCredential } from '../utils/loginMemory';
 
 interface LocationState {
   from?: { pathname: string };
@@ -28,15 +30,32 @@ function startBrowserSso(protocol: 'oidc' | 'saml' | 'cas') {
 
 /** 支持目录账号、本地账号和企业 SSO 的统一登录入口。 */
 export default function LoginPage() {
+  const [initialLoginMemory] = useState(loadLoginMemory);
   const [submitting, setSubmitting] = useState(false);
   const [ssoAvailable, setSsoAvailable] = useState(false);
   const [ssoProviders, setSsoProviders] = useState<SsoProviders | null>(null);
   const [mode, setMode] = useState<LoginMode>('LOCAL');
+  const [rememberCredentials, setRememberCredentials] = useState(initialLoginMemory.remember);
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
+  const [captchaVerified, setCaptchaVerified] = useState(false);
   const [formInstance] = Form.useForm<FormValues>();
+  const formHostRef = useRef<HTMLDivElement>(null);
+  const captchaProofRef = useRef<string | null>(null);
+  const loginInFlightRef = useRef(false);
+  const rememberCredentialsRef = useRef(initialLoginMemory.remember);
+  const submitRequestedRef = useRef(false);
+  const usernamesRef = useRef({ ...initialLoginMemory.usernames });
   const { message } = AntApp.useApp();
   const { loginSuccess } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  const resetCaptcha = useCallback(() => {
+    captchaProofRef.current = null;
+    submitRequestedRef.current = false;
+    setCaptchaVerified(false);
+    setCaptchaResetKey((current) => current + 1);
+  }, []);
 
   // SSO 结果放在 fragment 中，消费后立即清理，避免刷新重放或复制泄漏。
   useEffect(() => {
@@ -61,7 +80,22 @@ export default function LoginPage() {
       .then((res) => {
         if (!cancelled) {
           setSsoAvailable(res.sso_available);
-          setMode(res.sso_available ? 'SSO' : 'LOCAL');
+          const currentValues = formInstance.getFieldsValue();
+          const nativeForm = formHostRef.current?.querySelector('form');
+          const nativeValues = nativeForm instanceof HTMLFormElement ? new FormData(nativeForm) : null;
+          const hasCredentialInput = formInstance.isFieldsTouched()
+            || loginInFlightRef.current
+            || submitRequestedRef.current
+            || Boolean(currentValues.username || currentValues.password)
+            || Boolean(nativeValues?.get('username') || nativeValues?.get('password'));
+          if (res.sso_available && !hasCredentialInput) {
+            setMode('SSO');
+            formInstance.setFieldsValue({
+              username: initialLoginMemory.remember ? initialLoginMemory.usernames.SSO ?? '' : '',
+              password: '',
+            });
+            resetCaptcha();
+          }
         }
       })
       .catch(() => undefined);
@@ -75,12 +109,24 @@ export default function LoginPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [formInstance, initialLoginMemory, resetCaptcha]);
 
   const handleFinish = async (values: FormValues) => {
+    const captchaProof = captchaProofRef.current;
+    if (!captchaProof || loginInFlightRef.current) {
+      return;
+    }
+    loginInFlightRef.current = true;
     setSubmitting(true);
     try {
-      const res = await login({ ...values, mode });
+      const res = await login({ ...values, mode, captcha_proof: captchaProof });
+      if (rememberCredentialsRef.current) {
+        usernamesRef.current[mode] = values.username;
+        saveLoginMemory({ remember: true, usernames: usernamesRef.current });
+        await storePasswordCredential(values.username, values.password);
+      } else {
+        clearLoginMemory();
+      }
       loginSuccess(res.token, res.must_change_password);
       if (res.must_change_password) {
         navigate('/change-password', { replace: true });
@@ -88,7 +134,11 @@ export default function LoginPage() {
       }
       const state = location.state as LocationState | null;
       navigate(state?.from?.pathname ?? '/', { replace: true });
+    } catch {
+      // 共享请求拦截器已展示后端错误；这里只重置一次性 proof，保留账号和密码。
+      resetCaptcha();
     } finally {
+      loginInFlightRef.current = false;
       setSubmitting(false);
     }
   };
@@ -105,42 +155,103 @@ export default function LoginPage() {
   };
 
   const handleModeChange = (nextMode: string) => {
-    setMode(nextMode as LoginMode);
-    formInstance.setFieldValue('password', '');
+    const typedUsername = formInstance.getFieldValue('username');
+    if (typeof typedUsername === 'string') {
+      usernamesRef.current[mode] = typedUsername;
+    }
+    const selectedMode = nextMode as LoginMode;
+    setMode(selectedMode);
+    formInstance.setFieldsValue({
+      username: usernamesRef.current[selectedMode] ?? '',
+      password: '',
+    });
+    resetCaptcha();
+  };
+
+  const handleRememberChange = (checked: boolean) => {
+    // 登录请求可能尚未返回，成功回调必须读取用户最新的授权选择。
+    rememberCredentialsRef.current = checked;
+    setRememberCredentials(checked);
+    if (checked) {
+      saveLoginMemory({ remember: true, usernames: usernamesRef.current });
+    } else {
+      clearLoginMemory();
+    }
+  };
+
+  const handleCaptchaVerified = (captchaProof: string) => {
+    if (submitRequestedRef.current || loginInFlightRef.current) {
+      return;
+    }
+    captchaProofRef.current = captchaProof;
+    submitRequestedRef.current = true;
+    setCaptchaVerified(true);
+    const nativeForm = formHostRef.current?.querySelector('form');
+    if (!(nativeForm instanceof HTMLFormElement)) {
+      resetCaptcha();
+      return;
+    }
+    nativeForm.requestSubmit();
   };
 
   const credentialForm = (
-    <Form<FormValues>
-      className="login-form"
-      form={formInstance}
-      name={`login-${mode.toLowerCase()}`}
-      layout="vertical"
-      onFinish={handleFinish}
-      onSubmitCapture={syncAutofillBeforeSubmit}
-      autoComplete="on"
-    >
-      <Form.Item name="username" label="用户名" rules={[{ required: true, message: '请输入用户名' }]}>
-        <Input
-          name="username"
-          autoComplete="username"
-          prefix={<UserOutlined />}
-          placeholder={mode === 'SSO' ? '输入域账号' : '输入平台账号'}
+    <div ref={formHostRef}>
+      <Form<FormValues>
+        className="login-form"
+        form={formInstance}
+        name={`login-${mode.toLowerCase()}`}
+        initialValues={{
+          username: initialLoginMemory.remember ? initialLoginMemory.usernames.LOCAL ?? '' : '',
+        }}
+        layout="vertical"
+        onFinish={handleFinish}
+        onFinishFailed={resetCaptcha}
+        onSubmitCapture={syncAutofillBeforeSubmit}
+        autoComplete="on"
+      >
+        <Form.Item name="username" label="用户名" rules={[{ required: true, message: '请输入用户名' }]}>
+          <Input
+            name="username"
+            autoComplete="username"
+            prefix={<UserOutlined />}
+            placeholder={mode === 'SSO' ? '输入域账号' : '输入平台账号'}
+          />
+        </Form.Item>
+        <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
+          <Input.Password
+            name="password"
+            autoComplete="current-password"
+            prefix={<LockOutlined />}
+            placeholder={mode === 'SSO' ? '输入域账号密码' : '输入平台密码'}
+          />
+        </Form.Item>
+        <Form.Item>
+          <Checkbox
+            checked={rememberCredentials}
+            onChange={(event) => handleRememberChange(event.target.checked)}
+          >
+            记住用户名和密码
+          </Checkbox>
+        </Form.Item>
+        <LoginSliderCaptcha
+          disabled={submitting}
+          resetKey={captchaResetKey}
+          onVerified={handleCaptchaVerified}
         />
-      </Form.Item>
-      <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
-        <Input.Password
-          name="password"
-          autoComplete="current-password"
-          prefix={<LockOutlined />}
-          placeholder={mode === 'SSO' ? '输入域账号密码' : '输入平台密码'}
-        />
-      </Form.Item>
-      <Form.Item className="login-form__submit">
-        <Button type="primary" htmlType="submit" block size="large" loading={submitting}>
-          进入工作台
-        </Button>
-      </Form.Item>
-    </Form>
+        <Form.Item className="login-form__submit">
+          <Button
+            type="primary"
+            htmlType="submit"
+            block
+            size="large"
+            loading={submitting}
+            disabled={!captchaVerified}
+          >
+            进入工作台
+          </Button>
+        </Form.Item>
+      </Form>
+    </div>
   );
 
   const hint = mode === 'SSO'
@@ -165,8 +276,8 @@ export default function LoginPage() {
           activeKey={mode}
           onChange={handleModeChange}
           items={[
-            { key: 'SSO', label: '域账号' },
-            { key: 'LOCAL', label: '平台账号' },
+            { key: 'SSO', label: '域账号', disabled: submitting },
+            { key: 'LOCAL', label: '平台账号', disabled: submitting },
           ]}
         />
       )}
@@ -186,7 +297,7 @@ export default function LoginPage() {
       <div className="auth-hint">{hint}</div>
       <div className="auth-security-note">
         <SafetyCertificateOutlined />
-        账号与密码仅用于本次认证，不会由页面持久化保存。
+        页面只保存用户名；密码由浏览器密码管理器保护，不写入站点存储。
       </div>
     </AuthShell>
   );

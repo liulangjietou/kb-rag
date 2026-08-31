@@ -20,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -45,6 +46,10 @@ public class AuthService {
     private static final int SUCCESS_FLAG = 1;
     private static final int FAILURE_FLAG = 0;
     private static final int NOT_REQUIRED = 0;
+    private static final String INVALID_CREDENTIALS_MESSAGE = "invalid username or password";
+    // 不对应任何真实账号，只用于让未知账号和错误登录入口也付出同等 BCrypt 成本。
+    static final String DUMMY_PASSWORD_HASH =
+            "$2a$10$tesHlq8Mb9Tj200DjJwf6Om6ibfxNmblzIJp2uQ0goV2Qmm0uCt4W";
 
     private final AdminUserMapper adminUserMapper;
     private final LoginAuditMapper loginAuditMapper;
@@ -53,9 +58,9 @@ public class AuthService {
     private final KbProperties properties;
     private final BCryptPasswordEncoder passwordEncoder;
     private final DirectoryAuthenticator directoryAuthenticator;
-    private final DirectoryGroupSyncService groupSyncService;
-    private final UserService userService;
-    private final PrincipalResolver principalResolver;
+    private final LoginFailureAuditService loginFailureAuditService;
+    private final LoginSuccessService loginSuccessService;
+    private final LoginAttemptGuard loginAttemptGuard;
 
     /**
      * Verifies credentials through the requested entry point and issues a session token.
@@ -66,20 +71,22 @@ public class AuthService {
      * @param ip       source address of the attempt
      * @return session ticket
      */
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(propagation = Propagation.NEVER)
     public LoginTicket login(String username, String password, LoginMode mode, String ip) {
         String login = normalize(username);
-        if (isLocked(login, ip)) {
-            audit(login, ip, false, LoginResult.ACCOUNT_LOCKED);
-            log.info("login rejected by lock window, username={}, ip={}", login, ip);
-            throw BizException.unauthorized("account temporarily locked, retry after "
-                    + properties.getAuth().getLockMinutes() + " minutes");
+        try (LoginAttemptGuard.Permit ignored = loginAttemptGuard.acquire(login, ip)) {
+            if (isLocked(login, ip)) {
+                audit(login, ip, LoginResult.ACCOUNT_LOCKED);
+                log.info("login rejected by lock window, username={}, ip={}", login, ip);
+                throw BizException.unauthorized("account temporarily locked, retry after "
+                        + properties.getAuth().getLockMinutes() + " minutes");
+            }
+            LoginTicket ticket = mode == LoginMode.SSO
+                    ? loginWithDirectory(login, password, ip)
+                    : loginWithLocalPassword(login, password, ip);
+            log.info("login succeeded, username={}, mode={}, ip={}", login, mode, ip);
+            return ticket;
         }
-        LoginTicket ticket = mode == LoginMode.SSO
-                ? loginWithDirectory(login, password, ip)
-                : loginWithLocalPassword(login, password, ip);
-        log.info("login succeeded, username={}, mode={}, ip={}", login, mode, ip);
-        return ticket;
     }
 
     /**
@@ -93,26 +100,30 @@ public class AuthService {
 
     private LoginTicket loginWithLocalPassword(String username, String password, String ip) {
         AdminUser user = findByUsername(username);
+        boolean localAccount = user != null && !user.directoryAccount();
+        String passwordHash = localAccount && user.getPasswordHash() != null
+                ? user.getPasswordHash()
+                : DUMMY_PASSWORD_HASH;
+        boolean passwordMatches = passwordEncoder.matches(password, passwordHash);
         if (user == null) {
-            audit(username, ip, false, LoginResult.USER_NOT_FOUND);
-            throw BizException.unauthorized("invalid username or password");
+            audit(username, ip, LoginResult.USER_NOT_FOUND);
+            throw BizException.unauthorized(INVALID_CREDENTIALS_MESSAGE);
         }
         if (user.directoryAccount()) {
-            audit(username, ip, false, LoginResult.WRONG_LOGIN_MODE);
-            throw BizException.unauthorized("this account signs in through single sign on");
+            audit(username, ip, LoginResult.WRONG_LOGIN_MODE);
+            throw BizException.unauthorized(INVALID_CREDENTIALS_MESSAGE);
         }
-        if (user.getPasswordHash() == null
-                || !passwordEncoder.matches(password, user.getPasswordHash())) {
-            audit(username, ip, false, LoginResult.BAD_PASSWORD);
-            throw BizException.unauthorized("invalid username or password");
+        if (user.getPasswordHash() == null || !passwordMatches) {
+            audit(username, ip, LoginResult.BAD_PASSWORD);
+            throw BizException.unauthorized(INVALID_CREDENTIALS_MESSAGE);
         }
         requireEnabled(user, ip);
-        return issue(user, username, ip);
+        return loginSuccessService.issueExisting(user, username, ip);
     }
 
     private LoginTicket loginWithDirectory(String username, String password, String ip) {
         if (!directoryAuthenticator.available()) {
-            audit(username, ip, false, LoginResult.SSO_DISABLED);
+            audit(username, ip, LoginResult.SSO_DISABLED);
             throw BizException.unauthorized("single sign on is not enabled");
         }
         AdminUser existing = findByUsername(username);
@@ -120,8 +131,8 @@ public class AuthService {
         // it. A local account whose name matches a domain account would otherwise be inherited, and
         // an account bound to another identity provider must not have a second door.
         if (existing != null && existing.getSource() != UserSource.LDAP) {
-            audit(username, ip, false, LoginResult.WRONG_LOGIN_MODE);
-            throw BizException.unauthorized("this account does not sign in through the directory");
+            audit(username, ip, LoginResult.WRONG_LOGIN_MODE);
+            throw BizException.unauthorized(INVALID_CREDENTIALS_MESSAGE);
         }
         // Also checked before the bind, so a suspended account cannot be used to probe the directory.
         if (existing != null) {
@@ -132,21 +143,15 @@ public class AuthService {
         if (bind.result() == DirectoryBindResult.SERVICE_UNAVAILABLE) {
             // Audited as a failure but never counted towards the lockout, which is why the reason is a
             // separate value: one domain controller outage would otherwise lock out everyone who retried.
-            audit(username, ip, false, LoginResult.DIRECTORY_UNAVAILABLE);
+            audit(username, ip, LoginResult.DIRECTORY_UNAVAILABLE);
             throw BizException.unauthorized("directory is unavailable, try again later");
         }
         if (bind.result() == DirectoryBindResult.INVALID_CREDENTIALS) {
-            audit(username, ip, false, LoginResult.DIRECTORY_REJECTED);
-            throw BizException.unauthorized("invalid username or password");
+            audit(username, ip, LoginResult.DIRECTORY_REJECTED);
+            throw BizException.unauthorized(INVALID_CREDENTIALS_MESSAGE);
         }
 
-        AdminUser user = existing == null ? userService.provisionDirectoryUser(username) : existing;
-        if (groupSyncService.enabled()) {
-            // Synchronised before the token is issued, so the session being opened already sees the
-            // roles the directory groups map to - not the ones of the previous visit.
-            groupSyncService.sync(user, bind.groupDns());
-        }
-        return issue(user, username, ip);
+        return loginSuccessService.issueDirectory(existing, username, bind.groupDns(), ip);
     }
 
     /**
@@ -163,7 +168,7 @@ public class AuthService {
      * @param ip       source address of the callback
      * @return session ticket
      */
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(propagation = Propagation.NEVER)
     public LoginTicket completeExternalLogin(UserSource source, ExternalIdentity identity, String ip) {
         String login = normalize(identity.username());
         if (login.isBlank()) {
@@ -172,43 +177,32 @@ public class AuthService {
             log.error("single sign on assertion carries no usable login name, source={}", source);
             throw BizException.unauthorized("identity provider asserted no login name");
         }
-        if (isLocked(login, ip)) {
-            audit(login, ip, false, LoginResult.ACCOUNT_LOCKED);
-            throw BizException.unauthorized("account temporarily locked, retry after "
-                    + properties.getAuth().getLockMinutes() + " minutes");
+        try (LoginAttemptGuard.Permit ignored = loginAttemptGuard.acquire(login, ip)) {
+            if (isLocked(login, ip)) {
+                audit(login, ip, LoginResult.ACCOUNT_LOCKED);
+                throw BizException.unauthorized("account temporarily locked, retry after "
+                        + properties.getAuth().getLockMinutes() + " minutes");
+            }
+            AdminUser existing = findByUsername(login);
+            // An account is bound to the entry point that created it. Letting a SAML assertion open an
+            // OIDC account would make every configured provider a master key for every other.
+            if (existing != null && existing.getSource() != source) {
+                audit(login, ip, LoginResult.WRONG_LOGIN_MODE);
+                throw BizException.unauthorized(INVALID_CREDENTIALS_MESSAGE);
+            }
+            if (existing != null) {
+                requireEnabled(existing, ip);
+            }
+            LoginTicket ticket = loginSuccessService.issueExternal(existing, login, source, identity, ip);
+            log.info("single sign on login succeeded, username={}, source={}, ip={}", login, source, ip);
+            return ticket;
         }
-        AdminUser existing = findByUsername(login);
-        // An account is bound to the entry point that created it. Letting a SAML assertion open an
-        // OIDC account would make every configured provider a master key for every other.
-        if (existing != null && existing.getSource() != source) {
-            audit(login, ip, false, LoginResult.WRONG_LOGIN_MODE);
-            throw BizException.unauthorized("this account signs in through a different entry point");
-        }
-        if (existing != null) {
-            requireEnabled(existing, ip);
-        }
-        AdminUser user = existing == null
-                ? userService.provisionExternalUser(login, source, identity.displayName(), identity.email())
-                : existing;
-        LoginTicket ticket = issue(user, login, ip);
-        log.info("single sign on login succeeded, username={}, source={}, ip={}", login, source, ip);
-        return ticket;
-    }
-
-    private LoginTicket issue(AdminUser user, String username, String ip) {
-        audit(username, ip, true, LoginResult.SUCCESS);
-        user.setLastLoginAt(LocalDateTime.now());
-        adminUserMapper.updateById(user);
-        // A freshly provisioned account has no cached permissions, and a returning one may have been
-        // regranted while it was away.
-        principalResolver.evict(username);
-        return new LoginTicket(tokenStore.issue(username), user.mustChangePassword());
     }
 
     private void requireEnabled(AdminUser user, String ip) {
         if (!user.enabled()) {
-            audit(user.getUsername(), ip, false, LoginResult.ACCOUNT_DISABLED);
-            throw BizException.unauthorized("account is disabled");
+            audit(user.getUsername(), ip, LoginResult.ACCOUNT_DISABLED);
+            throw BizException.unauthorized(INVALID_CREDENTIALS_MESSAGE);
         }
         // Refused at the door, not only by the resolver: a disabled tenant means every one of its
         // accounts stops working, and letting the login succeed just to be rejected on the first
@@ -217,8 +211,8 @@ public class AuthService {
                 .eq(Tenant::getTenantId, user.getTenantId())
                 .last("limit 1"));
         if (tenant != null && !tenant.enabled()) {
-            audit(user.getUsername(), ip, false, LoginResult.TENANT_DISABLED);
-            throw BizException.unauthorized("tenant is disabled");
+            audit(user.getUsername(), ip, LoginResult.TENANT_DISABLED);
+            throw BizException.unauthorized(INVALID_CREDENTIALS_MESSAGE);
         }
     }
 
@@ -291,6 +285,9 @@ public class AuthService {
                 // An unreachable domain controller is a failed attempt in the audit but not a suspicious
                 // one. Counting it would let a single outage lock out every account that retried.
                 .ne(LoginAudit::getReason, LoginResult.DIRECTORY_UNAVAILABLE)
+                // A request rejected by an existing lock is observable, but it is not a new credential
+                // failure. Counting it would let polling extend the lock window indefinitely.
+                .ne(LoginAudit::getReason, LoginResult.ACCOUNT_LOCKED)
                 .gt(LoginAudit::getCreatedAt, since);
         if (username != null) {
             wrapper.eq(LoginAudit::getUsername, username);
@@ -301,13 +298,8 @@ public class AuthService {
         return loginAuditMapper.selectCount(wrapper);
     }
 
-    private void audit(String username, String ip, boolean success, LoginResult reason) {
-        LoginAudit record = new LoginAudit();
-        record.setUsername(username);
-        record.setIp(ip);
-        record.setSuccess(success ? SUCCESS_FLAG : FAILURE_FLAG);
-        record.setReason(reason);
-        loginAuditMapper.insert(record);
+    private void audit(String username, String ip, LoginResult reason) {
+        loginFailureAuditService.record(username, ip, reason);
     }
 
     private AdminUser findByUsername(String username) {

@@ -1,0 +1,206 @@
+.login-captcha {
+  margin: 2px 0 18px;
+}
+
+.login-captcha__puzzle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 126px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  background: var(--kb-color-surface-subtle);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-sm);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--kb-color-text) 6%, transparent);
+}
+
+.login-captcha__background {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
+}
+
+.login-captcha__piece {
+  position: absolute;
+  filter: drop-shadow(0 2px 4px color-mix(in srgb, #000000 32%, transparent));
+  object-fit: fill;
+  pointer-events: none;
+  transition: left 90ms ease-out;
+  user-select: none;
+}
+
+.login-captcha__puzzle-loading {
+  color: var(--kb-color-primary);
+  font-size: 24px;
+}
+
+.login-captcha__track {
+  position: relative;
+  height: 46px;
+  overflow: hidden;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--kb-color-primary) 7%, transparent), transparent 72%),
+    var(--kb-color-surface-subtle);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-sm);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--kb-color-text) 5%, transparent);
+}
+
+.login-captcha__progress {
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 0;
+  width: var(--login-captcha-progress);
+  background: color-mix(in srgb, var(--kb-color-primary) 15%, var(--kb-color-surface));
+  border-right: 1px solid color-mix(in srgb, var(--kb-color-primary) 38%, transparent);
+  transition: width 120ms ease-out;
+}
+
+.login-captcha__instruction {
+  position: absolute;
+  z-index: 1;
+  inset: 0 48px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: var(--kb-color-text-secondary);
+  font-size: 12px;
+  font-weight: 560;
+  letter-spacing: 0.01em;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.login-captcha__thumb {
+  position: absolute;
+  z-index: 2;
+  top: -1px;
+  left: clamp(0px, calc(var(--login-captcha-progress) - 23px), calc(100% - 46px));
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  color: #ffffff;
+  background: var(--kb-color-primary);
+  border: 1px solid color-mix(in srgb, var(--kb-color-primary) 80%, #000000);
+  border-radius: var(--kb-radius-sm);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--kb-color-primary) 30%, transparent);
+  cursor: grab;
+  touch-action: none;
+  transition: left 120ms ease-out, background-color 160ms ease, box-shadow 160ms ease;
+  user-select: none;
+}
+
+.login-captcha__thumb:active {
+  cursor: grabbing;
+}
+
+/* 拖动时视觉位置必须与立即提交的逻辑坐标同步；缓动只用于复位和状态切换。 */
+.login-captcha--dragging .login-captcha__piece,
+.login-captcha--dragging .login-captcha__progress {
+  transition: none;
+}
+
+.login-captcha--dragging .login-captcha__thumb {
+  transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+
+.login-captcha__thumb:focus-visible {
+  outline: 2px solid var(--kb-color-surface-raised);
+  outline-offset: -4px;
+  box-shadow:
+    0 0 0 3px var(--kb-color-primary),
+    0 0 0 6px color-mix(in srgb, var(--kb-color-primary) 28%, transparent);
+}
+
+.login-captcha--verified .login-captcha__track {
+  background: color-mix(in srgb, var(--kb-color-success) 10%, var(--kb-color-surface));
+  border-color: color-mix(in srgb, var(--kb-color-success) 42%, var(--kb-color-border));
+}
+
+.login-captcha--verified .login-captcha__puzzle {
+  border-color: color-mix(in srgb, var(--kb-color-success) 52%, var(--kb-color-border));
+}
+
+.login-captcha--verified .login-captcha__progress,
+.login-captcha--verified .login-captcha__thumb {
+  background: var(--kb-color-success);
+  border-color: var(--kb-color-success);
+}
+
+.login-captcha.is-disabled {
+  opacity: 0.62;
+}
+
+.login-captcha.is-disabled .login-captcha__thumb,
+.login-captcha--loading .login-captcha__thumb,
+.login-captcha--verifying .login-captcha__thumb,
+.login-captcha--verified .login-captcha__thumb {
+  cursor: default;
+}
+
+.login-captcha__footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 16px;
+  margin-top: 6px;
+}
+
+.login-captcha__status {
+  color: var(--kb-color-text-tertiary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.login-captcha__refresh {
+  flex: none;
+  padding: 0;
+  color: var(--kb-color-primary);
+  background: transparent;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.login-captcha__refresh:disabled {
+  color: var(--kb-color-text-tertiary);
+  cursor: default;
+}
+
+.login-captcha__refresh:focus-visible {
+  outline: 2px solid var(--kb-color-primary);
+  outline-offset: 3px;
+}
+
+@media (max-width: 480px) {
+  .login-captcha__instruction {
+    inset-inline: 46px 10px;
+    justify-items: end;
+    font-size: 11px;
+  }
+
+  .login-captcha__puzzle {
+    min-height: 112px;
+  }
+
+  .login-captcha__footer {
+    align-items: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-captcha__progress,
+  .login-captcha__thumb,
+  .login-captcha__piece {
+    transition: none;
+  }
+}

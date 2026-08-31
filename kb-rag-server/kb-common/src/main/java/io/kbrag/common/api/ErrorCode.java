@@ -34,6 +34,9 @@ public enum ErrorCode {
     /** Referenced business resource does not exist or was soft deleted. */
     NOT_FOUND(404, "resource not found"),
 
+    /** Request body exceeds the endpoint-specific ceiling before deserialization starts. */
+    PAYLOAD_TOO_LARGE(413, "payload too large"),
+
     /** Open API key is unknown, malformed or does not match any stored hash. */
     INVALID_API_KEY(401, "invalid api key"),
 
