@@ -30,6 +30,12 @@
 
 ### Changed
 
+- **kb-app 上帝类按职责拆解（重构，升级零操作）**：`IndexPipelineService`、`RetrievalService`、
+  `EvalRunService`、`ChatImportService` 的构造依赖由 31/25/22/21 降至 20/22/18/10，拆出 7 个
+  协作者类。**对运维无任何影响**：没有 Flyway 迁移、没有新增或改名的配置键与环境变量、没有新容器
+  或新第三方依赖、对外 HTTP 契约与 degraded 枚举完全不变，OpenAPI 版本号保持 `0.26.0-m24` 不动。
+  升级按常规发布即可，无需任何额外操作。`docs/ARCHITECTURE.md` 升至 v2.8，§3.4/§3.5 同步类归属
+  ——其中"`page` 策略由管线直接分流到 `PageSplitter`"一句已随本次重构失准，一并订正。
 - `.env.example` 新增 `MANAGEMENT_SERVER_PORT=20003` 与
   `MANAGEMENT_SERVER_ADDRESS=127.0.0.1`；OpenAPI 健康检查条目改为独立管理端口，需求文档升至
   v1.21。远程开放管理地址时必须同时配置防火墙、服务网格或带认证的反向代理。

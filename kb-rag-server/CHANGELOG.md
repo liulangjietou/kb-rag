@@ -7,6 +7,40 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 重构（kb-app 上帝类按职责拆解，行为不变）
+
+- **背景**：四个应用服务把多份互不相干的职责挤在一个类里，构造依赖分别达到 31 / 25 / 22 / 21 个。
+  判断边界的依据不是行数，而是**依赖的独占性**——某组协作者只被某一段代码读，那一段就是一个独立
+  职责。按这个尺子拆出 7 个协作者，四个类的行数与依赖数（实测）：
+
+  | 类 | 行数 | 构造依赖 |
+  |---|---|---|
+  | `IndexPipelineService` | 1119 → 871 | 31 → 20 |
+  | `RetrievalService` | 1396 → 919 | 25 → 22 |
+  | `EvalRunService` | 932 → 757 | 21 → 18 |
+  | `ChatImportService` | 473 → 279 | 22 → 10 |
+
+- **检索线**：`RetrievalNodeAssembler` 接手"胜出片段怎么描述"（`ParentTextRedactor`、`ObjectStorage`
+  与 22 个展示型 metadata 键只服务于它）；`MultimodalRetrievalService` 补齐一处既有的不对称——图路
+  早有独立的 `GraphRetrievalService`，多模态的执行逻辑却内联在管线里，而 `MultimodalRouteOutcome`
+  的注释本就写明自己是照 `GraphRouteOutcome` 建模的。顺带把图片分发"就地改写调用方 degraded 列表"
+  的副作用写法改为返回式 outcome，与 `RewriteOutcome`/`RoutingOutcome` 的既有惯例一致。
+- **索引线**：`ChunkSplitter`（切分与分片落库）、`IndexTaskLifecycle`（`t_kb_task` 状态机）、
+  `VersionActivationHandler`（激活及其四项后续）。管线只留阶段顺序与失败归类。
+- **聊天导入 / 评测线**：`ChatSessionImporter`（把一次会话写成一个文档版本，独占 13 个依赖）、
+  `EvalCaseRunner`（跑单个用例，不碰任何 mapper，因此可安全并发）。`answerJudgeRequested` 提为
+  `public static` 由费用预估与执行共用——两份副本就是"这个用例会不会调模型"的两个答案，而预估
+  存在的意义正是可被信任。
+- **顺带清理**：`judgeOneCase` / `judgeAll` 中只用于向下透传、从未被读取的参数 `k`；
+  `ReleaseGateService.runGate` 提取 `submitGateRuns`（88 → 65 行）。
+- **补测试**：`IndexPipelineService` 此前没有自己的单测（引用它的三个测试类都只把它当 mock）。
+  新增 `IndexPipelineServiceTest` 10 例，覆盖复用回退、待确认暂停、失败状态归类、页策略标志传递。
+  做过变异验证：注入 5 处缺陷（复用为空不回退 / 解析失败误报为索引失败 / 忽略待确认开关 /
+  单图走页切分 / 失败不置 `BUILD_FAILED`），5 处全部被对应用例捕获转红。
+- **零行为变更**：全部为 Extract Class 与 Extract Method，未改任何逻辑分支；无 schema 迁移、无
+  配置键、无 API 变更。测试 1340 → 1350 全绿（新增 10 例），246 个 Spring bean 的构造注入依赖图
+  经脚本验证无环。
+
 ### M24 · 模型 Token 成本台账与租户月度配额
 
 - `[schema]` Flyway V24 为租户增加 `monthly_token_quota`，新增月度原子计数器、调用明细台账与

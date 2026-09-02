@@ -110,13 +110,19 @@ class ChatImportServiceTest {
         when(fingerprintFactory.chunkFingerprint(any())).thenReturn("cf");
         when(fingerprintFactory.parseFingerprint(any(), anyString())).thenReturn("pf");
 
-        service = new ChatImportService(documentMapper, documentVersionMapper, chunkMapper, objectStorage,
-                parserClient, knowledgeBaseService, uploadTokenStore, sourceMappingService,
-                new ChatSessionMatcher(), new ChatWindowAggregator(), new ChatWindowRenderer(),
+        // One matcher instance for both halves, as the container wires it: the source key that decides
+        // which document a conversation maps to has to be the same string on the preview and on the import.
+        ChatSessionMatcher sessionMatcher = new ChatSessionMatcher();
+        ChatSessionImporter sessionImporter = new ChatSessionImporter(documentMapper, documentVersionMapper,
+                chunkMapper, knowledgeBaseService, sessionMatcher, new ChatWindowAggregator(),
+                new ChatWindowRenderer(),
                 new DocumentCleaner(new HeaderFooterDetector(), new TextDesensitizer()),
                 new ChunkTextHasher(), chunkIndexWriter, chunkEmbedder, versionActivator,
                 annotationInheritanceService, embeddingProvider, bizIdGenerator, fingerprintFactory,
-                versionPlanner, properties);
+                versionPlanner);
+        service = new ChatImportService(documentMapper, objectStorage, parserClient, knowledgeBaseService,
+                uploadTokenStore, sourceMappingService, sessionMatcher, sessionImporter, bizIdGenerator,
+                properties);
     }
 
     @Test

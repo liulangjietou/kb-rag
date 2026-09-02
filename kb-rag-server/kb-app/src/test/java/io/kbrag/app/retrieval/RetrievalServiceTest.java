@@ -157,16 +157,22 @@ class RetrievalServiceTest {
         indexContextResolver = new RetrievalIndexContextResolver(indexAliasManager,
                 new ActiveVersionResolver(documentMapper, properties), documentAclService,
                 fulltextStore, vectorStore);
+        // One policy instance for both collaborators, as the container wires it: the score a node reports
+        // and the score the threshold acted on have to come from the same rules to stay comparable.
+        ScoreThresholdPolicy scoreThresholdPolicy = new ScoreThresholdPolicy();
         retrievalService = new RetrievalService(knowledgeBaseService, chunkMapper,
                 fulltextStore, vectorStore, embeddingProvider, indexContextResolver,
                 new FusionRouter(List.of(new RrfFusion(), new WeightedFusion())),
                 new CrossKbRrfFusion(), new KbQuotaAllocator(), graphRetrievalService,
-                multimodalIndexManager, multimodalEmbeddingProvider,
-                new ImageQueryService(visionProvider, properties), routingService,
-                rewriteService, rerankService, new ScoreThresholdPolicy(), new ParentChildMerger(),
+                new MultimodalRetrievalService(multimodalIndexManager, multimodalEmbeddingProvider,
+                        new ImageQueryService(visionProvider, properties), vectorStore),
+                routingService,
+                rewriteService, rerankService, scoreThresholdPolicy, new ParentChildMerger(),
                 new NearDuplicateWindowMerger(),
-                new DisabledChildVisibility(chunkMapper), new ParentTextRedactor(),
-                engineChunkCleaner, objectStorage,
+                new DisabledChildVisibility(chunkMapper),
+                new RetrievalNodeAssembler(chunkMapper, scoreThresholdPolicy, new ParentTextRedactor(),
+                        objectStorage, properties),
+                engineChunkCleaner,
                 new RetrievalDegradeMonitor(properties), properties);
     }
 

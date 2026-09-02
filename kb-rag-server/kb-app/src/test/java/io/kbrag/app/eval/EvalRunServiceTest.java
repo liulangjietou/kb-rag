@@ -133,13 +133,17 @@ class EvalRunServiceTest {
      * @return service under test
      */
     private EvalRunService newService(Executor evalExecutor, Executor evalCaseExecutor) {
-        return new EvalRunService(evalDatasetService, appVersionService, evalRunMapper, evalResultMapper, evalCaseMapper,
-                retrievalService, embeddingProvider, rerankProvider, chatProvider, evalJudgeService,
-                answerGenerationService, finalAnswerJudgeService, corpusFingerprintFactory,
-                new EvalHitJudge(new OverlapRatioCalculator(new ChunkTextHasher())),
+        // One calculator instance behind both the hit judge and the overlap reporting, as the container
+        // wires it: a case judged a hit on one threshold must not report a ratio computed by another.
+        OverlapRatioCalculator overlapRatioCalculator = new OverlapRatioCalculator(new ChunkTextHasher());
+        EvalCaseRunner caseRunner = new EvalCaseRunner(retrievalService, evalJudgeService,
+                answerGenerationService, finalAnswerJudgeService,
+                new EvalHitJudge(overlapRatioCalculator), overlapRatioCalculator, properties);
+        return new EvalRunService(caseRunner, evalDatasetService, appVersionService, evalRunMapper,
+                evalResultMapper, evalCaseMapper, embeddingProvider, rerankProvider, chatProvider,
+                evalJudgeService, answerGenerationService, finalAnswerJudgeService, corpusFingerprintFactory,
                 new EvalMetricsCalculator(), new FinalAnswerMetricsCalculator(),
-                new OverlapRatioCalculator(new ChunkTextHasher()),
-                bizIdGenerator, properties, evalExecutor, evalCaseExecutor);
+                bizIdGenerator, evalExecutor, evalCaseExecutor);
     }
 
     @Test

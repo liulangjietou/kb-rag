@@ -243,34 +243,11 @@ public class ReleaseGateService {
         AppVersion version = appVersionService.require(appVersionId);
         AppConfigSnapshot candidateConfig = appVersionService.parseConfig(version);
         AppVersion baselineVersion = appVersionService.currentReleased(version.getAppId());
-        String datasetId = version.getGateDatasetId();
-
-        List<EvalRetrievalConfig> configs = new ArrayList<>(2);
-        configs.add(toEvalConfig(CANDIDATE_LABEL, candidateConfig));
-        if (baselineVersion != null) {
-            configs.add(toEvalConfig(BASELINE_LABEL, appVersionService.parseConfig(baselineVersion)));
-        }
-        int k = candidateConfig.retrievalOrDefaults().getTopN() == null
-                ? properties.getRetrieval().getDefaultTopN()
-                : candidateConfig.retrievalOrDefaults().getTopN();
-
         AnswerGateConfig answerGateConfig = candidateConfig.answerGateOrDefaults();
         boolean answerGateEnabled = answerGateConfig.isEnabled();
-        List<EvalRun> runs;
-        if (answerGateEnabled) {
-            List<EvalRunService.AnswerRunSpec> specs = new ArrayList<>(configs.size());
-            specs.add(new EvalRunService.AnswerRunSpec(configs.get(0),
-                    new AnswerEvaluationConfig(version.getAppVersionId(), candidateConfig)));
-            if (baselineVersion != null) {
-                specs.add(new EvalRunService.AnswerRunSpec(configs.get(1),
-                        new AnswerEvaluationConfig(baselineVersion.getAppVersionId(),
-                                appVersionService.parseConfig(baselineVersion))));
-            }
-            runs = evalRunService.submitAnswerRuns(datasetId, k, specs, false);
-        } else {
-            runs = evalRunService.submit(datasetId, k, configs, false);
-        }
-        List<EvalRun> finished = awaitCompletion(runs);
+
+        List<EvalRun> finished = awaitCompletion(
+                submitGateRuns(version, candidateConfig, baselineVersion, answerGateEnabled));
         EvalRun candidateRun = finished.get(0);
         EvalRun baselineRun = finished.size() > 1 ? finished.get(1) : null;
 
@@ -341,6 +318,47 @@ public class ReleaseGateService {
      * @param snapshot frozen configuration of this side
      * @return evaluation configuration row
      */
+    /**
+     * Submits the gate's evaluation runs: the candidate always, the released baseline when there is one.
+     *
+     * <p>Both runs are submitted under one data set and one K by construction. A gate is a subtraction,
+     * and two runs measured at different K would yield two numbers the verdict has no right to subtract.
+     *
+     * <p>The answer gate does not add a third run - it upgrades the same two into runs that also generate
+     * and judge a final answer, so the retrieval verdict and the answer verdict always describe the very
+     * same executions.
+     *
+     * @param version           version under gate
+     * @param candidateConfig   parsed configuration of that version
+     * @param baselineVersion   currently released version, {@code null} on a first release
+     * @param answerGateEnabled {@code true} when the final answer gate runs alongside
+     * @return submitted runs, candidate first and baseline second
+     */
+    private List<EvalRun> submitGateRuns(AppVersion version, AppConfigSnapshot candidateConfig,
+                                         AppVersion baselineVersion, boolean answerGateEnabled) {
+        String datasetId = version.getGateDatasetId();
+        List<EvalRetrievalConfig> configs = new ArrayList<>(2);
+        configs.add(toEvalConfig(CANDIDATE_LABEL, candidateConfig));
+        if (baselineVersion != null) {
+            configs.add(toEvalConfig(BASELINE_LABEL, appVersionService.parseConfig(baselineVersion)));
+        }
+        int k = candidateConfig.retrievalOrDefaults().getTopN() == null
+                ? properties.getRetrieval().getDefaultTopN()
+                : candidateConfig.retrievalOrDefaults().getTopN();
+        if (!answerGateEnabled) {
+            return evalRunService.submit(datasetId, k, configs, false);
+        }
+        List<EvalRunService.AnswerRunSpec> specs = new ArrayList<>(configs.size());
+        specs.add(new EvalRunService.AnswerRunSpec(configs.get(0),
+                new AnswerEvaluationConfig(version.getAppVersionId(), candidateConfig)));
+        if (baselineVersion != null) {
+            specs.add(new EvalRunService.AnswerRunSpec(configs.get(1),
+                    new AnswerEvaluationConfig(baselineVersion.getAppVersionId(),
+                            appVersionService.parseConfig(baselineVersion))));
+        }
+        return evalRunService.submitAnswerRuns(datasetId, k, specs, false);
+    }
+
     private EvalRetrievalConfig toEvalConfig(String label, AppConfigSnapshot snapshot) {
         KbRetrievalConfig retrieval = snapshot.retrievalOrDefaults();
         EvalRetrievalConfig config = new EvalRetrievalConfig();

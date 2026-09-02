@@ -1,8 +1,8 @@
 # kb-rag 架构文档
 
 
-> 版本：v2.7（基线 = v2.6 + M24 模型 Token 成本台账与租户配额，2026-08-14；v2.6 基线为 M23，其余历史见 Git）
-> 日期：2026-08-14
+> 版本：v2.8（基线 = v2.7 + kb-app 四个上帝类按职责拆解，2026-09-02；v2.7 基线为 M24，其余历史见 Git）
+> 日期：2026-09-02
 > 作者：RichardFyoung / Claude
 >
 > **文档定位**：本文描述系统的实际实现架构（以代码为准），与以下文档互补——
@@ -156,12 +156,14 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `RoutingService` | LLM 提议、**白名单裁决**（结果与候选库集合取交集，注入防线③）；失败/未命中回退全部关联库（`route_fallback_all`）；缓存 key=query+候选集+生效 prompt，失败不入缓存 |
 | `RetrievalIndexContextResolver` | **调用上下文三分支的唯一分辨点**：RELEASED → 冻结快照索引+固化可见集；TESTING/调试/评测 → 实时别名+当前激活集合；旧 RELEASED（无快照）→ 兼容实时、不记降级 |
 | `VectorScoreNormalizer` | 跨引擎向量分统一：ES `(1+cos)/2` 先还原、Qdrant 原生 cosine，统一映射到 [0,1]；两实现共享一份"引擎一致性单测" |
+| `MultimodalRetrievalService`（M14） | 多模态路由的执行方，与 `GraphRetrievalService` 对称：别名解析、以文搜图/以图搜图的向量来源选择、多向量命中按 chunk 取最大相似度折叠成单列表；加权融合下拒绝运行并记 `mm_route_skipped`（多模态相似度与文本路不同量纲）。**快照守卫留在调用点**，与图路一致——“released 版本查自己的冻结语料”是调用的性质而非某条路由的性质 |
 | `FusionRouter` → `RrfFusion`/`WeightedFusion` | 加权融合先按候选集 min-max 归一化；开图路的库强制 RRF（`GraphFusionPolicy`——图关联度是第三种量纲） |
 | `CrossKbRrfFusion` + `KbQuotaAllocator` | 跨库只用名次不用分数；rerank 候选预算是**全局总量**按权重配额切分（向下取整、余量归最高权重库） |
 | `RerankService` | 候选上限 50（父子开启时联动 `max(50, top_n×5)`，硬上限 100）；超时 1.5s 降级粗排；rerank 分是唯一跨库跨路可比的绝对分；M14 新增 `rerank_mode=hybrid`：将语义重排分与原始融合分按 `rerank_w_semantic`（0-1，默认 0.7）线性加权，`semantic` 模式与旧行为一致 |
 | `ParentChildMerger` | 召回/融合/rerank 全在子片粒度，之后按 parent_id 归并、父片得分取子片 max；目标父片数 `max(top_n×3, 20)` |
 | `DisabledChildVisibility` + `ParentTextRedactor`（M9） | 含禁用子片的父片：默认整片返回并标注 `disabled_child_ids`；M9 起对偏移非 null 的禁用子片按 [start,end) **倒序**精确剔除文本段、置省略标记与 `redacted_child_count`；任一禁用子片偏移为 null 则整片回退（半剔除比不剔除更误导）；库级开关 `hide_parent_with_disabled_child` 打开则整父片隐藏 |
 | `ScoreThresholdPolicy` | 阈值只作用于 rerank 分；降级时作用于标准 cosine 分；BM25 单路阈值失效并透出 `threshold_inactive`；`score_type` 必须如实上报 |
+| `RetrievalNodeAssembler` | 管线只决定“哪些片段胜出”，本类决定“胜出者怎么描述”：两级单元取父片文本、分数键命名、禁用子片剔除、图片 key 转预签名 URL（签名失败只丢图不失败整次检索）。展示型 metadata 键全部写在此处且无人回读，是它与阶段编排分离的依据 |
 | `ActiveVersionResolver` | 版本可见集缓存（TTL 可配）+ 失效通知；快照路径绝不经过此处 |
 | `EngineChunkCleaner` | 召回命中事实源已删分片时反向清理引擎（**快照路径关闭自愈**，防跨索引误删——M6 红线） |
 | `OfflineExecutionContext` | ThreadLocal 离线评测标记：超时放宽至 10s、降级不计入生产监控 |
@@ -176,9 +178,11 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 - **上传事务只持久化事实**（MinIO 原件 + document/version 行），管线经 `TransactionSynchronization.afterCommit` 提交异步执行——异步 worker 用独立连接读版本行，事务内触发会产生提交竞态（M1 联调发现的真实缺陷，全仓仅 `DocumentService` 与 `EngineChunkCleaner` 两处使用该手法）。
 - `IndexPipelineService` 是管线主编排，五个 `@Async(INDEX_EXECUTOR)` 入口：`submit`（新上传）/ `submit(versionId, reuse)`（指纹复用）/ `submitRestore`（归档版重建）/ `submitRebuild`（配置重建）/ `submitConfirm`（预览确认后续跑）。
-- 阶段：解析（parser HTTP）→ 清洗/脱敏（`DocumentCleaner`/`TextDesensitizer`；按页切分的库走 `PagedContentAssembler` 逐页清洗后拼回并记录页区间）→ 图片资产与 VLM 文本代理插回（`ImageAssetService`/`ImagePlaceholderResolver`，单图失败不失败整篇）→ 切分（`SplitterRouter` 策略路由，未知 code 回落定长；`page` 策略由管线直接分流到 `PageSplitter`，因它还需要页区间；父子两级切分 `ParentChildSplitter`，仅与定长策略组合）→ 嵌入（`ChunkEmbedder`，零 Key 全部 SKIPPED）→ 双写（`ChunkIndexWriter`：**先写 PENDING 同步行、再调引擎、再更新状态**——补偿扫描的唯一证据链）。
+- 阶段：解析（parser HTTP）→ 清洗/脱敏（`DocumentCleaner`/`TextDesensitizer`；按页切分的库走 `PagedContentAssembler` 逐页清洗后拼回并记录页区间）→ 图片资产与 VLM 文本代理插回（`ImageAssetService`/`ImagePlaceholderResolver`，单图失败不失败整篇）→ 切分（`ChunkSplitter` 统一承担：`SplitterRouter` 策略路由，未知 code 回落定长；`page` 策略分流到 `PageSplitter`，因它还需要页区间；父子两级切分 `ParentChildSplitter`，仅与定长策略组合。“是否单图 / 是否页策略”由管线判定后随请求传入，切分器不重复推导——两处各自判断会让页策略静默退化为定长）→ 嵌入（`ChunkEmbedder`，零 Key 全部 SKIPPED）→ 双写（`ChunkIndexWriter`：**先写 PENDING 同步行、再调引擎、再更新状态**——补偿扫描的唯一证据链）。
 - **指纹复用**：`VersionFingerprintFactory` 产出 content_hash/解析指纹/分片指纹/嵌入版本，`VersionArtifactReuser` 在全匹配时复制上一构建的 chunk 行（新 ID、重写父链），跳过解析与切分。
 - **版本机制**：`DocumentVersionPlanner` 一次回答重复判定/版本号（major.minor）/可否复用；`DocumentVersionActivator` 激活时旧 active 退回 READY（支持秒级回滚）；`VersionRetentionService` 异步清理超保留窗口（默认 3）的旧版 chunk（保留原件与解析产物）；`AppVersionPinChecker` 保护被快照引用的版本不被清理。
+- **编排与执行分离**：`IndexPipelineService` 只保留阶段顺序与失败归类，三类执行下沉——`ChunkSplitter`（切分与分片落库）、`IndexTaskLifecycle`（`t_kb_task` 状态机：开始/进度/成功/失败，重试复用同一行并累加 `retry_count`）、`VersionActivationHandler`（激活及其全部后续：标注继承 → 评测用例置陈旧 → 保留窗口清理 → 图谱失效）。后者刻意区别于 `DocumentVersionActivator`：激活器只守“单一 active 版本”不变式，聊天导入与手工回滚也复用它，那条不变式不能依赖任何后续步骤成功。
+- **失败语义**：`PARSE_FAILED` 与 `INDEX_FAILED` 按异常错误码分流（运维据此判断该查解析服务还是索引链路）；构建失败一律把版本置 `BUILD_FAILED` 且绝不激活；`execute` 不向异步包装层抛出——状态已如实落库，再抛只会覆盖一条更准确的记录。
 - **标注跨版本（M4a + M9）**：`AnnotationInheritanceService` 按 chunk_text_hash 精确继承禁用类标注（新版本不自动继承其他标注）；M9 起 `AnnotationMigrationAdvisor`（domain 纯函数）以归一化字符 3-gram **Dice 系数**（对称指标——刻意不用评测的非对称重叠率）为待复核标注懒计算迁移建议（阈值 `kb.annotation.migration-min-score=0.35`、top 3、候选限同文档当前激活版本、短文本不推荐），`POST /api/v1/annotations/{id}/migrate` 人工逐条确认（仅禁用/编辑两类，幂等；刻意不做自动与批量迁移——误迁移代价大于逐条确认成本）。
 
 ### 3.6 应用发布与开放 API（`appcenter` + `openapi`）

@@ -1,18 +1,14 @@
 package io.kbrag.app.retrieval;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.core.type.TypeReference;
 import io.kbrag.app.alert.RetrievalDegradeMonitor;
 import io.kbrag.app.graph.GraphRetrievalService;
 import io.kbrag.app.graph.GraphRouteOutcome;
 import io.kbrag.app.index.EngineChunkCleaner;
-import io.kbrag.app.index.MultimodalIndexManager;
 import io.kbrag.app.kb.KnowledgeBaseService;
-import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
-import io.kbrag.domain.constant.ChunkMetadataKeys;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.DegradedReason;
@@ -23,7 +19,6 @@ import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.model.FulltextQuery;
 import io.kbrag.domain.model.FusedChunk;
 import io.kbrag.domain.model.GraphChunkRelevance;
-import io.kbrag.domain.model.ImageInput;
 import io.kbrag.domain.model.KbIndexConfig;
 import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
@@ -32,20 +27,15 @@ import io.kbrag.domain.model.ScoredChunk;
 import io.kbrag.domain.model.VectorQuery;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.FulltextStore;
-import io.kbrag.domain.port.MultimodalEmbeddingProvider;
-import io.kbrag.domain.port.ObjectStorage;
 import io.kbrag.domain.port.VectorStore;
 import io.kbrag.domain.service.CrossKbRrfFusion;
 import io.kbrag.domain.service.FusionRouter;
 import io.kbrag.domain.service.KbQuotaAllocator;
-import io.kbrag.domain.service.ParentTextRedactor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
-import org.apache.commons.collections4.MapUtils;
 import org.springframework.stereotype.Service;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
@@ -107,53 +97,6 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class RetrievalService {
 
-    private static final String META_FUSED_SCORE = "fused_score";
-    private static final String META_VECTOR_SCORE = "vector_score";
-    private static final String META_BM25_SCORE = "bm25_score";
-    private static final String META_NORM_VECTOR_SCORE = "norm_vector_score";
-    private static final String META_NORM_BM25_SCORE = "norm_bm25_score";
-    private static final String META_RERANK_SCORE = "rerank_score";
-    private static final String META_VECTOR_RANK = "vector_rank";
-    private static final String META_BM25_RANK = "bm25_rank";
-
-    /**
-     * Graph route detail, requirement section 4.9: the relevance the in base ranking used, the hop count
-     * that produced it and the entity names that reached the chunk. Present only on a node the graph route
-     * contributed, so a caller can tell a three route call from a two route one node by node.
-     */
-    private static final String META_GRAPH_SCORE = "graph_score";
-    private static final String META_GRAPH_HOPS = "graph_hops";
-    private static final String META_GRAPH_ENTITIES = "graph_entities";
-    private static final String META_CHUNK_SEQ = "chunk_seq";
-    private static final String META_CHILD_IDS = "child_ids";
-    private static final String META_DISABLED_CHILD_IDS = "disabled_child_ids";
-
-    /**
-     * Disabled children whose passage was actually cut out of the returned parent text, requirement
-     * section 4.5. Present only when a cut happened, so its absence means "the parent is complete" - a
-     * parent that could not be redacted precisely carries {@code disabled_child_ids} and no count.
-     */
-    private static final String META_REDACTED_CHILD_COUNT = "redacted_child_count";
-
-    /**
-     * Chat window chunks this result absorbed because their message ranges overlapped it, requirement
-     * section 4.2. Present only on a node that absorbed at least one, so its absence means "nothing was
-     * merged" rather than "this deployment does not merge".
-     */
-    private static final String META_MERGED_WINDOW_CHUNK_IDS = "merged_window_chunk_ids";
-    private static final String META_CHILDREN = RetrievalMetadataKeys.CHILDREN;
-    private static final String META_CHILD_CHUNK_ID = "chunk_id";
-    private static final String META_CHILD_CONTENT = RetrievalMetadataKeys.CHILD_CONTENT;
-    private static final String META_CHILD_SCORE = "score";
-    private static final String META_CHILD_SCORE_TYPE = "score_type";
-
-    /**
-     * Knowledge base a node came from. Present on every node, single base calls included: a caller that
-     * has to branch on whether the key exists cannot use it, and the value is a fact of the chunk row
-     * rather than a property of the routing stage.
-     */
-    private static final String META_KB_ID = "kb_id";
-
     private static final int ENABLED = 1;
 
     /** Below this spread the BM25 route is treated as constant scored in the hybrid blend. */
@@ -172,9 +115,7 @@ public class RetrievalService {
     private final CrossKbRrfFusion crossKbRrfFusion;
     private final KbQuotaAllocator kbQuotaAllocator;
     private final GraphRetrievalService graphRetrievalService;
-    private final MultimodalIndexManager multimodalIndexManager;
-    private final MultimodalEmbeddingProvider multimodalEmbeddingProvider;
-    private final ImageQueryService imageQueryService;
+    private final MultimodalRetrievalService multimodalRetrievalService;
     private final RoutingService routingService;
     private final RewriteService rewriteService;
     private final RerankService rerankService;
@@ -182,9 +123,8 @@ public class RetrievalService {
     private final ParentChildMerger parentChildMerger;
     private final NearDuplicateWindowMerger nearDuplicateWindowMerger;
     private final DisabledChildVisibility disabledChildVisibility;
-    private final ParentTextRedactor parentTextRedactor;
+    private final RetrievalNodeAssembler nodeAssembler;
     private final EngineChunkCleaner engineChunkCleaner;
-    private final ObjectStorage objectStorage;
     private final RetrievalDegradeMonitor degradeMonitor;
     private final KbProperties properties;
 
@@ -228,7 +168,9 @@ public class RetrievalService {
         List<String> degraded = new ArrayList<>();
         // F6 image dispatch, the single point that decides between the multimodal image route and the vision
         // text fallback before any pipeline stage reads the question, the M14 contract section 7.
-        ImageDispatch imageDispatch = dispatchImages(command, targets, degraded);
+        MultimodalRetrievalService.ImageDispatch imageDispatch = multimodalRetrievalService
+                .dispatchImages(command, targets.stream().map(KbTarget::multimodalTarget).toList());
+        imageDispatch.degraded().forEach(reason -> addMarker(degraded, reason));
         RewriteOutcome rewrite = rewriteService.rewrite(imageDispatch.query(), command.getMessages(),
                 shouldRun(settings.isRewriteEnabled(), rewriteService.isAvailable(),
                         command.getRewriteEnabled(), primary.rewriteEnabled()));
@@ -326,8 +268,9 @@ public class RetrievalService {
             units = units.subList(0, settings.getTopN());
         }
 
-        List<RetrievalNodeView> nodes = toNodes(units, decision, orderingMode,
-                visibility.disabledChildrenByUnit(), nearDuplicates);
+        List<RetrievalNodeView> nodes = nodeAssembler.assemble(units,
+                new RetrievalNodeAssembler.AssemblyContext(decision, orderingMode,
+                        visibility.disabledChildrenByUnit(), nearDuplicates));
         log.info("search finished, routedKbIds={}, recallTopK={}, topN={}, fusion={}, candidates={}, "
                         + "units={}, returned={}, rerank={}, degraded={}",
                 routing.getKbIds(), settings.getRecallTopK(), settings.getTopN(), orderingMode.code(),
@@ -462,167 +405,8 @@ public class RetrievalService {
         if (context.snapshotBound()) {
             return MultimodalRouteOutcome.skipped();
         }
-        String alias = multimodalIndexManager.multimodalAlias(target.kbId(), target.indexConfig());
-        if (alias == null) {
-            return MultimodalRouteOutcome.skipped();
-        }
-        if (settings.getFusion().getMode() == FusionMode.WEIGHTED) {
-            log.info("multimodal route skipped under weighted fusion, kbId={}", target.kbId());
-            return MultimodalRouteOutcome.degraded(DegradedReason.MM_ROUTE_SKIPPED.code());
-        }
-        List<float[]> queryVectors;
-        if (CollectionUtils.isNotEmpty(imageQueryVectors)) {
-            // F6: the caller attached images and this base can search them, so the route embeds the pictures
-            // rather than the text - image to image and image to rendered page, the M14 contract section 7.
-            queryVectors = imageQueryVectors;
-        } else {
-            try {
-                queryVectors = List.of(multimodalEmbeddingProvider.embedTexts(List.of(query)).get(0));
-            } catch (Exception e) {
-                log.error("multimodal query embedding failed, errorCode={}, kbId={}",
-                        ErrorCode.UPSTREAM_MODEL_ERROR, target.kbId(), e);
-                return MultimodalRouteOutcome.degraded(DegradedReason.MM_ROUTE_UNAVAILABLE.code());
-            }
-        }
-        List<ScoredChunk> candidates = searchMultimodal(alias, queryVectors, filter, settings.getRecallTopK());
-        if (candidates.isEmpty()) {
-            return MultimodalRouteOutcome.skipped();
-        }
-        log.info("multimodal route finished, kbId={}, queries={}, candidates={}",
-                target.kbId(), queryVectors.size(), candidates.size());
-        return MultimodalRouteOutcome.of(candidates);
-    }
-
-    /**
-     * Searches the multimodal alias with every query vector and folds the hits into one ranking.
-     *
-     * <p>A text query issues one vector; an image query issues one per attached image. Overlapping hits are
-     * collapsed on the chunk id keeping the strongest similarity, so a chunk matched by two images is ranked
-     * once on its best score rather than counted twice, and the reciprocal rank fusion downstream sees a
-     * single ordered list exactly like the other routes.
-     *
-     * @param alias        multimodal alias to search
-     * @param queryVectors one or more query vectors
-     * @param filter       the very predicate the engine side routes were filtered by
-     * @param recallTopK   candidates the route contributes at most
-     * @return merged candidates ordered by descending similarity, tagged as the multimodal route
-     */
-    private List<ScoredChunk> searchMultimodal(String alias, List<float[]> queryVectors,
-                                               RetrievalFilter filter, int recallTopK) {
-        Map<String, Double> scoreByChunk = new LinkedHashMap<>();
-        for (float[] queryVector : queryVectors) {
-            List<ScoredChunk> hits = vectorStore.search(alias, VectorQuery.builder()
-                    .queryVector(queryVector).topK(recallTopK).filter(filter).build());
-            if (CollectionUtils.isEmpty(hits)) {
-                continue;
-            }
-            for (ScoredChunk hit : hits) {
-                scoreByChunk.merge(hit.getChunkId(), hit.getScore(), Math::max);
-            }
-        }
-        if (scoreByChunk.isEmpty()) {
-            return List.of();
-        }
-        List<ScoredChunk> candidates = new ArrayList<>(scoreByChunk.size());
-        for (Map.Entry<String, Double> entry : scoreByChunk.entrySet()) {
-            candidates.add(new ScoredChunk(entry.getKey(), entry.getValue(), RetrievalSource.MM));
-        }
-        candidates.sort(Comparator.comparingDouble(ScoredChunk::getScore).reversed()
-                .thenComparing(ScoredChunk::getChunkId));
-        return candidates.size() > recallTopK
-                ? new ArrayList<>(candidates.subList(0, recallTopK)) : candidates;
-    }
-
-    /**
-     * Decides what the attached images do, the single dispatch point of the M14 contract section 7.
-     *
-     * <p>Two outcomes, one of them per call. When the searched corpus can embed images - a multimodal
-     * provider is configured, at least one selected base has the multimodal switch on, the call is not a
-     * frozen release snapshot and a written query is present - the pictures are embedded and steer the
-     * multimodal route directly (image to image, image to rendered page). Otherwise they fall back to the
-     * vision transcription that folds their description into the query, exactly the path the open API used
-     * before this milestone, so a deployment without the multimodal capability keeps its image search.
-     *
-     * <p><b>A written query stays mandatory on the image route.</b> Pure image retrieval is out of scope for
-     * this milestone, so an image only call is never routed to the multimodal space; it takes the vision
-     * fallback, whose own gate rejects a call that has nothing at all to search for.
-     *
-     * <p><b>A release snapshot never takes the image route.</b> The multimodal index holds no frozen copy, so
-     * the per base route is off on the snapshot path anyway; sending images there would embed them for a
-     * route that cannot run, so a snapshot call transcribes them into its query instead.
-     *
-     * @param command call parameters, read for the images and the query
-     * @param targets knowledge bases the call will search
-     * @param degraded running degradation markers, appended in place
-     * @return the query the pipeline runs with and the image vectors the multimodal route embeds
-     */
-    private ImageDispatch dispatchImages(RetrievalCommand command, List<KbTarget> targets,
-                                         List<String> degraded) {
-        List<String> images = command.getImages();
-        if (multimodalUsableForImages(command, images, targets)) {
-            return new ImageDispatch(command.getQuery(), embedQueryImages(images, degraded));
-        }
-        ImageQueryService.ImageQueryOutcome outcome = imageQueryService.enrich(command.getQuery(), images);
-        outcome.degraded().forEach(reason -> addMarker(degraded, reason));
-        return new ImageDispatch(outcome.query(), List.of());
-    }
-
-    /**
-     * Tells whether the attached images can steer the multimodal route rather than the vision fallback.
-     *
-     * @param command call parameters, read for the query and the snapshot binding
-     * @param images  attached images
-     * @param targets knowledge bases the call will search
-     * @return {@code true} when the images are to be embedded into the multimodal space
-     */
-    private boolean multimodalUsableForImages(RetrievalCommand command, List<String> images,
-                                              List<KbTarget> targets) {
-        if (CollectionUtils.isEmpty(images) || !multimodalEmbeddingProvider.isConfigured()) {
-            return false;
-        }
-        if (command.getQuery() == null || command.getQuery().isBlank()) {
-            return false;
-        }
-        if (MapUtils.isNotEmpty(command.getIndexOverride())) {
-            return false;
-        }
-        return targets.stream().anyMatch(target ->
-                multimodalIndexManager.multimodalAlias(target.kbId(), target.indexConfig()) != null);
-    }
-
-    /**
-     * Embeds the attached images into the multimodal space, degrading rather than failing when the provider
-     * call itself breaks.
-     *
-     * <p>The count and size validation runs first and outside the try: an over sized or over counted image
-     * set is a caller error the pipeline rejects, not a degradation. A provider timeout or error, by
-     * contrast, leaves the written query and the other routes to answer, so it is reported through
-     * {@code mm_route_unavailable} and returns no vectors.
-     *
-     * @param images   attached images, already known to be present
-     * @param degraded running degradation markers, appended in place
-     * @return one vector per image, or empty when the provider call failed
-     */
-    private List<float[]> embedQueryImages(List<String> images, List<String> degraded) {
-        List<ImageInput> inputs = imageQueryService.decodeForEmbedding(images);
-        try {
-            return multimodalEmbeddingProvider.embedImages(inputs);
-        } catch (Exception e) {
-            log.error("query image embedding failed, errorCode={}, images={}",
-                    ErrorCode.UPSTREAM_MODEL_ERROR, inputs.size(), e);
-            addMarker(degraded, DegradedReason.MM_ROUTE_UNAVAILABLE.code());
-            return List.of();
-        }
-    }
-
-    /**
-     * What the image dispatch decided: the query every pipeline stage reads and the image vectors, if any,
-     * the multimodal route embeds instead of the text.
-     *
-     * @param query             query the pipeline runs with, enriched by the vision fallback when it ran
-     * @param imageQueryVectors embedded images for the multimodal route, empty on the fallback path
-     */
-    private record ImageDispatch(String query, List<float[]> imageQueryVectors) {
+        return multimodalRetrievalService.recall(target.multimodalTarget(), query, imageQueryVectors,
+                filter, settings);
     }
 
     /**
@@ -756,6 +540,11 @@ public class RetrievalService {
 
         boolean graphEnabled() {
             return retrievalConfig != null && retrievalConfig.graphEnabled();
+        }
+
+        /** The subset of this target the multimodal route is allowed to see. */
+        MultimodalRetrievalService.Target multimodalTarget() {
+            return new MultimodalRetrievalService.Target(kbId(), indexConfig);
         }
     }
 
@@ -1103,266 +892,6 @@ public class RetrievalService {
     }
 
     /**
-     * Turns the surviving units into the transport neutral nodes.
-     *
-     * @param orderingMode           strategy that produced the final ordering: the in base one on a single
-     *                               base call, reciprocal rank fusion once bases were merged
-     * @param units                  surviving units in ranking order
-     * @param decision               threshold decision of this search
-     * @param disabledChildrenByUnit disabled children to report per unit
-     * @param nearDuplicates         outcome of the near duplicate window merge
-     * @return ordered nodes
-     */
-    private List<RetrievalNodeView> toNodes(List<RetrievalUnit> units,
-                                            ScoreThresholdPolicy.ThresholdDecision decision,
-                                            FusionMode orderingMode,
-                                            Map<String, List<DisabledChildVisibility.DisabledChild>>
-                                                    disabledChildrenByUnit,
-                                            NearDuplicateWindowMerger.Outcome nearDuplicates) {
-        if (CollectionUtils.isEmpty(units)) {
-            return List.of();
-        }
-        Map<String, Chunk> parentById = loadParents(units);
-        List<RetrievalNodeView> nodes = new ArrayList<>(units.size());
-        for (RetrievalUnit unit : units) {
-            RetrievalCandidate best = unit.best();
-            ScoreThresholdPolicy.ReportedScore reported =
-                    scoreThresholdPolicy.report(best, decision, orderingMode);
-            Chunk answerChunk = unit.isParent()
-                    ? parentById.getOrDefault(unit.getUnitId(), best.getChunk())
-                    : best.getChunk();
-            List<DisabledChildVisibility.DisabledChild> disabledChildren =
-                    disabledChildrenByUnit.get(unit.getUnitId());
-            ParentTextRedactor.Redaction redaction = redact(answerChunk, disabledChildren);
-            nodes.add(RetrievalNodeView.builder()
-                    .docId(answerChunk.getDocId())
-                    .documentVersionId(answerChunk.getDocumentVersionId())
-                    .chunkId(answerChunk.getChunkId())
-                    .chunkType(answerChunk.getChunkType().code())
-                    .content(redaction.text())
-                    .score(reported.getValue())
-                    .scoreType(reported.getType().code())
-                    .retrievalSource(best.getFused().getPrimarySource().code())
-                    .metadata(buildMetadata(unit, answerChunk, decision, orderingMode,
-                            disabledChildren, redaction,
-                            // Keyed by the best member rather than by the unit: the merge judged candidates,
-                            // and on a two level base the unit id is a parent that was never a candidate.
-                            nearDuplicates.mergedIdsOf(best.chunkId())))
-                    .imageUrls(presignedImageUrls(unit, answerChunk))
-                    .previewUrl(null)
-                    .build());
-        }
-        return nodes;
-    }
-
-    /**
-     * Cuts the excluded passages out of a returned parent text, requirement section 4.5.
-     *
-     * <p>Reached only for a parent the knowledge base decided to return - the strict switch removed the
-     * others before this point - and only when the disabled children still know where they sit. Otherwise
-     * the redactor hands the text back untouched, which is the pre M9 behaviour.
-     *
-     * @param answerChunk      chunk whose text is returned
-     * @param disabledChildren excluded children of that chunk, {@code null} when there are none
-     * @return text to return with the number of passages that were cut
-     */
-    private ParentTextRedactor.Redaction redact(
-            Chunk answerChunk, List<DisabledChildVisibility.DisabledChild> disabledChildren) {
-        if (CollectionUtils.isEmpty(disabledChildren)) {
-            return new ParentTextRedactor.Redaction(answerChunk.getContent(), 0);
-        }
-        return parentTextRedactor.redact(answerChunk.getContent(), disabledChildren.stream()
-                .map(DisabledChildVisibility.DisabledChild::toSpan).toList());
-    }
-
-    /**
-     * Turns the stored image keys of a result into time limited pre signed URLs.
-     *
-     * <p>The keys are minted per response rather than stored as URLs: a link that lived in the index would
-     * be public for as long as the index exists, and it would already be expired by the time it is read.
-     *
-     * <p>A two level result collects the keys of its matched children as well as its own, because the parent
-     * text is what is returned and the image that made a child match is part of that text.
-     *
-     * @param unit        merged unit being returned
-     * @param answerChunk chunk whose text is returned
-     * @return pre signed URLs, empty when the result derives from no image
-     */
-    private List<String> presignedImageUrls(RetrievalUnit unit, Chunk answerChunk) {
-        List<String> keys = new ArrayList<>(imageKeysOf(answerChunk));
-        if (unit.isParent()) {
-            for (RetrievalCandidate member : unit.getMembers()) {
-                for (String key : imageKeysOf(member.getChunk())) {
-                    if (!keys.contains(key)) {
-                        keys.add(key);
-                    }
-                }
-            }
-        }
-        if (CollectionUtils.isEmpty(keys)) {
-            return List.of();
-        }
-        Duration ttl = Duration.ofMinutes(properties.getMinio().getPresignedTtlMinutes());
-        List<String> urls = new ArrayList<>(keys.size());
-        for (String key : keys) {
-            try {
-                urls.add(objectStorage.presignedUrl(key, ttl));
-            } catch (Exception e) {
-                // A thumbnail that cannot be signed must not fail a search: the passage is the answer.
-                log.info("image could not be presigned for a search result, object={}", key);
-            }
-        }
-        return urls;
-    }
-
-    /**
-     * Reads the image keys a chunk recorded.
-     *
-     * @param chunk fact source row
-     * @return object storage keys, empty when the chunk derives from no image
-     */
-    private List<String> imageKeysOf(Chunk chunk) {
-        Object value = storedMetadata(chunk).get(ChunkMetadataKeys.IMAGE_URLS);
-        if (!(value instanceof List<?> items)) {
-            return List.of();
-        }
-        List<String> keys = new ArrayList<>(items.size());
-        for (Object item : items) {
-            if (item != null) {
-                keys.add(String.valueOf(item));
-            }
-        }
-        return keys;
-    }
-
-    /**
-     * Parses the metadata column of a chunk.
-     *
-     * @param chunk fact source row
-     * @return metadata document, empty when the column is blank
-     */
-    private Map<String, Object> storedMetadata(Chunk chunk) {
-        if (chunk == null || chunk.getMetadata() == null || chunk.getMetadata().isBlank()) {
-            return Map.of();
-        }
-        Map<String, Object> parsed = JsonUtil.parse(chunk.getMetadata(),
-                new TypeReference<Map<String, Object>>() {
-                });
-        return parsed == null ? Map.of() : parsed;
-    }
-
-    /**
-     * Loads the parent rows of the two level units.
-     *
-     * <p>Parents are never indexed, so their text only exists in MySQL; this is the single reason the
-     * engines can stay child only while the caller still receives a passage large enough to read.
-     *
-     * @param units merged units
-     * @return parent chunk per parent chunk id
-     */
-    private Map<String, Chunk> loadParents(List<RetrievalUnit> units) {
-        List<String> parentIds = units.stream()
-                .filter(RetrievalUnit::isParent)
-                .map(RetrievalUnit::getUnitId)
-                .toList();
-        if (CollectionUtils.isEmpty(parentIds)) {
-            return Map.of();
-        }
-        List<Chunk> parents = chunkMapper.selectList(new LambdaQueryWrapper<Chunk>()
-                .in(Chunk::getChunkId, parentIds));
-        Map<String, Chunk> parentById = new HashMap<>(parents.size());
-        for (Chunk parent : parents) {
-            parentById.put(parent.getChunkId(), parent);
-        }
-        return parentById;
-    }
-
-    private Map<String, Object> buildMetadata(RetrievalUnit unit, Chunk answerChunk,
-                                              ScoreThresholdPolicy.ThresholdDecision decision,
-                                              FusionMode orderingMode,
-                                              List<DisabledChildVisibility.DisabledChild> disabledChildren,
-                                              ParentTextRedactor.Redaction redaction,
-                                              List<String> mergedWindowChunkIds) {
-        Map<String, Object> metadata = new LinkedHashMap<>(scoreMetadata(unit.best()));
-        // Read from the fact source row rather than from the routing decision: a node has to be traceable
-        // to its base even when routing never ran, and the row is the only place that cannot disagree.
-        metadata.put(META_KB_ID, answerChunk.getKbId());
-        metadata.put(META_CHUNK_SEQ, answerChunk.getSeq());
-        // The stored document facts travel next to the scores so a chat result card can show its
-        // conversation, its senders and its time without a second round trip. The image keys are excluded:
-        // they leave through image_urls as pre signed links and the raw keys are of no use to a caller.
-        storedMetadata(answerChunk).forEach((key, value) -> {
-            if (!ChunkMetadataKeys.IMAGE_URLS.equals(key)) {
-                metadata.putIfAbsent(key, value);
-            }
-        });
-        if (CollectionUtils.isNotEmpty(mergedWindowChunkIds)) {
-            metadata.put(META_MERGED_WINDOW_CHUNK_IDS, mergedWindowChunkIds);
-        }
-        if (!unit.isParent()) {
-            return metadata;
-        }
-        if (CollectionUtils.isNotEmpty(disabledChildren)) {
-            // Reported whether or not the text could be cut: the caller has to be able to tell that
-            // something inside this parent was excluded, and the two cases differ only by the count below.
-            metadata.put(META_DISABLED_CHILD_IDS, disabledChildren.stream()
-                    .map(DisabledChildVisibility.DisabledChild::chunkId).toList());
-        }
-        if (redaction.applied()) {
-            metadata.put(META_REDACTED_CHILD_COUNT, redaction.redactedChildCount());
-        }
-        metadata.put(META_CHILD_IDS, unit.getMembers().stream().map(RetrievalCandidate::chunkId).toList());
-        List<Map<String, Object>> children = new ArrayList<>(unit.getMembers().size());
-        for (RetrievalCandidate member : unit.getMembers()) {
-            ScoreThresholdPolicy.ReportedScore reported =
-                    scoreThresholdPolicy.report(member, decision, orderingMode);
-            Map<String, Object> child = new LinkedHashMap<>();
-            child.put(META_CHILD_CHUNK_ID, member.chunkId());
-            child.put(META_CHILD_CONTENT, member.getChunk().getContent());
-            child.put(META_CHILD_SCORE, reported.getValue());
-            child.put(META_CHILD_SCORE_TYPE, reported.getType().code());
-            child.putAll(scoreMetadata(member));
-            children.add(child);
-        }
-        metadata.put(META_CHILDREN, children);
-        return metadata;
-    }
-
-    /**
-     * Per route evidence of one candidate, shared by the node metadata and by the child detail list.
-     *
-     * <p>Both the raw and the normalised score are exposed when they exist: the raw value is what the
-     * engine reported and is the only one comparable with a manual query, while the normalised value
-     * is what the weighted strategy actually summed, and a debug page that shows one without the other
-     * cannot explain a ranking.
-     *
-     * @param candidate candidate being described
-     * @return score keys, ordered for readability
-     */
-    private Map<String, Object> scoreMetadata(RetrievalCandidate candidate) {
-        FusedChunk fused = candidate.getFused();
-        Map<String, Object> scores = new LinkedHashMap<>();
-        scores.put(META_FUSED_SCORE, fused.getFusedScore());
-        putIfPresent(scores, META_VECTOR_SCORE, fused.routeScore(RetrievalSource.VECTOR));
-        putIfPresent(scores, META_VECTOR_RANK, fused.getRouteRanks().get(RetrievalSource.VECTOR));
-        putIfPresent(scores, META_NORM_VECTOR_SCORE, fused.normalizedScore(RetrievalSource.VECTOR));
-        putIfPresent(scores, META_BM25_SCORE, fused.routeScore(RetrievalSource.BM25));
-        putIfPresent(scores, META_BM25_RANK, fused.getRouteRanks().get(RetrievalSource.BM25));
-        putIfPresent(scores, META_NORM_BM25_SCORE, fused.normalizedScore(RetrievalSource.BM25));
-        putIfPresent(scores, META_RERANK_SCORE, candidate.getRerankScore());
-        GraphChunkRelevance graph = candidate.getGraphEvidence();
-        if (graph != null) {
-            // The relevance is reported from the graph evidence rather than from the route score map: the
-            // two are the same number, and reading it from the object that also carries the hop count keeps
-            // the three keys of the debug row provably consistent with one another.
-            scores.put(META_GRAPH_SCORE, graph.score());
-            scores.put(META_GRAPH_HOPS, graph.hops());
-            scores.put(META_GRAPH_ENTITIES, graph.entityNames());
-        }
-        return scores;
-    }
-
-    /**
      * Builds the applied parameter summary.
      *
      * @param usedQuery          query the recall stage ran with
@@ -1380,12 +909,6 @@ public class RetrievalService {
                 .thresholdAppliedOn(thresholdAppliedOn)
                 .routedKbIds(routedKbIds)
                 .build();
-    }
-
-    private void putIfPresent(Map<String, Object> target, String key, Object value) {
-        if (value != null) {
-            target.put(key, value);
-        }
     }
 
     private void addMarker(List<String> degraded, String marker) {
