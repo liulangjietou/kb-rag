@@ -63,7 +63,7 @@
   触发，与 AGPL-3.0 的网络服务条款性质不同，逐项核实见 `NOTICE`。
 - **OCR 引擎为 Tesseract，`ocr_source` 取值 `"tesseract"` 而非 `"paddle"`**：PaddleOCR 无 JVM
   绑定。契约仍成立，因为 kb-rag-server 判的是该标记存不存在而非等于什么
-  （`ParsedDocument.Page#isOcrBackfilled`）。若要求 OpenAPI 的 `ocr_source` 枚举严格为 `paddle`，
+  （`ParsedDocument.ParsedPage#ocrApplied`，进而 `ocrPageNumbers()` → `ImageAssetService`）。若要求 OpenAPI 的 `ocr_source` 枚举严格为 `paddle`，
   需相应放宽该枚举——这是一处待 Owner 拍板的契约文本调整。
 - **`chat/PythonRegexTranslator`**：把映射档案里 Python 风格的 `(?P<name>...)` 命名组转成编号组
   加旁挂名字表，并开启 `UNICODE_CHARACTER_CLASS`。这不是锦上添花而是必需——Java 的正则组名

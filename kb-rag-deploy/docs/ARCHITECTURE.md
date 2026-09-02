@@ -291,7 +291,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `kb-rag-parser`（契约的原始定义方与行为基准） | Python 3.11+ / FastAPI + Uvicorn / pydantic 2 | **PyMuPDF**（pdf）、python-docx、openpyxl、标准库 csv/html.parser；可选 `requirements-ocr.txt`（paddlepaddle 3.3.1 + paddleocr 3.3.3，默认不装） |
 | `kb-rag-parse-java` | Java 17 / Spring Boot 3.3.9（与 kb-rag-server 同版本线） | **Apache PDFBox**（pdf）、Apache POI（docx/xlsx）、jsoup（html）、Commons CSV、SnakeYAML；可选 Maven profile `ocr`（tess4j，默认不构建） |
 
-两者以 `kb-rag-parse-java/tools/crosscheck.py` 端到端对拍，2026-09-02 实测 42/42 一致（含 pdf 文本层、图片去重、markdown 表格、时间戳归一、空白语义、聊天消息逐字段全等）。差异项与理由记在 `kb-rag-parse-java/README.md`「与契约的偏离说明」，其中唯一涉及契约文本的是 `ocr_source` 取值（Java 侧为 `tesseract` 而非 `paddle`，因 PaddleOCR 无 JVM 绑定；kb-rag-server 判的是该标记存不存在而非等于什么，故契约仍成立，但 `docs/openapi/kb-parser.yaml` 的枚举若要严格化需相应放宽——待 Owner 决策）。
+两者以 `kb-rag-parse-java/tools/crosscheck.py` 端到端对拍，2026-09-02 实测 42/42 一致（含 pdf 文本层、图片去重、markdown 表格、时间戳归一、空白语义、聊天消息逐字段全等）。差异项与理由记在 `kb-rag-parse-java/README.md`「与契约的偏离说明」，其中唯一涉及契约文本的是 `ocr_source` 取值（Java 侧为 `tesseract` 而非 `paddle`，因 PaddleOCR 无 JVM 绑定；kb-rag-server 判的是该标记存不存在而非等于什么（`ParsedDocument.ParsedPage#ocrApplied`），故契约仍成立，但 `docs/openapi/kb-parser.yaml` 的枚举若要严格化需相应放宽——待 Owner 决策）。
 
 > **许可差异（选型时的实际决定因素）**：`kb-rag-parser` 的 pdf 路径依赖 PyMuPDF，其免费分发一侧为 AGPL-3.0，带网络服务条款——以网络服务形式提供包含该代码的程序这一行为本身即触发完整对应源代码的提供义务，而解析服务恰是网络服务；这一点在该仓 README/NOTICE 中作为待 Owner 决策事项如实记录。`kb-rag-parse-java` 的 pdf 路径走 Apache-2.0 的 PDFBox，直接依赖全部为 Apache-2.0 / MIT / BSD-3-Clause，不触发此类义务。
 

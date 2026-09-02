@@ -33,7 +33,7 @@ import java.util.concurrent.TimeUnit;
  * <p><b>Why not PaddleOCR.</b> The Python service pins {@code ch_PP-OCRv4} and reports
  * {@code ocr_source="paddle"}; PaddleOCR has no JVM binding, so this port carries Tesseract and
  * reports {@code ocr_source="tesseract"}. That stays contract-compatible because kb-rag-server tests
- * the marker for presence, not for a particular value ({@code ParsedDocument.Page#isOcrBackfilled}) -
+ * the marker for presence, not for a particular value ({@code ParsedDocument.ParsedPage#ocrApplied}) -
  * see the README's deviations section.
  *
  * @author owlzhangfq@gmail.com

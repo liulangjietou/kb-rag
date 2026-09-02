@@ -64,7 +64,7 @@ public final class ParserConstants {
      * Tesseract stands in for the Python service's PaddleOCR: no PaddleOCR binding exists for the JVM,
      * and this tier only has to answer "can this service read a scanned page without a model key".
      * kb-rag-server keys off {@code ocr_source} being present, not off its value
-     * (ParsedDocument.Page#isOcrBackfilled), so the marker below stays contract-compatible.
+     * (ParsedDocument.ParsedPage#ocrApplied), so the marker below stays contract-compatible.
      */
     public static final String OCR_ENGINE_TESSERACT = "tesseract";
 

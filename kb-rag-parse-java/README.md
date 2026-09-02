@@ -311,7 +311,7 @@ kb-rag-parser/.venv/bin/python kb-rag-parse-java/tools/crosscheck.py
 
 以下是本实现相对 Python 实现的偏离，均已实测确认不影响 kb-rag-server 的消费：
 
-- **OCR 引擎为 Tesseract，`ocr_source` 取值为 `"tesseract"` 而非 `"paddle"`。** PaddleOCR 没有 JVM 绑定，而这一层要回答的问题只是"本服务能不能在没有模型 Key 的情况下读出扫描页"。契约仍然成立：kb-rag-server 判的是这个标记**存不存在**而不是它等于什么（`ParsedDocument.Page#isOcrBackfilled` 即 `ocrSource != null && !ocrSource.isBlank()`）。若严格要求枚举值为 `paddle`，`docs/openapi/kb-parser.yaml` 的 `ocr_source` 枚举需相应放宽——这是一处**需要 Owner 拍板的契约文本调整**，本文档不代为决定。
+- **OCR 引擎为 Tesseract，`ocr_source` 取值为 `"tesseract"` 而非 `"paddle"`。** PaddleOCR 没有 JVM 绑定，而这一层要回答的问题只是"本服务能不能在没有模型 Key 的情况下读出扫描页"。契约仍然成立：kb-rag-server 判的是这个标记**存不存在**而不是它等于什么（`ParsedDocument.ParsedPage#ocrApplied` 即 `ocrSource != null && !ocrSource.isBlank()`，其结果经 `ocrPageNumbers()` 交给 `ImageAssetService` 决定该页渲染图要不要再调视觉模型）。若严格要求枚举值为 `paddle`，`docs/openapi/kb-parser.yaml` 的 `ocr_source` 枚举需相应放宽——这是一处**需要 Owner 拍板的契约文本调整**，本文档不代为决定。
 - **pdf 内嵌图片的编码**：JPEG 原样透传原始 DCT 字节（`media_type=image/jpeg`），其余（Flate 位图、CCITT 传真、JBIG2 等）解码一次后统一编码为 PNG。这些格式在 pdf 内部本来就没有独立文件形态，必须重编码；JPEG 单独走透传是因为把照片型扫描页重编码为 PNG 常常让体积翻数倍，而响应里每张图都是 base64。Python 实现走 PyMuPDF 的 `extract_image`，直出原始编码流与原始扩展名，因此 `media_type` 分布可能不同——契约只约束 `media_type` 是有效 MIME，未约束具体取值。
 - **html 选择器是 CSS 全集**。Python 实现手写了最小选择器引擎，只支持 `tag`/`.class`/`#id`/`tag.class`；jsoup 带完整 CSS 选择器，是严格超集。为 Python 实现写的档案在这里原样可用；反过来，在这里写的档案若用了更复杂的选择器，拿回 Python 实现会被拒。档案作者需要知道这个方向性。
 - **XXE 防护方式不同**：Python 侧在启动时用 `defusedxml.defuse_stdlib()` 全局 patch 标准库；JVM 没有等价的全局开关（每个解析器都来自调用方自行配置的工厂），因此这里靠"POI 自身已加固（审计）+ 本服务不手工解析 XML"达成同一姿态，另加解压比阈值作为 zip 炸弹的第二道防线。审计结论写在 `security/XmlHardening` 的类注释里。
