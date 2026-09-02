@@ -1,0 +1,36 @@
+# Built-in mapping profile for HTML chat log exports (M8-CONTRACTS.md §0.2).
+# Selected automatically (ChatLogParser.DEFAULT_PROFILE_BY_EXT)
+# when a POST /api/v1/parse/chat request for file_ext=html does not pass
+# mapping_profile explicitly.
+#
+# NOTE: written from the publicly documented 留痕/MemoTrace HTML export DOM
+# shape; has NOT yet been validated against a real export sample --
+# recalibrate this file (not the parser code) once one is available
+# (M8-CONTRACTS.md §0 "样例到位后校准"). Expected per-message DOM shape:
+#
+#   <div class="message">
+#     <span class="sender">张三</span>
+#     <span class="time">2024-01-01 10:00:00</span>
+#     <div class="content">你好，最近怎么样？</div>
+#   </div>
+#
+# Selectors are a small CSS subset: tag, .class, #id, and tag.class
+# combinations (see chat/HtmlChatAdapter.java) -- enough to address this
+# shape without pulling in bs4. To match a different export's DOM, pass a
+# profile_yaml (or a custom mapping_profile file) whose html: section
+# overrides these selectors.
+
+html:
+  message: div.message
+  sender: span.sender
+  time: span.time
+  content: div.content
+  # A message node containing a node matching `image` has no usable text of
+  # its own; its content becomes the fixed [IMAGE] placeholder
+  # (msg_type=image) instead (M8-CONTRACTS.md §0.2).
+  image: img
+  # A message node containing a node matching `voice`/`video` is dropped
+  # entirely from sessions[].messages[] and counted in skipped, same as the
+  # csv/xlsx voice/video convention (M3-CONTRACTS.md §2.2).
+  voice: audio
+  video: video

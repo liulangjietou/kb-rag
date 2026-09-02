@@ -280,13 +280,22 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 ---
 
-## 4. kb-rag-parser 架构
+## 4. 解析服务架构（kb-rag-parser / kb-rag-parse-java）
 
 ### 4.1 技术栈与定位
 
-Python 3.11+ / FastAPI + Uvicorn / pydantic 2。解析实现：**PyMuPDF**（pdf）、python-docx、openpyxl、标准库 csv/html.parser；可选 `requirements-ocr.txt`（paddlepaddle 3.3.1 + paddleocr 3.3.3，默认不装）。
+解析服务有两套**行为等价、二选一部署**的实现，监听同一端口、同一套契约与环境变量，`PARSER_BASE_URL` 指向哪个都不需要改 kb-rag-server：
 
-> 注意：需求文档 §8 技术栈中"MinerU（pdf）"为原始选型，**实际实现未集成 MinerU**（全仓无引用；NOTICE 中为预留声明"does NOT use MinerU in M1"）。当前 pdf 路线 = PyMuPDF 文本层抽取 + 扫描页 150dpi 渲染，OCR 由 server 侧 VLM 或本地 PaddleOCR 承担。
+| 实现 | 技术栈 | 解析库 |
+|---|---|---|
+| `kb-rag-parser`（契约的原始定义方与行为基准） | Python 3.11+ / FastAPI + Uvicorn / pydantic 2 | **PyMuPDF**（pdf）、python-docx、openpyxl、标准库 csv/html.parser；可选 `requirements-ocr.txt`（paddlepaddle 3.3.1 + paddleocr 3.3.3，默认不装） |
+| `kb-rag-parse-java` | Java 17 / Spring Boot 3.3.9（与 kb-rag-server 同版本线） | **Apache PDFBox**（pdf）、Apache POI（docx/xlsx）、jsoup（html）、Commons CSV、SnakeYAML；可选 Maven profile `ocr`（tess4j，默认不构建） |
+
+两者以 `kb-rag-parse-java/tools/crosscheck.py` 端到端对拍，2026-09-02 实测 42/42 一致（含 pdf 文本层、图片去重、markdown 表格、时间戳归一、空白语义、聊天消息逐字段全等）。差异项与理由记在 `kb-rag-parse-java/README.md`「与契约的偏离说明」，其中唯一涉及契约文本的是 `ocr_source` 取值（Java 侧为 `tesseract` 而非 `paddle`，因 PaddleOCR 无 JVM 绑定；kb-rag-server 判的是该标记存不存在而非等于什么，故契约仍成立，但 `docs/openapi/kb-parser.yaml` 的枚举若要严格化需相应放宽——待 Owner 决策）。
+
+> **许可差异（选型时的实际决定因素）**：`kb-rag-parser` 的 pdf 路径依赖 PyMuPDF，其免费分发一侧为 AGPL-3.0，带网络服务条款——以网络服务形式提供包含该代码的程序这一行为本身即触发完整对应源代码的提供义务，而解析服务恰是网络服务；这一点在该仓 README/NOTICE 中作为待 Owner 决策事项如实记录。`kb-rag-parse-java` 的 pdf 路径走 Apache-2.0 的 PDFBox，直接依赖全部为 Apache-2.0 / MIT / BSD-3-Clause，不触发此类义务。
+
+> 注意：需求文档 §8 技术栈中"MinerU（pdf）"为原始选型，**实际实现未集成 MinerU**（全仓无引用；NOTICE 中为预留声明"does NOT use MinerU in M1"）。当前 pdf 路线 = 文本层抽取 + 扫描页 150dpi 渲染（Python 侧用 PyMuPDF，Java 侧用 PDFBox），OCR 由 server 侧 VLM 或解析服务的本地引擎承担。
 
 ### 4.2 API（统一信封 `{code, data, message, request_id}`，`code ∈ {OK, PARSE_FAILED}`）
 
@@ -298,6 +307,8 @@ Python 3.11+ / FastAPI + Uvicorn / pydantic 2。解析实现：**PyMuPDF**（pdf
 
 ### 4.3 模块结构
 
+以下按 `kb-rag-parser`（Python）描述，它是契约的原始定义方。`kb-rag-parse-java` 逐模块一一对应（`parsers/` -> `parser/`、`chat/` -> `chat/`、`ocr/` -> `ocr/`、`security.py` -> `security/`、`config.py` -> `config/`），职责划分与 fast-fail 边界相同，逐项对照见 `kb-rag-parse-java/README.md`「项目结构」。
+
 - `main.py`：端点 + `ThreadPoolExecutor(4)` 跑阻塞解析 + `asyncio.wait_for` 300s 超时；所有可恢复失败归一化为信封错误。
 - `config.py`：全部常量单点（100MB 文件上限、zip 解压 500MB/2000 条目上限、扫描页文本阈值、图片 100 张/10MB 上限、TXT 不匹配行 30% 失败线等）。
 - `parsers/`：`BaseParser` 策略接口 + `registry.py` 查表分派；pdf（扫描页判定 + 渲染，扫描页不再另抽内嵌图防双计）/ docx（段落表格图片按原始顺序，占位符插回）/ excel+csv（markdown 表格，每 sheet 一个 page_no）/ text / html（M12 通用 HTML 页面：仅标准库 html.parser，标题/块级分段→markdown，零出站请求）。
@@ -308,7 +319,7 @@ Python 3.11+ / FastAPI + Uvicorn / pydantic 2。解析实现：**PyMuPDF**（pdf
 
 ### 4.4 与 server 的交互
 
-server 侧 `HttpDocumentParserClient`（`kb-infrastructure`）经 `PARSER_BASE_URL` 调用；`X-Request-Id` 头透传实现两侧日志串联；M3 起新增字段全部防御式读取，双向兼容任意部署顺序；调用方仅 `IndexPipelineService` 与 `ChatImportService`（经 `DocumentParserClient` 端口）。
+server 侧 `HttpDocumentParserClient`（`kb-infrastructure`）经 `PARSER_BASE_URL` 调用，指向哪一套实现都不需要改动 server；`X-Request-Id` 头透传实现两侧日志串联；M3 起新增字段全部防御式读取，双向兼容任意部署顺序；调用方仅 `IndexPipelineService` 与 `ChatImportService`（经 `DocumentParserClient` 端口）。
 
 ---
 

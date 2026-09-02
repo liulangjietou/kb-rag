@@ -1,0 +1,42 @@
+# kb-rag-parse-java runtime configuration.
+#
+# Every kb.parser.* value below is bound from the same environment variable name the Python
+# kb-rag-parser documents, so one deployment's environment drives either implementation unchanged.
+
+server:
+  # Fixed by M1-CONTRACTS.md §0: kb-rag-server dials this port.
+  port: ${SERVER_PORT:20001}
+
+spring:
+  application:
+    name: kb-rag-parse-java
+  servlet:
+    multipart:
+      # Slightly above the 100MB contract cap on purpose. The cap itself is enforced in
+      # UploadGuard, which answers with the contract's own PARSE_FAILED message; this
+      # container-level limit is only the backstop that keeps a genuinely huge body from
+      # being buffered before that check can run.
+      max-file-size: 110MB
+      max-request-size: 110MB
+  jackson:
+    # The response contract is snake_case throughout (page_no, content_base64, ocr_source...).
+    property-naming-strategy: SNAKE_CASE
+
+kb:
+  parser:
+    scanned-page-text-threshold: ${SCANNED_PAGE_TEXT_THRESHOLD:20}
+    garbled-page-valid-char-ratio-pct: ${GARBLED_PAGE_VALID_CHAR_RATIO_PCT:50}
+    max-images-per-doc: ${MAX_IMAGES_PER_DOC:100}
+    max-image-bytes: ${MAX_IMAGE_BYTES:10485760}
+    max-workers: ${PARSER_MAX_WORKERS:4}
+    ocr-engine: ${OCR_ENGINE:none}
+    ocr-timeout-seconds: ${OCR_TIMEOUT_S:30}
+    ocr-language: ${OCR_LANGUAGE:chi_sim+eng}
+    ocr-data-path: ${OCR_DATA_PATH:}
+
+logging:
+  level:
+    root: INFO
+    io.kbrag.parser: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %logger{36} %msg%n"
