@@ -293,7 +293,7 @@ Python 3.11+ / FastAPI + Uvicorn / pydantic 2。解析实现：**PyMuPDF**（pdf
 | 端点 | 用途 |
 |---|---|
 | `GET /health` | 存活探针 |
-| `POST /api/v1/parse` | multipart `file` + `file_ext`（pdf/docx/txt/md/xlsx/csv/html/htm，html 为 M12 增量）→ markdown + 按页文本与该页 markdown 切片（`scanned`/`ocr_source` 标记，`markdown` 为 M14 增量）+ 图片 base64（`kind=embedded|page_render`）+ `warnings[]` |
+| `POST /api/v1/parse` | multipart `file` + `file_ext`（pdf/docx/txt/md/sql/xlsx/csv/html/htm，html 为 M12 增量，sql 与 txt/md 共用纯文本解析器）→ markdown + 按页文本与该页 markdown 切片（`scanned`/`ocr_source` 标记，`markdown` 为 M14 增量）+ 图片 base64（`kind=embedded|page_render`）+ `warnings[]` |
 | `POST /api/v1/parse/chat` | multipart `file` + `file_ext`（csv/xlsx/txt/html）+ 可选 `mapping_profile`/`profile_yaml` → 统一 ChatMessage 会话结构 + `skipped` 统计 |
 
 ### 4.3 模块结构

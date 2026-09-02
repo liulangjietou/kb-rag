@@ -37,6 +37,18 @@
 
 ### Fixed
 
+- **解析服务契约漏记 `sql` 扩展名（`f8f925c` 后修复）**：`sql` 自 2026-07-29 那次 pdf 乱码页修复起
+  就已是 kb-rag-parser 的正式支持格式（与 `txt`/`md` 共用纯文本解析器，`app/parsers/registry.py`
+  已注册、pytest 有专门用例），kb-rag-server 的 `UPLOAD_ALLOWED_EXTENSIONS` 默认值同期也已放行；
+  唯独三处对外文档的扩展名清单没跟着改——`docs/openapi/kb-parser.yaml` 的 `SupportedFileExt` 枚举、
+  `docs/ARCHITECTURE.md` §4.2 的端点表、`kb-rag-parser/README.md` 的 `file_ext` 说明与支持格式表。
+  **后果**：照契约对接解析服务的人会以为 `file_ext=sql` 会被 400 拒绝，从而绕开一个早已可用的格式；
+  排障时反过来也会把「这套部署能传 .sql」误判成实现越界。本次按实现补齐这三处清单。
+  **无 Flyway 脚本、无新增环境变量与配置键、无代码改动，升级零操作**；`kb-parser.yaml` 属
+  **纯描述订正，schema 与版本号不变**（仍为 `0.14.0-m14`），服务端本就接受 `sql`，对外行为零变更。
+  **运维提醒（沿用 `f8f925c` 的口径）**：已在 `.env` 里显式写死过 `UPLOAD_ALLOWED_EXTENSIONS` 的
+  部署不会自动获得 `sql`，需要手动把它补进那一行。
+
 - 修正 `GRAPH_EXTRACT_MAX_TOKENS` 在 `.env.example` 中重复且默认值冲突的问题，统一为服务端实际
   默认值 3072；Demo 目录改为仓库相对路径；full 模式内存说明统一为当前预检执行的 16GB。
 

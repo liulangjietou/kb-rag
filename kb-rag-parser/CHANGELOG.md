@@ -11,6 +11,10 @@
 - `ImageAssetCollector` 新增 `has_capacity()`（原内联于 `try_add` 的数量上限判定提为公开方法），让调用方能在生产昂贵字节**之前**预判；warning 语义不变（每次越限追加一条）。
 - pytest 新增（`tests/test_parse_pdf_images.py`）：多页同一 logo 只报一张图且不写 warning、超上限的扫描页不再调用 `get_pixmap`、开本地 OCR 后超上限仍渲染并回填 `ocr_source`。
 
+### 修复
+
+- **对外文档漏记 `sql` 扩展名**：`sql` 自 `f8f925c`（2026-07-29）起就已注册进 `app/parsers/registry.py`（与 `txt`/`md` 共用 `TextParser`，探测编码后原样透传），`tests/test_parse_text.py::test_parse_sql_returns_expected_structure` 一直覆盖着它，kb-rag-server 的上传白名单默认值同期也已放行——唯独三处对外文档的扩展名清单没跟着改：`kb-rag-deploy/docs/openapi/kb-parser.yaml` 的 `SupportedFileExt` 枚举、`kb-rag-deploy/docs/ARCHITECTURE.md` §4.2 的端点表、本仓 README 的 `file_ext` 说明与「支持格式一览」表。照契约对接的人会以为传 `file_ext=sql` 会被 400 拒绝，从而绕开一个早已可用的格式。本次按实现补齐这三处。**纯描述订正**：解析实现与测试均未改动，OpenAPI 的 schema 结构与版本号不变。
+
 ## [未发布] - M14
 
 ### 新增
