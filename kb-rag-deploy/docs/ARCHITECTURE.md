@@ -1,7 +1,7 @@
 # kb-rag 架构文档
 
 
-> 版本：v2.8（基线 = v2.7 + kb-app 四个上帝类按职责拆解，2026-09-02；v2.7 基线为 M24，其余历史见 Git）
+> 版本：v2.9（基线 = v2.8 + M24 后修复：模型预占死锁，2026-09-02；v2.8 基线为 kb-app 上帝类拆解，其余历史见 Git）
 > 日期：2026-09-02
 > 作者：RichardFyoung / Claude
 >
@@ -127,7 +127,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | `SamlProcessor`（M16） | `XmlDsigSamlProcessor` | SAML 2.0 Response 签名验证（自实现 XML-DSig，不引入 Spring Security SAML） |
 | `CasValidator`（M16） | `HttpCasValidator` | CAS ticket 服务端二次校验 |
 | `MemoryStore`（M19） | `EsMemoryStore` | 记忆节点检索副本：单物理索引 `kb_memory_nodes_v1` 所有记忆库共用（隔离靠 `library_id`+`user_id` filter）；vector mapping 懒加载（首个带 embedding 的写入按维度 putMapping）；kNN+BM25 并联，零 Key 降级 BM25 单路；过期节点查询期过滤 |
-| `ModelCallMeter`（M24） | `ModelUsageService` / 测试用 `NOOP` | Provider HTTP 出站前做租户月配额原子预占，响应后以供应商 usage 或保守估算结算；适配器不知道数据库细节 |
+| `ModelCallMeter`（M24） | `ModelUsageService` / 测试用 `NOOP` | Provider HTTP 出站前做租户月配额原子预占，响应后以供应商 usage 或保守估算结算；适配器不知道数据库细节。**预占事务内条件 `UPDATE` 必须先于任何建行语句**：行已存在时 `INSERT IGNORE` 取 S 锁、`UPDATE` 要 X 锁，两个并发预占各持 S 各等 X 即死锁（M24 后修复，见 M24 契约 §1.1 引用块） |
 
 **零 Key / 能力开关统一装置**：`ModelProviderConfig` 是唯一读模型凭据的地方，凭据为空即注入 `Unconfigured*` 实现；`GraphStoreConfig`（NEO4J_URI 空 → `DisabledGraphStore`）与 `QdrantClientConfig`（QDRANT_URI 空 → 不建 client、不注册健康探针）镜像同一模式。上游代码只写 `isConfigured()/isEnabled()` 一个分支，全链路无 null 检查——这是需求 §5"防御式编程只做一处且高复用"的落地点。
 

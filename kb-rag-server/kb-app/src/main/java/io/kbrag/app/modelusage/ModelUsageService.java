@@ -80,8 +80,7 @@ public class ModelUsageService implements ModelCallMeter {
     public ModelCallTicket reserve(ModelCallSpec spec) {
         ModelUsageContext context = requireContext();
         String month = currentMonth();
-        monthlyMapper.ensure(context.tenantId(), month);
-        if (monthlyMapper.reserve(context.tenantId(), month, spec.reservedTokens()) != 1) {
+        if (!takeQuota(context.tenantId(), month, spec.reservedTokens())) {
             Tenant tenant = findTenant(context.tenantId());
             if (tenant == null) {
                 log.error("model usage tenant not found, errorCode={}, tenantId={}",
@@ -123,6 +122,45 @@ public class ModelUsageService implements ModelCallMeter {
             throw new BizException(ErrorCode.INTERNAL_ERROR, "模型用量预占记录失败");
         }
         return new ModelCallTicket(usage.getUsageId(), spec.reservedTokens(), true);
+    }
+
+    /**
+     * Takes the tenant month's quota gate, creating the counter row only when it is genuinely absent.
+     *
+     * <p><b>The order of these three statements is the fix for a production deadlock.</b> The counter row
+     * used to be ensured on every call, before the update. INSERT IGNORE against an existing row takes a
+     * shared lock on it to resolve the duplicate key, and the update that follows needs an exclusive lock
+     * on that same row - so two concurrent reservations for one tenant month each held S and each waited
+     * for X, which InnoDB resolves by killing one of them. One document's embedding batches run in
+     * parallel and all bill the same tenant month, so a large document hit this reliably.
+     *
+     * <p>Attempting the update first removes the upgrade entirely on the hot path: the row exists for
+     * every call but the very first of a tenant's month, and a single UPDATE takes one exclusive lock and
+     * never waits on itself. Concurrent reservations still serialise on that row, which is the point -
+     * a quota gate has to be decided one caller at a time. Serialising is not deadlocking.
+     *
+     * <p><b>Why the existence check rather than just retrying the insert.</b> An update that changes no
+     * row means one of two things: the row is missing, or the quota is exhausted. Only the first calls for
+     * an insert. Being over quota lasts until the month rolls over, so letting INSERT IGNORE answer the
+     * question would put its shared lock back on every rejected call for the rest of the month - the same
+     * deadlock, reached along the failure path.
+     *
+     * @param tenantId   tenant business id
+     * @param usageMonth billing month, {@code YYYY-MM}
+     * @param tokens     tokens to put in flight
+     * @return {@code true} when the reservation was taken
+     */
+    private boolean takeQuota(String tenantId, String usageMonth, long tokens) {
+        if (monthlyMapper.reserve(tenantId, usageMonth, tokens) == 1) {
+            return true;
+        }
+        if (monthlyMapper.countRow(tenantId, usageMonth) > 0) {
+            return false;
+        }
+        // First call of this tenant month. A concurrent caller may win the insert, which is why the
+        // reservation is retried rather than assumed: INSERT IGNORE reports 0 for the loser too.
+        monthlyMapper.ensure(tenantId, usageMonth);
+        return monthlyMapper.reserve(tenantId, usageMonth, tokens) == 1;
     }
 
     @Override

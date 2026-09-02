@@ -7,6 +7,27 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 修复（M24 后修复：并发预占把 `INSERT IGNORE` 和 `UPDATE` 压在同一行上，触发 InnoDB 死锁）
+
+- **现象**：索引大文档时 `ChunkEmbedder` 抛 `MySQLTransactionRollbackException: Deadlock found`，
+  堆栈落在 `ModelUsageMonthlyMapper.reserve`，整个索引任务随之失败。
+- **根因**：`ModelUsageService.reserve` 事务里先 `monthlyMapper.ensure`（`INSERT IGNORE`）再
+  `monthlyMapper.reserve`（条件 `UPDATE`），两条语句打的是**同一行**。除该租户当月第一次调用外行都
+  已存在，此时 `INSERT IGNORE` 为判定 `uk_tenant_month` 冲突会对该行加 **S 锁**，紧接着的 `UPDATE`
+  需要把它升级成 **X 锁**。两个并发事务各持 S、各等 X，构成互等——InnoDB 只能杀掉一个。
+  而 `ChunkEmbedder.embedConcurrently` 把同一文档的多个批次并发提交，**每个批次计费到同一个租户月、
+  同一行**，所以文档越大越必然触发。
+- **修复**：改为先 `UPDATE`，只有它影响 0 行、且经一次**不加锁的一致性读**（新增
+  `ModelUsageMonthlyMapper.countRow`）确认计数器行确实缺席时，才补建并重试一次。热路径（行已存在）
+  从此只有一条 `UPDATE`、一把 X 锁，不存在锁升级。并发预占仍会在该行上串行等待，这正是配额闸门应有
+  的行为——**串行不是死锁**。
+- **为什么不用"再 `INSERT IGNORE` 一次"来判断行在不在**：超配额是持续到月末的状态，那会把同一把 S 锁
+  放回超配额期间的每一次被拒调用上，死锁只是换条路径回来。
+- 未加死锁重试：根因已消除，且死锁抛出时 Spring 事务已标记 rollback-only，方法内重试无效；真要重试
+  得放到 `ModelUsageSupport.execute` 之外，属另一项决策。
+- 单元测试新增 2 例（热路径不建行、首次调用补建后重试），并修正既有拒绝用例——它此前未 stub 行存在性，
+  实际测的是首次调用路径。变异验证：把 `ensure` 挪回热路径，3 个用例转红。
+- 无 schema 迁移、无配置键、无 API 变更。测试 1350 → 1352 全绿。
 ### 重构（kb-app 上帝类按职责拆解，行为不变）
 
 - **背景**：四个应用服务把多份互不相干的职责挤在一个类里，构造依赖分别达到 31 / 25 / 22 / 21 个。

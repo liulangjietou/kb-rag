@@ -32,6 +32,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -77,6 +78,8 @@ class ModelUsageServiceTest {
     @Test
     void shouldRejectBeforeInsertingLedgerWhenAtomicQuotaReservationFails() {
         when(monthlyMapper.reserve(anyString(), anyString(), anyLong())).thenReturn(0);
+        // The counter row is there - the reservation failed on the quota, not on a missing row.
+        when(monthlyMapper.countRow(anyString(), anyString())).thenReturn(1);
         Tenant tenant = new Tenant();
         tenant.setTenantId(TENANT_ID);
         tenant.setMonthlyTokenQuota(100L);
@@ -87,6 +90,37 @@ class ModelUsageServiceTest {
 
         assertEquals(ErrorCode.MODEL_QUOTA_EXCEEDED, failure.getErrorCode());
         verify(usageMapper, never()).insert(any(ModelUsage.class));
+        // Over quota lasts all month. Inserting here would put INSERT IGNORE's shared lock back on
+        // every rejected call, which is the deadlock this ordering exists to avoid.
+        verify(monthlyMapper, never()).ensure(anyString(), anyString());
+    }
+
+    @Test
+    void shouldNotInsertTheCounterRowOnTheHotPath() {
+        when(monthlyMapper.reserve(anyString(), anyString(), anyLong())).thenReturn(1);
+
+        service.reserve(new ModelCallSpec("dashscope", ModelCallSpec.EMBEDDING, "text-embedding-v4", 100));
+
+        // The regression under guard: ensuring the row on every call made INSERT IGNORE take a shared
+        // lock on it, which the following UPDATE then had to upgrade. One document's parallel embedding
+        // batches all bill the same tenant month, so two of them deadlocked instead of queuing.
+        verify(monthlyMapper, never()).ensure(anyString(), anyString());
+        verify(monthlyMapper).reserve(anyString(), anyString(), anyLong());
+    }
+
+    @Test
+    void shouldCreateTheCounterRowAndRetryOnTheFirstCallOfATenantMonth() {
+        // Missing row first, present after the insert.
+        when(monthlyMapper.reserve(anyString(), anyString(), anyLong())).thenReturn(0, 1);
+        when(monthlyMapper.countRow(anyString(), anyString())).thenReturn(0);
+        when(monthlyMapper.ensure(anyString(), anyString())).thenReturn(1);
+
+        ModelCallTicket ticket = service.reserve(
+                new ModelCallSpec("dashscope", ModelCallSpec.EMBEDDING, "text-embedding-v4", 100));
+
+        assertEquals(USAGE_ID, ticket.usageId());
+        verify(monthlyMapper).ensure(anyString(), anyString());
+        verify(monthlyMapper, times(2)).reserve(anyString(), anyString(), anyLong());
     }
 
     @Test
