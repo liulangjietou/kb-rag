@@ -2,56 +2,38 @@ package io.kbrag.app.index;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
-import io.kbrag.app.alert.TaskFailureTracker;
-import io.kbrag.app.annotation.AnnotationInheritanceService;
 import io.kbrag.app.config.AsyncConfig;
-import io.kbrag.app.eval.EvalCaseStalenessService;
-import io.kbrag.app.graph.GraphExtractionService;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
-import io.kbrag.domain.constant.ChunkMetadataKeys;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.DocumentVersion;
 import io.kbrag.domain.entity.ImageAsset;
 import io.kbrag.domain.entity.KbTask;
-import io.kbrag.domain.enums.ChunkType;
 import io.kbrag.domain.enums.DocumentVersionStatus;
-import io.kbrag.domain.enums.EmbeddingStatus;
 import io.kbrag.domain.enums.ProcessStatus;
-import io.kbrag.domain.enums.TaskStatus;
 import io.kbrag.domain.enums.TaskType;
 import io.kbrag.domain.mapper.ChunkMapper;
 import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.mapper.DocumentVersionMapper;
-import io.kbrag.domain.mapper.KbTaskMapper;
 import io.kbrag.domain.model.CleanRules;
 import io.kbrag.domain.model.KbIndexConfig;
 import io.kbrag.domain.model.PageRange;
 import io.kbrag.domain.model.PagedContent;
-import io.kbrag.domain.model.ParentChunk;
 import io.kbrag.domain.model.ParsePreview;
 import io.kbrag.domain.model.ParsedDocument;
 import io.kbrag.domain.model.ProxiedContent;
-import io.kbrag.domain.model.SplitChunk;
-import io.kbrag.domain.model.SplitParams;
 import io.kbrag.domain.port.DocumentParserClient;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.ObjectStorage;
 import io.kbrag.domain.port.VisionProvider;
-import io.kbrag.domain.service.BizIdGenerator;
-import io.kbrag.domain.service.ChunkTextHasher;
 import io.kbrag.domain.service.DocumentCleaner;
 import io.kbrag.domain.service.DocumentVersionPlanner;
-import io.kbrag.domain.service.ImageChunkLinker;
 import io.kbrag.domain.service.ImagePlaceholderResolver;
-import io.kbrag.domain.service.MetadataRuleExtractor;
 import io.kbrag.domain.service.PageSplitter;
 import io.kbrag.domain.service.PagedContentAssembler;
-import io.kbrag.domain.service.ParentChildSplitter;
-import io.kbrag.domain.service.SplitterRouter;
 import io.kbrag.domain.service.VersionFingerprintFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -104,46 +86,32 @@ public class IndexPipelineService {
     private static final String PREVIEW_OBJECT_TEMPLATE = "kb/%s/doc/%s/%s/preview.json";
     private static final String LEGACY_MARKDOWN_SUFFIX = ".md";
     private static final String CONTENT_TYPE_JSON = "application/json";
-    private static final int ENABLED = 1;
     private static final int PROGRESS_PARSED = 30;
     private static final int PROGRESS_CHUNKED = 60;
     private static final int PROGRESS_INDEXED = 90;
-    private static final int PROGRESS_DONE = 100;
     private static final int NOT_STALE = 0;
     private static final int DELETE_BATCH_SIZE = 500;
-    private static final int FAIL_REASON_MAX_LENGTH = 1024;
 
     private final DocumentMapper documentMapper;
     private final DocumentVersionMapper documentVersionMapper;
     private final ChunkMapper chunkMapper;
-    private final KbTaskMapper kbTaskMapper;
     private final ObjectStorage objectStorage;
     private final DocumentParserClient parserClient;
-    private final SplitterRouter splitterRouter;
-    private final ParentChildSplitter parentChildSplitter;
-    private final PageSplitter pageSplitter;
-    private final ChunkTextHasher chunkTextHasher;
     private final EmbeddingProvider embeddingProvider;
     private final ChunkEmbedder chunkEmbedder;
+    private final ChunkSplitter chunkSplitter;
+    private final IndexTaskLifecycle taskLifecycle;
     private final VisionProvider visionProvider;
     private final ChunkIndexWriter chunkIndexWriter;
     private final MultimodalIndexManager multimodalIndexManager;
     private final KnowledgeBaseService knowledgeBaseService;
-    private final BizIdGenerator bizIdGenerator;
     private final VersionFingerprintFactory fingerprintFactory;
     private final ImageAssetService imageAssetService;
     private final DocumentCleaner documentCleaner;
     private final PagedContentAssembler pagedContentAssembler;
     private final ImagePlaceholderResolver placeholderResolver;
-    private final ImageChunkLinker imageChunkLinker;
-    private final MetadataRuleExtractor metadataRuleExtractor;
-    private final DocumentVersionActivator versionActivator;
     private final VersionArtifactReuser versionArtifactReuser;
-    private final VersionRetentionService versionRetentionService;
-    private final AnnotationInheritanceService annotationInheritanceService;
-    private final TaskFailureTracker taskFailureTracker;
-    private final EvalCaseStalenessService evalCaseStalenessService;
-    private final GraphExtractionService graphExtractionService;
+    private final VersionActivationHandler activationHandler;
 
     /**
      * Queues a document version for indexing.
@@ -215,7 +183,7 @@ public class IndexPipelineService {
     public void execute(String versionId, DocumentVersionPlanner.Reuse reuse) {
         DocumentVersion version = requireVersion(versionId);
         Document document = requireDocument(version.getDocId());
-        KbTask task = startTask(versionId, TaskType.INDEX);
+        KbTask task = taskLifecycle.start(versionId, TaskType.INDEX);
         try {
             KbIndexConfig config = knowledgeBaseService.indexConfigOf(document.getKbId());
             if (reuse.reusesChunks() && indexReusedChunks(document, version, config, reuse, task)) {
@@ -226,7 +194,7 @@ public class IndexPipelineService {
             StagedContent staged = prepare(document, version, config, null, task, adoptParsed(version, reuse));
             if (config.isParsePreviewRequired()) {
                 pauseForConfirmation(document, version, config, staged, null);
-                completeTask(task);
+                taskLifecycle.complete(task);
                 return;
             }
             indexStaged(document, version, config, staged, task);
@@ -257,7 +225,7 @@ public class IndexPipelineService {
     public void confirm(String versionId) {
         DocumentVersion version = requireVersion(versionId);
         Document document = requireDocument(version.getDocId());
-        KbTask task = startTask(versionId, TaskType.INDEX);
+        KbTask task = taskLifecycle.start(versionId, TaskType.INDEX);
         try {
             KbIndexConfig config = knowledgeBaseService.indexConfigOf(document.getKbId());
             ParsePreview preview = readPreview(document, version);
@@ -286,12 +254,12 @@ public class IndexPipelineService {
     public ParsePreview reparse(String versionId, CleanRules override) {
         DocumentVersion version = requireVersion(versionId);
         Document document = requireDocument(version.getDocId());
-        KbTask task = startTask(versionId, TaskType.PARSE);
+        KbTask task = taskLifecycle.start(versionId, TaskType.PARSE);
         try {
             KbIndexConfig config = knowledgeBaseService.indexConfigOf(document.getKbId());
             StagedContent staged = prepare(document, version, config, override, task, true);
             ParsePreview preview = pauseForConfirmation(document, version, config, staged, override);
-            completeTask(task);
+            taskLifecycle.complete(task);
             return preview;
         } catch (Exception e) {
             fail(document, version, task, ProcessStatus.PARSE_FAILED, e.getMessage());
@@ -344,7 +312,7 @@ public class IndexPipelineService {
     private void rebuild(String versionId, boolean activate) {
         DocumentVersion version = requireVersion(versionId);
         Document document = requireDocument(version.getDocId());
-        KbTask task = startTask(versionId, TaskType.REBUILD);
+        KbTask task = taskLifecycle.start(versionId, TaskType.REBUILD);
         try {
             if (activate) {
                 version.setStatus(DocumentVersionStatus.BUILDING);
@@ -363,7 +331,7 @@ public class IndexPipelineService {
             removeObsolete(document.getKbId(), versionId, obsolete);
 
             if (activate) {
-                activateAndFollowUp(document, version);
+                activationHandler.activateAndFollowUp(document, version);
             } else {
                 documentMapper.update(null, new LambdaUpdateWrapper<Document>()
                         .set(Document::getProcessStatus, ProcessStatus.INDEXED.name())
@@ -371,7 +339,7 @@ public class IndexPipelineService {
                         .set(Document::getFailReason, null)
                         .eq(Document::getDocId, document.getDocId()));
             }
-            completeTask(task);
+            taskLifecycle.complete(task);
             log.info("rebuild finished, docId={}, versionId={}, newChunks={}, removedChunks={}, activated={}",
                     document.getDocId(), versionId, chunks.size(), obsolete.size(), activate);
         } catch (Exception e) {
@@ -429,33 +397,11 @@ public class IndexPipelineService {
         version.setChunkFingerprint(fingerprintFactory.chunkFingerprint(config));
         version.setEmbeddingVersion(embeddingProvider.model());
         documentVersionMapper.updateById(version);
-        updateProgress(task, PROGRESS_CHUNKED);
+        taskLifecycle.progress(task, PROGRESS_CHUNKED);
         index(document, version, copied, config, task);
-        activateAndFollowUp(document, version);
-        completeTask(task);
+        activationHandler.activateAndFollowUp(document, version);
+        taskLifecycle.complete(task);
         return true;
-    }
-
-    /**
-     * Makes a freshly built version the active one and runs everything that depends on that.
-     *
-     * <p>Both follow ups belong here rather than inside the activator: the activator is also used by the
-     * chat import path and by a manual rollback, which need the switch without necessarily needing the
-     * same follow ups, and the single active version invariant must not depend on either of them
-     * succeeding.
-     *
-     * @param document document record
-     * @param version  version that finished building
-     */
-    private void activateAndFollowUp(Document document, DocumentVersion version) {
-        versionActivator.activate(document, version);
-        annotationInheritanceService.inherit(document, version);
-        evalCaseStalenessService.markStale(document.getDocId(), version.getVersionId());
-        versionRetentionService.submit(document.getDocId());
-        // Requirement section 4.9: an activation is what invalidates the entities and relations the
-        // superseded versions contributed, otherwise the graph route would keep answering out of a corpus
-        // the other two routes can no longer see - version isolation broken from the side.
-        graphExtractionService.onVersionActivated(document, version);
     }
 
     /**
@@ -617,8 +563,8 @@ public class IndexPipelineService {
         deleteExistingChunks(document.getKbId(), version.getVersionId());
         List<Chunk> chunks = split(document, version, staged, config, task);
         index(document, version, chunks, config, task);
-        activateAndFollowUp(document, version);
-        completeTask(task);
+        activationHandler.activateAndFollowUp(document, version);
+        taskLifecycle.complete(task);
     }
 
     /**
@@ -706,7 +652,7 @@ public class IndexPipelineService {
         version.setParsedObject(parsedKey(document, version));
         documentVersionMapper.updateById(version);
         updateProcessStatus(document, ProcessStatus.PARSED, null);
-        updateProgress(task, PROGRESS_PARSED);
+        taskLifecycle.progress(task, PROGRESS_PARSED);
         return parsed;
     }
 
@@ -768,162 +714,19 @@ public class IndexPipelineService {
     private List<Chunk> split(Document document, DocumentVersion version, StagedContent staged,
                               KbIndexConfig config, KbTask task) {
         boolean embeddingConfigured = embeddingProvider.isConfigured();
-        boolean standaloneImage = imageAssetService.isStandaloneImage(document.getFileExt());
-        List<Chunk> indexable = config.parentChildEnabled() && !standaloneImage
-                ? splitTwoLevel(document, version, staged, config, embeddingConfigured)
-                : splitSingleLevel(document, version, staged, config, embeddingConfigured, standaloneImage);
+        List<Chunk> indexable = chunkSplitter.split(new ChunkSplitter.SplitRequest(document, version,
+                staged.proxied(), staged.pageRanges(), config, embeddingConfigured,
+                imageAssetService.isStandaloneImage(document.getFileExt()),
+                usesPageStrategy(document, config)));
 
         version.setChunkFingerprint(fingerprintFactory.chunkFingerprint(config));
         version.setEmbeddingVersion(embeddingProvider.model());
         documentVersionMapper.updateById(version);
-        updateProgress(task, PROGRESS_CHUNKED);
+        taskLifecycle.progress(task, PROGRESS_CHUNKED);
         log.info("chunks persisted, docId={}, versionId={}, indexable={}, parentChild={}, embeddingConfigured={}",
                 document.getDocId(), version.getVersionId(), indexable.size(),
                 config.parentChildEnabled(), embeddingConfigured);
         return indexable;
-    }
-
-    /**
-     * Cuts the text into a single level and links each chunk to the images it contains.
-     *
-     * @param document            document record
-     * @param version             version being built
-     * @param staged              text to cut
-     * @param config              knowledge base index configuration
-     * @param embeddingConfigured {@code true} when the vector route is available
-     * @param standaloneImage     {@code true} when the document is one uploaded image
-     * @return persisted chunks
-     */
-    private List<Chunk> splitSingleLevel(Document document, DocumentVersion version, StagedContent staged,
-                                         KbIndexConfig config, boolean embeddingConfigured,
-                                         boolean standaloneImage) {
-        SplitParams params = config.splitParams(cacheContextOf(document, version));
-        List<SplitChunk> splitChunks = usesPageStrategy(document, config)
-                ? pageSplitter.split(staged.proxied().getMarkdown(), staged.pageRanges(), params)
-                : splitterRouter.resolve(config.getSplitStrategy())
-                        .split(staged.proxied().getMarkdown(), params);
-        Map<Integer, List<String>> imagesByChunk = imageChunkLinker.link(staged.proxied().getMarkdown(),
-                staged.proxied().getPlacements(), splitChunks.stream().map(SplitChunk::getContent).toList());
-        List<MetadataRuleExtractor.PreparedRule> rules =
-                metadataRuleExtractor.prepare(config.metadataRulesOrEmpty());
-        List<Chunk> chunks = new ArrayList<>(splitChunks.size());
-        for (int index = 0; index < splitChunks.size(); index++) {
-            List<String> imageKeys = imagesByChunk.get(index);
-            SplitChunk splitChunk = splitChunks.get(index);
-            Chunk chunk = persistChunk(document, version, splitChunk, null, embeddingConfigured,
-                    standaloneImage ? ChunkType.IMAGE : ChunkType.TEXT,
-                    metadataOf(imageKeys, splitChunk,
-                            metadataRuleExtractor.extract(rules, splitChunk.getContent())));
-            chunks.add(chunk);
-        }
-        return chunks;
-    }
-
-    /**
-     * Persists both levels and returns only the children.
-     *
-     * <p>Parents are stored with {@code embedding_status=SKIPPED} because they are never embedded and
-     * never written to an engine; marking them PENDING would make the compensation scan chase a write
-     * that is not supposed to happen.
-     *
-     * @param document            document record
-     * @param version             version being built
-     * @param staged              text to cut
-     * @param config              knowledge base index configuration
-     * @param embeddingConfigured {@code true} when the vector route is available
-     * @return child chunks
-     */
-    private List<Chunk> splitTwoLevel(Document document, DocumentVersion version, StagedContent staged,
-                                      KbIndexConfig config, boolean embeddingConfigured) {
-        List<ParentChunk> groups = parentChildSplitter.split(staged.proxied().getMarkdown(),
-                config.parentChildOrDisabled());
-        List<String> childContents = new ArrayList<>();
-        for (ParentChunk group : groups) {
-            for (SplitChunk child : group.getChildren()) {
-                childContents.add(child.getContent());
-            }
-        }
-        Map<Integer, List<String>> imagesByChunk = imageChunkLinker.link(staged.proxied().getMarkdown(),
-                staged.proxied().getPlacements(), childContents);
-        List<MetadataRuleExtractor.PreparedRule> rules =
-                metadataRuleExtractor.prepare(config.metadataRulesOrEmpty());
-
-        List<Chunk> children = new ArrayList<>();
-        int childIndex = 0;
-        for (ParentChunk group : groups) {
-            Chunk parent = persistChunk(document, version, group.getParent(), null, false,
-                    ChunkType.TEXT, null);
-            for (SplitChunk child : group.getChildren()) {
-                children.add(persistChunk(document, version, child, parent.getChunkId(), embeddingConfigured,
-                        ChunkType.TEXT, metadataOf(imagesByChunk.get(childIndex++), child,
-                                metadataRuleExtractor.extract(rules, child.getContent()))));
-            }
-        }
-        return children;
-    }
-
-    /**
-     * Merges the image links a chunk carries with the title/summary/keywords the LLM semantic
-     * splitter attaches to it, requirement section 4.3, and with the operator extracted metadata of
-     * the M14 contract section 3.2.
-     *
-     * <p>The extracted values go in first so a reserved key wins any collision: the platform written
-     * semantics of {@code title} or {@code image_urls} must never be silently replaced by a rule an
-     * operator happened to name the same way.
-     *
-     * @param imageKeys  object storage keys of the images this chunk contains, may be empty
-     * @param splitChunk splitter output, {@code null} metadata for every strategy but the LLM one
-     * @param extracted  metadata rule output for this chunk, may be empty
-     * @return JSON metadata document, {@code null} when there is nothing to store
-     */
-    private String metadataOf(List<String> imageKeys, SplitChunk splitChunk, Map<String, Object> extracted) {
-        Map<String, Object> metadata = new LinkedHashMap<>(extracted);
-        if (CollectionUtils.isNotEmpty(imageKeys)) {
-            metadata.put(ChunkMetadataKeys.IMAGE_URLS, imageKeys);
-        }
-        if (splitChunk != null && splitChunk.getMetadata() != null && !splitChunk.getMetadata().isEmpty()) {
-            metadata.putAll(splitChunk.getMetadata());
-        }
-        return metadata.isEmpty() ? null : JsonUtil.toJson(metadata);
-    }
-
-    /**
-     * Builds the LLM semantic splitter's cache coordinates for one document version.
-     *
-     * @param document document record
-     * @param version  version being built
-     * @return cache context, safe to pass to every strategy since only the LLM one reads it
-     */
-    private SplitParams.CacheContext cacheContextOf(Document document, DocumentVersion version) {
-        return new SplitParams.CacheContext(document.getKbId(), document.getDocId(),
-                version.getVersionId(), version.getContentHash());
-    }
-
-    private Chunk persistChunk(Document document, DocumentVersion version, SplitChunk splitChunk,
-                               String parentId, boolean embeddingConfigured, ChunkType chunkType,
-                               String metadata) {
-        Chunk chunk = new Chunk();
-        chunk.setChunkId(bizIdGenerator.chunkId());
-        chunk.setKbId(document.getKbId());
-        chunk.setDocId(document.getDocId());
-        chunk.setDocumentVersionId(version.getVersionId());
-        chunk.setContent(splitChunk.getContent());
-        chunk.setChunkTextHash(chunkTextHasher.hash(splitChunk.getContent()));
-        chunk.setParentId(parentId);
-        if (parentId != null) {
-            // Only a child has a position worth storing: the offsets of a single level chunk are relative
-            // to the whole document, and storing them in a column the retrieval side reads as "inside my
-            // parent" would make it cut a passage out of the wrong text.
-            chunk.setParentStartOffset(splitChunk.getStartOffset());
-            chunk.setParentEndOffset(splitChunk.getEndOffset());
-        }
-        chunk.setSeq(splitChunk.getSeq());
-        chunk.setChunkType(chunkType);
-        chunk.setEnabled(ENABLED);
-        chunk.setMetadata(metadata);
-        chunk.setEmbeddingStatus(embeddingConfigured ? EmbeddingStatus.PENDING : EmbeddingStatus.SKIPPED);
-        chunkMapper.insert(chunk);
-        return chunk;
     }
 
     /**
@@ -938,12 +741,12 @@ public class IndexPipelineService {
     private void index(Document document, DocumentVersion version, List<Chunk> chunks,
                        KbIndexConfig config, KbTask task) {
         if (CollectionUtils.isEmpty(chunks)) {
-            updateProgress(task, PROGRESS_INDEXED);
+            taskLifecycle.progress(task, PROGRESS_INDEXED);
             return;
         }
         chunkIndexWriter.write(document.getKbId(), chunks, chunkEmbedder.embed(chunks));
         multimodalIndexManager.index(document.getKbId(), version.getVersionId(), chunks, config);
-        updateProgress(task, PROGRESS_INDEXED);
+        taskLifecycle.progress(task, PROGRESS_INDEXED);
     }
 
     /**
@@ -980,58 +783,13 @@ public class IndexPipelineService {
         }
     }
 
-    private KbTask startTask(String versionId, TaskType taskType) {
-        KbTask task = kbTaskMapper.selectOne(new LambdaQueryWrapper<KbTask>()
-                .eq(KbTask::getBizId, versionId)
-                .eq(KbTask::getTaskType, taskType)
-                .orderByDesc(KbTask::getId)
-                .last("limit 1"));
-        if (task == null) {
-            task = new KbTask();
-            task.setTaskId(bizIdGenerator.taskId());
-            task.setTaskType(taskType);
-            task.setBizId(versionId);
-            task.setRetryCount(0);
-            task.setStatus(TaskStatus.RUNNING);
-            task.setProgress(0);
-            kbTaskMapper.insert(task);
-            return task;
-        }
-        task.setStatus(TaskStatus.RUNNING);
-        task.setProgress(0);
-        task.setFailReason(null);
-        task.setRetryCount(task.getRetryCount() == null ? 1 : task.getRetryCount() + 1);
-        kbTaskMapper.update(null, new LambdaUpdateWrapper<KbTask>()
-                .set(KbTask::getStatus, TaskStatus.RUNNING.name())
-                .set(KbTask::getProgress, 0)
-                .set(KbTask::getFailReason, null)
-                .set(KbTask::getRetryCount, task.getRetryCount())
-                .eq(KbTask::getTaskId, task.getTaskId()));
-        return task;
-    }
-
-    private void updateProgress(KbTask task, int progress) {
-        task.setProgress(progress);
-        kbTaskMapper.updateById(task);
-    }
-
-    private void completeTask(KbTask task) {
-        task.setStatus(TaskStatus.SUCCESS);
-        task.setProgress(PROGRESS_DONE);
-        kbTaskMapper.updateById(task);
-        taskFailureTracker.recordSuccess(task.getTaskType());
-    }
-
     private void fail(Document document, DocumentVersion version, KbTask task,
                       ProcessStatus status, String reason) {
-        String safeReason = truncate(reason);
+        String safeReason = IndexTaskLifecycle.truncateReason(reason);
         updateProcessStatus(document, status, safeReason);
         version.setStatus(DocumentVersionStatus.BUILD_FAILED);
         documentVersionMapper.updateById(version);
-        task.setStatus(TaskStatus.FAILED);
-        task.setFailReason(safeReason);
-        kbTaskMapper.updateById(task);
-        taskFailureTracker.recordFailure(task.getTaskType(), safeReason);
+        taskLifecycle.fail(task, safeReason);
     }
 
     /**
@@ -1098,12 +856,6 @@ public class IndexPipelineService {
         }
     }
 
-    private String truncate(String reason) {
-        if (reason == null) {
-            return null;
-        }
-        return reason.length() > FAIL_REASON_MAX_LENGTH ? reason.substring(0, FAIL_REASON_MAX_LENGTH) : reason;
-    }
 
     /**
      * Text ready to be cut, together with what produced it.

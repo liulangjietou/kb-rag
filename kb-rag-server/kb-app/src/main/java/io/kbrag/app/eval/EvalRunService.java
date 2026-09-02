@@ -3,20 +3,17 @@ package io.kbrag.app.eval;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.fasterxml.jackson.core.type.TypeReference;
 import io.kbrag.app.config.AsyncConfig;
 import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.chat.AnswerGenerationService;
+import io.kbrag.app.eval.EvalCaseRunner.AnswerCaseOutcome;
+import io.kbrag.app.eval.EvalCaseRunner.CaseOutcome;
 import io.kbrag.app.retrieval.RetrievalCommand;
-import io.kbrag.app.retrieval.RetrievalNodeView;
-import io.kbrag.app.retrieval.RetrievalMetadataKeys;
 import io.kbrag.app.retrieval.RetrievalService;
 import io.kbrag.app.retrieval.OfflineExecutionContext;
-import io.kbrag.app.retrieval.SearchOutcome;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
-import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.EvalCase;
 import io.kbrag.domain.entity.EvalDataset;
 import io.kbrag.domain.entity.EvalResult;
@@ -32,21 +29,16 @@ import io.kbrag.domain.mapper.EvalResultMapper;
 import io.kbrag.domain.mapper.EvalRunMapper;
 import io.kbrag.domain.model.CaseJudgment;
 import io.kbrag.domain.model.AnswerEvaluationConfig;
-import io.kbrag.domain.model.ChatMessage;
-import io.kbrag.domain.model.EvalEvidence;
 import io.kbrag.domain.model.EvalMetricsAtK;
 import io.kbrag.domain.model.EvalRetrievalConfig;
 import io.kbrag.domain.model.FinalAnswerCaseOutcome;
 import io.kbrag.domain.model.FinalAnswerJudgment;
-import io.kbrag.domain.model.FinalAnswerMetrics;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.RerankProvider;
 import io.kbrag.domain.service.BizIdGenerator;
-import io.kbrag.domain.service.EvalHitJudge;
 import io.kbrag.domain.service.EvalMetricsCalculator;
 import io.kbrag.domain.service.FinalAnswerMetricsCalculator;
-import io.kbrag.domain.service.OverlapRatioCalculator;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -97,12 +89,12 @@ public class EvalRunService {
     private static final String QUEUE_FULL_REASON = "评测执行队列已满：当前并发评测数已达部署上限，本次运行未能进入"
             + "执行队列，请等待在跑的评测结束后重新提交";
 
+    private final EvalCaseRunner caseRunner;
     private final EvalDatasetService evalDatasetService;
     private final AppVersionService appVersionService;
     private final EvalRunMapper evalRunMapper;
     private final EvalResultMapper evalResultMapper;
     private final EvalCaseMapper evalCaseMapper;
-    private final RetrievalService retrievalService;
     private final EmbeddingProvider embeddingProvider;
     private final RerankProvider rerankProvider;
     private final ChatProvider chatProvider;
@@ -110,21 +102,18 @@ public class EvalRunService {
     private final AnswerGenerationService answerGenerationService;
     private final FinalAnswerJudgeService finalAnswerJudgeService;
     private final CorpusFingerprintFactory corpusFingerprintFactory;
-    private final EvalHitJudge evalHitJudge;
     private final EvalMetricsCalculator evalMetricsCalculator;
     private final FinalAnswerMetricsCalculator finalAnswerMetricsCalculator;
-    private final OverlapRatioCalculator overlapRatioCalculator;
     private final BizIdGenerator bizIdGenerator;
-    private final KbProperties properties;
     private final Executor evalExecutor;
     private final Executor evalCaseExecutor;
 
-    public EvalRunService(EvalDatasetService evalDatasetService,
+    public EvalRunService(EvalCaseRunner caseRunner,
+                          EvalDatasetService evalDatasetService,
                           AppVersionService appVersionService,
                           EvalRunMapper evalRunMapper,
                           EvalResultMapper evalResultMapper,
                           EvalCaseMapper evalCaseMapper,
-                          RetrievalService retrievalService,
                           EmbeddingProvider embeddingProvider,
                           RerankProvider rerankProvider,
                           ChatProvider chatProvider,
@@ -132,20 +121,17 @@ public class EvalRunService {
                           AnswerGenerationService answerGenerationService,
                           FinalAnswerJudgeService finalAnswerJudgeService,
                           CorpusFingerprintFactory corpusFingerprintFactory,
-                          EvalHitJudge evalHitJudge,
                           EvalMetricsCalculator evalMetricsCalculator,
                           FinalAnswerMetricsCalculator finalAnswerMetricsCalculator,
-                          OverlapRatioCalculator overlapRatioCalculator,
                           BizIdGenerator bizIdGenerator,
-                          KbProperties properties,
                           @Qualifier(AsyncConfig.EVAL_EXECUTOR) Executor evalExecutor,
                           @Qualifier(AsyncConfig.EVAL_CASE_EXECUTOR) Executor evalCaseExecutor) {
+        this.caseRunner = caseRunner;
         this.evalDatasetService = evalDatasetService;
         this.appVersionService = appVersionService;
         this.evalRunMapper = evalRunMapper;
         this.evalResultMapper = evalResultMapper;
         this.evalCaseMapper = evalCaseMapper;
-        this.retrievalService = retrievalService;
         this.embeddingProvider = embeddingProvider;
         this.rerankProvider = rerankProvider;
         this.chatProvider = chatProvider;
@@ -153,12 +139,9 @@ public class EvalRunService {
         this.answerGenerationService = answerGenerationService;
         this.finalAnswerJudgeService = finalAnswerJudgeService;
         this.corpusFingerprintFactory = corpusFingerprintFactory;
-        this.evalHitJudge = evalHitJudge;
         this.evalMetricsCalculator = evalMetricsCalculator;
         this.finalAnswerMetricsCalculator = finalAnswerMetricsCalculator;
-        this.overlapRatioCalculator = overlapRatioCalculator;
         this.bizIdGenerator = bizIdGenerator;
-        this.properties = properties;
         this.evalExecutor = evalExecutor;
         this.evalCaseExecutor = evalCaseExecutor;
     }
@@ -275,7 +258,7 @@ public class EvalRunService {
                         && !evalCase.getExpectedAnswer().isBlank())
                 .count();
         long judgeableCases = cases.stream()
-                .filter(this::answerJudgeRequested)
+                .filter(EvalCaseRunner::answerJudgeRequested)
                 .count();
         boolean answerAvailable = answerConfig == null
                 || answerGenerationService.isAvailable(answerConfig.snapshot())
@@ -565,7 +548,7 @@ public class EvalRunService {
 
             AnswerEvaluationConfig answerConfig = run.getAnswerEvalConfig() == null ? null
                     : JsonUtil.parse(run.getAnswerEvalConfig(), AnswerEvaluationConfig.class);
-            List<CaseOutcome> outcomes = judgeAll(run.getKbId(), effective, config, k, judgeEnabled,
+            List<CaseOutcome> outcomes = judgeAll(run.getKbId(), effective, config, judgeEnabled,
                     answerConfig);
             for (CaseOutcome outcome : outcomes) {
                 evalResultMapper.insert(toEntity(runId, outcome));
@@ -608,11 +591,10 @@ public class EvalRunService {
      * @param kbId         knowledge base business id
      * @param cases        the run's effective cases
      * @param config       retrieval configuration under test
-     * @param k            metrics {@code K}
      * @param judgeEnabled {@code true} runs the LLM-as-judge stage
      * @return one outcome per case, in the order the cases were given
      */
-    private List<CaseOutcome> judgeAll(String kbId, List<EvalCase> cases, EvalRetrievalConfig config, int k,
+    private List<CaseOutcome> judgeAll(String kbId, List<EvalCase> cases, EvalRetrievalConfig config,
                                        boolean judgeEnabled, AnswerEvaluationConfig answerConfig) {
         if (CollectionUtils.isEmpty(cases)) {
             return List.of();
@@ -620,7 +602,7 @@ public class EvalRunService {
         List<CompletableFuture<CaseOutcome>> futures = new ArrayList<>(cases.size());
         for (EvalCase evalCase : cases) {
             futures.add(CompletableFuture.supplyAsync(
-                    () -> judgeOneCase(kbId, evalCase, config, k, judgeEnabled, answerConfig),
+                    () -> caseRunner.run(kbId, evalCase, config, judgeEnabled, answerConfig),
                     evalCaseExecutor));
         }
         List<CaseOutcome> outcomes = new ArrayList<>(cases.size());
@@ -632,138 +614,6 @@ public class EvalRunService {
             throw new IllegalStateException("evaluation case execution failed", e.getCause());
         }
         return outcomes;
-    }
-
-    private CaseOutcome judgeOneCase(String kbId, EvalCase evalCase, EvalRetrievalConfig config, int k,
-                                     boolean judgeEnabled, AnswerEvaluationConfig answerConfig) {
-        RetrievalCommand command = toCommand(evalCase, config);
-        int budget = properties.getEval().getDegradedRetry();
-        SearchOutcome outcome = OfflineExecutionContext.runOffline(() -> retrievalService.search(kbId, command));
-        int retries = 0;
-        while (!outcome.getDegraded().isEmpty() && retries < budget) {
-            retries++;
-            outcome = OfflineExecutionContext.runOffline(() -> retrievalService.search(kbId, command));
-        }
-
-        List<RetrievalNodeView> nodes = outcome.getNodes();
-        List<List<String>> candidateTextsPerRank = new ArrayList<>(nodes.size());
-        List<String> docIdPerRank = new ArrayList<>(nodes.size());
-        List<String> recalledChunkIds = new ArrayList<>(nodes.size());
-        for (RetrievalNodeView node : nodes) {
-            candidateTextsPerRank.add(childTextsOf(node));
-            docIdPerRank.add(node.getDocId());
-            recalledChunkIds.add(node.getChunkId());
-        }
-
-        List<EvalEvidence> evidences = evidencesOf(evalCase);
-        CaseJudgment judgment;
-        List<Double> overlapRatios = new ArrayList<>();
-        if (evalCase.getAnchorType() == AnchorType.SPAN) {
-            List<String> spans = evidences.stream().map(EvalEvidence::getSpan).toList();
-            judgment = evalHitJudge.judgeSpanCase(spans, candidateTextsPerRank,
-                    properties.getEval().getOverlapThreshold());
-            for (String span : spans) {
-                overlapRatios.add(bestOverlapRatio(candidateTextsPerRank, span));
-            }
-        } else {
-            List<String> docIds = evidences.stream().map(EvalEvidence::getDocId).toList();
-            judgment = evalHitJudge.judgeDocumentCase(docIds, docIdPerRank);
-        }
-
-        EvalJudgeService.JudgeOutcome judgeOutcome = null;
-        if (judgeEnabled && evalCase.getExpectedAnswer() != null && !evalCase.getExpectedAnswer().isBlank()
-                && evalJudgeService.isAvailable()) {
-            List<String> allTexts = candidateTextsPerRank.stream().flatMap(List::stream).toList();
-            judgeOutcome = evalJudgeService.judge(evalCase.getExpectedAnswer(), allTexts);
-        }
-
-        AnswerCaseOutcome answerOutcome = answerOneCase(evalCase, nodes, answerConfig);
-
-        boolean multiTurn = evalCase.getMessages() != null && !evalCase.getMessages().isBlank();
-        return new CaseOutcome(evalCase.getCaseId(), judgment, overlapRatios, recalledChunkIds,
-                outcome.getDegraded(), retries, judgeOutcome, answerOutcome, evalCase.getAnchorType(), multiTurn);
-    }
-
-    private AnswerCaseOutcome answerOneCase(EvalCase evalCase, List<RetrievalNodeView> nodes,
-                                            AnswerEvaluationConfig config) {
-        if (config == null || !answerJudgeRequested(evalCase)) {
-            return null;
-        }
-        long startedAt = System.currentTimeMillis();
-        String answer = answerGenerationService.generate(config.snapshot(), evalCase.getQuery(),
-                messagesOf(evalCase), nodes);
-        long elapsed = System.currentTimeMillis() - startedAt;
-        int latencyMs = elapsed > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) elapsed;
-        List<String> passages = nodes.stream().map(RetrievalNodeView::getContent).toList();
-        FinalAnswerJudgeService.JudgeOutcome judgment = finalAnswerJudgeService.judge(
-                evalCase.getExpectedAnswer(), Boolean.TRUE.equals(evalCase.getExpectedRefusal()),
-                config.snapshot().promptOrDefaults().isCitationEnabled(), answer, passages);
-        return new AnswerCaseOutcome(answer, latencyMs, judgment);
-    }
-
-    private boolean answerJudgeRequested(EvalCase evalCase) {
-        return Boolean.TRUE.equals(evalCase.getExpectedRefusal())
-                || evalCase.getExpectedAnswer() != null && !evalCase.getExpectedAnswer().isBlank();
-    }
-
-    private double bestOverlapRatio(List<List<String>> candidateTextsPerRank, String span) {
-        double best = 0.0d;
-        for (List<String> rankTexts : candidateTextsPerRank) {
-            for (String text : rankTexts) {
-                best = Math.max(best, overlapRatioCalculator.overlapRatio(text, span));
-            }
-        }
-        return best;
-    }
-
-    private List<String> childTextsOf(RetrievalNodeView node) {
-        Object childrenRaw = node.getMetadata() == null ? null
-                : node.getMetadata().get(RetrievalMetadataKeys.CHILDREN);
-        if (!(childrenRaw instanceof List<?> children) || children.isEmpty()) {
-            return List.of(node.getContent());
-        }
-        List<String> texts = new ArrayList<>(children.size());
-        for (Object child : children) {
-            if (child instanceof Map<?, ?> map) {
-                Object content = map.get(RetrievalMetadataKeys.CHILD_CONTENT);
-                if (content != null) {
-                    texts.add(String.valueOf(content));
-                }
-            }
-        }
-        return texts.isEmpty() ? List.of(node.getContent()) : texts;
-    }
-
-    private RetrievalCommand toCommand(EvalCase evalCase, EvalRetrievalConfig config) {
-        EvalMode mode = config.getMode();
-        return RetrievalCommand.builder()
-                .query(evalCase.getQuery())
-                .messages(messagesOf(evalCase))
-                .recallTopK(config.getRecallTopK())
-                .topN(config.getTopN())
-                .fusionMode(config.getFusion())
-                .scoreThreshold(config.getScoreThreshold())
-                .rewriteEnabled(config.getRewriteEnabled())
-                .rerankEnabled(mode.rerankRequested())
-                .bm25RouteEnabled(mode.bm25RouteEnabled())
-                .vectorRouteEnabled(mode.vectorRouteEnabled())
-                .build();
-    }
-
-    private List<ChatMessage> messagesOf(EvalCase evalCase) {
-        if (evalCase.getMessages() == null || evalCase.getMessages().isBlank()) {
-            return List.of();
-        }
-        List<ChatMessage> messages = JsonUtil.parse(evalCase.getMessages(), new TypeReference<List<ChatMessage>>() {
-        });
-        return messages == null ? List.of() : messages;
-    }
-
-    private List<EvalEvidence> evidencesOf(EvalCase evalCase) {
-        List<EvalEvidence> evidences = JsonUtil.parse(evalCase.getEvidences(),
-                new TypeReference<List<EvalEvidence>>() {
-                });
-        return evidences == null ? List.of() : evidences;
     }
 
     private EvalResult toEntity(String runId, CaseOutcome outcome) {
@@ -863,31 +713,6 @@ public class EvalRunService {
             return "internal error";
         }
         return message.length() > 1024 ? message.substring(0, 1024) : message;
-    }
-
-    /**
-     * Judgment of one case together with everything the drill down and the metrics grouping need.
-     *
-     * @param caseId         case business id
-     * @param judgment       case level judgment
-     * @param overlapRatios  best individual overlap ratio per evidence, empty for a document anchor
-     * @param recalledChunkIds chunk ids the top K returned
-     * @param degraded       degradation markers observed on the final attempt
-     * @param retryCount     automatic retries actually performed
-     * @param judgeOutcome   LLM-as-judge outcome, {@code null} when not judged
-     * @param anchorType     anchoring granularity, for metrics grouping
-     * @param multiTurn      {@code true} when the case carries a conversation history
-     */
-    private record CaseOutcome(String caseId, CaseJudgment judgment, List<Double> overlapRatios,
-                               List<String> recalledChunkIds, List<String> degraded, int retryCount,
-                               EvalJudgeService.JudgeOutcome judgeOutcome, AnswerCaseOutcome answerOutcome,
-                               AnchorType anchorType,
-                               boolean multiTurn) {
-    }
-
-    /** Generated answer and its structured judgment for one judgeable case. */
-    private record AnswerCaseOutcome(String generatedAnswer, int generationLatencyMs,
-                                     FinalAnswerJudgeService.JudgeOutcome judgeOutcome) {
     }
 
     /**
