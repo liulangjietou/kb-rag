@@ -66,6 +66,37 @@ jobs:
       - name: Run tests
         run: pytest -q
 
+  parse-java:
+    name: Parse (Java) / JDK 17
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kb-rag-parse-java
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+          cache-dependency-path: "kb-rag-parse-java/pom.xml"
+
+      # The default profile deliberately leaves the optional OCR dependency out, so this is
+      # also the check that the reflective engine still compiles without tess4j on the classpath.
+      - name: Build and test
+        run: mvn -B -ntp verify
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parse-java-surefire-reports
+          path: kb-rag-parse-java/target/surefire-reports/**
+          retention-days: 7
+
   web:
     name: Web / Node.js 22
     runs-on: ubuntu-latest

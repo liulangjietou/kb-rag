@@ -47,7 +47,7 @@ flowchart TB
         API --> INFRA --> DOMAIN
     end
 
-    PARSER["kb-rag-parser<br/>Python 3.11 + FastAPI（:20001）<br/>文档解析 / 图片抽取 / 可选 OCR，不调用大模型"]
+    PARSER["解析服务（:20001，二选一）<br/>kb-rag-parser：Python 3.11 + FastAPI<br/>kb-rag-parse-java：Java 17 + Spring Boot<br/>文档解析 / 图片抽取 / 可选 OCR，不调用大模型"]
 
     subgraph middleware["中间件（docker-compose 一键拉起）"]
         MYSQL[("MySQL :13306<br/>唯一事实源")]
@@ -68,7 +68,11 @@ flowchart TB
 ```
 
 - **kb-rag-server**：唯一业务中枢，负责管理台 API、对外开放 API（REST + MCP）、索引管线编排、检索链路、记忆库与全部大模型调用。
-- **kb-rag-parser**：纯解析微服务，只做文件解析与图片抽取，不调用任何大模型。
+- **解析微服务**：纯解析，只做文件解析与图片抽取，不调用任何大模型。有两套**行为等价、二选一部署**的实现——
+  [`kb-rag-parser`](kb-rag-parser/)（Python，契约的原始定义方与行为基准）与
+  [`kb-rag-parse-java`](kb-rag-parse-java/)（Java，与主服务技术栈统一，且 pdf 路径改用 Apache-2.0 的
+  PDFBox 从而不涉及 AGPL-3.0 义务）。两者监听同一端口、同一套契约与环境变量，`PARSER_BASE_URL`
+  指向哪个都不需要改 kb-rag-server。
 - **MySQL 是唯一事实源**：ES / Qdrant / Neo4j 均为派生索引，可从 MySQL 幂等重建。
 - **三条独立鉴权链**：管理台 Bearer Token、知识库 API Key（`kb-sk-*`）、记忆库 Memory Key（`kb-mk-*`）；
   MCP 端点刻意落在既有过滤器前缀之下，零改动复用同一条鉴权 / 限流 / 审计管线。
@@ -158,7 +162,8 @@ flowchart LR
 | 子目录 | 职责 | 技术栈 |
 | --- | --- | --- |
 | [`kb-rag-server`](kb-rag-server/) | Java 主服务：知识库与文档生命周期、索引管线编排、检索融合、标注评测、应用发布、记忆库、对外 API（REST + MCP），以及全部大模型调用 | Java + Spring Boot + MyBatis |
-| [`kb-rag-parser`](kb-rag-parser/) | Python 解析微服务：文档转结构化 Markdown + 按页文本 + 图片，聊天记录导出转结构化会话 | Python 3.11 + FastAPI |
+| [`kb-rag-parser`](kb-rag-parser/) | Python 解析微服务：文档转结构化 Markdown + 按页文本 + 图片，聊天记录导出转结构化会话。契约的原始定义方与行为基准 | Python 3.11 + FastAPI |
+| [`kb-rag-parse-java`](kb-rag-parse-java/) | Java 解析微服务：与 `kb-rag-parser` 行为等价、二选一部署（两实现对拍 42/42 一致）。pdf 走 Apache-2.0 的 PDFBox，不涉及 AGPL-3.0 义务 | Java 17 + Spring Boot 3 |
 | [`kb-rag-web`](kb-rag-web/) | React 管理台 | Vite + React 18 + TypeScript + Ant Design 5 |
 | [`kb-rag-deploy`](kb-rag-deploy/) | 部署与契约：docker-compose 编排、环境变量模板、跨服务 OpenAPI 契约、备份与预检脚本、总体文档 | Docker Compose + Shell |
 
@@ -172,7 +177,7 @@ Key，clone 下来就能看到「上传 → 检索」跑通（检索自动降级
 
 - Docker Engine / Docker Desktop，并支持 `docker compose`
 - JDK 17、Maven 3.6+
-- Python 3.11+
+- Python 3.11+（只有解析服务走 Python 实现 `kb-rag-parser` 时才需要；用 `kb-rag-parse-java` 则不需要）
 - Node.js 22、npm
 - lite 模式约需 8GB 可用内存；full 模式建议 16GB 以上
 
@@ -193,12 +198,25 @@ docker compose -f docker-compose.lite.yml ps
 
 ### 2. 启动解析服务（终端 A）
 
+两套实现行为等价，任选其一，都监听 20001。
+
+Python 实现：
+
 ```bash
 cd kb-rag-parser
 python3.11 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 set -a; source ../kb-rag-deploy/.env; set +a
 .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 20001
+```
+
+或 Java 实现（不需要 Python 环境）：
+
+```bash
+cd kb-rag-parse-java
+mvn -DskipTests package
+set -a; source ../kb-rag-deploy/.env; set +a
+java -jar target/kb-rag-parse-java-0.1.0-SNAPSHOT.jar
 ```
 
 ### 3. 构建并启动 Java 主服务（终端 B）
@@ -312,14 +330,22 @@ python3 scripts/validate_config.py
 
 ## 许可与第三方依赖
 
-四个子项目的项目代码均以 Apache License 2.0 许可发布：
+各子项目的项目代码均以 Apache License 2.0 许可发布：
 [`server`](kb-rag-server/LICENSE)、[`parser`](kb-rag-parser/LICENSE)、
-[`web`](kb-rag-web/LICENSE)、[`deploy`](kb-rag-deploy/LICENSE)。
+[`parse-java`](kb-rag-parse-java/LICENSE)、[`web`](kb-rag-web/LICENSE)、
+[`deploy`](kb-rag-deploy/LICENSE)。
 
-需要特别注意：`kb-rag-parser` 当前直接依赖 PyMuPDF，而该依赖采用 AGPL-3.0 / 商业许可
-双重授权。分发或以网络服务形式部署前，请先阅读
+需要特别注意：`kb-rag-parser` 直接依赖 PyMuPDF，而该依赖采用 AGPL-3.0 / 商业许可双重授权。
+AGPL-3.0 带网络服务条款——以网络服务形式对外提供包含该代码的程序这一行为本身，就触发向服务
+使用者提供完整对应源代码的义务，而解析服务恰恰就是网络服务。**部署 `kb-rag-parser` 前**请先阅读
 [`kb-rag-parser/README.md`](kb-rag-parser/README.md#许可注意) 与
 [`kb-rag-parser/NOTICE`](kb-rag-parser/NOTICE)，并根据实际使用方式完成许可证合规评估。
+
+如果这条义务对你的场景不可接受，可以改用行为等价的 [`kb-rag-parse-java`](kb-rag-parse-java/)：
+它的 pdf 路径走 Apache-2.0 的 Apache PDFBox，直接依赖全部为 Apache-2.0 / MIT / BSD-3-Clause，
+传递依赖中只有 Logback 与 `jakarta.annotation-api` 两项弱 copyleft 双许可件，其义务仅在修改并
+分发该库本身时触发，逐项核实见 [`kb-rag-parse-java/NOTICE`](kb-rag-parse-java/NOTICE)。
+这不是法律意见，只是把两条路各自的触发条件摆出来供决策。
 
 ## 关注作者
 

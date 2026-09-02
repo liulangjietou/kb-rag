@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.9</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>io.kbrag</groupId>
+    <artifactId>kb-rag-parse-java</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    <name>kb-rag-parse-java</name>
+    <description>Enterprise RAG knowledge base - Java document and chat-log parsing microservice</description>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+        </license>
+    </licenses>
+
+    <properties>
+        <java.version>17</java.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!--
+          PDF text extraction and page rendering. Apache-2.0, unlike the PyMuPDF (AGPL-3.0) the Python
+          service depends on - see README "许可注意": porting the pdf path to PDFBox is what lets this
+          service ship under the same Apache-2.0 as the rest of kb-rag with no unresolved obligation.
+        -->
+        <pdfbox.version>3.0.5</pdfbox.version>
+        <!-- docx (XWPF) and xlsx (XSSF); replaces python-docx + openpyxl. -->
+        <poi.version>5.4.1</poi.version>
+        <!--
+          HTML tokenizing for both the M12 page parser and the M8 chat DOM adapter. The Python service
+          deliberately stays on the stdlib html.parser to avoid bs4; the JDK ships no HTML parser at all,
+          so one local-only library is unavoidable. jsoup parses bytes already in hand and never opens a
+          connection unless Jsoup.connect is called, which this service never does.
+        -->
+        <jsoup.version>1.18.3</jsoup.version>
+        <!-- csv delimiter handling; replaces the stdlib csv module. -->
+        <commons-csv.version>1.14.1</commons-csv.version>
+        <!--
+          Zip central-directory reading for the docx/xlsx safety precheck. POI pulls it in transitively,
+          but the precheck is this service's own security boundary rather than a POI detail, so the
+          coordinate is declared explicitly - the guard must not silently lose its parser the day POI
+          reshuffles its dependencies.
+        -->
+        <commons-compress.version>1.27.1</commons-compress.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>${pdfbox.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>${poi.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>${jsoup.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-csv</artifactId>
+            <version>${commons-csv.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+            <version>${commons-compress.version}</version>
+        </dependency>
+        <!-- Mapping profile yml; version managed by the Boot BOM. -->
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <profiles>
+        <!--
+          Optional local OCR fallback (OCR_ENGINE=tesseract), the counterpart of the Python service's
+          requirements-ocr.txt: off by default so the default image stays lean. The engine is invoked
+          reflectively (see ocr/TesseractOcrEngine), so the main source set compiles and runs with or
+          without this profile; activating it only puts the jar on the classpath.
+
+              mvn -Pocr package
+        -->
+        <profile>
+            <id>ocr</id>
+            <dependencies>
+                <dependency>
+                    <groupId>net.sourceforge.tess4j</groupId>
+                    <artifactId>tess4j</artifactId>
+                    <version>5.13.0</version>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
