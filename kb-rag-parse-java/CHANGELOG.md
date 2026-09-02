@@ -33,6 +33,9 @@
 - **112 个测试用例**：覆盖每种文档格式、zip-slip / zip 炸弹负例、扫描页与内嵌图片、上限保护、
   重复图片去重、乱码页降级、按页 markdown 无损拼回、chat 四格式正负例、`profile_yaml` 优先级、
   OCR 三态、正则方言转换、空白语义、时间与消息类型归一。样例文件全部由代码生成，不提交二进制 fixture。
+- **CI 门禁**：根仓库 `.github/workflows/ci.yml` 新增 `parse-java` job（JDK 17，`mvn -B -ntp verify`），
+  与既有 server / parser / web / deploy 四个 job 并列。刻意用默认 profile 构建——那也就顺带验证了
+  反射式 OCR 引擎在 tess4j 不在 classpath 时仍能编译运行。
 - **`tools/crosscheck.py` 两实现对拍脚本**：把同一份样例字节同时发给 Python 与 Java 两个服务，
   逐项比对契约字段。这是"两套实现行为等价"这一说法的证据来源——单元测试只能证明各自符合
   自己的预期。2026-09-02 实测 **42/42 一致**，其中 pdf 文本层连换行位置都逐字符相同、
