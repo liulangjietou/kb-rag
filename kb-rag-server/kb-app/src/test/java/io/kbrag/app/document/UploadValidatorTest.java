@@ -50,6 +50,15 @@ class UploadValidatorTest {
     }
 
     @Test
+    void shouldAcceptHtmlAndHtmAsTextFormats() {
+        // 兜底默认值曾漏 html/htm：yml 补过 html 而这份 List.of 没跟上，htm 则两边都没有——
+        // 于是 parser 早已注册的 .htm 在上传口被拒。本用例钉住两者都在白名单里。
+        byte[] page = "<html><body>hi</body></html>".getBytes(StandardCharsets.UTF_8);
+        assertEquals("html", validator.validate("page.html", page));
+        assertEquals("htm", validator.validate("page.HTM", page));
+    }
+
+    @Test
     void shouldRejectRenamedFile() {
         BizException e = assertThrows(BizException.class,
                 () -> validator.validate("payload.pdf", ZIP_HEADER));

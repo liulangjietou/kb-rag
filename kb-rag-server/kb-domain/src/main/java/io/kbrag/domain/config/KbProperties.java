@@ -928,9 +928,15 @@ public class KbProperties {
         /** Maximum accepted file size in megabytes. */
         private int maxFileSizeMb = 100;
 
-        /** Accepted lower case extensions. */
+        /**
+         * Accepted lower case extensions.
+         *
+         * <p>必须与 application.yml 的 kb.upload.allowed-extensions 默认值逐项一致：yml 在真实部署里
+         * 总会覆盖这里，但单元测试直接 new KbProperties() 吃的是这份兜底值——两者漂移会让测试放行/拒绝
+         * 的格式与生产不同（html 此前就只写进了 yml，测试里一直是被拒的）。
+         */
         private List<String> allowedExtensions =
-                List.of("pdf", "docx", "txt", "md", "sql", "xlsx", "csv",
+                List.of("pdf", "docx", "txt", "md", "sql", "xlsx", "csv", "html", "htm",
                         "png", "jpg", "jpeg", "webp", "bmp", "gif");
     }
 
