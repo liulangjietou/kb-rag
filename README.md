@@ -1,3 +1,6 @@
+#作品演示
+[![作品演示](https://github.com/user-attachments/assets/e983030c-ed85-4304-8468-b3d1f3443055)](https://www.bilibili.com/video/BV1LwtJ6DEk9/?vd_source=03686e8b5675ab4a5314432c9c02feeb)
+
 # kb-rag
 
 可自托管、开箱即用的企业知识库 / RAG（检索增强生成）系统：上传文档 → 自动解析切分 →
