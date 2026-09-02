@@ -13,6 +13,15 @@
 
 ### 修复
 
+- **清除 `config.py` 里两个零引用的影子白名单**：`SUPPORTED_FILE_EXTENSIONS` 与
+  `ZIP_BASED_FILE_EXTENSIONS` 全仓无任何引用——支持格式的判定一直由 `parsers/registry.py` 的
+  `_REGISTRY` 查表完成，zip 预检由 `docx.py`/`excel.py`/`chat/parser.py` 各自直接调用
+  `ensure_zip_is_safe`，两个常量从未参与决策。它们的注释却写着"kept in one place to avoid
+  scattering the whitelist across modules"，**读起来像是权威白名单**，而前者已经漂移（缺
+  `html`/`htm`，M12 加解析器时没同步）：下一个人照它判断"本服务支不支持某格式"会得到错误答案，
+  照它新增格式则改了个没人读的集合。两个常量删除，原处留一行注释指明唯一事实源是 `_REGISTRY`。
+  行为零变化（删的是死代码），`65 passed, 1 skipped` 保持不变。
+
 - **对外文档漏记 `sql` 扩展名**：`sql` 自 `f8f925c`（2026-07-29）起就已注册进 `app/parsers/registry.py`（与 `txt`/`md` 共用 `TextParser`，探测编码后原样透传），`tests/test_parse_text.py::test_parse_sql_returns_expected_structure` 一直覆盖着它，kb-rag-server 的上传白名单默认值同期也已放行——唯独三处对外文档的扩展名清单没跟着改：`kb-rag-deploy/docs/openapi/kb-parser.yaml` 的 `SupportedFileExt` 枚举、`kb-rag-deploy/docs/ARCHITECTURE.md` §4.2 的端点表、本仓 README 的 `file_ext` 说明与「支持格式一览」表。照契约对接的人会以为传 `file_ext=sql` 会被 400 拒绝，从而绕开一个早已可用的格式。本次按实现补齐这三处。**纯描述订正**：解析实现与测试均未改动，OpenAPI 的 schema 结构与版本号不变。
 
 ## [未发布] - M14
