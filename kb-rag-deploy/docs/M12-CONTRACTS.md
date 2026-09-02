@@ -35,6 +35,7 @@
 
 ### 3.1 上传白名单（UploadValidator，一行配置）
 - `application.yml` `kb.upload.allowed-extensions` 默认值追加 `html`（html 无魔数，UploadValidator 的 MAGIC 表不动——文本格式本就"仅验扩展名与大小"）。
+- **`htm` 补齐（后补，与代码一致）**：解析侧 §2 注册的是 `html`/`htm` 两个扩展名，上传白名单当期只追加了 `html`——`UploadValidator` 是上传路径唯一的 fast-fail 闸门，`.htm` 在那里即被判 `unsupported file extension: htm`，到不了解析服务；同一份白名单还管着 M14 外部数据源同步的对象过滤（`ExtSourceService`），桶里的 `.htm` 同样被静默跳过。默认值现补 `htm`，与解析侧注册表对齐。另：`KbProperties.Upload#allowedExtensions` 的兜底 `List.of(...)` 当期未同步追加 `html`，真实部署由 yml 覆盖故生产无影响，但直接 `new KbProperties()` 的单元测试一直把 `.html` 判为不支持——兜底值已补齐为与 yml 逐项一致。
 
 ### 3.2 SSRF 防线（UrlGuard，kb-domain service）
 - `UrlGuard.validate(url)`：仅 `http/https`；禁 userinfo（`user@host` 形态直接拒）；host 解析出的**每个** InetAddress 均须非回环/非私网（10/172.16-31/192.168）/非链路本地（169.254）/非组播/非通配（0.0.0.0）；解析失败 → INVALID_PARAM。中文拒绝消息（如"该地址指向内网，禁止抓取"）。

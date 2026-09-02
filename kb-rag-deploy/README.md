@@ -118,7 +118,7 @@ lite → full 的索引迁移路径（切 `VECTOR_ENGINE=qdrant` 后从 MySQL �
 | 仓库 | 职责 | 技术栈 |
 | --- | --- | --- |
 | [kb-rag-server](../kb-rag-server) | Java 主服务：知识库/文档/索引管线编排、混合检索、管理台 API | JDK 17、Spring Boot 3.3.x、MyBatis-Plus、Flyway |
-| [kb-rag-parser](../kb-rag-parser) | Python 文档解析服务：pdf/docx/txt/md/xlsx/csv → Markdown | Python 3.11、FastAPI |
+| [kb-rag-parser](../kb-rag-parser) | Python 文档解析服务：pdf/docx/txt/md/sql/xlsx/csv/html/htm → Markdown | Python 3.11、FastAPI |
 | [kb-rag-web](../kb-rag-web) | 前端管理台：登录、知识库管理、检索调试 | React 18、TypeScript、Vite、Ant Design 5 |
 | **kb-rag-deploy**（本仓库） | docker-compose、环境变量模板、OpenAPI 接口契约、部署文档 | docker-compose |
 

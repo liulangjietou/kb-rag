@@ -37,6 +37,31 @@
 
 ### Fixed
 
+- **`.htm` 上传被白名单挡下（M12 后修复）**：M12 在 kb-rag-parser 注册的是 `html` 与 `htm` 两个
+  扩展名，`UPLOAD_ALLOWED_EXTENSIONS` 默认值当期却只追加了 `html`。上传路径唯一的校验闸门
+  `UploadValidator` 因此把 `.htm` 判为 `unsupported file extension`——解析侧支持、入口不放行，
+  **运维视角看到的是「同一个网页存成 .htm 就传不进去」**；同一份白名单还管着 M14 外部数据源同步的
+  对象过滤，对象存储桶里的 `.htm` 对象一直被静默跳过（不报错、不计失败，只是不入库）。默认值补
+  `htm`。另修一处只影响测试的漂移：`KbProperties` 的兜底默认值里连 `html` 都没有，真实部署总由
+  yml 覆盖故**生产无影响**，但单测吃的是兜底值、`.html` 在测试中一直是被拒的，已补齐为与 yml
+  逐项一致。**无 Flyway、无新增环境变量与配置键，升级零操作**；`kb-server.yaml` 的上传端点补了
+  白名单口径说明（**纯描述订正，schema 与版本号不变**，仍为 `0.26.0-m24`）。
+  **唯一对外行为变更**：`.htm` 由 400 变为可上传。**运维提醒**：已在 `.env` 里显式写死过
+  `UPLOAD_ALLOWED_EXTENSIONS` 的部署不会自动获得 `htm`，需要手动把它补进那一行（与 M12 追加
+  `html`、`f8f925c` 追加 `sql` 时同一口径）。
+
+- **解析服务契约漏记 `sql` 扩展名（`f8f925c` 后修复）**：`sql` 自 2026-07-29 那次 pdf 乱码页修复起
+  就已是 kb-rag-parser 的正式支持格式（与 `txt`/`md` 共用纯文本解析器，`app/parsers/registry.py`
+  已注册、pytest 有专门用例），kb-rag-server 的 `UPLOAD_ALLOWED_EXTENSIONS` 默认值同期也已放行；
+  唯独三处对外文档的扩展名清单没跟着改——`docs/openapi/kb-parser.yaml` 的 `SupportedFileExt` 枚举、
+  `docs/ARCHITECTURE.md` §4.2 的端点表、`kb-rag-parser/README.md` 的 `file_ext` 说明与支持格式表。
+  **后果**：照契约对接解析服务的人会以为 `file_ext=sql` 会被 400 拒绝，从而绕开一个早已可用的格式；
+  排障时反过来也会把「这套部署能传 .sql」误判成实现越界。本次按实现补齐这三处清单。
+  **无 Flyway 脚本、无新增环境变量与配置键、无代码改动，升级零操作**；`kb-parser.yaml` 属
+  **纯描述订正，schema 与版本号不变**（仍为 `0.14.0-m14`），服务端本就接受 `sql`，对外行为零变更。
+  **运维提醒（沿用 `f8f925c` 的口径）**：已在 `.env` 里显式写死过 `UPLOAD_ALLOWED_EXTENSIONS` 的
+  部署不会自动获得 `sql`，需要手动把它补进那一行。
+
 - 修正 `GRAPH_EXTRACT_MAX_TOKENS` 在 `.env.example` 中重复且默认值冲突的问题，统一为服务端实际
   默认值 3072；Demo 目录改为仓库相对路径；full 模式内存说明统一为当前预检执行的 16GB。
 

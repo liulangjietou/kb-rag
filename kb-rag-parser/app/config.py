@@ -58,13 +58,10 @@ PARSE_TIMEOUT_SECONDS = 300
 # (MySQL/ES/Qdrant, typically).
 PARSER_EXECUTOR_MAX_WORKERS = _read_int_env("PARSER_MAX_WORKERS", 4)
 
-# Supported file extensions (registry keys), kept in one place to avoid
-# scattering the whitelist across modules.
-SUPPORTED_FILE_EXTENSIONS = frozenset({"pdf", "docx", "txt", "md", "sql", "xlsx", "csv"})
-
-# Zip-based formats that must go through the zip safety precheck before
-# being handed to python-docx / openpyxl.
-ZIP_BASED_FILE_EXTENSIONS = frozenset({"docx", "xlsx"})
+# 支持格式的唯一事实源是 app/parsers/registry.py 的 _REGISTRY——get_parser() 直接以它查表分派，
+# 这里不再另立一份影子白名单（曾有 SUPPORTED_FILE_EXTENSIONS / ZIP_BASED_FILE_EXTENSIONS 两个
+# frozenset，零引用且已漂移：前者缺 html/htm，后者的意图由 docx/excel/chat 三个解析器各自调用
+# ensure_zip_is_safe 实现，从不查表）。新增格式只需改 registry。
 
 
 # --- M3 multimodal parsing additions (M3-CONTRACTS.md §2.1) ---

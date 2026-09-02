@@ -83,7 +83,7 @@ python3 -m venv .venv
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `file` | file | 待解析的文档 |
-| `file_ext` | form 字段 | 文件扩展名（不带点），如 `pdf`/`docx`/`txt`/`md`/`xlsx`/`csv`/`html`/`htm` |
+| `file_ext` | form 字段 | 文件扩展名（不带点），如 `pdf`/`docx`/`txt`/`md`/`sql`/`xlsx`/`csv`/`html`/`htm` |
 
 成功响应 `data` 结构（M3-CONTRACTS.md §2.1，向后兼容 M1）：
 
@@ -159,6 +159,7 @@ html（M8-CONTRACTS.md §0.2，DOM 选择器）：
 | `docx` | python-docx | 按文档原始顺序抽取段落+表格+内嵌图片；docx 无可靠页码概念，整篇作为 `page_no=1` 返回 |
 | `txt` | 标准库 | 尽力探测编码（utf-8-sig/utf-8/gbk），原样返回 |
 | `md` | 标准库 | 原样透传，本身已是 markdown |
+| `sql` | 标准库 | 与 txt 同一解析器：探测编码后原样透传，不臆造 markdown 语法 |
 | `xlsx` | openpyxl | 每个 sheet 对应一个 `page_no`，同时渲染为 markdown 表格 |
 | `csv` | 标准库 `csv` | 自动探测分隔符（逗号/分号/tab），渲染为 markdown 表格 |
 | `html` / `htm` | 标准库 `html.parser`（M12） | 通用 HTML 页面→markdown：`<title>` 与 h1-h6 映射为标题、块级元素分段，剔除 script/style/noscript/template；单页返回（`page_no=1`）、不产出图片、绝不请求远程资源（URL 抓取与 SSRF 防护在 kb-rag-server 侧） |

@@ -193,7 +193,10 @@ components:
       type: string
       description: |
         html/htm 为 M12 增量（docs/M12-CONTRACTS.md §2，通用 HTML 页面解析）。
-      enum: [pdf, docx, txt, md, xlsx, csv, html, htm]
+        sql 与 txt/md 共用纯文本解析器（原样透传，不臆造 markdown 语法），实现自
+        2026-07-29 起即已支持（同期 kb-rag-server 的 UPLOAD_ALLOWED_EXTENSIONS 默认值
+        也已放行），本枚举当时漏记，此处按实现补齐——非新增能力，故 schema 与版本号不变。
+      enum: [pdf, docx, txt, md, sql, xlsx, csv, html, htm]
 
     ChatFileExt:
       type: string

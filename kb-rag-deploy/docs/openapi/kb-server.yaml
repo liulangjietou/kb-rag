@@ -1465,6 +1465,14 @@ paths:
       summary: 上传文档（异步进入索引管线）
       description: 'multipart 上传；服务端校验扩展名 + magic number + 文件大小（≤100MB）。
 
+        扩展名白名单为部署配置 kb.upload.allowed-extensions（UPLOAD_ALLOWED_EXTENSIONS），
+
+        默认放行 pdf/docx/txt/md/sql/xlsx/csv/html/htm 与 png/jpg/jpeg/webp/bmp/gif；
+
+        htm 为后补（M12 注册了 html/htm 两个解析扩展名，白名单当期只追加了 html）。
+
+        txt/md/sql/csv/html/htm 无魔数，只验扩展名与大小；不在白名单内一律 400 INVALID_PARAM。
+
         校验通过后立即返回，文档以 UPLOADED 状态异步进入解析/切分/索引管线。
 
         '

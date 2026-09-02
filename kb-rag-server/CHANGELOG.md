@@ -43,6 +43,27 @@
 - 新增独立的 `FinalAnswerJudgeService`、聚合器与答案门禁纯函数。Judge 失败不折算 0 分；双跑只比较双方均成功 Judge 的共同 case；历史应用版本的答案门禁默认关闭。
 - 评测提交和费用预估支持绑定应用版本；发布门禁在显式开启时联合检索与答案结论，并新增 `GATE_ANSWER_SCORE_EPSILON`（默认 0.2）。完整契约见 `kb-rag-deploy/docs/M21-CONTRACTS.md`。
 
+### 修复（M12 后修复：`.htm` 上传被白名单挡下，兜底默认值与 yml 漂移）
+
+- **`.htm` 传不进来**：M12 给 kb-rag-parser 注册的是 `html` 与 `htm` 两个扩展名（同一个解析器），
+  上传白名单当期却只追加了 `html`。`UploadValidator` 是上传路径唯一的 fast-fail 闸门，`.htm`
+  在那里就被判 `unsupported file extension: htm`，压根到不了解析服务——一个解析侧早已支持的
+  格式，在入口被挡了两个里程碑。同一份白名单还管着 M14 外部数据源同步的对象过滤
+  （`ExtSourceService` 按它筛 S3 对象），所以桶里的 `.htm` 对象也一直被静默跳过。
+  `application.yml` 的 `kb.upload.allowed-extensions` 默认值补 `htm`。
+- **`KbProperties.Upload#allowedExtensions` 与 yml 漂移**：那份兜底 `List.of(...)` 里连 `html`
+  都没有（M12 只改了 yml）。真实部署总由 yml 覆盖，**生产未受影响**；但单元测试直接
+  `new KbProperties()` 吃的正是这份兜底值——**测试里 `.html` 一直是被拒的**，一个已上线两个
+  里程碑的格式在测试中处于"不支持"状态，任何走白名单的用例都在错误前提上通过。兜底值补齐为
+  与 yml 逐项一致，并在字段 javadoc 上写明这条必须同步的约束。
+- `htm` 与 `html`/`txt`/`md`/`sql`/`csv` 同属无魔数的文本格式，`MAGIC_BY_EXTENSION` 表不动，
+  仍是"仅验扩展名与大小"。
+- `UploadValidatorTest` 增 `shouldAcceptHtmlAndHtmAsTextFormats`（9 → 10 个用例）。变异验证：
+  抽掉兜底值里的 `html`/`htm`，该用例即以 `unsupported file extension: html` 转红。
+  全量单测 1339 → 1340，全绿。
+- **无 Flyway、无新增配置键，升级零操作**；**唯一对外行为变更**是 `.htm` 由 400 变为可上传。
+  已在 `.env` 里显式写死过 `UPLOAD_ALLOWED_EXTENSIONS` 的部署不会自动获得 `htm`，需手动追加。
+
 ### 安全加固（Actuator 管理平面）
 
 - `/actuator/health`、`/actuator/info` 与 `/actuator/prometheus` 从 `20000` 业务监听器迁至
