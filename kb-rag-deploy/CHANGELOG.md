@@ -43,6 +43,16 @@
 
 ### Fixed
 
+- **索引大文档时模型预占死锁导致整个索引任务失败（M24 后修复）**：日志里表现为
+  `MySQLTransactionRollbackException: Deadlock found when trying to get lock`，堆栈落在
+  `ModelUsageMonthlyMapper.reserve`，**运维视角看到的是「文档一直索引失败、重试还是失败，但数据库
+  和模型服务都正常」**。根因是配额预占事务先 `INSERT IGNORE` 建计数器行、再 `UPDATE` 同一行：行已
+  存在时前者取 S 锁、后者要 X 锁，两个并发预占各持 S 各等 X，InnoDB 杀掉其中一个。一篇文档的嵌入
+  分批是并发的且都计费到同一个租户月同一行，所以**文档越大越必然触发**，小文档可能一直不复现。
+  修复后热路径只剩一条 `UPDATE`。**无 Flyway 迁移、无新增或改名的配置键与环境变量、无新容器或
+  第三方依赖、对外 HTTP 契约不变，OpenAPI 版本号保持 `0.26.0-m24` 不动——升级零操作**；升级后原先
+  失败的文档重新触发索引即可正常完成。`docs/ARCHITECTURE.md` 升 v2.8，`M24-CONTRACTS.md` §1 补
+  预占语句顺序不变量。
 - **`.htm` 上传被白名单挡下（M12 后修复）**：M12 在 kb-rag-parser 注册的是 `html` 与 `htm` 两个
   扩展名，`UPLOAD_ALLOWED_EXTENSIONS` 默认值当期却只追加了 `html`。上传路径唯一的校验闸门
   `UploadValidator` 因此把 `.htm` 判为 `unsupported file extension`——解析侧支持、入口不放行，

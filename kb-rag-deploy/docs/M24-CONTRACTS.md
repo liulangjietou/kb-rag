@@ -17,6 +17,15 @@ M24 回答两个生产问题：一次模型调用应归属哪个租户、一个�
 1. **先预占、后调用**：模型 HTTP 请求发出前，用一条条件 `UPDATE` 原子判断
    `used_tokens + reserved_tokens + 本次预占 <= monthly_token_quota`。禁止先 `SUM` 再写入，后者在并发下会
    让多个请求同时越过同一个余额。
+
+   > **预占语句顺序（M24 后修复补齐）**：这条 `UPDATE` 必须是预占事务里对
+   > `t_kb_model_usage_monthly` 的**第一条**语句，计数器行只在 `UPDATE` 影响 0 行、且经不加锁的
+   > 存在性查询确认该行确实缺席时才补建。原实现每次调用先 `INSERT IGNORE` 建行再 `UPDATE`：行已存在时
+   > `INSERT IGNORE` 会为判定唯一键冲突而对该行加 S 锁，随后的 `UPDATE` 需要把它升级为 X 锁——两个
+   > 并发预占各持 S 各等 X，InnoDB 判定死锁并杀掉其中一个。同一文档的嵌入分批是并发的且计费到同一个
+   > 租户月，因此大文档必然触发。超配额时同样不得回落到 `INSERT IGNORE`：超配额会持续到月末，那会让
+   > 同一把 S 锁回到每一次被拒调用上。
+
 2. **真实用量替换预占**：供应商响应带 usage 时，以其 input/output/total 结算；兼容 OpenAI
    `prompt_tokens/completion_tokens` 与 DashScope `input_tokens/output_tokens` 命名。
 3. **未知用量保守结算**：供应商没有 usage 时按预占量结算，`estimated=1`。进程崩溃遗留的 RESERVED
@@ -92,7 +101,7 @@ CallerRuns 回压场景也不能误清提交者上下文。图谱抽取和图片
 
 ## 7. 测试与验收
 
-单元测试覆盖：原子配额拒绝、价格快照、真实/未知用量结算、崩溃保守结算、OpenAI/DashScope usage
+单元测试覆盖：原子配额拒绝、预占热路径不建行与首次调用补建后重试（M24 后修复）、价格快照、真实/未知用量结算、崩溃保守结算、OpenAI/DashScope usage
 解析、供应商返回后解析失败不释放、UTF-8/输出预算、压缩图片像素上界、Token 加法溢出、异步上下文传播、
 租户配额更新和索引补偿租户归属。管理台执行 test/lint/build；OpenAPI、Flyway、配置与两份需求文档进入
 部署契约校验；里程碑结束执行整个仓库的全量单元测试门禁。
