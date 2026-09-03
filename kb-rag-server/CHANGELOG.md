@@ -3,9 +3,13 @@
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与语义化版本。
 标注 `[schema]` 的条目包含数据库迁移脚本，升级时会自动执行 Flyway。
 
-## [未发布]
+## [1.1.0] - 2026-09-03
 
-尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
+> **⚠️ 破坏性变更（升级必读）**：管理台会话请求头由 `Authorization: Bearer <token>` 改为
+> `satoken: <token>`，影响 178 个受认证保护的端点，**升级后所有控制台用户需重新登录一次**。
+> 控制台前端已同步，使用打包产物的用户无需操作；自行调用管理 API 的脚本必须改请求头。
+> 两条开放 API（`/api/v1/knowledge/*` 的 API Key、`/api/v1/memory/*` 的 Memory Key，共 10 个端点）
+> 凭据与调用方式**一律不变**。升级步骤见 [../kb-rag-deploy/UPGRADING.md](../kb-rag-deploy/UPGRADING.md)。
 
 ### 变更（控制台会话与登录态底座换成 Sa-Token 1.46.0，**含破坏性变更**）
 
@@ -315,6 +319,8 @@
 
 - MCP 协议层（`docs/M20-CONTRACTS.md`）：知识库应用与记忆库各暴露一个 MCP Streamable HTTP 端点（`POST /api/v1/knowledge/mcp`、`POST /api/v1/memory/mcp`），任何 MCP 兼容客户端配一个 URL 加一把既有 Key 即可直接调用。手写无状态 JSON-RPC 2.0 引擎（`McpServerEngine`，支持 initialize / ping / tools/list / tools/call / notifications/*，协议版本 2025-03-26 兼容 2024-11-05，不支持批量数组），**零新增依赖**。工具集：knowledge_search / knowledge_chat（仅非流式，stream=true 报 INVALID_PARAM 指路 REST SSE）与 memory_add / memory_search / memory_list / memory_update / memory_delete / memory_get_profile，参数与返回结构同 REST 孪生端点（复用 DTO，`McpArgumentBinder` 补 jakarta Validator 显式校验）。
 - 鉴权复用而非新建：两个端点刻意落在 `ApiKeyAuthFilter`（kb-sk-*）与 `MemoryKeyAuthFilter`（kb-mk-*）既有 URL 前缀之下，鉴权/限流/审计与 REST 同一条链、零过滤器改动；记忆库隔离红线原样成立（库来自 Key 绑定关系，参数无法指定 library_id）。两个失败平面：协议违规回 JSON-RPC error（-32700/-32600/-32601/-32602），业务失败（BizException）回 tools/call 成功响应里 isError=true 的工具结果（文本形如「错误码: 消息」）；成功结果同时给 content 文本与 structuredContent 结构化两形态。离线单测 `McpServerEngineTest` 12 例。
+
+## [1.0.0] - 2026-07-31
 
 ### 新增（M19）
 

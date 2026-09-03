@@ -2,9 +2,19 @@
 
 本文件记录 kb-rag-deploy 仓库的显著变更，格式遵循
 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
-版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
+版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)，其中 **MAJOR 的判定范围是
+两条开放 API**（`/api/v1/knowledge/*` 与 `/api/v1/memory/*`，凭据为 API Key / Memory Key）——
+它们是本项目面向第三方系统的稳定契约。管理台端点（控制台前端与后端之间）随控制台整体演进，
+其不兼容变更在 MINOR 版本中发布，但一律在该版本条目顶部以醒目块标注，并同步写入
+[UPGRADING.md](UPGRADING.md)。
 
-## [Unreleased]
+## [1.1.0] - 2026-09-03
+
+> **⚠️ 破坏性变更（升级必读）**：管理台会话请求头由 `Authorization: Bearer <token>` 改为
+> `satoken: <token>`，影响 178 个受认证保护的端点，**升级后所有控制台用户需重新登录一次**。
+> 控制台前端已同步，使用打包产物的用户无需操作；自行调用管理 API 的脚本必须改请求头。
+> 两条开放 API（`/api/v1/knowledge/*` 的 API Key、`/api/v1/memory/*` 的 Memory Key，共 10 个端点）
+> 凭据与调用方式**一律不变**。升级步骤见 [UPGRADING.md](UPGRADING.md)。
 
 ### Added
 
@@ -135,6 +145,11 @@
 
 - **MCP 协议层（M20，`docs/M20-CONTRACTS.md`）**：知识库应用与记忆库各暴露一个 MCP Streamable HTTP 端点（`POST /api/v1/knowledge/mcp`、`POST /api/v1/memory/mcp`，JSON-RPC 2.0 单请求单 JSON 响应，协议版本 2025-03-26 兼容 2024-11-05），任何 MCP 兼容客户端（Claude Desktop / Cursor / Cline 等）配一个 URL 加一把既有 Key（kb-sk-* / kb-mk-*）即可直接调用。鉴权/限流/审计与 REST 开放端点同一条过滤器链；工具集 knowledge_search / knowledge_chat（仅非流式）与 memory 六工具，参数与返回结构同 REST 孪生端点。**无新增容器、依赖、环境变量与配置键**，纯新增、存量端点与行为零变化。控制台新增「MCP 调试」一级菜单；调用方文档见主仓 `docs/MCP接入指南.md`。
 - OpenAPI 升至 `0.20.0-m20`：新增 `mcp` tag、两个 MCP path 与 `McpJsonRpcRequest` / `McpJsonRpcResponse` schema。
+
+## [1.0.0] - 2026-07-31
+
+### Added
+
 - **企业级记忆库（M19，`docs/M19-CONTRACTS.md`）**：对标阿里云百炼「记忆库」——外部智能体应用通过 **Memory Key（`kb-mk-*`）** 调用开放 API（`/api/v1/memory/*` 六端点：Add/Search/List/Update/Delete/GetUserProfile），为最终用户维护跨会话长期记忆：对话经 LLM 抽取成记忆片段与结构化画像，后续会话按语义召回（向量 + BM25 混合，可选意图识别/改写/重排）。控制台新增「记忆库」一级菜单（库/片段规则/画像规则/记忆数据/检索调试/Memory Key 管理）。Flyway `V20__memory_library.sql` 新增 6 张表与 `memory:read`/`memory:write` 权限种子。记忆节点写入 ES 单物理索引 `kb_memory_nodes_v1`（隔离靠 `library_id` + `user_id` 查询谓词，一把 Key 只绑定一个库）。**无新增容器、环境变量与配置键**——LLM 三类调用复用既有 `DASHSCOPE_API_KEY` 等模型配置，零 Key 部署降级 BM25 单路检索、抽取报错可见；纯新增，存量端点与行为零变化。调用方文档见主仓 `docs/记忆库接入指南.md`。
 - OpenAPI 升至 `0.19.0-m19`（M18 未递增版本号，本次一并补账）：新增 `memory-library`（管理端 23 路径）与 `memory-open-api`（开放端 6 路径，`Authorization: Bearer kb-mk-*` 鉴权）两组端点及记忆库全套 schema。
 - **网页导入站点凭据与登录墙检测（M18）**：抓取需要登录的站点（内网 wiki、私有文档站）的通用能力。新增 `t_kb_web_credential`（Flyway `V19`，host 全局唯一），BASIC / HEADER 两种类型覆盖所有走请求头的认证；凭据只对精确匹配 host 的请求注入，静态路径重定向跨 host 剥离、渲染路径在 SSRF 拦截回调里逐请求判定。新增登录墙检测：登录表单 + 200 此前会被当正文入库（真实事故），现于两条抓取路径的唯一出口拦截并记 FAILED；同一轮同步同 host 首个 401/登录墙后剩余登记直接跳过（防 Confluence CAPTCHA 锁号）。OpenAPI 新增 `/api/v1/web-credentials` 系列端点与 `WebCredential` schema（响应结构上就没有 secret 字段）。**无新增环境变量**；secret 与 S3 凭据同一决策（D17）明文存库，建议站点侧使用专用只读账号并配合网络隔离部署。

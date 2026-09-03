@@ -2,7 +2,13 @@
 
 本项目的版本记录遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 约定，按里程碑分节记录（对应 `kb-rag-deploy/docs/M1~M15-CONTRACTS.md`）。
 
-## [Unreleased]
+## [1.1.0] - 2026-09-03
+
+> **⚠️ 破坏性变更（升级必读）**：管理台会话请求头由 `Authorization: Bearer <token>` 改为
+> `satoken: <token>`，影响 178 个受认证保护的端点，**升级后所有控制台用户需重新登录一次**。
+> 控制台前端已同步，使用打包产物的用户无需操作；自行调用管理 API 的脚本必须改请求头。
+> 两条开放 API（`/api/v1/knowledge/*` 的 API Key、`/api/v1/memory/*` 的 Memory Key，共 10 个端点）
+> 凭据与调用方式**一律不变**。升级步骤见 [../kb-rag-deploy/UPGRADING.md](../kb-rag-deploy/UPGRADING.md)。
 
 ### Changed
 
@@ -44,6 +50,10 @@
 - 新增一级菜单「MCP 调试」（`/mcp`，`app:read` 或 `memory:read` 任一可见，位于「记忆库」与「评测中心」之间）：针对知识库应用与记忆库两个 MCP 端点的在线调试页（`pages/mcp/McpDebugPage.tsx`）——端点二选一（切换即清场）、粘贴明文 Key（kb-sk-* / kb-mk-*，与 API 调试 tab 同一约定）、initialize 握手、tools/list 拉取工具目录（选中工具自动按 inputSchema.required 预填参数模板）、tools/call 发起调用。
 - 响应区显式区分三种结果平面：JSON-RPC error（红，协议错误码）、isError=true（橙，业务失败文本）、成功（绿），并展示原始 JSON-RPC 响应全文；接入示例区随表单实时生成 curl 与 MCP 客户端 `mcpServers` 配置片段（streamable-http）。
 - 新增 `api/mcp.ts`：仿 publicApi.ts 绕过共享 axios 实例直连 fetch 的 JSON-RPC 客户端（mcpInitialize / mcpListTools / mcpCallTool）——粘贴的 Key 不是管理台 JWT，401/429 正是页面要观察的对象。
+
+## [1.0.0] - 2026-07-31
+
+### Added
 
 **M19 · 记忆库控制台**（`docs/M19-CONTRACTS.md`）
 - 新增一级菜单「记忆库」（`/memory`，`memory:read` 可见，位于「应用中心」与「评测中心」之间）：库列表页（`pages/memory/MemoryLibraryListPage.tsx`，关键词搜索/分页/新建/编辑/删除）。
