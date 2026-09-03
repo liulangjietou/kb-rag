@@ -232,7 +232,7 @@ set -a; source ../kb-rag-deploy/.env; set +a
 cd kb-rag-parse-java
 mvn -DskipTests package
 set -a; source ../kb-rag-deploy/.env; set +a
-java -jar target/kb-rag-parse-java-0.1.0-SNAPSHOT.jar
+java -jar target/kb-rag-parse-java-1.1.0.jar
 ```
 
 ### 3. 构建并启动 Java 主服务（终端 B）

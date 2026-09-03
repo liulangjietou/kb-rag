@@ -2,16 +2,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/) 格式。
 
-## [未发布] - M16
+自 `1.1.0` 起，本文件的版本号与仓库统一发布版本（git tag `v*`）对齐；此前的 `0.1.0` / `0.2.0`
+是本仓早期的独立版本线，保留原样不改写。里程碑（M1、M3、M8…）作为分节标注保留，
+标明该条目属于哪个里程碑的交付。
 
-### 优化
+## [1.1.0] - 2026-09-03
 
-- **pdf 内嵌图片按对象去重**（M3-CONTRACTS.md §2.1）：页眉页脚 logo 在 pdf 里是**一个**图片对象（xref）被每页绘制，此前按出现位置逐页上报——实测一份 247 页 2.7MB 的国标省市区 pdf 只有 3 张不同的图，却报出 493 张，撑满 `MAX_IMAGES_PER_DOC`（100）后再刷出 393 条 warning，base64 让响应体涨到 1.7MB，且 kb-rag-server 要为同两张 logo 逐个调 100 次 VLM（单张超时 20s，串行）。现按 xref 在**文档级**去重：同一图片对象只产出一条 `images[]` 与一个占位符，位置取首次出现页。该文件实测 `images` 100→3、warnings 393→0、base64 1.7MB→0.03MB、解析 1.59s→0.77s；也维持了"markdown 中占位符 id 唯一"这一 server 回填偏移量所依赖的不变量（同一 id 出现 247 次会把 logo 描述插进 247 处，污染每个分片）。
-- **超上限的扫描页不再白渲染**：图片数已达上限且 `OCR_ENGINE=none` 时，该页的 150dpi 位图既不进 `images[]` 也不产文本，纯属白烧 CPU（单页渲染约 100ms 量级）。现于渲染前判定容量与本地 OCR 开关，两者皆无则跳过；`OCR_ENGINE=paddle` 时仍渲染——上限约束的是响应携带的图片数，不是本服务读取页面的能力。合成 220 页扫描件实测 29.34s→13.54s。
-- `ImageAssetCollector` 新增 `has_capacity()`（原内联于 `try_add` 的数量上限判定提为公开方法），让调用方能在生产昂贵字节**之前**预判；warning 语义不变（每次越限追加一条）。
-- pytest 新增（`tests/test_parse_pdf_images.py`）：多页同一 logo 只报一张图且不写 warning、超上限的扫描页不再调用 `get_pixmap`、开本地 OCR 后超上限仍渲染并回填 `ocr_source`。
-
-### 修复
+### 修复（M16）
 
 - **清除 `config.py` 里两个零引用的影子白名单**：`SUPPORTED_FILE_EXTENSIONS` 与
   `ZIP_BASED_FILE_EXTENSIONS` 全仓无任何引用——支持格式的判定一直由 `parsers/registry.py` 的
@@ -24,28 +21,31 @@
 
 - **对外文档漏记 `sql` 扩展名**：`sql` 自 `f8f925c`（2026-07-29）起就已注册进 `app/parsers/registry.py`（与 `txt`/`md` 共用 `TextParser`，探测编码后原样透传），`tests/test_parse_text.py::test_parse_sql_returns_expected_structure` 一直覆盖着它，kb-rag-server 的上传白名单默认值同期也已放行——唯独三处对外文档的扩展名清单没跟着改：`kb-rag-deploy/docs/openapi/kb-parser.yaml` 的 `SupportedFileExt` 枚举、`kb-rag-deploy/docs/ARCHITECTURE.md` §4.2 的端点表、本仓 README 的 `file_ext` 说明与「支持格式一览」表。照契约对接的人会以为传 `file_ext=sql` 会被 400 拒绝，从而绕开一个早已可用的格式。本次按实现补齐这三处。**纯描述订正**：解析实现与测试均未改动，OpenAPI 的 schema 结构与版本号不变。
 
-## [未发布] - M14
-
-### 新增
+### 新增（M14）
 
 - **`pages[]` 增 `markdown`：该页对应的 `data.markdown` 切片**（M14-CONTRACTS.md §4）：含该页标题（pdf `## Page N` / xlsx `## Sheet: 名`）与 `[[IMAGE:{image_id}]]` 占位符行，各页按 `\n\n` 顺序拼接与 `data.markdown` 逐字符相等。此前 kb-rag-server 的按页切分策略消费的是 `pages[].text`，而纯文本既不含占位符也不含 markdown 结构——按页切出的分片因此永远关联不到图片，拿到的还是未经清洗脱敏的解析原文。有了逐页切片，server 才能逐页清洗后无损拼回并按页区间下刀。纯新增字段，既有消费方不受影响；早于本字段的产物为 null，消费方回退 `text`。
 - pytest 新增（`tests/test_parse_page_markdown.py`）：pdf 多页各带自己的切片且 `text` 不含页标题、内嵌图占位符落在所属页的切片里、txt/html/docx 单页切片即全文、xlsx 每 sheet 一段，以及五种格式统一验证"逐页拼接 == 合并 markdown"这一 server 侧依赖的不变量。
 
-### 修复
+## [1.0.0] - 2026-07-31
+
+### 优化（M16）
+
+- **pdf 内嵌图片按对象去重**（M3-CONTRACTS.md §2.1）：页眉页脚 logo 在 pdf 里是**一个**图片对象（xref）被每页绘制，此前按出现位置逐页上报——实测一份 247 页 2.7MB 的国标省市区 pdf 只有 3 张不同的图，却报出 493 张，撑满 `MAX_IMAGES_PER_DOC`（100）后再刷出 393 条 warning，base64 让响应体涨到 1.7MB，且 kb-rag-server 要为同两张 logo 逐个调 100 次 VLM（单张超时 20s，串行）。现按 xref 在**文档级**去重：同一图片对象只产出一条 `images[]` 与一个占位符，位置取首次出现页。该文件实测 `images` 100→3、warnings 393→0、base64 1.7MB→0.03MB、解析 1.59s→0.77s；也维持了"markdown 中占位符 id 唯一"这一 server 回填偏移量所依赖的不变量（同一 id 出现 247 次会把 logo 描述插进 247 处，污染每个分片）。
+- **超上限的扫描页不再白渲染**：图片数已达上限且 `OCR_ENGINE=none` 时，该页的 150dpi 位图既不进 `images[]` 也不产文本，纯属白烧 CPU（单页渲染约 100ms 量级）。现于渲染前判定容量与本地 OCR 开关，两者皆无则跳过；`OCR_ENGINE=paddle` 时仍渲染——上限约束的是响应携带的图片数，不是本服务读取页面的能力。合成 220 页扫描件实测 29.34s→13.54s。
+- `ImageAssetCollector` 新增 `has_capacity()`（原内联于 `try_add` 的数量上限判定提为公开方法），让调用方能在生产昂贵字节**之前**预判；warning 语义不变（每次越限追加一条）。
+- pytest 新增（`tests/test_parse_pdf_images.py`）：多页同一 logo 只报一张图且不写 warning、超上限的扫描页不再调用 `get_pixmap`、开本地 OCR 后超上限仍渲染并回填 `ocr_source`。
+
+### 修复（M14）
 
 - **pdf 乱码页不再入库**（M3-CONTRACTS.md §2.1 乱码页判定）：内嵌子集字体缺失/损坏 ToUnicode CMap 的 pdf，`page.get_text()` 抽出的是错码位"字形汤"（中文变缅甸文/方块，数字与英文往往仍正常），文本长度达标故躲过扫描页阈值，垃圾文本被直接切分入库。现按可识别字符（ASCII/CJK/假名/中日标点等区段）占比判定：低于 `GARBLED_PAGE_VALID_CHAR_RATIO_PCT`（新环境变量，默认 50）即置空该页文本并复用扫描页路径（`scanned=true` + `page_render` 渲染交 OCR/VLM 兜底），同时在 `data.warnings[]` 记录一条说明，不失败整篇。
 - pytest 新增（`tests/test_parse_pdf_garbled.py`）：乱码判定正例、正常中英文与空输入的负例、乱码页端到端降级为 `page_render` 且文本置空并带 warning。
 
-## [未发布] - M12
-
-### 新增
+### 新增（M12）
 
 - `POST /api/v1/parse` 的 `file_ext` 扩展至 `html`/`htm`（M12-CONTRACTS.md §2，通用网页解析通道，与 M8 的聊天记录 HTML 适配器无关）：`app/parsers/html.py` 仅用标准库 `html.parser`（不引入 bs4/markdownify），事件式提取为 markdown——`<title>` 提为 `# 标题`，`h1..h6` 映射 markdown 标题前缀，块级标签切段、内联标签并入所在段；`script`/`style`/`noscript`/`template` 内容整体丢弃；固定单页、无图片产出。解析全程**零网络 I/O**（外部图片/脚本/样式一律不拉取），URL 导入的 SSRF 面全部收敛在 kb-rag-server 的抓取器侧。
 - pytest 新增（`tests/test_parse_html.py`）：标题/小标题/段落提取、script/style 丢弃、实体解码、空白归并、破损标记容错、htm 后缀注册等。
 
-## [未发布] - M8
-
-### 新增
+### 新增（M8）
 
 - `POST /api/v1/parse/chat` 的 `file_ext` 扩展至 `txt`/`html`（M8-CONTRACTS.md §0.1/§0.2，csv/xlsx 列名映射不变）：
   - **TXT 行模式**（`app/chat/txt_adapter.py`）：逐行匹配 mapping profile `txt:` 段的有序行首正则列表（命名捕获组 `send_time`/`sender`，可选 `content`），内置 `liuhen`（`YYYY-MM-DD HH:MM:SS 发送人` 换行消息体）与 `wechat_pc`（`发送人 (时间):` 同行/换行消息体）两种模板；不匹配任何模板的行归并为上一条消息的续行；不匹配行占比 > 30%（分母只计非空行，分子不含已开始消息的续行）判定为格式/模板选错，直接返回 `PARSE_FAILED` 并给出可操作提示。固定解析为单一 `ChatSession`（`session_id`/`session_name` 取文件名 stem）。
@@ -56,7 +56,7 @@
 - `app/mappings/` 新增内置映射档案：`liuhen_txt.yml`（TXT 行模板：`liuhen` + `wechat_pc`）、`liuhen_html.yml`（HTML DOM 选择器：留痕导出模板）；连同既有 `memotrace.yml` 构成三份内置模板。
 - pytest 新增：TXT 双模板正例、自定义正则覆盖、30% 不匹配失败线、多行消息体归并；HTML 留痕模板正例、script/style 安全剥离、图片/语音/视频消息语义、选择器零匹配失败；`profile_yaml` 优先于本地 `mapping_profile` 文件；`OCR_ENGINE` 三态（`none` 与现状一致、`paddle` 未装依赖启动 fast-fail、装依赖后真实推理产出 `ocr_source=paddle`——真实 PaddleOCR 推理用例按依赖是否安装 `skipif` 自动跳过）。
 
-### 已知限制 / 待校准
+### 已知限制 / 待校准（M8）
 
 - `liuhen_txt`/`liuhen_html` 映射档案与 `memotrace` 同样依据公开约定（留痕/MemoTrace、微信 PC 端导出格式的公开资料）编写，尚未用真实导出样例校准，详见各 yml 文件顶部说明。
 - TXT/HTML 固定解析为单一 `ChatSession`，不支持同文件多会话拆分；csv/xlsx 仍支持多会话（多房间）。真实样例若显示需要多会话拆分（如按分隔符/标题行区分），届时再补。

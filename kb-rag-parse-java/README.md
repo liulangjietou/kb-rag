@@ -47,7 +47,7 @@ mvn -DskipTests package
 mvn -Pocr -DskipTests package
 
 # 2. 启动（默认端口 20001，与 M1 契约 kb-rag-parser 端口一致）
-java -jar target/kb-rag-parse-java-0.1.0-SNAPSHOT.jar
+java -jar target/kb-rag-parse-java-1.1.0.jar
 
 # 3. 运行测试
 mvn test
@@ -281,7 +281,7 @@ tools/crosscheck.py             与 Python 实现的端到端对拍脚本（42 �
 cd kb-rag-parser && .venv/bin/uvicorn app.main:app --port 20012
 
 # 终端 2
-cd kb-rag-parse-java && java -jar target/kb-rag-parse-java-0.1.0-SNAPSHOT.jar --server.port=20011
+cd kb-rag-parse-java && java -jar target/kb-rag-parse-java-1.1.0.jar --server.port=20011
 
 # 终端 3
 kb-rag-parser/.venv/bin/python kb-rag-parse-java/tools/crosscheck.py

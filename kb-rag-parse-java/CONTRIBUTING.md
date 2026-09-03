@@ -68,7 +68,7 @@ mvn test
 ```
 
 ```bash
-mvn -DskipTests package && java -jar target/kb-rag-parse-java-0.1.0-SNAPSHOT.jar
+mvn -DskipTests package && java -jar target/kb-rag-parse-java-1.1.0.jar
 ```
 
 两实现对拍（改动了解析行为就该跑）：
@@ -78,7 +78,7 @@ cd kb-rag-parser && .venv/bin/uvicorn app.main:app --port 20012
 ```
 
 ```bash
-cd kb-rag-parse-java && java -jar target/kb-rag-parse-java-0.1.0-SNAPSHOT.jar --server.port=20011
+cd kb-rag-parse-java && java -jar target/kb-rag-parse-java-1.1.0.jar --server.port=20011
 ```
 
 ```bash
