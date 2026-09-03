@@ -10,6 +10,7 @@ secrets*
 
 # ===== IDE 与本地 Agent 配置 =====
 .claude/
+.agents/
 AGENTS.md
 CLAUDE.md
 .idea/
