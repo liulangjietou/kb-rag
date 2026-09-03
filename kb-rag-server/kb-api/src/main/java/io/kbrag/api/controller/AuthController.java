@@ -13,12 +13,12 @@ import io.kbrag.api.filter.AuthInterceptor;
 import io.kbrag.api.security.ClientIpResolver;
 import io.kbrag.app.auth.AccessGuard;
 import io.kbrag.app.auth.AuthService;
+import io.kbrag.app.auth.ConsoleSessionService;
 import io.kbrag.app.auth.LoginCaptchaChallenge;
 import io.kbrag.app.auth.LoginCaptchaProof;
 import io.kbrag.app.auth.LoginCaptchaService;
 import io.kbrag.app.auth.LoginCaptchaTrackPoint;
 import io.kbrag.app.auth.LoginTicket;
-import io.kbrag.app.auth.TokenStore;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.AdminUser;
@@ -47,7 +47,7 @@ import java.util.List;
 public class AuthController {
 
     private final AuthService authService;
-    private final TokenStore tokenStore;
+    private final ConsoleSessionService consoleSessionService;
     private final LoginCaptchaService loginCaptchaService;
     private final ClientIpResolver clientIpResolver;
 
@@ -147,7 +147,7 @@ public class AuthController {
      */
     @PostMapping("/logout")
     public Result<Void> logout(@RequestAttribute(AuthInterceptor.ATTR_TOKEN) String token) {
-        tokenStore.revoke(token);
+        consoleSessionService.revoke(token);
         return Result.success(null);
     }
 

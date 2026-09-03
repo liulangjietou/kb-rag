@@ -82,12 +82,12 @@ class AuthServiceLoginSecurityTest {
             return 1;
         });
 
-        TokenStore tokenStore = mock(TokenStore.class);
+        ConsoleSessionService consoleSessionService = mock(ConsoleSessionService.class);
         LoginSuccessService loginSuccessService = new LoginSuccessService(
-                adminUserMapper, loginAuditMapper, tokenStore, mock(UserService.class),
+                adminUserMapper, loginAuditMapper, consoleSessionService, mock(UserService.class),
                 mock(DirectoryGroupSyncService.class), mock(PrincipalResolver.class));
         service = new AuthService(adminUserMapper, loginAuditMapper, tenantMapper,
-                tokenStore, new KbProperties(), passwordEncoder, directoryAuthenticator,
+                consoleSessionService, new KbProperties(), passwordEncoder, directoryAuthenticator,
                 new LoginFailureAuditService(loginAuditMapper), loginSuccessService,
                 new LoginAttemptGuard());
     }

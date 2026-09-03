@@ -15,8 +15,19 @@ spring:
     # actuator then registers a neo4j health probe that reports DOWN on every graph-less deployment -
     # defeating the "blank URI leaves everything else untouched" contract (M7-CONTRACTS.md 0.1). The
     # graph stack is wired exclusively through GraphStoreConfig, so the auto configuration is excluded.
+    #
+    # Redis 是同一类问题，也用同一种办法处理。spring-boot-starter-data-redis 在 classpath 上（会话可以
+    # 存 Redis），Boot 便会无条件建出一个 RedisConnectionFactory，actuator 随即注册 Redis 健康探针，
+    # 于是每一套 cache.provider=local 的部署都会因为连不上一个它根本没有的 Redis 而报 DOWN。连接工厂
+    # 改由 ConsoleSessionConfig 只在 redis 模式下声明。
+    #
+    # Sa-Token 的 Redis 存储实现同理，但原因更硬：它是个没有 @ConditionalOnMissingBean 的自动装配类，
+    # 只要 jar 在 classpath 上就注册，而框架侧是单值注入 SaTokenDao 的——两个实现同时存在会直接启动失败。
+    # 两种存储都改由 ConsoleSessionConfig 按 kb.cache.provider 二选一显式装配。
     exclude:
       - org.springframework.boot.autoconfigure.neo4j.Neo4jAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - cn.dev33.satoken.dao.SaTokenDaoForRedisTemplate
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:13306}/${MYSQL_DB:kb_rag}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
     username: ${MYSQL_USER:kbrag}
@@ -38,6 +49,15 @@ spring:
       max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:110MB}
   jackson:
     default-property-inclusion: non_null
+  data:
+    # 仅在 kb.cache.provider=redis 时被读取（见 ConsoleSessionConfig）。留在这里而不是另起一套
+    # kb.redis.* 配置，是为了让运维用他们已经熟悉的 Spring 标准键名。
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      timeout: ${REDIS_TIMEOUT:3s}
 
 mybatis-plus:
   configuration:
@@ -69,7 +89,40 @@ management:
     defaults:
       enabled: true
 
+# 控制台会话框架。会话时长不在这里配：它由 kb.auth.token-ttl-hours 统一决定，
+# 由 ConsoleSessionConfig 在启动时写入框架配置，避免同一件事出现两个可改的地方。
+sa-token:
+  # 会话令牌走自定义请求头。名字用框架默认值，正好也和开放 API 的 Authorization: Bearer 分了家——
+  # 控制台会话、API Key、Memory Key 三种凭据从此在请求头上互不相干。
+  token-name: satoken
+  is-read-header: true
+  # 不读 Cookie 是这套设计的安全前提，不是风格选择：浏览器不会替攻击者带上自定义请求头，
+  # 跨站请求伪造因此在构造上就不成立。一旦打开，整个管理 API 都需要另配 CSRF 防护。
+  is-read-cookie: false
+  # 令牌由登录响应体返回、前端自行保管，不需要框架再写一份到响应头。
+  is-write-header: false
+  # 64 位随机字符，熵不低于换框架之前的 32 字节随机令牌。
+  token-style: random-64
+  # 允许同一账号在多处登录（换框架前就是如此：每次登录各自签发令牌，互不影响）。
+  is-concurrent: true
+  # 但不共享令牌：每次登录签发新的一个，与换框架前的行为一致。
+  is-share: false
+  # 只保留绝对过期，不启用"多久没操作就失效"。换框架前没有这个语义，
+  # 悄悄加上会让长时间阅读文档的用户被动登出。
+  active-timeout: -1
+  # 关掉框架自带的启动横幅：本项目有自己的 banner.txt，MyBatis-Plus 的横幅同样是关的（见上面的
+  # mybatis-plus.global-config.banner）。第三方 logo 逐个堆进启动日志，会把真正要看的信息挤下去。
+  # 想确认 Sa-Token 是否接管了会话，看 ConsoleSessionConfig 打的那两行 initialized / timeout aligned。
+  is-print: true
+
 kb:
+  # 易失性共享状态的存放位置，需求文档 §5 的"Redis 职责边界"落点。
+  # local：控制台会话写进 MySQL，单实例部署无需 Redis，进程重启后会话仍然有效。
+  # redis：会话交给 Sa-Token 官方适配，多实例部署下各节点共享同一份登录态。
+  # 该开关同时决定会话与 RBAC 权限缓存的存放位置，两者同步切换、不可分开配置——只共享其一会造成
+  # 「登录态跨节点一致、授权判据不一致」的错位。详见 README 的"多实例部署"一节。
+  cache:
+    provider: ${KB_CACHE_PROVIDER:redis}
   vector:
     engine: ${VECTOR_ENGINE:es}
   es:

@@ -1,7 +1,7 @@
 # kb-rag 架构文档
 
 
-> 版本：v2.9（基线 = v2.8 + M24 后修复：模型预占死锁，2026-09-02；v2.8 基线为 kb-app 上帝类拆解，其余历史见 Git）
+> 版本：v3.1（基线 = v3.0 + 权限缓存抽出端口、随 cache.provider 与会话同步切换，多副本部署由此就绪，2026-09-03；v3.0 基线为控制台会话底座换 Sa-Token，其余历史见 Git）
 > 日期：2026-09-02
 > 作者：RichardFyoung / Claude
 >
@@ -60,7 +60,7 @@
 
 - **MySQL `t_kb_chunk` 是唯一事实源**；Qdrant 与 ES 均为派生索引，可从 MySQL 幂等重建。
 - 双写状态按"分片 × 物理索引"粒度记录在 `t_kb_chunk_index_sync`，由定时补偿任务重放（§3.7）。
-- **无消息队列、无强制 Redis**：异步全部落在进程内线程池上（多数经 Spring `@Async`；**自调用的提交点显式注入 Executor 手工 `execute`**——`@Async` 代理拦不住同 bean 自调用，标了也是内联跑，评测提交与门禁提交都属这一类，见 §3.7）；跨存储一致性 = 同步状态表 + 定时补偿。限流计数与上传 Token 为进程内实现，明确记录为单实例部署的降级方案（多实例扩展是未来边界，不影响功能正确性）；管理台登录 Token 自 M9 后修复起落库 `t_kb_auth_token`（V11，仅存 SHA-256 哈希，单实例重启不再踢掉全部会话）。
+- **无消息队列、无强制 Redis**：异步全部落在进程内线程池上（多数经 Spring `@Async`；**自调用的提交点显式注入 Executor 手工 `execute`**——`@Async` 代理拦不住同 bean 自调用，标了也是内联跑，评测提交与门禁提交都属这一类，见 §3.7）；跨存储一致性 = 同步状态表 + 定时补偿。限流计数与上传 Token 为进程内实现，明确记录为单实例部署的降级方案（多实例扩展是未来边界，不影响功能正确性）；管理台会话自 M9 后修复起落库（V11 `t_kb_auth_token`，重启不再踢掉全部会话），Sa-Token 接管后改落 V25 `t_kb_auth_session`；**会话与 RBAC 权限缓存由同一个 `KB_CACHE_PROVIDER` 开关决定存放位置**（`local` 落 MySQL + 进程内 Map，`redis` 两者都进 Redis），多副本部署由此就绪，见 §7.2。
 
 ---
 
@@ -248,7 +248,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V8（M7） | `t_kb_task` 加 `skipped_count`（图抽取跳过计数） |
 | V9（M8） | `t_kb_source_mapping`（映射档案，启动播种内置模板、只补缺不覆盖） |
 | V10（M9） | `t_kb_chunk` 加 `parent_start_offset` / `parent_end_offset`（子片在父片中的 [起,止) 字符偏移，切分副产物、不做事后反查；子片编辑/合并/拆分及父片编辑时失效置 null） |
-| V11（M9 后修复） | `t_kb_auth_token`（管理台登录 Token 落库，仅存 SHA-256 哈希，24h TTL 语义不变） |
+| V11（M9 后修复） | `t_kb_auth_token`（管理台登录 Token 落库，仅存 SHA-256 哈希，24h TTL 语义不变；Sa-Token 接管后停用，V25 起无读者） |
 | V12（M10） | `t_kb_retrieval_feedback`（检索反馈，带幂等键）/ `t_kb_search_insight`（检索洞察埋点，只增不改） |
 | V13（M11） | `t_kb_document` 加 `publish_status` / `review_note` / `effective_at` / `expires_at` / `trashed` / `trashed_at`；`t_kb_knowledge_base` 加 `review_required` |
 | V14（M12） | `t_kb_web_source`（网页来源登记：URL/content_hash/四态同步状态/派生文档关联）。**刻意不带 `tenant_id`**：从属表经 `kb_id` 归属租户，其隔离由 `WebSourceGuard` 在每个入口解析根表完成，不靠行级围栏（见 §7.2 与 M16 契约 §1.3.2） |
@@ -262,6 +262,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V22（M18 后修复） | `t_kb_web_credential` 增 `tenant_id`（存量行靠列 DEFAULT 划入默认租户），`uk_host(host)` 收缩为 `uk_tenant_host(tenant_id, host)` —— V19 建表时漏了 M16 的租户层。缺陷两面：管理面任何租户持 `system:config` 可改删停用他人凭据；抓取面凭据按 host 全局查找，B 租户给自己的 WebSource 登记一个同 host URL，夜里的同步就会把 A 租户的密码发到那个请求上。配套把表加进 `KbTenantLineHandler.FENCED_TABLES`（只覆盖管理面），抓取面由 `WebCredentialService#resolveFor(tenantId, host)` 的显式租户谓词覆盖 —— 同步跑在无主体线程上，围栏在那条线程整条跳过（见 §7.2 与 M16 契约 §1.3） |
 | V23（M21） | 最终答案评测字段：`t_kb_eval_case.expected_refusal`；`t_kb_eval_run` 增应用配置快照、答案 Judge 身份与聚合指标；`t_kb_eval_result` 增生成答案、生成耗时、五维评分、答/拒结果与失败原因。全部新列可空或有兼容默认值，存量 run 不回填 |
 | V24（M24） | `t_kb_tenant.monthly_token_quota`（0=不限）；`t_kb_model_usage_monthly`（租户+月份原子 used/reserved 计数器）；`t_kb_model_usage`（不含客户内容的调用台账与价格快照）；`t_kb_model_price`（provider+capability+model 唯一价格） |
+| V25（会话底座换 Sa-Token） | `t_kb_auth_session`（Sa-Token 的通用 KV 表，`cache.provider=local` 时的会话底座，不带 `lock_version`/`deleted`——会话是易失数据）；`t_kb_sso_state`（单点登录一次性 state，从 `t_kb_auth_token` 搬出，仍只存 SHA-256 摘要）。**只加表不删表**：`t_kb_auth_token` 此后无读者但保留，以维持 UPGRADING.md 的回退承诺 |
 
 引擎侧可过滤字段全集（Qdrant 标量 / ES filter，建索引时显式声明）：`kb_id`、`doc_id`、`document_version_id`、`enabled`、`parent_id`、`chunk_type`、`tag_ids`、`session_id`、`sender`、`msg_time`、`chunk_seq`；其余 metadata 只存 MySQL。新增可过滤维度视为 schema 变更，走索引重建迁移。
 
@@ -388,7 +389,24 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 
 ### 7.2 安全
 
-- **三条独立鉴权链**：管理台 Bearer Token（`AuthInterceptor`，Token 哈希落库 `t_kb_auth_token`、防爆破锁定、首登随机密码强制改密；M15 起叠加 `PermissionInterceptor` 功能权限 + 知识库数据范围两层授权）、对外 API Key（`ApiKeyAuthFilter` 独立过滤器链、哈希存储、app_scope 授权范围、令牌桶限流）、记忆库 Memory Key（M19，`MemoryKeyAuthFilter`：`Bearer kb-mk-*` 只作用于 `/api/v1/memory/**`，一把 Key 绑定一个记忆库、库内再按 user_id 隔离，隔离是查询谓词、越权一律 404；限流复用 `ApiRateLimiter`）——三面凭据形态、失败面、限流口径互不干扰。
+- **三条独立鉴权链**：管理台会话（`AuthInterceptor`，会话由 Sa-Token 1.46.0 签发与校验、请求头 `satoken`、防爆破锁定、首登随机密码强制改密；M15 起叠加 `PermissionInterceptor` 功能权限 + 知识库数据范围两层授权）、对外 API Key（`ApiKeyAuthFilter` 独立过滤器链、哈希存储、app_scope 授权范围、令牌桶限流）、记忆库 Memory Key（M19，`MemoryKeyAuthFilter`：`Bearer kb-mk-*` 只作用于 `/api/v1/memory/**`，一把 Key 绑定一个记忆库、库内再按 user_id 隔离，隔离是查询谓词、越权一律 404；限流复用 `ApiRateLimiter`）——三面凭据形态、失败面、限流口径互不干扰。
+- **会话底座换成 Sa-Token 之后，请求头是三条链的分界线**：管理台会话走 `satoken`，两条开放 API 走
+  `Authorization: Bearer`（`kb-sk-*` / `kb-mk-*`）。此前三者共用 `Authorization`，靠前缀和过滤器
+  顺序区分；换头之后凭据在协议层就分开了，一条链的凭据递到另一条链上不会再走到"看起来像但校验失败"
+  那一步。**不读 Cookie 是这套设计的前提而非风格**（`sa-token.is-read-cookie=false`）：浏览器不会替
+  攻击者带上自定义请求头，跨站请求伪造因此在构造上不成立；一旦打开 Cookie 读取，整个管理 API 都需要
+  另配 CSRF 防护。会话存储随部署形态切换：`kb.cache.provider=local`（默认）落 MySQL `t_kb_auth_session`，
+  单实例部署无需 Redis 且进程重启不掉线；`=redis` 交给官方适配，多节点共享登录态。
+  > **会话与权限缓存共用一个开关，因为它们必须同进同退**：只共享会话不共享权限，会得到"登录态跨节点
+  > 一致、授权判据不一致"这种错位——登录一切正常，只有某个刚被降权的账号在某个节点上还是管理员，
+  > 比两者都不共享更难察觉。`PrincipalResolver` 因此对着 `PrincipalCache` 端口编程，两个实现
+  > （进程内 Map / Redis）随 `KB_CACHE_PROVIDER` 一起切换。
+  > **共享实现是共享存储，不是"本地缓存 + 失效广播"**：广播是尽力而为的，一条失效消息在某节点重连时
+  > 丢掉，那个节点就会一直用着旧授权且外部看不出来；共享存储下失效是一次删除，要么删掉要么报错。
+  > 与之配套的是三种失败的不同处理：**读写失败降级、失效失败上抛**——读不到回落数据库仍然正确，
+  > 写不进去下次再查，而失效失败意味着旧授权还在，异常照常抛出让调用方事务回滚（6 处调用点全部位于
+  > `@Transactional` 方法内、且在 DB 写入之后）。`evictAll` 用 SCAN 而非 KEYS，避免一次角色编辑
+  > 阻塞与会话共用的那个 Redis 实例。
 - **记忆库的第三层隔离是租户**（V21 修复）：Key 绑定库（应用级）与 `user_id`（实体级）只覆盖开放端，管理端的 `memory:read`/`memory:write` 只回答"这个账号能不能碰记忆库"，回答不了"能碰哪些"。补法与知识库同构：`t_kb_memory_library` 加 `tenant_id` 并进围栏，五张从属表不加列、经 `library_id` 归属；关键是 `MemoryLibraryGuard` —— 管理端带 `libraryId` 的 21 个入口**一律先解析库**（包括按 rule_id / node_id / key_id 直接寻址的那些），否则从属语句压根不经过带 `tenant_id` 的那张表，围栏形同虚设；余下 2 个（库列表、建库）无 libraryId，由围栏本体覆盖（SELECT 拼条件 / INSERT 注入）。开放端不受影响：那条链上没有控制台主体，`ignoreTable` 整条跳过，这是必须保留的既有语义（一拼租户条件，Key 会把自己的库过滤掉）。
 - **站点凭据的租户隔离要两套机制，因为它有两类读者**（V22 修复）：控制台增删改查靠行级围栏（`t_kb_web_credential` 进 `FENCED_TABLES`），夜间网页同步靠 `WebCredentialService#resolveFor(tenantId, host)` 的显式租户谓词——同步跑在 `@Scheduled` 线程上，没有控制台主体，围栏在那条线程整条跳过，光进名单等于抓取面零防护。租户由 `WebSource.kb_id` 反查知识库得到；库被删的孤儿登记解析不出租户，按"无凭据"匿名抓取，**绝不退化成按 host 查**。连带两处语义收缩：同 host 凭据从全局唯一变租户内唯一（两个租户各在同一 wiki 上放一个只读账号是正常业务），"一次 401 就停掉该站点本轮抓取"的去重键从 `host` 变为 `(租户, host)`（锁的是账号，而两个租户在同一 host 上是两个账号，按 host 记会让一家的过期密码掐掉所有人的当晚抓取）。详见 M16 契约 §1.3 与 §1.3.1。
 - **从属表的隔离是"每个入口先解析根"，不是"表在不在围栏名单里"**（V22 后修复，M12/M17/M18 网页源）：`t_kb_web_source` 不带 `tenant_id`、也不在 `FENCED_TABLES` 里，这个设计是对的（经 `kb_id` 归属租户，加列只会造第二个可以不一致的事实源）；错的是四个入口——按 `sourceId` 的手动同步 / 改开关 / 硬删、按 `kbId` 的列表——压根不查 `t_kb_knowledge_base`，围栏在那几条语句上什么都没做。新增 `WebSourceGuard` 让四个入口一律先解析到根表（跨租户读作"不存在"→ **404**），与记忆库的 `MemoryLibraryGuard` 同构。**根因值得单独记住**：原先站在这些入口前面的 `KbScopeGuard#requireWebSourceAccess` 回答的是"库在不在调用者的数据范围里"，一行租户判断都没有，且第一行的 `unrestrictedKbScope()` 短路对租户 SUPER_ADMIN、未配数据范围的 KB_ADMIN 直接放行——**只覆盖数据范围的守卫比没有守卫更危险，它让 review 以为这条路径已经守住了**，该方法已随本次修复删除。判定顺序也是契约的一部分：租户（404）先于数据范围（403），反过来会用状态码差异泄露"这个 id 在别的租户里存在"。详见 M16 契约 §1.3.2。

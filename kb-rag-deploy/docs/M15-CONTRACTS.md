@@ -25,7 +25,7 @@
 
 ### 1.1 三条设计取舍（写在迁移脚本文件头）
 
-1. **不新建 user 表**，让 `t_kb_admin_user` 长成用户表 —— 会话令牌表（M11 `t_kb_auth_token`）与登录审计表都以 `username` 为外键语义，另起一张表会立刻制造两个"当前用户"。
+1. **不新建 user 表**，让 `t_kb_admin_user` 长成用户表 —— 会话令牌表（M11 `t_kb_auth_token`，Sa-Token 接管后为 `t_kb_auth_session`，会话仍以登录名为标识）与登录审计表都以 `username` 为外键语义，另起一张表会立刻制造两个"当前用户"。
 2. **权限码落库**而非只写在 Java 常量里 —— 角色管理页要按模块分组展示中文名，这是它的数据源；常量类 `PermissionCodes` 只保证编译期不写错字面量。
 3. **数据范围挂角色不挂用户** —— 一个人的可见库 = 其全部角色的并集；任一角色 `kb_scope_all=1` 即全库。挂用户会让"批量调整一类人的可见范围"退化成逐人操作。
 
@@ -97,6 +97,16 @@
 | GET /me | 账号信息 + 本次会话的 `permissions`/`roles`/`kb_scope_all`/`kb_ids` |
 | POST /logout | 吊销当前令牌 |
 
+> **会话底座变更（Sa-Token 后补齐）**：上述端点语义一字未变，但**承载会话的请求头变了**——由
+> `Authorization: Bearer <token>` 改为 `satoken: <token>`，`/login` 返回体字段不变。原自建
+> `TokenStore`（本节写作时的 M11 实现）已退役，签发、校验、过期与吊销改由 Sa-Token 1.46.0 承担，
+> 门面类为 `ConsoleSessionService`。三处语义**必须继续成立**，它们不是框架白送的：①`change-password`
+> 与用户停用/删除/改授权后吊销该账号**全部**会话（`StpUtil.logout(loginId)`，不是只登出当前那一个）；
+> ②不读 Cookie（`sa-token.is-read-cookie=false`），跨站请求伪造靠自定义头在构造上不成立；
+> ③会话时长仍由 `kb.auth.token-ttl-hours` 决定，启动时覆盖框架自带的 `sa-token.timeout`，
+> 否则运维改 `AUTH_TOKEN_TTL_HOURS` 会静默失效。
+> 新增：401 可分辨被顶下线与被踢下线，此前二者都报作令牌失效。
+
 ### 3.2 用户（UserController，`/api/v1/users`，类级 `user:manage`）
 
 `GET ?keyword=&status=&source=&page=&size=`、`GET /{userId}`、`POST`（`{username, display_name?, email?, password, role_ids}`）、`PUT /{userId}`（仅 display_name/email）、`PUT /{userId}/status`、`PUT /{userId}/roles`、`POST /{userId}/reset-password`、`DELETE /{userId}`。
@@ -159,7 +169,19 @@
 
 ### 4.5 权限缓存
 
-`PrincipalResolver` 写透式进程内缓存（`ConcurrentHashMap`，key = username）。四次查询（roles / role rows / grants / kb scopes）不该由每次控制台调用承担，而这些行一个月改动几次。失效**刻意粗暴**：改角色定义清全表（`evictAll`）而不去算谁持有它 —— 算准要多一次查询，而过期的授权是安全缺陷，清空只是四次查询。单实例部署假设与 M11 `TokenStore` 一致。
+`PrincipalResolver` 写透式进程内缓存（`ConcurrentHashMap`，key = username）。四次查询（roles / role rows / grants / kb scopes）不该由每次控制台调用承担，而这些行一个月改动几次。失效**刻意粗暴**：改角色定义清全表（`evictAll`）而不去算谁持有它 —— 算准要多一次查询，而过期的授权是安全缺陷，清空只是四次查询。
+
+> **缓存放哪里已改由部署形态决定**（Sa-Token 后订正）：本节原文写的是"单实例部署假设与 M11
+> `TokenStore` 一致"，那个假设现已解除。`PrincipalResolver` 改为对着 `PrincipalCache` 端口编程，
+> 两个实现随 `cache.provider` 与会话存储**同步切换**：`local` 是进程内 `ConcurrentHashMap`（单节点
+> 最优，一次 Map 查找、无序列化无网络），`redis` 是各节点共享的一份（A 节点 `evictAll`，B 节点下一次
+> 请求即刻看到）。
+> **两者共用一个开关是刻意的**：只共享会话不共享权限，会得到"登录态跨节点一致、授权判据不一致"这种
+> 错位，登录一切正常而某个刚被降权的账号在某个节点上还是管理员，比两者都不共享更难察觉。
+> **共享实现选了共享存储而非失效广播**：广播丢一条消息就是一份永久生效的旧授权且外部无感；共享存储下
+> 失效是一次删除，要么成功要么报错。因此读写失败降级（回落数据库这个事实源，答案仍正确），
+> 而失效失败**上抛**——本节列出的失效调用点全部位于 `@Transactional` 方法内且在 DB 写入之后，
+> 异常会连同角色变更一起回滚：宁可角色没改成，也不要改完了而旧授权还在生效。
 
 ## 5. 单点登录（F5，参考 LdapAuthService）
 

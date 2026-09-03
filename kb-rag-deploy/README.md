@@ -108,7 +108,10 @@ mysql/elasticsearch/minio 定义，额外叠加：
 - **qdrant**（v1.18.x）：单容器自带存储，数据落在 `kb_rag_qdrant_data` 卷的
   `/qdrant/storage`，不依赖额外的元数据服务或对象存储，也不占用应用侧 MinIO
 - **redis:7.2.x**：标注 optional，默认不随 `up` 启动，需 `--profile redis` 显式开启；
-  单实例部署无需 Redis（`cache.provider=local`，见需求文档 §5 Redis 职责边界）
+  单实例部署无需 Redis（`KB_CACHE_PROVIDER=local`，控制台会话改落 MySQL，见需求文档 §5
+  Redis 职责边界）。启用容器后记得同时把 `KB_CACHE_PROVIDER` 设为 `redis`，否则没有消费者。
+  该开关同时决定会话与 RBAC 权限缓存的存放位置，两者同步切换，多副本部署由此就绪；
+  详见 `docs/ARCHITECTURE.md` §7.2
 
 lite → full 的索引迁移路径（切 `VECTOR_ENGINE=qdrant` 后从 MySQL 事实源全量重建索引、
 别名原子切换，重建期间 ES 持续服务）详见 `docs/M1-CONTRACTS.md` §3 与需求文档 §5。

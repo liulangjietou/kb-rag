@@ -91,6 +91,7 @@ public interface FulltextStore { /* upsert/delete/searchBm25(alias, text, filter
 - `POST /api/v1/auth/login` {username,password} → {token, must_change_password}；失败记 t_kb_login_audit；5 次锁 15 分钟
 - `POST /api/v1/auth/change-password`、`GET /api/v1/auth/me`
 - 鉴权：自定义 Header `Authorization: Bearer <token>`（服务端 token 表或内存缓存，有效期 24h），除 login/actuator 外全部拦截
+  > **已变更（Sa-Token 后补齐）**：请求头改为 `satoken: <token>`，会话由 Sa-Token 1.46.0 托管（存储随 `cache.provider` 落 MySQL 或 Redis）。有效期 24h 与拦截范围不变，`Authorization: Bearer` 此后专属两条开放 API 的 Key。详见 M15 契约 §3.1。
 - `POST /api/v1/kb` {name,description} / `GET /api/v1/kb` / `GET|DELETE /api/v1/kb/{kbId}`
 - `POST /api/v1/kb/{kbId}/documents`（multipart，校验扩展名+magic number+≤100MB）→ 异步入管线
 - `GET /api/v1/kb/{kbId}/documents?process_status=&page=`

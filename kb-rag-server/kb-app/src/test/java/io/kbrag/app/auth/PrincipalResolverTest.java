@@ -18,10 +18,13 @@ import io.kbrag.domain.mapper.RolePermissionMapper;
 import io.kbrag.domain.mapper.TenantMapper;
 import io.kbrag.domain.mapper.UserRoleMapper;
 import io.kbrag.domain.model.UserPrincipal;
+import io.kbrag.domain.port.PrincipalCache;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -58,7 +61,8 @@ class PrincipalResolverTest {
         UserRoleMapper userRoleMapper = mock(UserRoleMapper.class);
         when(userRoleMapper.selectList(any())).thenReturn(List.of());
         resolver = new PrincipalResolver(adminUserMapper, userRoleMapper, mock(RoleMapper.class),
-                mock(RolePermissionMapper.class), mock(RoleKbScopeMapper.class), tenantMapper);
+                mock(RolePermissionMapper.class), mock(RoleKbScopeMapper.class), tenantMapper,
+                new FakePrincipalCache());
     }
 
     @Test
@@ -117,5 +121,38 @@ class PrincipalResolverTest {
         tenant.setCode("ACME");
         tenant.setStatus(status);
         return tenant;
+    }
+
+    /**
+     * 进程内的缓存替身。
+     *
+     * <p>这些用例验证的是"命中就不再查库""失效之后才看得到变化"，因此需要一个真会记住东西的缓存，
+     * mock 表达不了。不直接用 {@code LocalPrincipalCache}：那是端口实现，按本仓惯例住在
+     * kb-infrastructure，而 kb-app 不依赖那个模块——为了测试方便去破坏模块方向，代价比这十行大。
+     * 它自身的契约由 kb-infrastructure 的 {@code LocalPrincipalCacheTest} 覆盖。
+     */
+    private static final class FakePrincipalCache implements PrincipalCache {
+
+        private final Map<String, UserPrincipal> entries = new ConcurrentHashMap<>();
+
+        @Override
+        public UserPrincipal get(String username) {
+            return entries.get(username);
+        }
+
+        @Override
+        public void put(String username, UserPrincipal principal) {
+            entries.put(username, principal);
+        }
+
+        @Override
+        public void evict(String username) {
+            entries.remove(username);
+        }
+
+        @Override
+        public void evictAll() {
+            entries.clear();
+        }
     }
 }

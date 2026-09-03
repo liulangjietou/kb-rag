@@ -1,6 +1,6 @@
 // Author: owlzhangfq@gmail.com
 import { streamChat, type ChatStreamHandlers } from './chatStream';
-import { getToken } from './authStorage';
+import { SESSION_HEADER, getToken } from './authStorage';
 import { apiDelete, apiGet, apiPost, apiPut } from './request';
 import type {
   AppVersion,
@@ -102,9 +102,12 @@ export function chatPreview(appId: string, payload: ChatPreviewRequest): Promise
   return apiPost<ChatResponse>(`/apps/${appId}/chat-preview`, { ...payload, stream: false });
 }
 
-/** Streaming counterpart of chatPreview; uses the admin JWT (read directly, bypassing the shared axios client -- see chatStream.ts). */
+/**
+ * Streaming counterpart of chatPreview. Carries the console session token, read straight from
+ * storage because this call bypasses the shared axios client -- see chatStream.ts.
+ */
 export function streamChatPreview(appId: string, payload: ChatPreviewRequest, handlers: ChatStreamHandlers): Promise<void> {
   const token = getToken();
-  const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+  const headers: Record<string, string> = token ? { [SESSION_HEADER]: token } : {};
   return streamChat(`/api/v1/apps/${appId}/chat-preview`, headers, { ...payload, app_id: appId }, handlers);
 }

@@ -2,8 +2,8 @@ package io.kbrag.app.auth;
 
 import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.common.util.HashUtil;
-import io.kbrag.domain.entity.AuthToken;
-import io.kbrag.domain.mapper.AuthTokenMapper;
+import io.kbrag.domain.entity.SsoState;
+import io.kbrag.domain.mapper.SsoStateMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -38,41 +38,41 @@ class SsoStateStoreTest {
 
     private static final String PAYLOAD = "sso:oidc";
 
-    private AuthTokenMapper authTokenMapper;
+    private SsoStateMapper ssoStateMapper;
     private SsoStateStore store;
 
-    /** The single token row the mapper mock persists between issue and consume. */
-    private final AtomicReference<AuthToken> row = new AtomicReference<>();
+    /** The single state row the mapper mock persists between issue and consume. */
+    private final AtomicReference<SsoState> row = new AtomicReference<>();
 
     @BeforeEach
     void setUp() {
-        MybatisLambdaCache.register(AuthToken.class);
-        authTokenMapper = mock(AuthTokenMapper.class);
+        MybatisLambdaCache.register(SsoState.class);
+        ssoStateMapper = mock(SsoStateMapper.class);
         row.set(null);
-        when(authTokenMapper.insert(any(AuthToken.class))).thenAnswer(invocation -> {
+        when(ssoStateMapper.insert(any(SsoState.class))).thenAnswer(invocation -> {
             row.set(invocation.getArgument(0));
             return 1;
         });
-        when(authTokenMapper.selectOne(any())).thenAnswer(invocation -> row.get());
-        when(authTokenMapper.delete(any())).thenAnswer(invocation -> {
+        when(ssoStateMapper.selectOne(any())).thenAnswer(invocation -> row.get());
+        when(ssoStateMapper.delete(any())).thenAnswer(invocation -> {
             row.set(null);
             return 1;
         });
-        store = new SsoStateStore(authTokenMapper);
+        store = new SsoStateStore(ssoStateMapper);
     }
 
     @Test
     void shouldStoreOnlyTheDigestOfTheIssuedState() {
         String state = store.issue(PAYLOAD);
 
-        ArgumentCaptor<AuthToken> inserted = ArgumentCaptor.forClass(AuthToken.class);
-        verify(authTokenMapper).insert(inserted.capture());
-        AuthToken record = inserted.getValue();
+        ArgumentCaptor<SsoState> inserted = ArgumentCaptor.forClass(SsoState.class);
+        verify(ssoStateMapper).insert(inserted.capture());
+        SsoState record = inserted.getValue();
         // The raw value only ever travels in the redirect; a table dump must not be enough to
         // complete somebody else's login flow.
-        assertNotEquals(state, record.getTokenHash());
-        assertEquals(HashUtil.sha256Hex(state), record.getTokenHash());
-        assertEquals(PAYLOAD, record.getUsername());
+        assertNotEquals(state, record.getStateHash());
+        assertEquals(HashUtil.sha256Hex(state), record.getStateHash());
+        assertEquals(PAYLOAD, record.getPayload());
         assertTrue(record.getExpiresAt().isAfter(LocalDateTime.now()));
     }
 
@@ -95,7 +95,7 @@ class SsoStateStoreTest {
 
         // The row is deleted before the expiry is judged: even a rejected presentation ends the
         // flow, so the attacker gains nothing by keeping an old state around.
-        verify(authTokenMapper).delete(any());
+        verify(ssoStateMapper).delete(any());
         assertNull(row.get());
     }
 
@@ -103,7 +103,7 @@ class SsoStateStoreTest {
     void shouldRejectAnUnknownStateWithoutDeletingAnything() {
         assertEquals(Optional.empty(), store.consume("never-issued"));
 
-        verify(authTokenMapper, never()).delete(any());
+        verify(ssoStateMapper, never()).delete(any());
     }
 
     @Test
@@ -111,6 +111,6 @@ class SsoStateStoreTest {
         assertEquals(Optional.empty(), store.consume(null));
         assertEquals(Optional.empty(), store.consume("  "));
 
-        verifyNoInteractions(authTokenMapper);
+        verifyNoInteractions(ssoStateMapper);
     }
 }

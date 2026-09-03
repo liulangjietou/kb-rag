@@ -54,7 +54,7 @@ public class AuthService {
     private final AdminUserMapper adminUserMapper;
     private final LoginAuditMapper loginAuditMapper;
     private final TenantMapper tenantMapper;
-    private final TokenStore tokenStore;
+    private final ConsoleSessionService consoleSessionService;
     private final KbProperties properties;
     private final BCryptPasswordEncoder passwordEncoder;
     private final DirectoryAuthenticator directoryAuthenticator;
@@ -236,7 +236,7 @@ public class AuthService {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setMustChangePassword(NOT_REQUIRED);
         adminUserMapper.updateById(user);
-        tokenStore.revokeAll(username);
+        consoleSessionService.revokeAll(username);
         log.info("password changed, username={}", username);
     }
 

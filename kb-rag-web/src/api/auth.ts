@@ -53,12 +53,12 @@ export function getCurrentUser(): Promise<CurrentUser> {
 }
 
 /**
- * POST /api/v1/auth/logout: revokes the current token server-side (TokenStore.revoke). Dropping
- * the token locally is not enough on its own -- an unrevoked JWT stays valid until it expires, so
- * a copy captured from storage would keep working after the operator "logged out".
+ * POST /api/v1/auth/logout: revokes the current session server-side. Dropping the token locally is
+ * not enough on its own -- an unrevoked token stays valid until it expires, so a copy captured from
+ * storage would keep working after the operator "logged out".
  *
  * Must be called while the token is still in storage: the request interceptor reads it from there
- * to build the Authorization header.
+ * to build the session header.
  */
 export function logout(): Promise<void> {
   return apiPost<void>('/auth/logout');

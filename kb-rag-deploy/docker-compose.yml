@@ -2,8 +2,9 @@
 #
 # 在 lite（mysql + elasticsearch + minio）基础上叠加：
 #   - qdrant v1.18.x（单容器自带存储，无需额外的元数据服务或对象存储）
-#   - redis:7（可选，标注 optional：仅用于多实例部署下的 Query 改写缓存 / 限流计数 / 任务互斥锁；
-#     单实例部署默认 cache.provider=local，Redis 缺失不影响功能正确性，见需求文档 §5 Redis 职责边界）
+#   - redis:7（可选，标注 optional：多实例部署下承载控制台会话，以及规划中的 Query 改写缓存 /
+#     限流计数 / 任务互斥锁；单实例部署默认 KB_CACHE_PROVIDER=local，会话改写进 MySQL，
+#     Redis 缺失不影响功能正确性，见需求文档 §5 Redis 职责边界）
 #
 # 通过 Compose `include` 复用 docker-compose.lite.yml，避免 mysql/es/minio 两处维护、配置漂移。
 #
@@ -54,7 +55,9 @@ services:
 
   # ------------------------------------------------------------------
   # Redis（可选）：默认不随 `docker compose up` 启动，需显式加 --profile redis。
-  # 单实例部署无需 Redis（cache.provider=local，Caffeine+Guava+JVM 锁降级实现）。
+  # 单实例部署无需 Redis（KB_CACHE_PROVIDER=local：控制台会话落 MySQL，其余降级为
+  # Caffeine+Guava+JVM 锁的进程内实现）。启用后记得同时把 KB_CACHE_PROVIDER 设为 redis，
+  # 否则容器起来了也没有消费者。
   # 固定 7.2.x：该系列仍为 BSD-3-Clause 许可，避免 Redis 7.4+/8.x 切换到 RSALv2/SSPLv2
   # 双许可后对 Apache-2.0 开源分发引入的许可证复杂度。
   # ------------------------------------------------------------------

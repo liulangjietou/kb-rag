@@ -123,6 +123,34 @@ public class KbProperties {
     /** Model Token ledger reservation recovery policy. */
     private ModelUsage modelUsage = new ModelUsage();
 
+    /** Where volatile shared state lives, see the requirements doc section 5 "Redis 职责边界". */
+    private Cache cache = new Cache();
+
+    /**
+     * 易失性共享状态的存放位置。
+     *
+     * <p>需求文档 §5 把 Redis 定性为可选依赖：单实例部署（含 lite）必须在没有 Redis 的情况下功能完整。
+     * 这个开关就是那条边界的落点——它决定控制台会话存哪儿，而不决定会话本身怎么工作。
+     *
+     * <p>{@code local} 把会话写进 MySQL：进程重启后会话仍然有效，这是自建 TokenStore 时代就有的行为，
+     * 不能因为换了框架而倒退成"重启即掉线"。{@code redis} 把会话交给 Sa-Token 官方适配，多实例部署下
+     * 各节点看到同一份登录态，这是单机 MySQL 方案给不了的。
+     */
+    @Getter
+    @Setter
+    @ToString
+    public static class Cache {
+
+        /** {@code local} 走 MySQL，{@code redis} 走 Sa-Token 官方 RedisTemplate 适配。 */
+        private String provider = PROVIDER_LOCAL;
+
+        /** 进程内实现的取值。 */
+        public static final String PROVIDER_LOCAL = "local";
+
+        /** Redis 实现的取值。 */
+        public static final String PROVIDER_REDIS = "redis";
+    }
+
     /**
      * Crash recovery of in-flight model quota reservations.
      */

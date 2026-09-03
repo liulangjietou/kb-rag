@@ -49,6 +49,24 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- 控制台会话与登录态框架，拦截器与全局异常映射都由这里的 web 集成提供。 -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-spring-boot3-starter</artifactId>
+        </dependency>
+        <!--
+          Redis 会话存储，仅在 kb.cache.provider=redis 时被 SaTokenConfig 装配。
+          随包发布而不是标 optional：Redis 是这个项目里唯一的多实例开关，做成需要用户自己补依赖
+          才能打开的形态，等于把一个配置项的代价变成一次重新构建。
+        -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-redis-template</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>
             <artifactId>flyway-core</artifactId>

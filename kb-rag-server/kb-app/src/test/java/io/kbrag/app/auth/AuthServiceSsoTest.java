@@ -52,7 +52,7 @@ class AuthServiceSsoTest {
 
     private AdminUserMapper adminUserMapper;
     private LoginAuditMapper loginAuditMapper;
-    private TokenStore tokenStore;
+    private ConsoleSessionService consoleSessionService;
     private DirectoryAuthenticator directoryAuthenticator;
     private DirectoryGroupSyncService groupSyncService;
     private UserService userService;
@@ -64,7 +64,7 @@ class AuthServiceSsoTest {
         MybatisLambdaCache.register(AdminUser.class, LoginAudit.class, Tenant.class);
         adminUserMapper = mock(AdminUserMapper.class);
         loginAuditMapper = mock(LoginAuditMapper.class);
-        tokenStore = mock(TokenStore.class);
+        consoleSessionService = mock(ConsoleSessionService.class);
         directoryAuthenticator = mock(DirectoryAuthenticator.class);
         groupSyncService = mock(DirectoryGroupSyncService.class);
         userService = mock(UserService.class);
@@ -72,10 +72,10 @@ class AuthServiceSsoTest {
         // The lock window is derived from the audit table; an empty one means nobody is locked.
         when(loginAuditMapper.selectCount(any())).thenReturn(0L);
         LoginSuccessService loginSuccessService = new LoginSuccessService(
-                adminUserMapper, loginAuditMapper, tokenStore, userService,
+                adminUserMapper, loginAuditMapper, consoleSessionService, userService,
                 groupSyncService, principalResolver);
         service = new AuthService(adminUserMapper, loginAuditMapper, mock(TenantMapper.class),
-                tokenStore, new KbProperties(), mock(BCryptPasswordEncoder.class), directoryAuthenticator,
+                consoleSessionService, new KbProperties(), mock(BCryptPasswordEncoder.class), directoryAuthenticator,
                 new LoginFailureAuditService(loginAuditMapper), loginSuccessService,
                 new LoginAttemptGuard());
     }
@@ -90,7 +90,7 @@ class AuthServiceSsoTest {
                 UserSource.SAML, new ExternalIdentity(USERNAME, null, null), IP));
 
         assertEquals(LoginResult.WRONG_LOGIN_MODE, lastAudit().getReason());
-        verify(tokenStore, never()).issue(anyString());
+        verify(consoleSessionService, never()).issue(anyString());
     }
 
     @Test
@@ -107,13 +107,13 @@ class AuthServiceSsoTest {
         when(adminUserMapper.selectOne(any())).thenReturn(null);
         when(userService.provisionExternalUser(USERNAME, UserSource.OIDC, "Alice", null))
                 .thenReturn(user(UserSource.OIDC));
-        when(tokenStore.issue(USERNAME)).thenReturn("tok_1");
+        when(consoleSessionService.issue(USERNAME)).thenReturn("tok_1");
 
         LoginTicket ticket = service.completeExternalLogin(
                 UserSource.OIDC, new ExternalIdentity(USERNAME, "Alice", null), IP);
 
         assertNotNull(ticket);
-        verify(tokenStore).issue(USERNAME);
+        verify(consoleSessionService).issue(USERNAME);
         // The fresh account has no cached permissions, and the session must resolve them anew.
         verify(principalResolver).evict(USERNAME);
         assertEquals(LoginResult.SUCCESS, lastAudit().getReason());
@@ -155,15 +155,15 @@ class AuthServiceSsoTest {
         when(directoryAuthenticator.bind(USERNAME, "pw"))
                 .thenReturn(DirectoryBindOutcome.success(List.of("cn=kb-admins,dc=corp")));
         when(groupSyncService.enabled()).thenReturn(true);
-        when(tokenStore.issue(USERNAME)).thenReturn("tok_1");
+        when(consoleSessionService.issue(USERNAME)).thenReturn("tok_1");
 
         service.login(USERNAME, "pw", LoginMode.SSO, IP);
 
         // Synchronised before the token exists, so the session being opened already sees the
         // roles the directory groups map to - not the ones of the previous visit.
-        InOrder order = inOrder(groupSyncService, tokenStore);
+        InOrder order = inOrder(groupSyncService, consoleSessionService);
         order.verify(groupSyncService).sync(user, List.of("cn=kb-admins,dc=corp"));
-        order.verify(tokenStore).issue(USERNAME);
+        order.verify(consoleSessionService).issue(USERNAME);
     }
 
     private AdminUser user(UserSource source) {

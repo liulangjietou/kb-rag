@@ -75,6 +75,36 @@ in the published poms and jar manifests). JSQLParser is dual-licensed
 Apache-2.0 / LGPL-2.1 and is used here under the Apache-2.0 option.
 
 --------------------------------------------------------------------------
+Sa-Token 1.46.0
+--------------------------------------------------------------------------
+Components: cn.dev33:sa-token-core, sa-token-spring-boot3-starter,
+sa-token-spring-boot-webmvc-v3v4-common,
+sa-token-spring-boot-webmvc-reactor-v2v3v4-common, sa-token-jakarta-servlet,
+sa-token-jackson, sa-token-redis-template.
+License: Apache-2.0 (verified in the published parent pom, which declares
+"Apache 2" with the apache.org LICENSE-2.0 URL).
+Carries the console session: token issue, verification, expiry and
+revocation. The session store itself is this project's own code on the
+default path - kb.cache.provider=local writes sessions to MySQL through
+MysqlSaTokenDao - so a deployment without Redis needs none of the framework's
+Redis integration at runtime, even though sa-token-redis-template ships in
+the jar for the kb.cache.provider=redis path.
+
+--------------------------------------------------------------------------
+Spring Data Redis 3.3.9, Lettuce 6.3.2.RELEASE and Reactor Core 3.6.14
+--------------------------------------------------------------------------
+Components: org.springframework.data:spring-data-redis,
+io.lettuce:lettuce-core, io.projectreactor:reactor-core.
+License: Apache-2.0 (verified in the published poms).
+Reached only when kb.cache.provider=redis; the default local deployment
+never opens a connection, and the Redis auto configuration is excluded so
+that no connection factory exists in that mode. The Redis *server* is a
+separate concern: it runs as an independent unmodified container
+orchestrated by kb-rag-deploy (pinned to the 7.2.x line, which is still
+BSD-3-Clause) and is reached only over its wire protocol. This repository
+contains no Redis server source and does not redistribute it.
+
+--------------------------------------------------------------------------
 Caffeine 3.1.8
 --------------------------------------------------------------------------
 Component: com.github.ben-manes.caffeine:caffeine.

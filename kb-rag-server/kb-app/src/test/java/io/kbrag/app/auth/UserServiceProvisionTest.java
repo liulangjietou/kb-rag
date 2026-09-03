@@ -60,7 +60,7 @@ class UserServiceProvisionTest {
         properties = new KbProperties();
         service = new UserService(adminUserMapper, userRoleMapper, roleMapper,
                 mock(TenantMapper.class), idGenerator, mock(BCryptPasswordEncoder.class),
-                mock(TokenStore.class), mock(PrincipalResolver.class), properties);
+                mock(ConsoleSessionService.class), mock(PrincipalResolver.class), properties);
     }
 
     @Test

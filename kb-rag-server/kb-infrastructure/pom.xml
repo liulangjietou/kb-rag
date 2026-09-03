@@ -23,6 +23,21 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- MysqlSaTokenDao 实现 Sa-Token 的存储契约，只需要框架核心，不需要它的 web 集成。 -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-core</artifactId>
+        </dependency>
+        <!-- RedisPrincipalCache 用 StringRedisTemplate；只在 kb.cache.provider=redis 时被装配。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <!-- 权限缓存的共享实现用 JsonUtil 序列化；虽由 kb-domain 传递可得，仍按直接依赖显式声明。 -->
+        <dependency>
+            <groupId>io.kbrag</groupId>
+            <artifactId>kb-common</artifactId>
+        </dependency>
         <dependency>
             <groupId>co.elastic.clients</groupId>
             <artifactId>elasticsearch-java</artifactId>
