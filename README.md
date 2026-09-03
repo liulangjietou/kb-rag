@@ -11,12 +11,14 @@
 向量 + BM25 双路混合检索 → 标注与评测闭环 → 对外开放平台（REST + MCP），
 并内置面向 Agent 的记忆库（长期记忆抽取 / 画像 / 记忆检索）。
 
-**一句话架构**：Java 主服务（检索/管理编排）+ Python 解析服务（文档转 Markdown）+
-React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch 与 Qdrant（检索引擎）/
-MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 docker-compose 一键拉起中间件。
+**一句话架构**：Java 主服务（检索/管理编排）+ 解析服务（文档转 Markdown，Java 与 Python
+两套实现，行为等价、二选一部署）+ React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch
+与 Qdrant（检索引擎）/ MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过
+docker-compose 一键拉起中间件。
 
 > 本仓库由原先四个独立仓库（`kb-rag-server` / `kb-rag-parser` / `kb-rag-web` /
-> `kb-rag-deploy`）合并而成，各子项目的完整提交历史已一并保留。
+> `kb-rag-deploy`）合并而成，各子项目的完整提交历史已一并保留；
+> `kb-rag-parse-java` 是合并之后新增的 Java 解析实现，与 `kb-rag-parser`（Python）二选一。
 
 ## 作品演示
 
@@ -479,7 +481,7 @@ kb-rag-parser/.venv/bin/python kb-rag-parse-java/tools/crosscheck.py
 | [`kb-rag-deploy/docs/LOGIN-CAPTCHA-CONTRACT.md`](kb-rag-deploy/docs/LOGIN-CAPTCHA-CONTRACT.md) | 登录滑块验证码与凭据记忆契约 |
 | [`kb-rag-deploy/sql/kb_rag_full_schema.sql`](kb-rag-deploy/sql/kb_rag_full_schema.sql) | 全量建表语句快照（V1~V25，48 张表），用于快速了解数据模型；实际建表以 Flyway 迁移脚本为准 |
 | [`kb-rag-deploy/docs/openapi/kb-server.yaml`](kb-rag-deploy/docs/openapi/kb-server.yaml) | Java 主服务 OpenAPI 契约 |
-| [`kb-rag-deploy/docs/openapi/kb-parser.yaml`](kb-rag-deploy/docs/openapi/kb-parser.yaml) | Python 解析服务 OpenAPI 契约 |
+| [`kb-rag-deploy/docs/openapi/kb-parser.yaml`](kb-rag-deploy/docs/openapi/kb-parser.yaml) | 解析服务 OpenAPI 契约（Java / Python 两套实现共用的规范来源） |
 | [`docs/MCP接入指南.md`](docs/MCP接入指南.md) | MCP 客户端（Claude Desktop / Cursor 等）接入配置与工具目录 |
 | [`docs/记忆库接入指南.md`](docs/记忆库接入指南.md) | 记忆库 REST + MCP 接入、Memory Key 管理 |
 | [`docs/知识库需求文档.md`](docs/知识库需求文档.md) | 需求全集与设计取舍 |
