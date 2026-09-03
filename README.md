@@ -77,7 +77,8 @@ flowchart TB
   PDFBox 从而不涉及 AGPL-3.0 义务）。两者监听同一端口、同一套契约与环境变量，`PARSER_BASE_URL`
   指向哪个都不需要改 kb-rag-server。
 - **MySQL 是唯一事实源**：ES / Qdrant / Neo4j 均为派生索引，可从 MySQL 幂等重建。
-- **三条独立鉴权链**：管理台 Bearer Token、知识库 API Key（`kb-sk-*`）、记忆库 Memory Key（`kb-mk-*`）；
+- **三条独立鉴权链**：管理台会话（Sa-Token，请求头 `satoken`）、知识库 API Key（`kb-sk-*`）、
+  记忆库 Memory Key（`kb-mk-*`，与前者同走 `Authorization: Bearer`）；
   MCP 端点刻意落在既有过滤器前缀之下，零改动复用同一条鉴权 / 限流 / 审计管线。
 
 ## 核心流程图

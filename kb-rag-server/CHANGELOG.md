@@ -7,6 +7,74 @@
 
 尚未打过 tag，以下条目全部属于首个发布版本的内容，按里程碑倒序排列。
 
+### 变更（控制台会话与登录态底座换成 Sa-Token 1.46.0，**含破坏性变更**）
+
+- **动机**：为多实例部署铺路。自建的 `TokenStore` 与 `PrincipalResolver` 都把状态放在进程内 Map 里，
+  类注释明写"the console is a single instance deployment"——这个前提不解除，服务就只能单节点跑。
+- **换掉的东西**：`TokenStore`（自己生成令牌、自己算过期、自己写库、自己维护写穿缓存）整体退役，
+  改由 Sa-Token 承担签发、校验、过期与吊销。类随之改名 `ConsoleSessionService`：存储职责已经不在
+  这里了（在 `SaTokenDao` 那侧），留着"Store"这个名字会让人来这里找根本不在这里的东西。
+  7 处生产调用点（签发 1、登出 1、吊销 5）语义不变。
+- **`[schema]` Flyway V25**：新增 `t_kb_auth_session`（Sa-Token 的通用 KV 表，`cache.provider=local`
+  时的会话底座）与 `t_kb_sso_state`（单点登录的一次性 state）。`t_kb_auth_token` **保留不删**——它此后
+  没有读者，看着像该顺手清掉的死表，但 UPGRADING.md 承诺"升级失败可回退旧镜像"，删表会让回退后的旧代码
+  登录不了。实体与 Mapper 作为死代码删除，表留给运维在确认稳定后手工清理。
+- **存储介质做成两条分支，而不是硬绑 Redis**：`kb.cache.provider=local`（默认）把会话写进 MySQL，
+  `=redis` 交给 Sa-Token 官方适配。之所以不直接上 Redis：需求文档 §5 承诺 Redis 是可选依赖、lite
+  单实例部署无需它，硬绑会让这些部署直接登录不了；而框架自带的内存实现又会让"进程重启不掉线"这个
+  **既有能力**倒退（自建版本从 V11 起就是数据库落地的）。两条分支都由 `ConsoleSessionConfig` 显式
+  装配——Sa-Token 的 Redis 存储是个没有 `@ConditionalOnMissingBean` 的自动装配类，只要 jar 在
+  classpath 上就注册，而框架侧单值注入 `SaTokenDao`，两个实现同时存在会直接启动失败。
+- **会话时长仍由 `kb.auth.token-ttl-hours` 决定**：Sa-Token 自带 `sa-token.timeout`，两个配置并存
+  的后果不是多一种写法，而是运维改了原来那个却不生效。`ConsoleSessionConfig` 在启动时把项目配置写进
+  框架配置，`AUTH_TOKEN_TTL_HOURS` 行为不变。
+- **单点登录的一次性 state 搬进自己的表**：它此前借住在 `t_kb_auth_token` 里（形状相同、清理顺带）。
+  没有改用 Sa-Token 的临时票据——那会把 state 明文写进存储，而现有实现从设计上只写 SHA-256 摘要，
+  拖库拿不到能用的 state。安全属性不在换框架时被顺手降级。过期清理改由定时任务承担。
+- **破坏性变更（对外行为）**：管理台会话请求头由 `Authorization: Bearer <token>` 改为
+  `satoken: <token>`，影响 178 个受认证保护的端点；4 个公开 auth 端点、7 个 SSO 端点、
+  1 个 internal 字典端点与两条开放 API（knowledge 4 + memory 6，共 22 个）不受影响——后两者的凭据
+  是 API Key / Memory Key，仍走 `Authorization: Bearer`，与会话彻底分家。**升级后所有人需重新登录。**
+  前端已同步（`SESSION_HEADER` 常量）。OpenAPI 升至 `0.27.0-satoken`，`bearerAuth` 更名
+  `consoleSession` 并由 `http/bearer` 改为 `apiKey/header`。
+- **不读 Cookie 是配置出来的，不是白得的**：`sa-token.is-read-cookie=false`。原设计靠自定义请求头
+  让跨站请求伪造在构造上不成立，这条性质在换框架后必须显式保住。
+- **顺带得到**：401 此后能分辨被顶下线与被管理员踢下线，此前二者都只能报作令牌失效。
+- **权限缓存一并解除单实例假设，多副本部署由此就绪**：`PrincipalResolver` 原先把拍平后的权限放在进程内
+  `ConcurrentHashMap` 里，现改为对着新增的 `PrincipalCache` 端口编程，两个实现随**同一个**
+  `cache.provider` 与会话存储同步切换（`LocalPrincipalCache` / `RedisPrincipalCache`）。11 处调用点
+  语义不变、一行未改。
+  - **两者共用一个开关是刻意的**：只共享会话不共享权限，会得到"登录态跨节点一致、授权判据不一致"的
+    错位——登录一切正常，只有某个刚被降权的账号在某个节点上还是管理员，比两者都不共享更难察觉。
+  - **共享实现选了共享存储，不是"本地缓存 + 失效广播"**：后者读更快，但广播是尽力而为的，一条失效消息
+    在某节点重连时丢掉，那个节点就会永久用着旧授权且外部无感。共享存储下失效是一次删除，要么成功要么
+    报错。过期的授权是安全缺陷，不能让正确性取决于消息是否送达。
+  - **三种失败的处理刻意不同**：读失败降级为未命中（回落数据库这个事实源，答案仍正确）、写失败忽略
+    （下次再查一遍），而**失效失败必须上抛**——吞掉它，调用方就会以为权限已经收回。6 处失效调用点全部
+    位于 `@Transactional(rollbackFor = Exception.class)` 方法内且在 DB 写入之后（已逐一核对），
+    异常会连同角色变更一起回滚：宁可角色没改成，也不要改完了而旧授权还在生效。
+  - `evictAll` 用 SCAN 而非 KEYS：这套缓存很可能与会话共用一个 Redis 实例，一次角色编辑不该阻塞所有人。
+  - 共享条目带 24h 过期，仅为回收空间——进程内实现靠重启兜底，共享存储没有这个性质，被删账号的条目会
+    永远留着。正确性仍由显式失效保证。
+- **排除一个自动装配，就要接过它承担的全部契约**（首次启动 `provider=redis` 时暴露）：排除
+  `RedisAutoConfiguration` 换来了"local 模式下没有 Redis 连接工厂"，却也一并拿走了它顺带定义的
+  `redisTemplate` / `stringRedisTemplate`。`RedisRepositoriesAutoConfiguration` 按名字找前者，而它的
+  生效条件恰是"容器里有 RedisConnectionFactory"——于是这个洞在 local 下永远看不见，一切到 redis 就
+  必然启动失败（`A component required a bean named 'redisTemplate'`）。修复是在 redis 分支按原样补齐
+  这两个 bean，而不是只堵住当前这一个调用方。
+- 单元测试：删除 `TokenStoreTest`（7 例，被测类已不存在），新增 `MysqlSaTokenDaoTest`（14 例，
+  覆盖 `timeout` 的 0/-1/≤-2 三种约定、`update` 绝不插入、缺键返回 -2、LIKE 通配符转义）。
+  其中一例查出实现缺陷：`searchData` 把 mapper 的返回值直接交给会就地排序的框架工具，已改为先复制。
+  另新增 `ConsoleSessionConfigTest`（8 例）覆盖装配开关：两种 provider 各自的实现、容器里只能有一个
+  `SaTokenDao`（框架单值注入，多一个即启动失败）、local 下不得存在 `RedisConnectionFactory`（否则
+  actuator 探针会去连一个不存在的 Redis 而永久 DOWN），以及上面那条 `redisTemplate` 回归。
+  权限缓存另增 `PrincipalCacheTest`（10 例）：两种实现的读写与失效、`UserPrincipal` 的 JSON 逐字段
+  往返（含空授权账号——`JsonUtil` 配了 NON_NULL，空集合必须仍还原成空集合而非 null）、读写失败降级与
+  失效失败上抛的分野、`evictAll` 走 SCAN。`ConsoleSessionConfigTest` 补 2 例守住"两个开关同步切换"。
+  变异验证两轮：抽掉补齐的模板 bean，精确转红 `shouldStartWithRedisRepositories...` 1 例；
+  让 `RedisPrincipalCache#evict` 吞掉异常，精确转红 `redisCacheMustNotSwallowAnEvictionFailure` 1 例。
+  测试 1352 → 1379 全绿（实测，`mvn clean test`）。
+
 ### 修复（M24 后修复：并发预占把 `INSERT IGNORE` 和 `UPDATE` 压在同一行上，触发 InnoDB 死锁）
 
 - **现象**：索引大文档时 `ChunkEmbedder` 抛 `MySQLTransactionRollbackException: Deadlock found`，

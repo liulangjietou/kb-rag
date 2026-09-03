@@ -43,7 +43,7 @@ info:
     （`release?force`）、回滚（`rollback`）；控制台内 chat 预览（`chat-preview`，复用对外 chat
     编排，支持 SSE，事件契约与对外 `/api/v1/knowledge/chat` 一致）；对外开放 API（`/api/v1/
     knowledge/search`、`/api/v1/knowledge/chat`，API Key 鉴权，独立鉴权/限流过滤器链，
-    securityScheme 见 `ApiKeyBearer`，与管理鉴权 `bearerAuth` 相互独立）；API Key 管理（创建/
+    securityScheme 见 `ApiKeyBearer`，与管理鉴权 `consoleSession` 相互独立）；API Key 管理（创建/
     列表/启禁用/授权范围/轮换/删除，`/api/v1/api-keys`）；调用审计查询与统计（`/api/v1/
     api-audit-logs`、`.../stats`）。八状态发布状态机 `AppVersionStatus`、三态门禁结论
     `GateVerdict` 与其分类原因 `GateReason` 详见对应 schema。
@@ -275,7 +275,7 @@ info:
     模型请求发出前返回 429 MODEL_QUOTA_EXCEEDED。详见 M24-CONTRACTS.md。
 
     '
-  version: 0.26.0-m24
+  version: 0.27.0-satoken
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -350,7 +350,7 @@ tags:
   description: MCP 协议层：知识库应用与记忆库的 MCP Streamable HTTP 端点，JSON-RPC 2.0，凭证与限流复用各自
     REST 过滤器链（M20，docs/M20-CONTRACTS.md）
 security:
-- bearerAuth: []
+- consoleSession: []
 paths:
   /api/v1/auth/captcha/challenge:
     post:
@@ -5273,18 +5273,27 @@ paths:
           $ref: '#/components/responses/RateLimited'
 components:
   securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      description: '自定义 Header：Authorization: Bearer <token>。服务端 token 表/内存缓存维护，
+    consoleSession:
+      type: apiKey
+      in: header
+      name: satoken
+      description: '管理台会话鉴权，Header：satoken: <token>（不带 Bearer 前缀）。
 
-        有效期 24h；业务监听器上除 /api/v1/auth/login、/api/v1/auth/sso-available、
+        **破坏性变更**：此前为 Authorization: Bearer <token>，自会话底座换成 Sa-Token 起改为本方案。
+        换用独立 Header 而非 Authorization，是为了让管理台会话与两条开放 API 的 Key（ApiKeyBearer、
+        MemoryKeyBearer）在请求头上彻底分开——三种凭据此后不会再被误当成同一种。
 
-        /api/v1/auth/sso/**（含 oidc/saml/cas 的 login 与回调）外全部拦截。Actuator 运行在独立管理监听器，
+        会话由 Sa-Token 签发与校验，存储介质随部署形态切换（kb.cache.provider=local 写 MySQL，
+        =redis 写 Redis），有效期 24h（AUTH_TOKEN_TTL_HOURS）；业务监听器上除 /api/v1/auth/login、
+        /api/v1/auth/sso-available、/api/v1/auth/sso/**（含 oidc/saml/cas 的 login 与回调）外全部拦截。
+        Actuator 运行在独立管理监听器，不属于该认证链。
 
-        不属于该认证链。
+        不读 Cookie，因此跨站请求伪造在构造上不成立。
 
         M15 起认证之后还有一道功能权限拦截：命中 @RequiresPermission 且主体不持有其中任一权限码时返回 403 FORBIDDEN。
+
+        401 的消息此后可分辨被顶下线（signed in from another location）与被管理员踢下线
+        （session ended by an administrator），此前二者都报作令牌失效。
 
         '
     ApiKeyBearer:
@@ -5293,7 +5302,7 @@ components:
       bearerFormat: kb-sk-*
       description: '对外开放 API（/api/v1/knowledge/*）专用鉴权，Header：Authorization: Bearer
 
-        kb-sk-*；按 key_hash（SHA-256）查验，与管理台 bearerAuth 会话令牌相互独立、走独立过滤器链，
+        kb-sk-*；按 key_hash（SHA-256）查验，与管理台 consoleSession 会话令牌相互独立、走独立过滤器链，
 
         独立限流（按 Key 令牌桶）（M4c-CONTRACTS.md §3）。
 

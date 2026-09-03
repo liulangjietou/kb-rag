@@ -30,6 +30,38 @@
 
 ### Changed
 
+- **控制台登录改用 Sa-Token 1.46.0（含破坏性变更，升级需重新登录）**：
+  - **对外行为变更**：管理台会话请求头由 `Authorization: Bearer <token>` 改为 `satoken: <token>`，
+    影响 178 个受认证保护的端点。**升级后所有控制台用户需重新登录一次**（旧令牌格式与请求头都已改变，
+    无法沿用）。控制台前端已同步，直接用打包产物的用户无需操作；自行调用管理 API 的脚本必须改请求头。
+  - **不受影响**：两条开放 API（`/api/v1/knowledge/*` 的 API Key、`/api/v1/memory/*` 的 Memory Key）
+    仍用 `Authorization: Bearer`，共 10 个端点，凭据与调用方式一律不变。SSO 登录端点、验证码端点同样不变。
+  - **Flyway V25（自动执行）**：新增 `t_kb_auth_session`（会话存储）与 `t_kb_sso_state`（单点登录
+    一次性 state）。**只加表、不删表**——旧的 `t_kb_auth_token` 保留，以便升级不顺利时仍能回退旧镜像
+    （见 UPGRADING.md「迁移向后兼容一个版本」）。该表升级后不再有任何读者，确认新版本稳定后可手工
+    `DROP`，里面只有已失效的会话，无需备份或回填。
+  - **新增配置键 `KB_CACHE_PROVIDER`（默认 `local`）**：这是需求文档 §5"Redis 职责边界"里预留的开关
+    第一次真正接入。`local` 把会话写进 MySQL——**单实例部署与 lite 部署无需任何操作，也依然不需要 Redis**，
+    进程重启后会话仍然有效（与升级前行为一致）。`redis` 把会话交给 Sa-Token 官方适配，多节点共享登录态。
+  - **首启 `KB_CACHE_PROVIDER=redis` 会失败的缺陷已修**：该模式下应用曾因缺少 `redisTemplate` bean
+    启动不了（`A component required a bean named 'redisTemplate'`）。`local` 模式从不受影响。
+    若你已经踩到，拉最新代码即可，无需改配置。
+  - **Redis 相关配置键**（仅 `KB_CACHE_PROVIDER=redis` 时读取）：`REDIS_HOST`、`REDIS_PORT`、
+    `REDIS_PASSWORD`、`REDIS_DATABASE`、`REDIS_TIMEOUT`，用的是 Spring 标准键名。compose 里的 redis
+    服务仍是 `profile: optional`，不加 `--profile redis` 不会启动。
+  - **多副本部署就绪**：`KB_CACHE_PROVIDER` 同时决定会话与 RBAC 权限缓存的存放位置，两者同步切换、
+    **不可分开配置**——只共享其一会造成"登录态跨节点一致、授权判据不一致"的错位（登录一切正常，
+    只有某个刚被降权的账号在某个节点上还是管理员）。切 `redis` 后角色变更在所有节点的下一次请求即刻生效。
+    详见 `docs/ARCHITECTURE.md` §7.2。
+  - **Redis 抖动的影响面**：权限缓存读写失败会降级（回落数据库，控制台照常可用，只是慢一点），
+    但**失效失败会让那次角色编辑失败并回滚**——这是有意的，宁可角色没改成，也不要改完了而旧授权还在生效。
+  - **会话时长仍由 `AUTH_TOKEN_TTL_HOURS` 控制**（默认 24h），行为与升级前一致；不要改用 Sa-Token 自带的
+    `sa-token.timeout`，服务启动时会用前者覆盖它。
+  - OpenAPI 升至 `0.27.0-satoken`：`bearerAuth` 更名 `consoleSession`，类型由 `http/bearer` 改为
+    `apiKey/header`（header 名 `satoken`）。
+  - 新增第三方依赖 `cn.dev33:sa-token-*` 1.46.0（Apache-2.0）与 `spring-boot-starter-data-redis`，
+    已登记进 `kb-rag-server/NOTICE`。
+
 - **kb-app 上帝类按职责拆解（重构，升级零操作）**：`IndexPipelineService`、`RetrievalService`、
   `EvalRunService`、`ChatImportService` 的构造依赖由 31/25/22/21 降至 20/22/18/10，拆出 7 个
   协作者类。**对运维无任何影响**：没有 Flyway 迁移、没有新增或改名的配置键与环境变量、没有新容器

@@ -1,6 +1,6 @@
 import axios, { type AxiosError, type AxiosRequestConfig } from 'axios';
 import { message } from 'antd';
-import { clearToken, getToken } from './authStorage';
+import { SESSION_HEADER, clearToken, getToken } from './authStorage';
 import type { ApiResult } from './types';
 
 // The login endpoint must never trigger the 401 redirect loop (a wrong password
@@ -24,7 +24,7 @@ const client = axios.create({
 client.interceptors.request.use((config) => {
   const token = getToken();
   if (token) {
-    config.headers.set('Authorization', `Bearer ${token}`);
+    config.headers.set(SESSION_HEADER, token);
   }
   return config;
 });

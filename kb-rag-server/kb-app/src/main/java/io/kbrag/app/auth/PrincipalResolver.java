@@ -15,25 +15,27 @@ import io.kbrag.domain.mapper.RolePermissionMapper;
 import io.kbrag.domain.mapper.TenantMapper;
 import io.kbrag.domain.mapper.UserRoleMapper;
 import io.kbrag.domain.model.UserPrincipal;
+import io.kbrag.domain.port.PrincipalCache;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 /**
- * Resolves the flattened permissions of a user, with a write through in process cache.
+ * Resolves the flattened permissions of a user, with a write through cache.
  *
  * <p>Joining roles, grants and knowledge base scopes takes four queries. Paying them on every single
  * console call would tax every screen for a set of rows that changes a handful of times a month, so the
- * result is cached per user name and invalidated explicitly whenever a grant moves. The console is a
- * single instance deployment - the same assumption {@link TokenStore} already relies on - so the cache
- * cannot go stale against another node.
+ * result is cached per user name and invalidated explicitly whenever a grant moves.
+ *
+ * <p><b>缓存放哪里由部署形态决定，这个类不关心。</b> 它对着 {@link PrincipalCache} 端口编程：
+ * {@code cache.provider=local} 时是进程内的 Map，单节点下最优；{@code =redis} 时是各节点共享的一份，
+ * 多节点下 A 节点改掉一个角色，B 节点的下一次请求立刻看到。会话与权限由此在同一个开关下同进同退——
+ * 只切一半会得到"登录态共享、授权判据不共享"这种更难察觉的错位。
  *
  * <p>Invalidation is deliberately blunt: editing a role clears the whole cache instead of working out who
  * held it. Getting that set right needs another query, and a stale grant is a security bug while a cleared
@@ -53,8 +55,7 @@ public class PrincipalResolver {
     private final RoleKbScopeMapper roleKbScopeMapper;
     private final TenantMapper tenantMapper;
 
-    /** login name -> flattened permissions. */
-    private final Map<String, UserPrincipal> cache = new ConcurrentHashMap<>();
+    private final PrincipalCache cache;
 
     /**
      * Resolves the caller behind an authenticated session.
@@ -79,13 +80,12 @@ public class PrincipalResolver {
      * @param username login name
      */
     public void evict(String username) {
-        cache.remove(username);
+        cache.evict(username);
     }
 
     /** Drops every cached entry, after a role definition or a knowledge base scope changed. */
     public void evictAll() {
-        cache.clear();
-        log.info("permission cache cleared");
+        cache.evictAll();
     }
 
     private UserPrincipal load(String username) {

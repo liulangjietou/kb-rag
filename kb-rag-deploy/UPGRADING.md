@@ -45,6 +45,29 @@ README「备份与恢复（M6）」一节与 [`docs/backup-restore.md`](docs/bac
 - 升级失败时可以把 kb-rag-server 镜像直接回退到旧版本；因为迁移向后兼容，
   回退后的旧代码仍可正常读写新 schema（多出的列被忽略，不会报错）
 
+## 单次升级注意事项：控制台登录改用 Sa-Token（会话底座更换）
+
+这一版把控制台会话底座换成了 Sa-Token，是目前唯一需要额外注意的一次升级：
+
+- **所有人需要重新登录一次。** 令牌格式与请求头都变了，旧会话无法沿用。没有办法避免，
+  也不需要任何操作——用户重新登录即可。
+- **调用管理 API 的脚本必须改请求头**：`Authorization: Bearer <token>` → `satoken: <token>`。
+  影响 178 个受认证保护的端点。**两条开放 API 不受影响**（`/api/v1/knowledge/*` 的 API Key、
+  `/api/v1/memory/*` 的 Memory Key 仍用 `Authorization: Bearer`），用它们做集成的脚本无需改动。
+  控制台前端已同步，用打包产物的部署者不必操作。
+- **Flyway V25 只加表不删表**，符合"向后兼容一个版本"，因此**回退路径依然成立**：把 server 镜像
+  换回旧版本即可，旧代码读的 `t_kb_auth_token` 仍在（只是所有人要再登一次）。
+- **新增配置键 `KB_CACHE_PROVIDER`，默认 `local`，单实例部署零操作**：会话写进 MySQL，
+  行为与升级前一致（重启不掉线），**仍然不需要 Redis**。
+- 确认新版本稳定、不再打算回退之后，可以手工清掉那张不再有读者的旧表：
+
+  ```sql
+  DROP TABLE t_kb_auth_token;
+  ```
+
+- **跑多副本切 `KB_CACHE_PROVIDER=redis`**：该开关同时把会话与 RBAC 权限缓存放进 Redis，两者同步
+  切换，不可分开配置。单副本保持默认 `local` 即可，不需要 Redis。详见 `docs/ARCHITECTURE.md` §7.2。
+
 ## ES / Qdrant：schema 变更走"从事实源重建 + 别名切换"
 
 ES / Qdrant 的索引结构变更**不走迁移脚本**，官方迁移路径是"从 MySQL 事实源

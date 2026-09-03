@@ -60,7 +60,7 @@ src/
 
 ## 与后端的三条交互通道
 
-1. **`src/api/request.ts`**（主通道）：axios 实例，`baseURL=/api/v1`，请求拦截器统一注入 `Authorization: Bearer <token>`；响应拦截器与 `unwrap()` 统一拆包后端 `{code, message, data, request_id}` 信封 —— 业务错误码非 `OK`、HTTP 层错误、401（自动清 token 并跳登录）均在此集中处理并通过 `antd.message` 提示（附带 `request_id` 便于排查）。后台内部管理页面（知识库、检索调试、应用中心、评测中心、系统设置）均走此通道。
+1. **`src/api/request.ts`**（主通道）：axios 实例，`baseURL=/api/v1`，请求拦截器统一注入会话请求头 `satoken`（头名集中在 `src/api/authStorage.ts` 的 `SESSION_HEADER`，与服务端 `sa-token.token-name` 一致；开放 API 的 `Authorization: Bearer` 是另一条通道，见下）；响应拦截器与 `unwrap()` 统一拆包后端 `{code, message, data, request_id}` 信封 —— 业务错误码非 `OK`、HTTP 层错误、401（自动清 token 并跳登录）均在此集中处理并通过 `antd.message` 提示（附带 `request_id` 便于排查）。后台内部管理页面（知识库、检索调试、应用中心、评测中心、系统设置）均走此通道。
 2. **`src/api/chatStream.ts`**：SSE 流式问答的共享驱动，用原生 `fetch` 而非 `request.ts` 的 axios 实例（刻意绕过其 401 拦截器 —— 一个过期/错误的 API Key 应该在调试 UI 内联展示，而不是把管理员自己的登录态清掉）。同时服务「问答调试」页（JWT 鉴权，`/apps/{id}/chat-preview`）与应用详情「API 调试」Tab（API Key 鉴权，对外 `/api/v1/knowledge/chat`）。
 3. **`src/api/publicApi.ts`**：API Key 直连对外端点（`/api/v1/knowledge/search`、`/api/v1/knowledge/chat`），同样绕开 `request.ts`；统一返回 `{ok, data}` / `{ok, error}` 结构，429 限流响应读取 `Retry-After` 头透出给调用方。
 4. **`src/api/mcp.ts`**：MCP 调试专用 fetch 客户端；现代版逐请求生成 `_meta` 与动态镜像头，旧版保留 initialize 形态，原样返回 HTTP / JSON-RPC / 工具业务三个结果平面。

@@ -11,7 +11,7 @@ import io.kbrag.app.auth.LoginCaptchaProof;
 import io.kbrag.app.auth.LoginCaptchaService;
 import io.kbrag.app.auth.LoginCaptchaTrackPoint;
 import io.kbrag.app.auth.LoginTicket;
-import io.kbrag.app.auth.TokenStore;
+import io.kbrag.app.auth.ConsoleSessionService;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.enums.LoginMode;
 import jakarta.servlet.http.HttpServletRequest;
@@ -57,7 +57,7 @@ class AuthControllerTest {
         when(servlet.getHeader(HttpHeaders.USER_AGENT)).thenReturn(USER_AGENT);
         when(servlet.getHeader("X-Forwarded-For")).thenReturn(FORWARDED_ADDRESS);
         when(clientIpResolver.resolve(servlet)).thenReturn(FORWARDED_ADDRESS);
-        controller = new AuthController(authService, mock(TokenStore.class), captchaService, clientIpResolver);
+        controller = new AuthController(authService, mock(ConsoleSessionService.class), captchaService, clientIpResolver);
     }
 
     @Test

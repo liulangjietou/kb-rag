@@ -61,7 +61,7 @@ public class UserService {
     private final TenantMapper tenantMapper;
     private final BizIdGenerator idGenerator;
     private final BCryptPasswordEncoder passwordEncoder;
-    private final TokenStore tokenStore;
+    private final ConsoleSessionService consoleSessionService;
     private final PrincipalResolver principalResolver;
     private final KbProperties properties;
 
@@ -254,7 +254,7 @@ public class UserService {
         if (status == UserStatus.DISABLED) {
             // Suspension has to take effect now. Leaving the sessions alive would keep the account working
             // for up to a full token lifetime after an operator locked it out.
-            tokenStore.revokeAll(user.getUsername());
+            consoleSessionService.revokeAll(user.getUsername());
         }
         log.info("user status changed, userId={}, status={}", userId, status);
     }
@@ -276,7 +276,7 @@ public class UserService {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setMustChangePassword(MUST_CHANGE);
         adminUserMapper.updateById(user);
-        tokenStore.revokeAll(user.getUsername());
+        consoleSessionService.revokeAll(user.getUsername());
         log.info("user password reset, userId={}", userId);
     }
 
@@ -318,7 +318,7 @@ public class UserService {
         userRoleMapper.deleteByUserId(userId);
         // The account changes what it may see entirely; ending its sessions makes it come back
         // through login and resolve inside the new tenant.
-        tokenStore.revokeAll(user.getUsername());
+        consoleSessionService.revokeAll(user.getUsername());
         principalResolver.evict(user.getUsername());
         log.info("user moved to tenant, userId={}, tenantId={}", userId, tenant.getTenantId());
     }
@@ -334,7 +334,7 @@ public class UserService {
         requireNotSelf(user, "you cannot delete your own account");
         userRoleMapper.deleteByUserId(userId);
         adminUserMapper.deleteById(user.getId());
-        tokenStore.revokeAll(user.getUsername());
+        consoleSessionService.revokeAll(user.getUsername());
         principalResolver.evict(user.getUsername());
         log.info("user deleted, userId={}", userId);
     }

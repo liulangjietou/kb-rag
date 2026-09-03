@@ -68,6 +68,34 @@ kb-infrastructure 实现 kb-domain 定义的端口接口，kb-app 只依赖端�
 
 两种形态下向量分都会被换算为标准 cosine 再线性映射到 `[0,1]`，因此同一个相似度阈值在两种形态下语义一致。
 
+## 多实例部署
+
+一个开关同时决定两件事的存放位置——**会话**和**权限缓存**：
+
+```bash
+KB_CACHE_PROVIDER=local   # 默认。会话写 MySQL，权限缓存在进程内 Map
+KB_CACHE_PROVIDER=redis   # 两者都放 Redis，多节点共享
+```
+
+**这两者刻意共用一个开关，不能分开配。** 只共享会话不共享权限，会得到"登录态跨节点一致、授权判据不
+一致"这种错位：登录一切正常，只有某个刚被降权的账号在某个节点上还是管理员——比两者都不共享更难察觉。
+
+单实例部署什么都不用做：`local` 下会话落 MySQL（进程重启不掉线），权限缓存是一次 Map 查找，没有
+序列化也没有网络往返，也不需要 Redis。
+
+多副本部署切 `redis` 即可，两块状态一起变成共享的。几个设计取舍值得知道：
+
+- **权限缓存是共享存储，不是"本地缓存 + 失效广播"。** 后者读更快，但广播是尽力而为的：某个节点重连时
+  丢掉一条失效消息，它就会一直用着旧授权，且外部完全看不出来。共享存储下失效就是一次删除——要么删掉了，
+  要么报错，不存在"以为删掉了"。
+- **读写失败降级，失效失败上抛。** 读不到就回落到数据库这个事实源，答案仍然正确；写不进去只是下次再查
+  一遍；而失效失败意味着旧授权还在，异常会照常抛出，让调用方的事务回滚——宁可角色没改成，也不要改完了
+  而旧授权还在生效。所以 Redis 抖动不会让控制台不可用，但会让一次角色编辑失败。
+- **`evictAll` 用 SCAN 而非 KEYS**：这套缓存很可能和会话共用一个 Redis 实例，一次角色编辑不该阻塞
+  所有人的请求。
+
+Redis 容器在 `kb-rag-deploy` 里是 `profile: optional`，需显式 `--profile redis` 启用。
+
 ## 零 Key 模式
 
 不配置 `DASHSCOPE_API_KEY` 时服务照常启动，全链路可用：
@@ -143,6 +171,8 @@ CHAT_MODEL=qwen-plus                         # 留空 CHAT_API_KEY 即关闭 Que
 VISION_MODEL=qwen-vl-max                     # 留空 VISION_API_KEY 即不生成图片文本代理
 PARSER_BASE_URL=http://127.0.0.1:20001
 CORS_ALLOWED_ORIGINS=http://localhost:20002  # 管理台地址
+KB_CACHE_PROVIDER=local                      # local 会话落 MySQL（单实例无需 Redis）| redis 见「多实例部署」
+AUTH_TOKEN_TTL_HOURS=24                      # 会话有效期，同时决定 Sa-Token 的 timeout
 TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128     # 可提供 X-Forwarded-For 的代理；生产替换为实际网关 CIDR
 ```
 
@@ -175,7 +205,7 @@ mvn -B -ntp -DskipTests package
 java -jar kb-api/target/kb-rag-server.jar
 ```
 
-启动时 Flyway 自动执行迁移（当前 V1–V22，26 张业务表）。数据库中没有管理员账号时会创建 `admin` 并把随机密码打印到启动日志（只打印一次），首次登录强制改密。
+启动时 Flyway 自动执行迁移（当前 V1–V25，48 张业务表）。数据库中没有管理员账号时会创建 `admin` 并把随机密码打印到启动日志（只打印一次），首次登录强制改密。
 
 跑测试：
 
@@ -192,12 +222,16 @@ CI 配置见仓库根目录 `../.github/workflows/ci.yml`（Temurin 17）。
 
 接口清单不在本文件维护，以 OpenAPI 契约为准：`kb-rag-deploy/docs/openapi/kb-server.yaml`（92 条路径 / 111 个操作）。契约先行——改动端点或 DTO 时先改 yaml 再改代码。
 
-鉴权分两条完全独立的链路：
+鉴权分两条完全独立的链路，凭据从请求头就开始分家：
 
 | 面 | 路径 | 凭据 | 拦截位置 |
 |---|---|---|---|
-| 管理台 | `/api/v1/**` | `Authorization: Bearer <token>`（登录签发，默认 24h，落 `t_kb_auth_token` 只存 SHA-256 摘要） | `WebMvcConfig` 拦截器 |
+| 管理台 | `/api/v1/**` | `satoken: <token>`（登录签发，Sa-Token 1.46.0 托管，默认 24h） | `WebMvcConfig` 拦截器 |
 | 对外开放 | `/api/v1/knowledge/**` | `Authorization: Bearer kb-sk-***`（API Key，库里只存 SHA-256 摘要与展示前缀） | `ApiKeyAuthFilter` servlet 过滤器 |
+
+管理台会话走独立请求头而不是 `Authorization`，这样三种凭据（会话 / API Key / Memory Key）在协议层
+就互不相干。会话不读 Cookie（`sa-token.is-read-cookie=false`），跨站请求伪造因此在构造上不成立——
+这是配置保证的性质，不要改成读 Cookie，否则整个管理 API 需要另配 CSRF 防护。
 
 业务监听器上，登录与 SSO 入口按流程免控制台 Token；`/internal/dict/ik/**` 是供 Elasticsearch
 轮询的显式例外。Actuator 不属于这条鉴权链，它运行在独立管理监听器上。

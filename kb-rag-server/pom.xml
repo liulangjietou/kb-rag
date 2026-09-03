@@ -50,6 +50,9 @@
              stays in step with the rest of the ecosystem even though the Boot BOM itself does not
              manage this coordinate. -->
         <nimbus-jose-jwt.version>9.37.3</nimbus-jose-jwt.version>
+        <!-- 控制台会话与登录态的底座（Apache-2.0）。Boot BOM 不管理该坐标，版本在此显式钉住，
+             使会话框架与其 Redis 适配包始终同版本发布，避免二者错位导致的序列化不兼容。 -->
+        <sa-token.version>1.46.0</sa-token.version>
     </properties>
 
     <dependencyManagement>
@@ -108,6 +111,26 @@
                 <groupId>com.microsoft.playwright</groupId>
                 <artifactId>playwright</artifactId>
                 <version>${playwright.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>cn.dev33</groupId>
+                <artifactId>sa-token-core</artifactId>
+                <version>${sa-token.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>cn.dev33</groupId>
+                <artifactId>sa-token-spring-boot3-starter</artifactId>
+                <version>${sa-token.version}</version>
+            </dependency>
+            <!--
+              仅在 kb.cache.provider=redis 时装配，见 SaTokenConfig。
+              直接取 sa-token-redis-template 而不是 sa-token-redis-jackson：后者是个不含任何类的聚合包，
+              只把 sa-token-jackson 和本包拼在一起，而 sa-token-jackson 已由 starter 传递引入。
+            -->
+            <dependency>
+                <groupId>cn.dev33</groupId>
+                <artifactId>sa-token-redis-template</artifactId>
+                <version>${sa-token.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

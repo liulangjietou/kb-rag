@@ -73,8 +73,8 @@ class LoginFailureAuditTransactionTest {
                      new AnnotationConfigApplicationContext(TransactionTestConfig.class)) {
             BCryptPasswordEncoder passwordEncoder = context.getBean(BCryptPasswordEncoder.class);
             when(passwordEncoder.matches(anyString(), anyString())).thenReturn(true);
-            TokenStore tokenStore = context.getBean(TokenStore.class);
-            when(tokenStore.issue("alice")).thenThrow(new IllegalStateException("token store failed"));
+            ConsoleSessionService consoleSessionService = context.getBean(ConsoleSessionService.class);
+            when(consoleSessionService.issue("alice")).thenThrow(new IllegalStateException("token store failed"));
 
             AuthService authService = context.getBean(AuthService.class);
             assertThrows(IllegalStateException.class,
@@ -227,8 +227,8 @@ class LoginFailureAuditTransactionTest {
         }
 
         @Bean
-        TokenStore tokenStore() {
-            return mock(TokenStore.class);
+        ConsoleSessionService consoleSessionService() {
+            return mock(ConsoleSessionService.class);
         }
 
         @Bean
@@ -261,11 +261,11 @@ class LoginFailureAuditTransactionTest {
         @Bean
         LoginSuccessService loginSuccessService(AdminUserMapper adminUserMapper,
                                                 LoginAuditMapper loginAuditMapper,
-                                                TokenStore tokenStore,
+                                                ConsoleSessionService consoleSessionService,
                                                 UserService userService,
                                                 DirectoryGroupSyncService directoryGroupSyncService,
                                                 PrincipalResolver principalResolver) {
-            return new LoginSuccessService(adminUserMapper, loginAuditMapper, tokenStore,
+            return new LoginSuccessService(adminUserMapper, loginAuditMapper, consoleSessionService,
                     userService, directoryGroupSyncService, principalResolver);
         }
 
@@ -273,14 +273,14 @@ class LoginFailureAuditTransactionTest {
         AuthService authService(AdminUserMapper adminUserMapper,
                                 LoginAuditMapper loginAuditMapper,
                                 TenantMapper tenantMapper,
-                                TokenStore tokenStore,
+                                ConsoleSessionService consoleSessionService,
                                 BCryptPasswordEncoder passwordEncoder,
                                 DirectoryAuthenticator directoryAuthenticator,
                                 LoginFailureAuditService loginFailureAuditService,
                                 LoginSuccessService loginSuccessService,
                                 LoginAttemptGuard loginAttemptGuard) {
             return new AuthService(adminUserMapper, loginAuditMapper, tenantMapper,
-                    tokenStore, new KbProperties(), passwordEncoder, directoryAuthenticator,
+                    consoleSessionService, new KbProperties(), passwordEncoder, directoryAuthenticator,
                     loginFailureAuditService, loginSuccessService, loginAttemptGuard);
         }
 

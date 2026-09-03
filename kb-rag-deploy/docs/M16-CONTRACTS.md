@@ -51,7 +51,7 @@
 ### 1.3 行级隔离的执行点（TenantLineInnerInterceptor）
 
 - MyBatis-Plus `TenantLineInnerInterceptor` 注册在分页插件**之前**（官方要求，租户条件必须进 count 语句）；`TenantLineHandler.getTenantId()` 取 `UserContextHolder` 的租户，无控制台主体（开放 API、后台任务线程）时**整条跳过拼接** —— 后台任务按业务 id 精确定位行，API Key 已被应用版本限定范围，再拼租户条件需要的上下文根本不在线程里。跳过发生在 `ignoreTable()`（无主体一律返回 true），不是靠 `getTenantId()` 返回 null：后者永远返回一个合法值（无主体时回落默认租户），只为兜住"某条路径绕过 ignoreTable 还来问租户"的情况。
-- **忽略清单**（`ignoreTable`）：除 §1.2 六张根聚合表外全部忽略。从属表靠父表裁剪；`t_kb_tenant`、`t_kb_permission`、`t_kb_auth_token`、两张登录/操作审计表、META 表、flyway 表天然全局。
+- **忽略清单**（`ignoreTable`）：除 §1.2 六张根聚合表外全部忽略。从属表靠父表裁剪；`t_kb_tenant`、`t_kb_permission`、`t_kb_auth_session`（原 `t_kb_auth_token`，Sa-Token 后改名）、`t_kb_sso_state`、两张登录/操作审计表、META 表、flyway 表天然全局。
   > 后续里程碑新增的根聚合表要一并入列，这是本节的持续义务而不是一次性清单：M19 的 `t_kb_memory_library` 漏了这一步，多租户下记忆库全员可见可改，由 Flyway V21 补齐（见 M19 契约 §1.4）；M18 的 `t_kb_web_credential` 同样漏了，由 Flyway V22 补齐（见下条）。判据是"该表是不是某个域的根、有没有从属表经它归属租户"——是，就加列 + 入围栏 + 让该域每个入口先解析根。
 - **入围栏≠隔离完成：被后台线程读的表必须自己写租户谓词**（V22 的教训，本节第一段那条"无主体整条跳过"的直接推论）。围栏只在有控制台主体的线程上拼条件，所以一张表如果同时被控制台和 `@Scheduled` / 开放 API 线程读，进名单只解决了控制台那一半，另一半是**零防护**。`t_kb_web_credential` 正是这种表：控制台增删改查靠围栏，夜里的网页同步（`WebSourceService#syncEnabledSources`）在无主体线程上按 host 查凭据，围栏整条跳过。因此 `WebCredentialService#resolveFor(tenantId, host)` 把租户做成**必填入参**（租户由 `WebSource.kb_id` 反查 `t_kb_knowledge_base.tenant_id` 得到，拿不到就返回"无凭据"、绝不退化成按 host 查）。
   > 这一条比 V21 那条更要紧，因为它的失败形态是静默的：只给表加 `tenant_id` 列、只把表名加进围栏，控制台看起来隔离好了，抓取仍在跨租户取用凭据，而且比修复前更难发现——修复前是"共享一份全局凭据"这个明面上的错，加列之后变成"看起来已隔离、实际仍串号"。**判据**：新表进围栏时先问"除了控制台，还有谁读这张表"，有后台读者就必须同时给出一条显式带租户的查询入口。
@@ -143,7 +143,15 @@
 | 端点 | 说明 |
 |---|---|
 | GET /sso/providers | 免认证 → `{providers: [{type: OIDC/SAML/CAS, display_name}]}`，登录页据此渲染 |
-| GET /oidc/login | 302 到 IdP 授权端点，携带 state（随机 32 字节，进 `t_kb_auth_token` 同款存储、10 分钟过期、一次性） |
+| GET /oidc/login | 302 到 IdP 授权端点，携带 state（随机 32 字节，存 `t_kb_sso_state`、10 分钟过期、一次性） |
+
+> **state 存储搬家（Sa-Token 后补齐）**：state 原先借住在会话令牌表 `t_kb_auth_token` 里（形状相同、
+> 过期清理顺带做掉），该表随会话底座更换而删除，state 迁入自己的表 `t_kb_sso_state`（Flyway V25）。
+> **语义一字未变**：仍是随机 32 字节、仅存 SHA-256 摘要、10 分钟过期、一次性消费，且**过期的呈现同样
+> 会烧掉该行**——先删后判过期这个顺序是防重放的一部分，不是实现细节。
+> 特意没有改用 Sa-Token 自带的临时票据：那会把 state 明文写进存储，而现有设计只写摘要，拖库拿不到
+> 能用的 state。**安全属性不在换框架时被顺手降级。** 过期回收由原先的登录顺带清理改为定时任务
+> （`kb.auth.sso.state-purge-cron`），正常流程里的 state 在回调时就已被消费。
 | GET /oidc/callback | 验 state → code 换 token → 验 id_token（JWKS 验签 + iss/aud/exp）→ 取 `preferred_username`/`email` → §3.5 统一落地 |
 | GET /saml/login | 302 到 IdP SSO URL，携带 deflate+base64 的 AuthnRequest 与 RelayState（同 state 纪律） |
 | POST /saml/acs | 验 Response 签名（JDK XMLDSig + 配置的 IdP 证书）→ 验 NotOnOrAfter/Audience/InResponseTo → 取 NameID → 统一落地 |

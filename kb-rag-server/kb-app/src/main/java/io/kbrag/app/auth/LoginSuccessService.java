@@ -31,7 +31,7 @@ public class LoginSuccessService {
 
     private final AdminUserMapper adminUserMapper;
     private final LoginAuditMapper loginAuditMapper;
-    private final TokenStore tokenStore;
+    private final ConsoleSessionService consoleSessionService;
     private final UserService userService;
     private final DirectoryGroupSyncService groupSyncService;
     private final PrincipalResolver principalResolver;
@@ -100,6 +100,6 @@ public class LoginSuccessService {
         adminUserMapper.updateById(user);
         // 首次建号没有权限缓存；已有账号也可能在离线期间被重新授权。
         principalResolver.evict(username);
-        return new LoginTicket(tokenStore.issue(username), user.mustChangePassword());
+        return new LoginTicket(consoleSessionService.issue(username), user.mustChangePassword());
     }
 }
