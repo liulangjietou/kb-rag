@@ -6,6 +6,7 @@ import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.HashUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
@@ -32,6 +33,7 @@ public class RegistrationRateLimiter {
     private final Clock clock;
     private final Cache<String, FixedWindowCounter> counters;
 
+    @Autowired
     public RegistrationRateLimiter(RegistrationProperties properties) {
         this(properties, Clock.systemUTC());
     }

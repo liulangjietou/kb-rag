@@ -3,6 +3,7 @@ package io.kbrag.app.registration;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -27,6 +28,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @author owlzhangfq@gmail.com
  */
 class RegistrationRateLimiterTest {
+
+    @Test
+    void shouldBeCreatedBySpringWithTheRuntimeConstructor() {
+        try (AnnotationConfigApplicationContext context =
+                     new AnnotationConfigApplicationContext(
+                             RegistrationProperties.class, RegistrationRateLimiter.class)) {
+            assertTrue(context.containsBean("registrationRateLimiter"));
+        }
+    }
 
     @Test
     void shouldEnforceEmailAndIpLayersAndResetAtTheNextHour() {
