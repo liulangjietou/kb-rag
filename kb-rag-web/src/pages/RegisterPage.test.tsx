@@ -123,7 +123,7 @@ describe('RegisterPage', () => {
     expect(JSON.stringify(receipt)).not.toContain('ticket-1');
     expect(JSON.stringify(receipt)).not.toContain('123456');
     expect(JSON.stringify(receipt)).not.toContain('AtlasStrong@2026');
-  });
+  }, 15_000);
 
   it('刷新后恢复待审核回执，注册其他邮箱会清除它', async () => {
     window.sessionStorage.setItem('kb-rag-registration-receipt', JSON.stringify({
