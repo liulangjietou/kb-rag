@@ -486,6 +486,7 @@ kb-rag-parser/.venv/bin/python kb-rag-parse-java/tools/crosscheck.py
 | [`docs/记忆库接入指南.md`](docs/记忆库接入指南.md) | 记忆库 REST + MCP 接入、Memory Key 管理 |
 | [`docs/知识库需求文档.md`](docs/知识库需求文档.md) | 需求全集与设计取舍 |
 | [`docs/自测步骤.md`](docs/自测步骤.md) | 端到端自测清单 |
+| [`docs/RAG面试八股.md`](docs/RAG面试八股.md) | RAG 工程知识点整理：切分 / 嵌入 / 混合检索 / 融合 / 重排 / 评测 / 工程化全链路，每条对应本仓库的真实实现与参数 |
 | 各子目录 `README.md` / `CONTRIBUTING.md` / `SECURITY.md` | 子项目自身的架构细节、开发规范与安全上报渠道 |
 
 ## 常见问题与故障排查
