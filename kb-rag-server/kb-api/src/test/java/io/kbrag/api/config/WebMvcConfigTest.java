@@ -27,5 +27,9 @@ class WebMvcConfigTest {
 
         assertTrue(publicPaths.contains("/api/v1/auth/captcha/challenge"));
         assertTrue(publicPaths.contains("/api/v1/auth/captcha/verify"));
+        assertTrue(publicPaths.contains("/api/v1/registrations/verification-code"));
+        assertTrue(publicPaths.contains("/api/v1/registrations/verify-email"));
+        assertTrue(publicPaths.contains("/api/v1/registrations"));
+        assertTrue(publicPaths.stream().noneMatch(path -> path.contains("registration-reviews")));
     }
 }

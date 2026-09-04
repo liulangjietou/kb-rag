@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+// Author: owlzhangfq@gmail.com
 import { App as AntApp } from 'antd';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -122,8 +123,10 @@ describe('LoginPage slider integration', () => {
       resolveLogin = resolve;
     }));
     renderLoginPage();
-    const username = await screen.findByPlaceholderText('输入平台账号') as HTMLInputElement;
+    const username = await screen.findByPlaceholderText('输入邮箱或平台用户名') as HTMLInputElement;
     const password = screen.getByPlaceholderText('输入平台密码') as HTMLInputElement;
+    expect(screen.getByRole('link', { name: '使用工作邮箱注册' }).getAttribute('href')).toBe('/register');
+    expect(username.maxLength).toBe(254);
     await waitFor(() => expect(mocks.getSsoAvailability).toHaveBeenCalledOnce());
 
     // 模拟密码管理器只改原生 DOM 值、没有触发 React change。
@@ -152,7 +155,7 @@ describe('LoginPage slider integration', () => {
   it('登录失败后刷新 challenge，同时保留用户名和密码', async () => {
     mocks.login.mockRejectedValue(new Error('UNAUTHORIZED'));
     renderLoginPage();
-    const username = await screen.findByPlaceholderText('输入平台账号') as HTMLInputElement;
+    const username = await screen.findByPlaceholderText('输入邮箱或平台用户名') as HTMLInputElement;
     const password = screen.getByPlaceholderText('输入平台密码') as HTMLInputElement;
     fireEvent.change(username, { target: { value: 'richard' } });
     fireEvent.change(password, { target: { value: 'wrong-password' } });
@@ -167,7 +170,7 @@ describe('LoginPage slider integration', () => {
   it('仅在勾选且登录成功后调用浏览器密码管理器', async () => {
     mocks.login.mockResolvedValue({ token: 'token-2', must_change_password: true });
     renderLoginPage();
-    const username = await screen.findByPlaceholderText('输入平台账号');
+    const username = await screen.findByPlaceholderText('输入邮箱或平台用户名');
     const password = screen.getByPlaceholderText('输入平台密码');
     fireEvent.change(username, { target: { value: 'remembered-user' } });
     fireEvent.change(password, { target: { value: 'browser-owned-secret' } });
@@ -191,7 +194,7 @@ describe('LoginPage slider integration', () => {
       resolveLogin = resolve;
     }));
     renderLoginPage();
-    fireEvent.change(await screen.findByPlaceholderText('输入平台账号'), {
+    fireEvent.change(await screen.findByPlaceholderText('输入邮箱或平台用户名'), {
       target: { value: 'shared-browser-user' },
     });
     fireEvent.change(screen.getByPlaceholderText('输入平台密码'), {
@@ -223,7 +226,7 @@ describe('LoginPage slider integration', () => {
       resolveLogin = resolve;
     }));
     renderLoginPage();
-    const username = await screen.findByPlaceholderText('输入平台账号') as HTMLInputElement;
+    const username = await screen.findByPlaceholderText('输入邮箱或平台用户名') as HTMLInputElement;
     const password = screen.getByPlaceholderText('输入平台密码') as HTMLInputElement;
     fireEvent.change(username, { target: { value: 'richard' } });
     fireEvent.change(password, { target: { value: 'correct-password' } });
@@ -234,7 +237,7 @@ describe('LoginPage slider integration', () => {
       resolveAvailability?.({ sso_available: true });
     });
 
-    expect(screen.getByPlaceholderText('输入平台账号')).toBe(username);
+    expect(screen.getByPlaceholderText('输入邮箱或平台用户名')).toBe(username);
     expect(username.value).toBe('richard');
     expect(password.value).toBe('correct-password');
     expect(mocks.login).toHaveBeenCalledWith(expect.objectContaining({ mode: 'LOCAL' }));

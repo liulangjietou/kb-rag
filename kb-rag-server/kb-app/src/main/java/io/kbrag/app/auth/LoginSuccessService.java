@@ -1,5 +1,6 @@
 package io.kbrag.app.auth;
 
+import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.AdminUser;
 import io.kbrag.domain.entity.LoginAudit;
 import io.kbrag.domain.enums.LoginResult;
@@ -97,7 +98,11 @@ public class LoginSuccessService {
         loginAuditMapper.insert(record);
 
         user.setLastLoginAt(LocalDateTime.now());
-        adminUserMapper.updateById(user);
+        if (adminUserMapper.updateById(user) != 1) {
+            // BCrypt 校验后发生改密、停用或其他并发更新时，乐观锁必须让登录安全失败。
+            // 当前事务会回滚成功审计，且会话服务尚未签发任何新会话。
+            throw BizException.unauthorized("account state changed, retry login");
+        }
         // 首次建号没有权限缓存；已有账号也可能在离线期间被重新授权。
         principalResolver.evict(username);
         return new LoginTicket(consoleSessionService.issue(username), user.mustChangePassword());

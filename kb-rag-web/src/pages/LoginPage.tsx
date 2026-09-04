@@ -3,7 +3,7 @@ import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from '@ant-desi
 import { App as AntApp, Button, Checkbox, Divider, Form, Input, Space, Tabs, Typography } from 'antd';
 import type { FormEvent } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { getSsoAvailability, getSsoProviders, login } from '../api/auth';
 import type { LoginMode, SsoProviders } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
@@ -209,12 +209,17 @@ export default function LoginPage() {
         onSubmitCapture={syncAutofillBeforeSubmit}
         autoComplete="on"
       >
-        <Form.Item name="username" label="用户名" rules={[{ required: true, message: '请输入用户名' }]}>
+        <Form.Item
+          name="username"
+          label={mode === 'SSO' ? '域用户名' : '邮箱或平台用户名'}
+          rules={[{ required: true, message: mode === 'SSO' ? '请输入域用户名' : '请输入邮箱或平台用户名' }]}
+        >
           <Input
             name="username"
             autoComplete="username"
+            maxLength={254}
             prefix={<UserOutlined />}
-            placeholder={mode === 'SSO' ? '输入域账号' : '输入平台账号'}
+            placeholder={mode === 'SSO' ? '输入域账号' : '输入邮箱或平台用户名'}
           />
         </Form.Item>
         <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
@@ -256,7 +261,7 @@ export default function LoginPage() {
 
   const hint = mode === 'SSO'
     ? '使用企业目录账号登录，首次登录将自动开通账号并授予默认角色。'
-    : '使用管理员创建的平台账号登录，如需开通请联系管理员。';
+    : '使用已审核的邮箱，或管理员创建的平台用户名登录。';
 
   const hasBrowserSso = Boolean(ssoProviders && (ssoProviders.oidc || ssoProviders.saml || ssoProviders.cas));
 
@@ -295,6 +300,11 @@ export default function LoginPage() {
       )}
 
       <div className="auth-hint">{hint}</div>
+      {mode === 'LOCAL' && (
+        <div className="registration-login-entry">
+          还没有账号？ <Link to="/register">使用工作邮箱注册</Link>
+        </div>
+      )}
       <div className="auth-security-note">
         <SafetyCertificateOutlined />
         页面只保存用户名；密码由浏览器密码管理器保护，不写入站点存储。

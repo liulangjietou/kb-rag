@@ -63,6 +63,7 @@ public class NimbusOidcClient implements OidcClient {
     private static final String CLAIM_PREFERRED_USERNAME = "preferred_username";
     private static final String CLAIM_NAME = "name";
     private static final String CLAIM_EMAIL = "email";
+    private static final String CLAIM_EMAIL_VERIFIED = "email_verified";
     private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(5);
     private static final int STATUS_OK = 200;
     private static final int STATUS_SERVER_ERROR = 500;
@@ -173,7 +174,7 @@ public class NimbusOidcClient implements OidcClient {
             String username = firstNonBlank(
                     claims.getStringClaim(CLAIM_PREFERRED_USERNAME), claims.getSubject());
             return ExternalAuthOutcome.success(new ExternalIdentity(username,
-                    claims.getStringClaim(CLAIM_NAME), claims.getStringClaim(CLAIM_EMAIL)));
+                    claims.getStringClaim(CLAIM_NAME), verifiedEmail(claims)));
         } catch (Exception e) {
             // A token that fails verification is an invalid credential regardless of which check
             // tripped; naming the failing check to the browser would only help an attacker iterate.
@@ -230,6 +231,14 @@ public class NimbusOidcClient implements OidcClient {
 
     private static String firstNonBlank(String preferred, String fallback) {
         return preferred != null && !preferred.isBlank() ? preferred : fallback;
+    }
+
+    /** 只有 IdP 明确证明归属的邮箱才能进入本系统全局身份命名空间。 */
+    private static String verifiedEmail(JWTClaimsSet claims) throws java.text.ParseException {
+        if (!Boolean.TRUE.equals(claims.getBooleanClaim(CLAIM_EMAIL_VERIFIED))) {
+            return null;
+        }
+        return claims.getStringClaim(CLAIM_EMAIL);
     }
 
     /**

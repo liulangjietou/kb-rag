@@ -18,6 +18,20 @@
 
 ### Added
 
+- **邮箱验证码注册、管理员租户/角色审核与企业知识首页（M26，`docs/M26-CONTRACTS.md`）**：新增
+  三步公开注册入口（滑块 proof 后发码、验证码换一次性票据、票据提交申请），验证码只存 HMAC、票据只存
+  SHA-256，申请审核前不创建账号、不签发会话。审核接口同时要求 `user:manage` 与 `tenant:manage`，通过时
+  在同一事务内创建账号、绑定目标租户角色、推进申请并写审核结果 outbox；审核邮件先领取有界 lease，再按
+  at-least-once 语义重试。Flyway `V26__email_registration.sql` 新增邮箱身份声明、验证码/交付状态、申请、提交幂等声明、
+  审核角色快照与 outbox 六表；身份声明把邮箱格式用户名和已验证联系邮箱放入同一唯一命名空间，历史跨账号
+  冲突会使迁移失败而不会静默合并；历史 OIDC 联系邮箱因缺少 `email_verified` 事实不回填，新 JIT 仅接受
+  `email_verified=true`。响应丢失后的稳定 `client_submission_id` 重试返回原回执，被拒绝后重新申请新增
+  独立审核事实而不覆盖历史。同时把
+  用户、令牌、登录审计与操作审计的 `username` 扩为 254 以容纳完整邮箱；迁移脚本仍由 kb-rag-server
+  承载。V26 升级或回退旧镜像期间必须冻结账号创建、联系邮箱修改、SSO 首次建号与注册审批，禁止新旧版本
+  混写身份声明表。`.env.example` 新增
+  `ADMIN_MAIL_*` 与 `REGISTRATION_*`，所有 SMTP 凭据和 HMAC 密钥安全留空；同步 SMTP、BCrypt 与 outbox
+  lease 均有显式资源边界；登录根路径默认进入 `/home`。
 - **模型 Token 成本台账与租户月度配额（M24，`docs/M24-CONTRACTS.md`）**：Flyway V24
   新增月度原子计数器、调用台账和价格配置；全部模型 Provider 在出站边界先预占后结算，控制台提供
   租户配额、用量与价格管理。OpenAPI 升至 `0.26.0-m24`，新增三个恢复配置键。

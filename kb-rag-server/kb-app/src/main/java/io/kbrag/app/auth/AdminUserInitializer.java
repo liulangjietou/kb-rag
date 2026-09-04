@@ -12,6 +12,7 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.util.Base64;
@@ -40,12 +41,14 @@ public class AdminUserInitializer implements ApplicationRunner {
     private static final int MUST_CHANGE = 1;
 
     private final AdminUserMapper adminUserMapper;
+    private final EmailIdentityClaimService emailIdentityClaimService;
     private final KbProperties properties;
     private final BCryptPasswordEncoder passwordEncoder;
     private final BizIdGenerator idGenerator;
     private final UserService userService;
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void run(ApplicationArguments args) {
         Long existing = adminUserMapper.selectCount(null);
         if (existing != null && existing > 0) {
@@ -56,6 +59,7 @@ public class AdminUserInitializer implements ApplicationRunner {
         String password = generatePassword();
         AdminUser user = new AdminUser();
         user.setUserId(idGenerator.userId());
+        emailIdentityClaimService.claimForNewUser(user.getUserId(), username, null);
         user.setUsername(username);
         user.setDisplayName(username);
         user.setSource(UserSource.LOCAL);

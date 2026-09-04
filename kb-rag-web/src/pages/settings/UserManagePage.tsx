@@ -1,6 +1,6 @@
 // Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useState } from 'react';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { AuditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
   Button,
   Card,
@@ -17,6 +17,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { useNavigate } from 'react-router-dom';
 import { listRoles } from '../../api/role';
 import { listTenants } from '../../api/tenant';
 import {
@@ -57,6 +58,7 @@ interface UserFormValues {
  * manage either way, which is the point of provisioning domain logins into a local record at all.
  */
 export default function UserManagePage() {
+  const navigate = useNavigate();
   const { username: signedInAs, can } = useAuth();
   // The tenant column and the move action ride on tenant:manage: the tenant list endpoint answers
   // only that code, so without it the page would render a column it cannot fill.
@@ -324,6 +326,11 @@ export default function UserManagePage() {
         description="管理平台账号、域账号映射、角色与租户归属。当前账号的自保护规则和后端权限边界保持不变。"
         actions={
         <Space>
+          {canTenantManage && (
+            <Button icon={<AuditOutlined />} onClick={() => navigate('/users/registration-reviews')}>
+              注册审核
+            </Button>
+          )}
           <Button icon={<ReloadOutlined />} onClick={load}>
             刷新
           </Button>
@@ -402,8 +409,15 @@ export default function UserManagePage() {
           <Form.Item name="display_name" label="姓名">
             <Input placeholder="用于界面展示" />
           </Form.Item>
-          <Form.Item name="email" label="邮箱" rules={[{ type: 'email', message: '邮箱格式不正确' }]}>
-            <Input placeholder="选填" />
+          <Form.Item
+            name="email"
+            label="邮箱"
+            rules={[
+              { type: 'email', message: '邮箱格式不正确' },
+              { max: 254, message: '邮箱不能超过 254 个字符' },
+            ]}
+          >
+            <Input maxLength={254} placeholder="选填" />
           </Form.Item>
           {!editing && (
             <>

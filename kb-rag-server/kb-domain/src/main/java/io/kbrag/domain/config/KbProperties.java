@@ -768,6 +768,9 @@ public class KbProperties {
         /** Bootstrap administrator user name created on an empty database. */
         private String bootstrapUsername = "admin";
 
+        /** 匿名滑块挑战准入与图片生成舱壁。 */
+        private Captcha captcha = new Captcha();
+
         /** Corporate directory single sign on. */
         private Ldap ldap = new Ldap();
 
@@ -782,6 +785,21 @@ public class KbProperties {
 
         /** Settings shared by every browser redirect based protocol. */
         private Sso sso = new Sso();
+
+        /**
+         * 进程内滑块全局准入；多实例总量仍由共享网关负责。
+         */
+        @Getter
+        @Setter
+        @ToString
+        public static class Captcha {
+
+            /** 每个进程每分钟最多生成的滑块图片组。 */
+            private int globalIssueRateLimitPerMinute = 120;
+
+            /** 同时执行 PNG 生成的最大线程数，超过时立即拒绝。 */
+            private int maxGenerationConcurrency = 2;
+        }
 
         /**
          * Corporate directory single sign on.

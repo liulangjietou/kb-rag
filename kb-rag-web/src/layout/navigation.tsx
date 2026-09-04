@@ -10,6 +10,7 @@ import {
   BulbOutlined,
   DatabaseOutlined,
   ExperimentOutlined,
+  HomeOutlined,
   MessageOutlined,
   SafetyCertificateOutlined,
   SearchOutlined,
@@ -26,9 +27,9 @@ export interface NavEntry {
   icon: ReactNode;
   section: NavSection;
   /**
-   * Codes that admit the entry, any one of them being enough -- the same rule the server's
-   * @RequiresPermission applies. The list mirrors what the screen's endpoints actually declare, so a
-   * visible entry never opens onto a page that answers 403 on its first fetch.
+   * 允许进入菜单的权限码，任一满足即可，与服务端 @RequiresPermission 语义一致。列表必须映射
+   * 页面真实接口权限，避免可见菜单首次请求必然返回 403；空列表表示仅要求登录，例如由各组件
+   * 自行裁剪请求与内容的 /home。
    */
   anyOf: string[];
 }
@@ -41,6 +42,7 @@ export const NAV_SECTIONS: Array<{ key: NavSection; label: string }> = [
 ];
 
 export const NAV_ENTRIES: NavEntry[] = [
+  { key: '/home', icon: <HomeOutlined />, label: '首页', section: 'workspace', anyOf: [] },
   { key: '/kb', icon: <DatabaseOutlined />, label: '知识库', section: 'workspace', anyOf: [PERMISSIONS.KB_READ] },
   { key: '/search', icon: <SearchOutlined />, label: '检索调试', section: 'workspace', anyOf: [PERMISSIONS.SEARCH_DEBUG] },
   {
@@ -89,17 +91,15 @@ export const NAV_ENTRIES: NavEntry[] = [
 export const NO_ACCESS_PATH = '/no-access';
 
 export function visibleNavEntries(canAny: (codes: string[]) => boolean): NavEntry[] {
-  return NAV_ENTRIES.filter((entry) => canAny(entry.anyOf));
+  return NAV_ENTRIES.filter((entry) => entry.anyOf.length === 0 || canAny(entry.anyOf));
 }
 
 /**
- * Where to send a session that has not asked for a particular screen.
+ * 决定没有指定页面的会话落点。
  *
- * The first entry it may open, in menu order, rather than a hardcoded /kb: an account granted only
- * evaluation rights would otherwise be bounced to a knowledge base list it is not allowed to read and
- * from there back to the root, which is a redirect loop rather than a landing page. A session with
- * nothing granted gets told so instead of being spun.
+ * 首页是第一个仅要求登录的入口；最小权限账号也可使用，且每个请求和组件都按权限裁剪，
+ * 因此不会产生重定向循环或无意义的 403 探测。
  */
 export function landingPath(canAny: (codes: string[]) => boolean): string {
-  return visibleNavEntries(canAny)[0]?.key ?? NO_ACCESS_PATH;
+  return visibleNavEntries(canAny)[0]?.key ?? '/home';
 }

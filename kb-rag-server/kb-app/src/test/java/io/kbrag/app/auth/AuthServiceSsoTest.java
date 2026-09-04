@@ -71,6 +71,7 @@ class AuthServiceSsoTest {
         principalResolver = mock(PrincipalResolver.class);
         // The lock window is derived from the audit table; an empty one means nobody is locked.
         when(loginAuditMapper.selectCount(any())).thenReturn(0L);
+        when(adminUserMapper.updateById(any(AdminUser.class))).thenReturn(1);
         LoginSuccessService loginSuccessService = new LoginSuccessService(
                 adminUserMapper, loginAuditMapper, consoleSessionService, userService,
                 groupSyncService, principalResolver);

@@ -274,8 +274,15 @@ info:
 
     模型请求发出前返回 429 MODEL_QUOTA_EXCEEDED。详见 M24-CONTRACTS.md。
 
+
+    0.28.0-m26 增量：新增匿名邮箱注册三阶段端点（滑块 proof 后发码、邮箱验证码换一次性票据、
+
+    提交待审核申请）与管理员审核端点。审核必须同时具备 user:manage 和 tenant:manage，只有通过
+
+    审核的事务才创建正式账号并分配租户/角色；申请提交成功不签发登录会话。详见 M26-CONTRACTS.md。
+
     '
-  version: 0.27.0-satoken
+  version: 0.28.0-m26
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -285,6 +292,10 @@ servers:
 tags:
 - name: auth
   description: 登录（本地口令/单点登录）、改密、当前用户
+- name: registration
+  description: 匿名邮箱注册：滑块后发码、验证码换票据、提交待审核申请（M26）
+- name: registration-review
+  description: 注册申请审核：同时要求 USER_MANAGE 与 TENANT_MANAGE（M26）
 - name: rbac
   description: 权限体系：用户与角色管理、权限目录（M15，docs/M15-CONTRACTS.md §3）
 - name: tenant
@@ -535,7 +546,9 @@ paths:
       summary: OIDC 回调（M16）
       description: '免认证；验 state → code 换 token → 验 id_token（JWKS 验签 + iss/aud/exp）→ JIT
         建号（落默认租户）→ 302 到 {web-base-url}/login#sso_token={token}；失败同样 302，以
-        #sso_error={中文原因} 交付——令牌与错误都走 fragment，不进服务器日志与 Referer。'
+        #sso_error={中文原因} 交付——令牌与错误都走 fragment，不进服务器日志与 Referer。只有
+        id_token 明确携带 email_verified=true 时，email 才会作为联系邮箱并进入全局邮箱身份声明；
+        false 或缺失时忽略该 email。'
       security: []
       parameters:
       - name: code
@@ -612,6 +625,343 @@ paths:
       responses:
         '302':
           description: 重定向回控制台登录页，结果在 URL fragment
+  /api/v1/registrations/verification-code:
+    post:
+      tags:
+      - registration
+      summary: 发送注册邮箱验证码
+      description: '免认证；先原子消费与客户端 IP、User-Agent 绑定的一次性 captcha_proof，再按邮箱、
+        IP 与全局窗口限流并同步发送邮件。已占用邮箱同样进入验证单行状态机并持久化随机码 HMAC，
+        但邮件只提示直接登录、绝不交付随机验证码；公开响应保持相同结构。邮箱已有有效注册票据时，
+        新验证码 challenge 与旧票据并存，匿名发码或新码错误不会撤销旧票据。新 challenge 先落为
+        ISSUING，SMTP 成功后以 verificationId + HMAC 精确 CAS 为 DELIVERED；只有确认成功才返回 200，
+        交付尚未完成的并发请求返回 429。请求体在反序列化前受 4KB 硬上限保护。应用内 Caffeine 限流
+        是单实例兜底，多副本部署必须在共享网关或 WAF 配置原子限流。'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistrationVerificationCodeRequest'
+      responses:
+        '200':
+          description: SMTP 已成功且新码已确认为 DELIVERED，或冷却期提示邮件已成功；返回实际剩余冷却秒数
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationVerificationCodeResult'
+        '400':
+          description: 邮箱格式不合法，或 captcha_proof 缺失、无效、过期或已消费（INVALID_PARAM）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidCaptchaProof:
+                  value:
+                    code: INVALID_PARAM
+                    message: 请先完成滑块验证
+                    request_id: req-3f6a2e1c
+        '413':
+          description: 请求体超过 4KB 硬上限（PAYLOAD_TOO_LARGE）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 滑块 proof 消费、注册发码超出限流窗口，或同邮箱邮件仍在交付中（RATE_LIMITED）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: RATE_LIMITED
+                message: 操作过于频繁，请稍后重试
+                request_id: req-3f6a2e1c
+        '500':
+          description: 注册安全配置或 SMTP 未就绪，或邮件发送失败（INTERNAL_ERROR）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: INTERNAL_ERROR
+                message: 注册服务暂不可用，请联系管理员
+                request_id: req-3f6a2e1c
+  /api/v1/registrations/verify-email:
+    post:
+      tags:
+      - registration
+      summary: 校验邮箱验证码并签发注册票据
+      description: '免认证；六位验证码正确且未过期时签发 43 字符的一次性注册票据。验证码错误会原子
+        扣减剩余次数，耗尽后只清除当前 challenge；并存的有效旧票据仍可提交。新验证码成功时才原子
+        替换旧票据，使旧票据失效；处于 ISSUING、尚未确认 SMTP 交付的验证码一律不可校验。服务端只
+        持久化验证码 HMAC 与票据 SHA-256，不保存明文。请求体
+        在反序列化前受 4KB 硬上限保护。查询验证状态前按来源 IP（默认 60 次/小时）和全局（默认
+        300 次/分钟）独立限流；该 Caffeine 额度按实例生效，多副本部署必须叠加共享网关或 WAF 限流。'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRegistrationEmailRequest'
+      responses:
+        '200':
+          description: 邮箱验证成功；registration_ticket 仅在本响应出现一次
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifiedRegistrationEmailResult'
+        '400':
+          description: 参数格式错误，或验证码错误、过期、耗尽或已使用（INVALID_PARAM）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: INVALID_PARAM
+                message: 验证码无效或已过期，请重新获取
+                request_id: req-3f6a2e1c
+        '413':
+          description: 请求体超过 4KB 硬上限（PAYLOAD_TOO_LARGE）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 验证码校验超出来源 IP 或全局限流窗口（RATE_LIMITED）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: 注册安全配置未就绪（INTERNAL_ERROR）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/registrations:
+    post:
+      tags:
+      - registration
+      summary: 提交待审核注册申请
+      description: '免认证；邮箱不由请求体提交，只从加锁后的一次性 registration_ticket 恢复。
+        client_submission_id 是浏览器为一次提交生成并在网络重试间保持不变的 UUID；服务端先绑定该
+        标识与票据摘要，再在同一事务写申请并消费票据。响应丢失后的同标识/同票据重试返回原回执，
+        同标识换票据则拒绝。随机或过期票据在 BCrypt 前无锁预检，密码哈希在有界 CPU 舱壁且事务外完成。
+        成功只生成 PENDING 申请，不创建账号、不签发 token；被拒绝的邮箱重新验证后会新增一条申请事实，
+        不覆盖历史审核。请求体在反序列化前受 16KB 硬上限保护。查询票据前按来源 IP（默认 20 次/小时）
+        和全局（默认 100 次/分钟）独立限流；该 Caffeine 额度按实例生效，多副本部署必须叠加共享网关
+        或 WAF 限流。'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitRegistrationRequest'
+      responses:
+        '200':
+          description: 申请已提交或返回同一次提交的原回执；status 是当前持久状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationSubmittedResult'
+        '400':
+          description: '参数或密码策略不合法；票据无效、过期或已消费；邮箱已注册；已有 PENDING 申请；
+            或 client_submission_id 已绑定另一票据（均为 INVALID_PARAM）'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidTicket:
+                  value:
+                    code: INVALID_PARAM
+                    message: registration ticket is invalid or expired
+                    request_id: req-3f6a2e1c
+                alreadyPending:
+                  value:
+                    code: INVALID_PARAM
+                    message: registration application is already pending review
+                    request_id: req-3f6a2e1c
+        '413':
+          description: 请求体超过 16KB 硬上限（PAYLOAD_TOO_LARGE）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: 注册提交超出来源 IP/全局限流窗口，或 BCrypt CPU 舱壁已满（RATE_LIMITED）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/registration-reviews:
+    get:
+      tags:
+      - registration-review
+      summary: 注册申请分页列表（USER_MANAGE + TENANT_MANAGE）
+      description: '必须同时持有 user:manage 与 tenant:manage；按最新提交时间倒序。keyword 模糊匹配
+        申请 ID、邮箱、显示名或团队名，status 缺省时返回全部状态。'
+      parameters:
+      - name: keyword
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: status
+        in: query
+        required: false
+        schema:
+          $ref: '#/components/schemas/RegistrationStatus'
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          default: 1
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100
+          default: 20
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationReviewPageResult'
+        '400':
+          description: status、page 或 size 不合法（INVALID_PARAM）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: INVALID_PARAM
+                message: status only supports PENDING, APPROVED or REJECTED
+                request_id: req-3f6a2e1c
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 缺少 user:manage 或 tenant:manage 任一权限（FORBIDDEN）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/registration-reviews/{applicationId}/approve:
+    post:
+      tags:
+      - registration-review
+      summary: 通过注册申请（USER_MANAGE + TENANT_MANAGE）
+      description: '必须同时持有 user:manage 与 tenant:manage。在一个事务中锁定 PENDING 申请，校验
+        已启用租户与同租户角色，创建正式账号、绑定角色、CAS 标记 APPROVED 并写入审核通知 outbox；
+        任一步失败则整体回滚。子租户角色不得携带平台级权限。'
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveRegistrationRequest'
+      responses:
+        '200':
+          description: 申请已通过，正式账号已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationReviewResult'
+        '400':
+          description: 申请已审核、租户不可用、角色为空/不存在/跨租户（INVALID_PARAM）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: INVALID_PARAM
+                message: registration application has already been reviewed
+                request_id: req-3f6a2e1c
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 双权限不足，或子租户角色包含平台级权限（FORBIDDEN）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 注册申请不存在（NOT_FOUND）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/registration-reviews/{applicationId}/reject:
+    post:
+      tags:
+      - registration-review
+      summary: 拒绝注册申请（USER_MANAGE + TENANT_MANAGE）
+      description: '必须同时持有 user:manage 与 tenant:manage。在一个事务中锁定 PENDING 申请、
+        CAS 标记 REJECTED、清除密码摘要并写入审核通知 outbox；拒绝原因必填。'
+      parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+          maxLength: 64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectRegistrationRequest'
+      responses:
+        '200':
+          description: 申请已拒绝
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegistrationReviewResult'
+        '400':
+          description: 拒绝原因缺失或申请已审核（INVALID_PARAM）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: INVALID_PARAM
+                message: reject reason is required
+                request_id: req-3f6a2e1c
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: 缺少 user:manage 或 tenant:manage 任一权限（FORBIDDEN）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: 注册申请不存在（NOT_FOUND）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/users:
     get:
       tags:
@@ -5570,6 +5920,274 @@ components:
         properties:
           data:
             nullable: true
+    RegistrationStatus:
+      type: string
+      description: 注册申请状态；提交后为 PENDING，审核后只迁移到 APPROVED 或 REJECTED
+      enum:
+      - PENDING
+      - APPROVED
+      - REJECTED
+    RegistrationVerificationCodeRequest:
+      type: object
+      required:
+      - email
+      - captcha_proof
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          description: 待注册邮箱；服务端会 trim 并按小写规范化
+        captcha_proof:
+          type: string
+          minLength: 43
+          maxLength: 43
+          writeOnly: true
+          description: 由登录滑块校验端点签发、与当前请求来源绑定的一次性 proof
+    RegistrationVerificationCode:
+      type: object
+      required:
+      - resend_after_seconds
+      properties:
+        resend_after_seconds:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 60
+    RegistrationVerificationCodeResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/RegistrationVerificationCode'
+    VerifyRegistrationEmailRequest:
+      type: object
+      required:
+      - email
+      - code
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        code:
+          type: string
+          pattern: '^[0-9]{6}$'
+          writeOnly: true
+          description: 六位数字验证码；错误尝试会扣减剩余次数
+          example: '123456'
+    VerifiedRegistrationEmail:
+      type: object
+      required:
+      - registration_ticket
+      - expires_in_seconds
+      properties:
+        registration_ticket:
+          type: string
+          minLength: 43
+          maxLength: 43
+          description: 一次性注册票据，仅本响应返回明文；不得写入日志或持久化到客户端长期存储
+        expires_in_seconds:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 900
+    VerifiedRegistrationEmailResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/VerifiedRegistrationEmail'
+    SubmitRegistrationRequest:
+      type: object
+      required:
+      - registration_ticket
+      - client_submission_id
+      - display_name
+      - password
+      properties:
+        registration_ticket:
+          type: string
+          minLength: 43
+          maxLength: 43
+          writeOnly: true
+          description: 邮箱验证成功后签发的一次性票据；请求体故意不接收 email
+        client_submission_id:
+          type: string
+          format: uuid
+          minLength: 36
+          maxLength: 36
+          pattern: '(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+          description: 浏览器为一次提交生成的稳定 UUID；响应未知时必须复用，开始新的邮箱验证后再换新值
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        team_name:
+          type: string
+          nullable: true
+          maxLength: 128
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          minLength: 12
+          maxLength: 72
+          description: 至少 12 个 Unicode 字符、UTF-8 编码不超过 72 字节；不允许空白，且必须同时包含大写字母、小写字母、数字和符号
+        application_note:
+          type: string
+          nullable: true
+          maxLength: 1000
+    RegistrationSubmitted:
+      type: object
+      required:
+      - application_id
+      - email
+      - status
+      - created_at
+      properties:
+        application_id:
+          type: string
+          example: reg_a1b2c3d4e5f6g7h8i9j0
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        status:
+          $ref: '#/components/schemas/RegistrationStatus'
+        created_at:
+          type: string
+          description: ISO-8601 本地日期时间，不携带 UTC offset
+    RegistrationSubmittedResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/RegistrationSubmitted'
+    RegistrationReview:
+      type: object
+      description: 审核列表行；审核前 tenant_id/role_ids/reviewed_at/rejection_reason 为空
+      required:
+      - application_id
+      - email
+      - display_name
+      - status
+      - email_verified_at
+      - created_at
+      - role_ids
+      properties:
+        application_id:
+          type: string
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        display_name:
+          type: string
+          maxLength: 64
+        team_name:
+          type: string
+          nullable: true
+          maxLength: 128
+        application_note:
+          type: string
+          nullable: true
+          maxLength: 1000
+        status:
+          $ref: '#/components/schemas/RegistrationStatus'
+        email_verified_at:
+          type: string
+          description: ISO-8601 本地日期时间，不携带 UTC offset
+        created_at:
+          type: string
+          description: ISO-8601 本地日期时间，不携带 UTC offset
+        reviewed_at:
+          type: string
+          description: ISO-8601 本地日期时间，不携带 UTC offset
+          nullable: true
+        tenant_id:
+          type: string
+          nullable: true
+          description: APPROVED 时分配的租户业务 ID
+        role_ids:
+          type: array
+          items:
+            type: string
+          description: APPROVED 审核当时授予角色的不可变快照；账号后续调权不会改写，其他状态为空数组
+        rejection_reason:
+          type: string
+          nullable: true
+          maxLength: 500
+    RegistrationReviewPage:
+      type: object
+      required:
+      - items
+      - page
+      - size
+      - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RegistrationReview'
+        page:
+          type: integer
+          format: int64
+          minimum: 1
+        size:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 100
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+    RegistrationReviewPageResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/RegistrationReviewPage'
+    RegistrationReviewResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/RegistrationReview'
+    ApproveRegistrationRequest:
+      type: object
+      required:
+      - tenant_id
+      - role_ids
+      properties:
+        tenant_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        role_ids:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+          description: 至少一个目标租户内角色；服务端会去重并校验权限边界
+    RejectRegistrationRequest:
+      type: object
+      required:
+      - reason
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
     LoginRequest:
       type: object
       required:
@@ -5579,7 +6197,8 @@ components:
       properties:
         username:
           type: string
-          maxLength: 128
+          maxLength: 254
+          description: LOCAL 模式支持完整邮箱登录名；精确邮箱不存在时兼容旧账号的去域后缀登录
         password:
           type: string
           format: password
@@ -5897,7 +6516,7 @@ components:
           type: string
           format: email
           nullable: true
-          maxLength: 128
+          maxLength: 254
         password:
           type: string
           format: password
@@ -5926,7 +6545,7 @@ components:
           type: string
           format: email
           nullable: true
-          maxLength: 128
+          maxLength: 254
     UpdateUserStatusRequest:
       type: object
       required:

@@ -27,7 +27,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 
 /**
- * 在 Jackson 分配对象前限制公开口令登录与验证码校验请求的实际字节数。
+ * 在 Jackson 分配对象前限制公开认证与注册请求的实际字节数。
  *
  * <p>同时检查声明长度并最多读取上限加一个字节，因此 Content-Length 缺失、造假、chunked
  * 或 HTTP/2 流都不能绕过。通过的短请求才会以缓存输入流交给 DispatcherServlet。
@@ -41,9 +41,15 @@ public class LoginCaptchaBodyLimitFilter extends OncePerRequestFilter {
 
     static final int MAX_VERIFY_BODY_BYTES = 32 * 1_024;
     static final int MAX_LOGIN_BODY_BYTES = 8 * 1_024;
+    static final int MAX_REGISTRATION_CODE_BODY_BYTES = 4 * 1_024;
+    static final int MAX_REGISTRATION_VERIFY_BODY_BYTES = 4 * 1_024;
+    static final int MAX_REGISTRATION_BODY_BYTES = 16 * 1_024;
 
     private static final String VERIFY_PATH = "/api/v1/auth/captcha/verify";
     private static final String LOGIN_PATH = "/api/v1/auth/login";
+    private static final String REGISTRATION_CODE_PATH = "/api/v1/registrations/verification-code";
+    private static final String REGISTRATION_VERIFY_PATH = "/api/v1/registrations/verify-email";
+    private static final String REGISTRATION_PATH = "/api/v1/registrations";
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
@@ -75,6 +81,15 @@ public class LoginCaptchaBodyLimitFilter extends OncePerRequestFilter {
         if (LOGIN_PATH.equals(path)) {
             return MAX_LOGIN_BODY_BYTES;
         }
+        if (REGISTRATION_CODE_PATH.equals(path)) {
+            return MAX_REGISTRATION_CODE_BODY_BYTES;
+        }
+        if (REGISTRATION_VERIFY_PATH.equals(path)) {
+            return MAX_REGISTRATION_VERIFY_BODY_BYTES;
+        }
+        if (REGISTRATION_PATH.equals(path)) {
+            return MAX_REGISTRATION_BODY_BYTES;
+        }
         return -1;
     }
 
@@ -85,13 +100,13 @@ public class LoginCaptchaBodyLimitFilter extends OncePerRequestFilter {
     }
 
     private void writeTooLarge(HttpServletResponse response, int bodyLimit) throws IOException {
-        log.info("public authentication request rejected, errorCode={}, bodyLimitBytes={}",
+        log.info("public request rejected, errorCode={}, bodyLimitBytes={}",
                 ErrorCode.PAYLOAD_TOO_LARGE, bodyLimit);
         response.setStatus(ErrorCode.PAYLOAD_TOO_LARGE.getHttpStatus());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.getWriter().write(JsonUtil.toJson(
-                Result.failure(ErrorCode.PAYLOAD_TOO_LARGE, "authentication request body is too large")));
+                Result.failure(ErrorCode.PAYLOAD_TOO_LARGE, "public request body is too large")));
     }
 
     private static final class CachedBodyRequest extends HttpServletRequestWrapper {

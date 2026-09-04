@@ -324,10 +324,106 @@ class LoginCaptchaServiceTest {
         assertEquals(ErrorCode.RATE_LIMITED, limited.getErrorCode());
     }
 
+    @Test
+    void shouldRateLimitChallengeIssuanceGloballyAcrossSources() {
+        Ticker ticker = tickerNanos::get;
+        LoginCaptchaPuzzleGenerator puzzleGenerator = stubPuzzleGenerator();
+        service = new LoginCaptchaService(new LoginCaptchaRateLimiter(ticker, 2, 1),
+                new SecureRandom(), ticker, puzzleGenerator);
+
+        service.issue("10.0.0.1", USER_AGENT);
+        service.issue("10.0.0.2", USER_AGENT);
+        BizException limited = assertThrows(BizException.class,
+                () -> service.issue("10.0.0.3", USER_AGENT));
+
+        assertEquals(ErrorCode.RATE_LIMITED, limited.getErrorCode());
+    }
+
+    @Test
+    void shouldRejectConcurrentImageGenerationBeyondTheBulkhead() throws Exception {
+        Ticker ticker = tickerNanos::get;
+        CountDownLatch generationEntered = new CountDownLatch(1);
+        CountDownLatch releaseGeneration = new CountDownLatch(1);
+        LoginCaptchaPuzzleGenerator puzzleGenerator = mock(LoginCaptchaPuzzleGenerator.class);
+        when(puzzleGenerator.generate(anyString())).thenAnswer(invocation -> {
+            generationEntered.countDown();
+            if (!releaseGeneration.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("captcha generation test timed out");
+            }
+            return puzzle();
+        });
+        service = new LoginCaptchaService(new LoginCaptchaRateLimiter(ticker, 120, 1),
+                new SecureRandom(), ticker, puzzleGenerator);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<LoginCaptchaChallenge> first = executor.submit(
+                    () -> service.issue(REMOTE_ADDRESS, USER_AGENT));
+            assertTrue(generationEntered.await(5, TimeUnit.SECONDS));
+
+            BizException limited = assertThrows(BizException.class,
+                    () -> service.issue(OTHER_ADDRESS, USER_AGENT));
+            assertEquals(ErrorCode.RATE_LIMITED, limited.getErrorCode());
+
+            releaseGeneration.countDown();
+            assertNotNull(first.get(5, TimeUnit.SECONDS));
+        } finally {
+            releaseGeneration.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void shouldRejectNewChallengeWithoutEvictingTheExistingOneWhenCapacityIsFull() {
+        Ticker ticker = tickerNanos::get;
+        LoginCaptchaPuzzleGenerator puzzleGenerator = stubPuzzleGenerator();
+        service = new LoginCaptchaService(new LoginCaptchaRateLimiter(ticker),
+                new SecureRandom(), ticker, puzzleGenerator, 1, 1);
+        LoginCaptchaChallenge first = service.issue(REMOTE_ADDRESS, USER_AGENT);
+
+        BizException limited = assertThrows(BizException.class,
+                () -> service.issue(OTHER_ADDRESS, USER_AGENT));
+        advanceForVerification();
+        LoginCaptchaProof proof = service.verify(first.challengeId(), validTrack(),
+                REMOTE_ADDRESS, USER_AGENT);
+
+        assertEquals(ErrorCode.RATE_LIMITED, limited.getErrorCode());
+        org.mockito.Mockito.verify(puzzleGenerator, org.mockito.Mockito.times(1)).generate(anyString());
+        service.consume(proof.proof(), REMOTE_ADDRESS, USER_AGENT);
+    }
+
+    @Test
+    void shouldRejectNewProofWithoutEvictingTheExistingOneWhenCapacityIsFull() {
+        Ticker ticker = tickerNanos::get;
+        service = new LoginCaptchaService(new LoginCaptchaRateLimiter(ticker),
+                new SecureRandom(), ticker, stubPuzzleGenerator(), 2, 1);
+        LoginCaptchaChallenge first = service.issue(REMOTE_ADDRESS, USER_AGENT);
+        LoginCaptchaChallenge second = service.issue(OTHER_ADDRESS, USER_AGENT);
+        advanceForVerification();
+        LoginCaptchaProof firstProof = service.verify(first.challengeId(), validTrack(),
+                REMOTE_ADDRESS, USER_AGENT);
+
+        BizException limited = assertThrows(BizException.class,
+                () -> service.verify(second.challengeId(), validTrack(), OTHER_ADDRESS, USER_AGENT));
+
+        assertEquals(ErrorCode.RATE_LIMITED, limited.getErrorCode());
+        service.consume(firstProof.proof(), REMOTE_ADDRESS, USER_AGENT);
+    }
+
     private LoginCaptchaProof verifiedProof() {
         LoginCaptchaChallenge challenge = service.issue(REMOTE_ADDRESS, USER_AGENT);
         advanceForVerification();
         return service.verify(challenge.challengeId(), validTrack(), REMOTE_ADDRESS, USER_AGENT);
+    }
+
+    private LoginCaptchaPuzzleGenerator stubPuzzleGenerator() {
+        LoginCaptchaPuzzleGenerator generator = mock(LoginCaptchaPuzzleGenerator.class);
+        when(generator.generate(anyString())).thenReturn(puzzle());
+        return generator;
+    }
+
+    private LoginCaptchaPuzzleGenerator.Puzzle puzzle() {
+        return new LoginCaptchaPuzzleGenerator.Puzzle(
+                BACKGROUND_IMAGE, PIECE_IMAGE, TARGET_X, PIECE_Y);
     }
 
     private List<LoginCaptchaTrackPoint> validTrack() {

@@ -1,9 +1,11 @@
+// Author: owlzhangfq@gmail.com
 import { DownOutlined, LogoutOutlined, MenuOutlined, UserOutlined } from '@ant-design/icons';
 import { Alert, Avatar, Breadcrumb, Button, Dropdown, Layout, Menu, Tag } from 'antd';
 import type { MenuProps } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { PERMISSIONS } from '../auth/permissions';
 import BrandMark from '../components/BrandMark';
 import ThemePresetSwitcher from '../components/ThemePresetSwitcher';
 import { useModelStatus } from '../context/ModelStatusContext';
@@ -20,6 +22,7 @@ export default function MainLayout() {
   const navigate = useNavigate();
   const { displayName, username, canAny, logout } = useAuth();
   const { modelStatus, loading: modelStatusLoading } = useModelStatus();
+  const mayReadModelStatus = canAny([PERMISSIONS.SYSTEM_CONFIG, PERMISSIONS.KB_READ]);
   const [compactNavigation, setCompactNavigation] = useState(
     () => typeof window !== 'undefined' && window.matchMedia(COMPACT_NAV_QUERY).matches,
   );
@@ -135,9 +138,11 @@ export default function MainLayout() {
     };
   }, [compactNavigation, navigationOpen]);
 
-  const modelHealth = modelStatus
+  const modelHealth = !mayReadModelStatus
+    ? { statusClass: 'is-unknown', title: '模型状态按权限隐藏', detail: '当前角色未授权' }
+    : modelStatus
     ? modelStatus.embedding_configured
-      ? { statusClass: 'is-ready', title: '检索服务就绪', detail: '模型能力正常' }
+      ? { statusClass: 'is-ready', title: '混合检索已配置', detail: '可用性以请求结果为准' }
       : { statusClass: 'is-degraded', title: 'BM25 检索模式', detail: 'Embedding 尚未配置' }
     : modelStatusLoading
       ? { statusClass: 'is-pending', title: '正在检查模型', detail: '读取服务配置中' }
@@ -244,7 +249,7 @@ export default function MainLayout() {
           <div className="app-topbar__actions">
             {modelStatus && (
               <Tag className="model-health" color={modelStatus.embedding_configured ? 'success' : 'warning'}>
-                {modelStatus.embedding_configured ? '模型健康' : '检索降级'}
+                {modelStatus.embedding_configured ? 'Embedding 已配置' : 'BM25 模式'}
               </Tag>
             )}
             <ThemePresetSwitcher compact={compactNavigation} />

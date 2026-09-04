@@ -20,6 +20,6 @@ public record UpdateUserRequest(
         @Size(max = 64, message = "must be at most 64 characters")
         String displayName,
         @Email(message = "must be a valid address")
-        @Size(max = 128, message = "must be at most 128 characters")
+        @Size(max = 254, message = "must be at most 254 characters")
         String email) {
 }

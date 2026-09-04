@@ -1,5 +1,6 @@
 package io.kbrag.app.auth;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
@@ -215,9 +216,16 @@ class LoginFailureAuditTransactionTest {
         }
 
         @Bean
+        @SuppressWarnings({"rawtypes", "unchecked"})
         AdminUserMapper adminUserMapper() {
             AdminUserMapper mapper = mock(AdminUserMapper.class);
-            when(mapper.selectOne(any())).thenReturn(localUser());
+            when(mapper.selectOne(any())).thenAnswer(invocation -> {
+                LambdaQueryWrapper<AdminUser> wrapper = invocation.getArgument(0);
+                wrapper.getSqlSegment();
+                return wrapper.getParamNameValuePairs().containsValue("alice")
+                        ? localUser() : null;
+            });
+            when(mapper.updateById(any(AdminUser.class))).thenReturn(1);
             return mapper;
         }
 

@@ -3,8 +3,10 @@ package io.kbrag.app.auth;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Ticker;
+import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.HashUtil;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -24,6 +26,7 @@ import java.util.List;
  *
  * @author owlzhangfq@gmail.com
  */
+@Slf4j
 @Service
 public class LoginCaptchaService {
 
@@ -53,6 +56,10 @@ public class LoginCaptchaService {
     private final LoginCaptchaPuzzleGenerator puzzleGenerator;
     private final Cache<String, ChallengeState> challenges;
     private final Cache<String, ProofState> proofs;
+    private final Object challengeCapacityLock = new Object();
+    private final Object proofCapacityLock = new Object();
+    private final int maxChallenges;
+    private final int maxProofs;
 
     @Autowired
     public LoginCaptchaService(LoginCaptchaRateLimiter rateLimiter) {
@@ -65,18 +72,28 @@ public class LoginCaptchaService {
 
     LoginCaptchaService(LoginCaptchaRateLimiter rateLimiter, SecureRandom secureRandom, Ticker ticker,
                         LoginCaptchaPuzzleGenerator puzzleGenerator) {
+        this(rateLimiter, secureRandom, ticker, puzzleGenerator, MAX_CHALLENGES, MAX_PROOFS);
+    }
+
+    LoginCaptchaService(LoginCaptchaRateLimiter rateLimiter, SecureRandom secureRandom, Ticker ticker,
+                        LoginCaptchaPuzzleGenerator puzzleGenerator, int maxChallenges, int maxProofs) {
+        if (maxChallenges <= 0 || maxProofs <= 0) {
+            throw new IllegalArgumentException("captcha cache capacity must be positive");
+        }
         this.rateLimiter = rateLimiter;
         this.secureRandom = secureRandom;
         this.ticker = ticker;
         this.puzzleGenerator = puzzleGenerator;
+        this.maxChallenges = maxChallenges;
+        this.maxProofs = maxProofs;
         this.challenges = Caffeine.newBuilder()
                 .expireAfterWrite(CHALLENGE_TTL)
-                .maximumSize(MAX_CHALLENGES)
+                .maximumSize(maxChallenges)
                 .ticker(ticker)
                 .build();
         this.proofs = Caffeine.newBuilder()
                 .expireAfterWrite(PROOF_TTL)
-                .maximumSize(MAX_PROOFS)
+                .maximumSize(maxProofs)
                 .ticker(ticker)
                 .build();
     }
@@ -90,16 +107,24 @@ public class LoginCaptchaService {
      */
     public LoginCaptchaChallenge issue(String remoteAddress, String userAgent) {
         String fingerprint = fingerprint(remoteAddress, userAgent);
-        rateLimiter.acquire(LoginCaptchaRateLimiter.Action.ISSUE, rateLimitSubject(remoteAddress));
         String challengeId = randomToken();
-        LoginCaptchaPuzzleGenerator.Puzzle puzzle = puzzleGenerator.generate(challengeId);
-        challenges.put(digest(challengeId),
-                new ChallengeState(fingerprint, puzzle.targetX(), ticker.read()));
-        return new LoginCaptchaChallenge(challengeId, TRACK_SCALE, CHALLENGE_TTL.toSeconds(),
-                puzzle.backgroundImage(), puzzle.pieceImage(),
-                LoginCaptchaPuzzleGenerator.IMAGE_WIDTH, LoginCaptchaPuzzleGenerator.IMAGE_HEIGHT,
-                LoginCaptchaPuzzleGenerator.PIECE_WIDTH, LoginCaptchaPuzzleGenerator.PIECE_HEIGHT,
-                puzzle.pieceY());
+        String challengeDigest = digest(challengeId);
+        try (LoginCaptchaRateLimiter.IssuePermit ignored =
+                     rateLimiter.acquireIssue(rateLimitSubject(remoteAddress))) {
+            ChallengeState reservation = reserveChallenge(challengeDigest, fingerprint);
+            try {
+                LoginCaptchaPuzzleGenerator.Puzzle puzzle = puzzleGenerator.generate(challengeId);
+                completeChallenge(challengeDigest, reservation, puzzle);
+                return new LoginCaptchaChallenge(challengeId, TRACK_SCALE, CHALLENGE_TTL.toSeconds(),
+                        puzzle.backgroundImage(), puzzle.pieceImage(),
+                        LoginCaptchaPuzzleGenerator.IMAGE_WIDTH, LoginCaptchaPuzzleGenerator.IMAGE_HEIGHT,
+                        LoginCaptchaPuzzleGenerator.PIECE_WIDTH, LoginCaptchaPuzzleGenerator.PIECE_HEIGHT,
+                        puzzle.pieceY());
+            } catch (RuntimeException failure) {
+                challenges.asMap().remove(challengeDigest, reservation);
+                throw failure;
+            }
+        }
     }
 
     /**
@@ -126,7 +151,7 @@ public class LoginCaptchaService {
         validateTrack(track, challenge);
 
         String proof = randomToken();
-        proofs.put(digest(proof), new ProofState(fingerprint));
+        putProof(digest(proof), new ProofState(fingerprint));
         return new LoginCaptchaProof(proof, PROOF_TTL.toSeconds());
     }
 
@@ -185,6 +210,47 @@ public class LoginCaptchaService {
         if (Math.abs(last.x() - challenge.targetX()) > TARGET_X_TOLERANCE) {
             throw BizException.invalidParam("拼图位置不正确，请重新滑动");
         }
+    }
+
+    private ChallengeState reserveChallenge(String digest, String fingerprint) {
+        synchronized (challengeCapacityLock) {
+            challenges.cleanUp();
+            if (challenges.estimatedSize() >= maxChallenges) {
+                rejectFullCache("challenge");
+            }
+            ChallengeState reservation = new ChallengeState(fingerprint, -1, ticker.read());
+            challenges.put(digest, reservation);
+            return reservation;
+        }
+    }
+
+    private void completeChallenge(String digest, ChallengeState reservation,
+                                   LoginCaptchaPuzzleGenerator.Puzzle puzzle) {
+        synchronized (challengeCapacityLock) {
+            ChallengeState completed = new ChallengeState(
+                    reservation.fingerprint(), puzzle.targetX(), reservation.issuedAtNanos());
+            if (!challenges.asMap().replace(digest, reservation, completed)) {
+                throw new BizException(ErrorCode.RATE_LIMITED,
+                        "验证码生成超时，请重新获取");
+            }
+        }
+    }
+
+    private void putProof(String digest, ProofState state) {
+        synchronized (proofCapacityLock) {
+            proofs.cleanUp();
+            if (!proofs.asMap().containsKey(digest) && proofs.estimatedSize() >= maxProofs) {
+                rejectFullCache("proof");
+            }
+            proofs.put(digest, state);
+        }
+    }
+
+    private void rejectFullCache(String cacheName) {
+        log.info("login captcha call rejected because state cache is full, errorCode={}, cache={}",
+                ErrorCode.RATE_LIMITED, cacheName);
+        throw new BizException(ErrorCode.RATE_LIMITED,
+                "验证码请求繁忙，请稍后重试");
     }
 
     private String fingerprint(String remoteAddress, String userAgent) {
