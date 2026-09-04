@@ -117,11 +117,11 @@ sa-token:
 # 邮件开关与凭据完全由部署环境提供。enabled=true 但必需字段为空时，发送端口仍保持不可用，
 # 避免审核或验证码流程反复连接一个并不存在的 SMTP 服务。
 mail:
-  enabled: ${ADMIN_MAIL_ENABLED:false}
+  enabled: ${ADMIN_MAIL_ENABLED:true}
   host: ${ADMIN_MAIL_HOST:smtp.163.com}
   port: ${ADMIN_MAIL_PORT:465}
-  username: ${ADMIN_MAIL_USERNAME:}
-  password: ${ADMIN_MAIL_PASSWORD:}
+  username: ${ADMIN_MAIL_USERNAME:xxx@163.com}
+  password: ${ADMIN_MAIL_PASSWORD:xxxxxxxxxxx}
   from: ${ADMIN_MAIL_FROM:}
   login-url: ${ADMIN_MAIL_LOGIN_URL:}
   ssl-enabled: ${ADMIN_MAIL_SSL_ENABLED:true}
@@ -132,7 +132,7 @@ mail:
 # 注册 HMAC 密钥必须由环境显式注入；源码默认空值不会形成所有部署共享的伪密钥。
 registration:
   enabled: ${REGISTRATION_ENABLED:true}
-  code-hmac-key: ${REGISTRATION_HMAC_KEY:}
+  code-hmac-key: ${REGISTRATION_HMAC_KEY:4e45ae4cb57c47d49c229f9bbeb63d974e45ae4cb57c47d49c229f9bbeb63d97}
   code-ttl-minutes: ${REGISTRATION_CODE_TTL_MINUTES:10}
   ticket-ttl-minutes: ${REGISTRATION_TICKET_TTL_MINUTES:15}
   resend-seconds: ${REGISTRATION_RESEND_SECONDS:60}
