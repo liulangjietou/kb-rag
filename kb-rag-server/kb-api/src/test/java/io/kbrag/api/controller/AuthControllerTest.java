@@ -15,6 +15,8 @@ import io.kbrag.app.auth.ConsoleSessionService;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.enums.LoginMode;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -24,6 +26,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -108,5 +111,22 @@ class AuthControllerTest {
         verify(authService, never()).login(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void shouldAcceptAndForwardAnRfcMaximumLengthEmailLogin() {
+        String email = "l".repeat(64) + "@" + "d".repeat(63) + "."
+                + "e".repeat(63) + "." + "f".repeat(61);
+        String proof = "p".repeat(43);
+        LoginRequest request = new LoginRequest(email, "secret", "LOCAL", proof);
+        Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+        when(authService.login(email, "secret", LoginMode.LOCAL, FORWARDED_ADDRESS))
+                .thenReturn(new LoginTicket("token", false));
+
+        assertEquals(254, email.length());
+        assertTrue(validator.validate(request).isEmpty());
+        controller.login(request, servlet);
+
+        verify(authService).login(email, "secret", LoginMode.LOCAL, FORWARDED_ADDRESS);
     }
 }

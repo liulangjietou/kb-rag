@@ -30,6 +30,11 @@ public class WebMvcConfig implements WebMvcConfigurer {
             // challenge 和 verify 是登录前置步骤，各自有来源绑定、一次性消费和专用限流。
             "/api/v1/auth/captcha/challenge",
             "/api/v1/auth/captcha/verify",
+            // 邮箱注册有独立的验证码、一次性票据、限流与请求体上限，不依赖已有会话。
+            // 只列出三个精确路径，审核接口 /api/v1/registration-reviews 不在公开边界内。
+            "/api/v1/registrations/verification-code",
+            "/api/v1/registrations/verify-email",
+            "/api/v1/registrations",
             // Tells the login page whether to offer the single sign-on tab. It has to be answerable before
             // anybody is authenticated, and it discloses one boolean about the deployment's own wiring.
             "/api/v1/auth/sso-available",

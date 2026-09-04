@@ -1,0 +1,918 @@
+/* Author: owlzhangfq@gmail.com */
+
+/* 注册：三个编号阶段对应真实的身份验证、资料填写、等待审核流程。 */
+.auth-card:has(.registration-flow) {
+  width: min(548px, 100%);
+}
+
+.registration-flow h2.ant-typography {
+  font-size: 27px;
+}
+
+.registration-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0 0 26px;
+  padding: 0;
+  list-style: none;
+}
+
+.registration-steps li {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: var(--kb-color-text-tertiary);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.registration-steps li::after {
+  position: absolute;
+  z-index: 0;
+  top: 13px;
+  right: 8px;
+  left: 35px;
+  border-top: 1px solid var(--kb-color-border);
+  content: '';
+}
+
+.registration-steps li:last-child::after {
+  display: none;
+}
+
+.registration-steps li > span {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  color: var(--kb-color-text-tertiary);
+  background: var(--kb-color-surface);
+  border: 1px solid var(--kb-color-border-strong);
+  border-radius: 50%;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 10px;
+  place-items: center;
+}
+
+.registration-steps li > strong {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  padding-right: 8px;
+  background: var(--kb-color-surface-raised);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.registration-steps li.is-active {
+  color: var(--kb-color-primary-active);
+}
+
+.registration-steps li.is-active > span {
+  color: #ffffff;
+  background: var(--kb-color-primary);
+  border-color: var(--kb-color-primary);
+  box-shadow: 0 0 0 4px var(--kb-color-primary-soft);
+}
+
+.registration-steps li.is-done {
+  color: var(--kb-color-success);
+}
+
+.registration-steps li.is-done > span {
+  color: #ffffff;
+  background: var(--kb-color-success);
+  border-color: var(--kb-color-success);
+}
+
+.registration-inline-error,
+.registration-note {
+  margin-bottom: 18px;
+}
+
+.registration-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px;
+  gap: 10px;
+}
+
+.registration-code-button {
+  height: 100%;
+  min-height: 40px;
+  color: var(--kb-color-primary);
+  border-color: var(--kb-color-primary);
+}
+
+.registration-code-button:not(:disabled):hover {
+  color: var(--kb-color-primary-hover) !important;
+  background: var(--kb-color-primary-soft) !important;
+  border-color: var(--kb-color-primary-hover) !important;
+}
+
+.registration-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 14px;
+}
+
+.registration-verified-email {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 11px 13px;
+  color: var(--kb-color-success);
+  background: color-mix(in srgb, var(--kb-color-success) 8%, var(--kb-color-surface));
+  border: 1px solid color-mix(in srgb, var(--kb-color-success) 34%, var(--kb-color-border));
+  border-radius: var(--kb-radius-md);
+}
+
+.registration-verified-email > svg {
+  flex: none;
+  font-size: 22px;
+}
+
+.registration-verified-email div {
+  display: grid;
+  min-width: 0;
+}
+
+.registration-verified-email strong {
+  color: var(--kb-color-text);
+  font-size: 12px;
+}
+
+.registration-verified-email span {
+  overflow: hidden;
+  color: var(--kb-color-text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+}
+
+.registration-form-actions {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.registration-login-link {
+  margin: 20px -36px -36px;
+  padding: 14px 20px;
+  color: var(--kb-color-text-secondary);
+  background: color-mix(in srgb, var(--kb-color-surface-subtle) 42%, var(--kb-color-surface));
+  border-top: 1px solid var(--kb-color-border);
+  border-radius: 0 0 calc(var(--kb-radius-lg) - 1px) calc(var(--kb-radius-lg) - 1px);
+  font-size: 12px;
+  text-align: center;
+}
+
+.registration-login-link a {
+  color: var(--kb-color-primary);
+  font-weight: 700;
+}
+
+.registration-pending__seal {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  margin-bottom: 18px;
+  color: var(--kb-color-primary);
+  background: var(--kb-color-primary-soft);
+  border: 1px solid color-mix(in srgb, var(--kb-color-primary) 35%, var(--kb-color-border));
+  border-radius: 17px;
+  font-size: 26px;
+  place-items: center;
+}
+
+.registration-reference {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 22px 0;
+  padding: 12px 14px;
+  color: var(--kb-color-text-secondary);
+  background: color-mix(in srgb, var(--kb-color-surface-subtle) 35%, var(--kb-color-surface));
+  border: 1px dashed var(--kb-color-border-strong);
+  border-radius: var(--kb-radius-md);
+}
+
+.registration-reference code {
+  overflow-wrap: anywhere;
+  color: var(--kb-color-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.registration-timeline {
+  margin: 0 0 24px;
+  padding: 0;
+  list-style: none;
+}
+
+.registration-timeline li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 27px minmax(0, 1fr);
+  gap: 12px;
+  padding-bottom: 17px;
+}
+
+.registration-timeline li::after {
+  position: absolute;
+  top: 26px;
+  bottom: -2px;
+  left: 12px;
+  width: 1px;
+  background: var(--kb-color-border);
+  content: '';
+}
+
+.registration-timeline li:last-child::after {
+  display: none;
+}
+
+.registration-timeline li > span {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 25px;
+  height: 25px;
+  color: var(--kb-color-text-tertiary);
+  background: var(--kb-color-surface);
+  border: 1px solid var(--kb-color-border-strong);
+  border-radius: 50%;
+  font-size: 11px;
+  place-items: center;
+}
+
+.registration-timeline li.is-done > span {
+  color: #ffffff;
+  background: var(--kb-color-success);
+  border-color: var(--kb-color-success);
+}
+
+.registration-timeline li.is-current > span {
+  color: var(--kb-color-primary);
+  background: var(--kb-color-primary-soft);
+  border-color: var(--kb-color-primary);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--kb-color-primary-soft) 65%, transparent);
+}
+
+.registration-timeline strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--kb-color-text);
+  font-size: 13px;
+}
+
+.registration-timeline p {
+  margin: 2px 0 0;
+  color: var(--kb-color-text-secondary);
+  font-size: 11px;
+}
+
+.registration-primary-link {
+  display: grid;
+  min-height: 44px;
+  color: #ffffff;
+  background: var(--kb-color-primary);
+  border-radius: var(--kb-radius-md);
+  font-weight: 700;
+  text-decoration: none;
+  place-items: center;
+}
+
+.registration-primary-link:hover {
+  color: #ffffff;
+  background: var(--kb-color-primary-hover);
+}
+
+.registration-secondary-action {
+  margin: 8px 0 4px;
+}
+
+.registration-login-entry {
+  margin-top: 10px;
+  color: var(--kb-color-text-secondary);
+  font-size: 11px;
+  text-align: center;
+}
+
+.registration-login-entry a {
+  color: var(--kb-color-primary);
+  font-weight: 700;
+}
+
+/* 首页：证据轨道是核心视觉语言，其余元素保持克制。 */
+.atlas-home {
+  width: min(100%, 1540px);
+  margin: 0 auto;
+}
+
+.atlas-overline {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--kb-color-primary);
+  font-size: 11px;
+  font-weight: 760;
+  letter-spacing: 0.14em;
+}
+
+.atlas-home__heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.atlas-home__heading h1 {
+  margin: 0;
+  color: var(--kb-color-text);
+  font-size: clamp(26px, 3vw, 32px);
+  font-weight: 760;
+  letter-spacing: -0.04em;
+  line-height: 1.2;
+}
+
+.atlas-home__heading p {
+  margin: 6px 0 0;
+  color: var(--kb-color-text-secondary);
+}
+
+.atlas-home__alert {
+  margin-bottom: 18px;
+}
+
+.atlas-command {
+  position: relative;
+  margin-bottom: 20px;
+  padding: 24px 26px 22px;
+  overflow: visible;
+  color: #f7fbfa;
+  background: linear-gradient(112deg, #143d3f 0%, #0e5550 62%, var(--kb-color-primary) 100%);
+  border: 1px solid color-mix(in srgb, var(--kb-color-primary) 35%, var(--kb-color-border));
+  border-radius: var(--kb-radius-lg);
+  box-shadow: var(--kb-shadow);
+}
+
+.atlas-command::after {
+  position: absolute;
+  z-index: 0;
+  top: -118px;
+  right: -62px;
+  width: 350px;
+  height: 350px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 50%;
+  box-shadow: 0 0 0 42px rgba(255, 255, 255, 0.025), 0 0 0 92px rgba(255, 255, 255, 0.018);
+  content: '';
+  pointer-events: none;
+}
+
+.atlas-command__top {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(280px, 0.8fr) minmax(400px, 1.2fr);
+  gap: 26px;
+  align-items: end;
+}
+
+.atlas-command__top h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: clamp(21px, 2vw, 26px);
+  letter-spacing: -0.035em;
+}
+
+.atlas-command__top p {
+  margin: 7px 0 0;
+  color: #bdd4cf;
+  font-size: 12px;
+}
+
+.atlas-command-search {
+  position: relative;
+  display: flex;
+  height: 48px;
+  align-items: center;
+  gap: 11px;
+  padding: 0 13px 0 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 12px;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.atlas-command-search > input {
+  min-width: 0;
+  flex: 1;
+  color: #ffffff;
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.atlas-command-search > input::placeholder {
+  color: #c3d8d3;
+}
+
+.atlas-command-search > kbd {
+  flex: none;
+  padding: 3px 7px;
+  color: #d5e6e2;
+  background: rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 6px;
+  font-size: 10px;
+}
+
+.atlas-command-search__results {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  left: 0;
+  margin: 0;
+  padding: 6px;
+  overflow: hidden;
+  color: var(--kb-color-text);
+  background: var(--kb-color-surface-raised);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-md);
+  box-shadow: var(--kb-shadow-strong);
+  list-style: none;
+}
+
+.atlas-command-search__results button {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  color: var(--kb-color-text);
+  background: transparent;
+  border: 0;
+  border-radius: var(--kb-radius-sm);
+  text-align: left;
+}
+
+.atlas-command-search__results button:hover,
+.atlas-command-search__results button:focus-visible {
+  background: var(--kb-color-primary-soft);
+}
+
+.atlas-command-search__results span {
+  color: var(--kb-color-text-tertiary);
+  font-size: 11px;
+}
+
+.atlas-command-search__results strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atlas-evidence {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  margin-top: 24px;
+  padding-top: 13px;
+}
+
+.atlas-evidence::before {
+  position: absolute;
+  top: 23px;
+  right: 5%;
+  left: 5%;
+  height: 2px;
+  background: rgba(191, 224, 215, 0.26);
+  content: '';
+}
+
+.atlas-evidence__node {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  padding-right: 8px;
+}
+
+.atlas-evidence__node > i {
+  display: block;
+  width: 21px;
+  height: 21px;
+  margin-bottom: 8px;
+  background: #8bd3bf;
+  border: 5px solid #1c5c57;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22);
+}
+
+.atlas-evidence__node.is-warning > i {
+  background: #f2b76d;
+}
+
+.atlas-evidence__node strong,
+.atlas-evidence__node span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atlas-evidence__node strong {
+  color: #ffffff;
+  font-size: 11px;
+}
+
+.atlas-evidence__node span {
+  color: #aecbc4;
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 11px;
+}
+
+.atlas-home__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.65fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.atlas-panel {
+  min-width: 0;
+  overflow: hidden;
+  background: var(--kb-color-surface-raised);
+  border: 1px solid var(--kb-color-border);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--kb-color-text) 4%, transparent);
+}
+
+.atlas-panel__head {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--kb-color-border);
+}
+
+.atlas-panel__head h2 {
+  margin: 0;
+  color: var(--kb-color-text);
+  font-size: 14px;
+}
+
+.atlas-panel__head p {
+  margin: 2px 0 0;
+  color: var(--kb-color-text-tertiary);
+  font-size: 11px;
+}
+
+.atlas-panel__loading {
+  padding: 22px;
+}
+
+.atlas-panel__empty {
+  margin: 24px;
+}
+
+.atlas-panel__resource-error {
+  margin: 20px;
+}
+
+.atlas-work-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.atlas-work-list li:not(:last-child) {
+  border-bottom: 1px solid var(--kb-color-border);
+}
+
+.atlas-work-list button {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  width: 100%;
+  min-height: 74px;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 17px;
+  color: var(--kb-color-text);
+  background: transparent;
+  border: 0;
+  text-align: left;
+}
+
+.atlas-work-list button:hover,
+.atlas-work-list button:focus-visible {
+  background: color-mix(in srgb, var(--kb-color-primary-soft) 45%, transparent);
+}
+
+.atlas-work-list__icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  color: var(--kb-color-primary);
+  background: var(--kb-color-primary-soft);
+  border-radius: 11px;
+  place-items: center;
+}
+
+.atlas-work-list__icon.is-app {
+  color: var(--kb-color-info);
+  background: color-mix(in srgb, var(--kb-color-info) 10%, var(--kb-color-surface));
+}
+
+.atlas-work-list__copy {
+  display: grid;
+  min-width: 0;
+}
+
+.atlas-work-list__copy strong,
+.atlas-work-list__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atlas-work-list__copy strong {
+  font-size: 12px;
+}
+
+.atlas-work-list__copy small,
+.atlas-work-list__meta small {
+  color: var(--kb-color-text-tertiary);
+  font-size: 11px;
+}
+
+.atlas-work-list__meta {
+  display: grid;
+  justify-items: end;
+  gap: 3px;
+}
+
+.atlas-quick-actions__list {
+  display: grid;
+  padding: 5px 0;
+}
+
+.atlas-quick-action.ant-btn {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  width: 100%;
+  height: auto;
+  min-height: 62px;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 16px;
+  text-align: left;
+}
+
+.atlas-quick-action__icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  color: var(--kb-color-primary);
+  background: var(--kb-color-primary-soft);
+  border-radius: 9px;
+  place-items: center;
+}
+
+.atlas-quick-action > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+}
+
+.atlas-quick-action strong {
+  overflow: hidden;
+  color: var(--kb-color-text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.atlas-quick-action small {
+  overflow: hidden;
+  color: var(--kb-color-text-tertiary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+}
+
+/* 注册审核 */
+.registration-review-page__alert {
+  margin-bottom: 16px;
+}
+
+.registration-review-panel {
+  overflow: hidden;
+}
+
+.registration-review-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 360px) 150px;
+  gap: 10px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--kb-color-border);
+}
+
+.registration-applicant,
+.registration-review-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.registration-review-action-error {
+  margin-bottom: 16px;
+}
+
+.registration-applicant > span,
+.registration-review-identity > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  color: #ffffff;
+  background: var(--kb-color-primary);
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 720;
+  place-items: center;
+}
+
+.registration-applicant div,
+.registration-review-identity div {
+  display: grid;
+  min-width: 0;
+}
+
+.registration-applicant strong,
+.registration-applicant small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.registration-applicant small,
+.registration-review-identity p {
+  color: var(--kb-color-text-tertiary);
+  font-size: 11px;
+}
+
+.registration-review-identity {
+  margin-bottom: 18px;
+  padding: 14px;
+  background: var(--kb-color-surface-subtle);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-md);
+}
+
+.registration-review-identity > span {
+  width: 44px;
+  height: 44px;
+  font-size: 15px;
+}
+
+.registration-review-identity p {
+  margin: 1px 0 0;
+}
+
+.registration-approval-form {
+  margin-top: 20px;
+}
+
+.registration-permission-preview {
+  margin-bottom: 18px;
+  padding: 12px;
+  background: var(--kb-color-surface-subtle);
+  border-radius: var(--kb-radius-md);
+}
+
+.registration-permission-preview > strong {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+
+.registration-permission-preview > span {
+  color: var(--kb-color-text-tertiary);
+  font-size: 11px;
+}
+
+.registration-permission-preview > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.registration-permission-preview code {
+  padding: 3px 6px;
+  color: var(--kb-color-primary-active);
+  background: var(--kb-color-primary-soft);
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+.registration-review-drawer__actions {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+@media (max-width: 1080px) {
+  .atlas-command__top,
+  .atlas-home__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .atlas-command-search {
+    width: 100%;
+  }
+}
+
+@media (max-width: 720px) {
+  .registration-form-grid,
+  .registration-review-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .registration-steps li > strong {
+    position: absolute;
+    top: 32px;
+    left: 0;
+    padding: 0;
+    background: transparent;
+    font-size: 11px;
+  }
+
+  .registration-steps {
+    margin-bottom: 42px;
+  }
+
+  .atlas-command {
+    padding: 20px;
+    overflow: visible;
+  }
+
+  .atlas-command::after {
+    /* 桌面端的同心圆可越过卡片形成纵深；窄屏必须收回视口内，避免产生横向滚动。 */
+    right: -12px;
+  }
+
+  .atlas-evidence {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px 0;
+  }
+
+  .atlas-evidence::before {
+    display: none;
+  }
+
+  .atlas-work-list button {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .atlas-work-list__meta {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .auth-card:has(.registration-flow) {
+    padding-inline: 24px;
+  }
+
+  .registration-code-row,
+  .registration-form-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .registration-login-link {
+    margin-right: -24px;
+    margin-left: -24px;
+  }
+
+  .atlas-command-search > kbd {
+    display: none;
+  }
+
+  .atlas-evidence {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .atlas-command-search__results,
+  .registration-steps li > span {
+    animation: none;
+    transition: none;
+  }
+}

@@ -95,7 +95,7 @@ class LoginCaptchaBodyLimitFilterTest {
         filter.doFilter(unknownLength, response, chain);
 
         assertEquals(413, response.getStatus());
-        assertTrue(response.getContentAsString().contains("authentication request body is too large"));
+        assertTrue(response.getContentAsString().contains("public request body is too large"));
         assertNull(chain.getRequest());
     }
 
@@ -135,6 +135,16 @@ class LoginCaptchaBodyLimitFilterTest {
 
         assertEquals(413, response.getStatus());
         assertNull(chain.getRequest());
+    }
+
+    @Test
+    void shouldApplyIndependentLimitsToAllAnonymousRegistrationBodies() throws Exception {
+        assertRejectedRegistrationBody("/api/v1/registrations/verification-code",
+                LoginCaptchaBodyLimitFilter.MAX_REGISTRATION_CODE_BODY_BYTES);
+        assertRejectedRegistrationBody("/api/v1/registrations/verify-email",
+                LoginCaptchaBodyLimitFilter.MAX_REGISTRATION_VERIFY_BODY_BYTES);
+        assertRejectedRegistrationBody("/api/v1/registrations",
+                LoginCaptchaBodyLimitFilter.MAX_REGISTRATION_BODY_BYTES);
     }
 
     @Test
@@ -193,6 +203,42 @@ class LoginCaptchaBodyLimitFilterTest {
         assertEquals(0, controller.invocations.get());
     }
 
+    @Test
+    void shouldRejectMatrixAndEncodedRegistrationPathsThatSpringMapsToController() throws Exception {
+        AuthenticationController controller = new AuthenticationController();
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(controller)
+                .addFilters(filter)
+                .build();
+
+        mockMvc.perform(post("/api/v1/registrations/verification-code;x=1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(new byte[LoginCaptchaBodyLimitFilter.MAX_REGISTRATION_CODE_BODY_BYTES + 1]))
+                .andExpect(status().isPayloadTooLarge());
+        mockMvc.perform(post(URI.create("/api/v1/registrations/%76erify-email"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(new byte[LoginCaptchaBodyLimitFilter.MAX_REGISTRATION_VERIFY_BODY_BYTES + 1]))
+                .andExpect(status().isPayloadTooLarge());
+        mockMvc.perform(post(URI.create("/api/v1/%72egistrations"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(new byte[LoginCaptchaBodyLimitFilter.MAX_REGISTRATION_BODY_BYTES + 1]))
+                .andExpect(status().isPayloadTooLarge());
+
+        assertEquals(0, controller.invocations.get());
+    }
+
+    private void assertRejectedRegistrationBody(String path, int limit) throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
+        request.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        request.setContent(new byte[limit + 1]);
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, response, chain);
+
+        assertEquals(413, response.getStatus());
+        assertNull(chain.getRequest());
+    }
+
     private MockHttpServletRequest verifyRequest(byte[] body) {
         MockHttpServletRequest request = new MockHttpServletRequest(
                 "POST", "/api/v1/auth/captcha/verify");
@@ -213,6 +259,21 @@ class LoginCaptchaBodyLimitFilterTest {
 
         @PostMapping("/api/v1/auth/login")
         void login(@RequestBody byte[] body) {
+            invocations.incrementAndGet();
+        }
+
+        @PostMapping("/api/v1/registrations/verification-code")
+        void registrationCode(@RequestBody byte[] body) {
+            invocations.incrementAndGet();
+        }
+
+        @PostMapping("/api/v1/registrations/verify-email")
+        void registrationVerify(@RequestBody byte[] body) {
+            invocations.incrementAndGet();
+        }
+
+        @PostMapping("/api/v1/registrations")
+        void registration(@RequestBody byte[] body) {
             invocations.incrementAndGet();
         }
     }

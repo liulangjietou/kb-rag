@@ -114,7 +114,54 @@ sa-token:
   # mybatis-plus.global-config.banner）。第三方 logo 逐个堆进启动日志，会把真正要看的信息挤下去。
   # 想确认 Sa-Token 是否接管了会话，看 ConsoleSessionConfig 打的那两行 initialized / timeout aligned。
   is-print: true
+# 邮件开关与凭据完全由部署环境提供。enabled=true 但必需字段为空时，发送端口仍保持不可用，
+# 避免审核或验证码流程反复连接一个并不存在的 SMTP 服务。
+mail:
+  enabled: ${ADMIN_MAIL_ENABLED:false}
+  host: ${ADMIN_MAIL_HOST:smtp.163.com}
+  port: ${ADMIN_MAIL_PORT:465}
+  username: ${ADMIN_MAIL_USERNAME:}
+  password: ${ADMIN_MAIL_PASSWORD:}
+  from: ${ADMIN_MAIL_FROM:}
+  login-url: ${ADMIN_MAIL_LOGIN_URL:}
+  ssl-enabled: ${ADMIN_MAIL_SSL_ENABLED:true}
+  connect-timeout-ms: ${ADMIN_MAIL_CONNECT_TIMEOUT_MS:5000}
+  read-timeout-ms: ${ADMIN_MAIL_READ_TIMEOUT_MS:10000}
+  write-timeout-ms: ${ADMIN_MAIL_WRITE_TIMEOUT_MS:10000}
 
+# 注册 HMAC 密钥必须由环境显式注入；源码默认空值不会形成所有部署共享的伪密钥。
+registration:
+  enabled: ${REGISTRATION_ENABLED:true}
+  code-hmac-key: ${REGISTRATION_HMAC_KEY:}
+  code-ttl-minutes: ${REGISTRATION_CODE_TTL_MINUTES:10}
+  ticket-ttl-minutes: ${REGISTRATION_TICKET_TTL_MINUTES:15}
+  resend-seconds: ${REGISTRATION_RESEND_SECONDS:60}
+  max-attempts: ${REGISTRATION_MAX_ATTEMPTS:5}
+  # 同步 SMTP 发送位于数据库事务之外，并发上限必须低于默认 Hikari 连接池容量（10）。
+  mail-concurrency: ${REGISTRATION_MAIL_CONCURRENCY:4}
+  # BCrypt 在轻量票据预检后、数据库事务外执行；CPU 槽位耗尽时立即拒绝。
+  password-hash-concurrency: ${REGISTRATION_PASSWORD_HASH_CONCURRENCY:2}
+  email-rate-limit-per-hour: ${REGISTRATION_EMAIL_RATE_LIMIT_PER_HOUR:6}
+  ip-rate-limit-per-hour: ${REGISTRATION_IP_RATE_LIMIT_PER_HOUR:20}
+  global-rate-limit-per-minute: ${REGISTRATION_GLOBAL_RATE_LIMIT_PER_MINUTE:100}
+  verify-ip-rate-limit-per-hour: ${REGISTRATION_VERIFY_IP_RATE_LIMIT_PER_HOUR:60}
+  verify-global-rate-limit-per-minute: ${REGISTRATION_VERIFY_GLOBAL_RATE_LIMIT_PER_MINUTE:300}
+  submit-ip-rate-limit-per-hour: ${REGISTRATION_SUBMIT_IP_RATE_LIMIT_PER_HOUR:20}
+  submit-global-rate-limit-per-minute: ${REGISTRATION_SUBMIT_GLOBAL_RATE_LIMIT_PER_MINUTE:100}
+  outbox:
+    batch-size: ${REGISTRATION_OUTBOX_BATCH_SIZE:50}
+    max-retries: ${REGISTRATION_OUTBOX_MAX_RETRIES:5}
+    retry-delay-seconds: ${REGISTRATION_OUTBOX_RETRY_DELAY_SECONDS:60}
+    lease-seconds: ${REGISTRATION_OUTBOX_LEASE_SECONDS:60}
+    dispatch-interval-ms: ${REGISTRATION_OUTBOX_DISPATCH_INTERVAL_MS:5000}
+  cleanup:
+    enabled: ${REGISTRATION_CLEANUP_ENABLED:true}
+    verification-retention-hours: ${REGISTRATION_VERIFICATION_RETENTION_HOURS:24}
+    terminal-verification-retention-days: ${REGISTRATION_TERMINAL_VERIFICATION_RETENTION_DAYS:7}
+    pending-application-ttl-days: ${REGISTRATION_PENDING_APPLICATION_TTL_DAYS:30}
+    batch-size: ${REGISTRATION_CLEANUP_BATCH_SIZE:200}
+    max-batches-per-run: ${REGISTRATION_CLEANUP_MAX_BATCHES_PER_RUN:50}
+    cron: ${REGISTRATION_CLEANUP_CRON:0 15 * * * *}
 kb:
   # 易失性共享状态的存放位置，需求文档 §5 的"Redis 职责边界"落点。
   # local：控制台会话写进 MySQL，单实例部署无需 Redis，进程重启后会话仍然有效。
@@ -235,6 +282,9 @@ kb:
     max-failed-attempts: ${AUTH_MAX_FAILED_ATTEMPTS:5}
     lock-minutes: ${AUTH_LOCK_MINUTES:15}
     bootstrap-username: ${AUTH_BOOTSTRAP_USERNAME:admin}
+    captcha:
+      global-issue-rate-limit-per-minute: ${AUTH_CAPTCHA_GLOBAL_ISSUE_RATE_LIMIT_PER_MINUTE:120}
+      max-generation-concurrency: ${AUTH_CAPTCHA_MAX_GENERATION_CONCURRENCY:2}
     ldap:
       # Off by default: a deployment without a domain controller must still log in with local accounts,
       # and the console only offers the single sign on tab when this says a directory exists.

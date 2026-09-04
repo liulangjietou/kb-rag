@@ -75,7 +75,8 @@ class NimbusOidcClientTest {
     @Test
     void shouldVerifyTheIdTokenAndReadTheIdentity() throws Exception {
         tokenAnswers(idToken(claims().claim("preferred_username", "alice")
-                .claim("name", "Alice").claim("email", "alice@corp.example").build(), idpKey));
+                .claim("name", "Alice").claim("email", "alice@corp.example")
+                .claim("email_verified", true).build(), idpKey));
 
         ExternalAuthOutcome outcome = client.exchange("code-1", REDIRECT_URI);
 
@@ -83,6 +84,21 @@ class NimbusOidcClientTest {
         assertThat(outcome.identity().username()).isEqualTo("alice");
         assertThat(outcome.identity().displayName()).isEqualTo("Alice");
         assertThat(outcome.identity().email()).isEqualTo("alice@corp.example");
+    }
+
+    @Test
+    void shouldIgnoreAnEmailWhenTheIdpDoesNotConfirmItsOwnership() throws Exception {
+        tokenAnswers(idToken(claims().claim("email", "victim@corp.example")
+                .claim("email_verified", false).build(), idpKey));
+
+        ExternalAuthOutcome unverified = client.exchange("code-1", REDIRECT_URI);
+        assertThat(unverified.result()).isEqualTo(DirectoryBindResult.SUCCESS);
+        assertThat(unverified.identity().email()).isNull();
+
+        tokenAnswers(idToken(claims().claim("email", "victim@corp.example").build(), idpKey));
+        ExternalAuthOutcome missingFlag = client.exchange("code-2", REDIRECT_URI);
+        assertThat(missingFlag.result()).isEqualTo(DirectoryBindResult.SUCCESS);
+        assertThat(missingFlag.identity().email()).isNull();
     }
 
     @Test

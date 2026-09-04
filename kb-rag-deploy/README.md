@@ -148,9 +148,38 @@ containerize 与内存限制配置随后续里程碑（kb-rag-parser 仓库自�
 2. **docker-compose 专用变量**：仅供中间件容器初始化使用（如 `MYSQL_ROOT_PASSWORD`、
    各服务端口、Qdrant 专属 MinIO 凭据、备份与预检相关配置）
 
-所有密码类变量默认值均为 `CHANGE_ME_*` 占位符，**`scripts/preflight.sh` 会在启动前
-拦截仍在使用占位口令的情况**，这是本项目防御式编程的唯一拦截点（避免在
-compose 文件、应用代码、运维脚本里多处重复校验）。
+中间件初始化密码仍以 `CHANGE_ME_*` 作为必改占位符，**`scripts/preflight.sh` 会在启动前
+拦截仍在使用占位口令的情况**。可选应用能力的密钥（模型、SMTP、邮箱注册 HMAC）则默认
+留空，由各能力在唯一装配边界安全关闭；不要把任何真实密钥提交到 `.env.example` 或版本库。
+
+### 邮箱注册与管理员审核（M26）
+
+邮箱注册默认展示入口，但必须同时完成两组部署配置才可用：`REGISTRATION_HMAC_KEY` 至少为
+32 个高熵字符，且 SMTP 开关与凭据完整。可以用 `openssl rand -base64 48` 生成 HMAC 密钥，
+只把输出写入部署环境；SMTP 的 `ADMIN_MAIL_PASSWORD` 应填写供应商签发的授权码，不是邮箱网页登录
+密码。最小配置如下，完整的 TTL、限流、超时与 outbox 参数见 [`.env.example`](.env.example)：
+
+```dotenv
+REGISTRATION_HMAC_KEY=<至少32个高熵字符>
+ADMIN_MAIL_ENABLED=true
+ADMIN_MAIL_HOST=<SMTP主机>
+ADMIN_MAIL_PORT=465
+ADMIN_MAIL_USERNAME=<SMTP账号>
+ADMIN_MAIL_PASSWORD=<SMTP授权码>
+ADMIN_MAIL_FROM=
+ADMIN_MAIL_LOGIN_URL=https://<控制台域名>/login
+```
+
+`ADMIN_MAIL_FROM` 留空时回退到登录账号。默认 `REGISTRATION_HMAC_KEY`、SMTP 账号与授权码均为空，
+注册请求会失败关闭而已有账号登录不受影响；不要为了消除启动告警填入弱密钥。申请提交后不会立即创建
+账号，只有同时持有 `user:manage` 与 `tenant:manage` 的管理员选择目标租户和至少一个同租户角色并通过
+审核后，邮箱才成为登录名；登录根路径统一落到企业知识首页 `/home`。完整状态机、失败语义与升级边界见
+[`docs/M26-CONTRACTS.md`](docs/M26-CONTRACTS.md)。
+
+默认保留策略会在申请提交 30 天仍无人处理时自动关闭：同一事务清除 BCrypt 摘要、记录系统原因并写结果
+邮件 outbox；它不是管理员人工驳回，申请人可以重新验证邮箱再提交。验证码临时行按 24 小时/7 天两级
+保留规则物理清理，单轮默认容量 10,000 行，高于单实例提交入口 6,000 次/小时的理论上限。相关开关、
+批量与 cron 参数见 `.env.example`；生产不要长期关闭清理器。
 
 ## 中文分词（IK）
 

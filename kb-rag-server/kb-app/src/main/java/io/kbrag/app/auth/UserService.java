@@ -3,6 +3,7 @@ package io.kbrag.app.auth;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.constant.BuiltinRoles;
@@ -22,6 +23,7 @@ import io.kbrag.domain.service.BizIdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,17 +32,16 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Administration of console users and of the roles they hold.
+ * 管理控制台账号及其角色。
  *
- * <p>There is no self service registration. Accounts appear in exactly two ways, and both are traceable:
- * an operator holding {@code user:manage} creates one, or a corporate directory login provisions one on
- * first use. An open registration form on a knowledge base console would let anybody outside reach the
- * point where a role is all that stands between them and the content.
+ * <p>账号只能由管理员创建、已验证外部身份首次登录或邮箱注册审核通过后产生。公开注册链路
+ * 不会直接调用本服务；只有管理员原子选择租户与角色后，待审核申请才能转为已启用账号。
  *
  * @author owlzhangfq@gmail.com
  */
@@ -56,6 +57,7 @@ public class UserService {
     private static final int MIN_PASSWORD_LENGTH = 8;
 
     private final AdminUserMapper adminUserMapper;
+    private final EmailIdentityClaimService emailIdentityClaimService;
     private final UserRoleMapper userRoleMapper;
     private final RoleMapper roleMapper;
     private final TenantMapper tenantMapper;
@@ -107,7 +109,7 @@ public class UserService {
      *
      * @param username    login name, unique across local and directory accounts
      * @param displayName display label, falls back to the login name
-     * @param email       contact address, optional
+     * @param email       可选联系邮箱；与邮箱格式登录名共享全局身份命名空间
      * @param password    initial password chosen by the operator
      * @param roleIds     roles granted right away, may be empty
      * @param tenantId    owning tenant, {@code null} keeps the caller's own tenant
@@ -129,19 +131,64 @@ public class UserService {
             // it blank and the row lands in the caller's own tenant.
             user.setTenantId(requireEnabledTenant(tenantId).getTenantId());
         }
+        String normalizedEmail = emailIdentityClaimService.claimForNewUser(
+                user.getUserId(), login, email);
         user.setUsername(login);
         user.setDisplayName(displayName == null || displayName.isBlank() ? login : displayName);
-        user.setEmail(email);
+        user.setEmail(normalizedEmail);
         user.setSource(UserSource.LOCAL);
         user.setStatus(UserStatus.ENABLED);
         user.setPasswordHash(passwordEncoder.encode(password));
         // The operator knows this password, so the account is not the user's own until they rotate it.
         user.setMustChangePassword(MUST_CHANGE);
-        adminUserMapper.insert(user);
+        insertUser(user, "username already taken: " + login);
 
         replaceRoles(user, roleIds);
         log.info("user created, userId={}, username={}, roles={}", user.getUserId(), login,
                 roleIds == null ? 0 : roleIds.size());
+        return user;
+    }
+
+    /**
+     * 从已审核申请创建可登录的本地账号。
+     *
+     * <p>密码在提交申请时已 BCrypt 编码，这里只接收摘要，避免审核链路重新接触明文。租户、
+     * 角色和全局邮箱唯一性仍在本服务内再次校验，防止未来新增调用方绕过审核服务的前置检查。
+     *
+     * @param email        已验证且标准化的邮箱，同时作为完整登录名
+     * @param displayName  显示名称
+     * @param passwordHash BCrypt 摘要
+     * @param roleIds      至少一个目标租户角色
+     * @param tenantId     已启用目标租户
+     * @return 正式账号
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public AdminUser createRegisteredUser(String email, String displayName, String passwordHash,
+                                          List<String> roleIds, String tenantId) {
+        String login = normalizeUsername(email);
+        if (passwordHash == null || !passwordHash.matches("^\\$2[aby]\\$\\d{2}\\$[./A-Za-z0-9]{53}$")) {
+            throw BizException.invalidParam("registered password hash is invalid");
+        }
+        if (roleIds == null || roleIds.isEmpty()) {
+            throw BizException.invalidParam("at least one role is required");
+        }
+
+        AdminUser user = new AdminUser();
+        user.setUserId(idGenerator.userId());
+        user.setTenantId(requireEnabledTenant(tenantId).getTenantId());
+        String normalizedEmail = emailIdentityClaimService.claimForNewUser(
+                user.getUserId(), login, login);
+        user.setUsername(login);
+        user.setDisplayName(displayName == null || displayName.isBlank() ? login : displayName.trim());
+        user.setEmail(normalizedEmail);
+        user.setSource(UserSource.LOCAL);
+        user.setStatus(UserStatus.ENABLED);
+        user.setPasswordHash(passwordHash);
+        user.setMustChangePassword(NOT_REQUIRED);
+        insertUser(user, "email is already registered");
+        replaceRoles(user, roleIds);
+        log.info("approved registration account created, userId={}, roles={}",
+                user.getUserId(), roleIds.size());
         return user;
     }
 
@@ -176,7 +223,7 @@ public class UserService {
      * @param username    login name as asserted, already stripped of any domain suffix
      * @param source      external origin the account is bound to
      * @param displayName asserted display label, falls back to the login name
-     * @param email       asserted contact address, optional
+     * @param email       身份提供方声明的可选联系邮箱；格式异常时忽略，合法值进入全局身份命名空间
      * @return provisioned account
      */
     @Transactional(rollbackFor = Exception.class)
@@ -185,16 +232,18 @@ public class UserService {
         String login = normalizeUsername(username);
         AdminUser user = new AdminUser();
         user.setUserId(idGenerator.userId());
+        String normalizedEmail = emailIdentityClaimService.claimForExternalUser(
+                user.getUserId(), login, email);
         user.setUsername(login);
         user.setDisplayName(displayName == null || displayName.isBlank() ? login : displayName);
-        user.setEmail(email);
+        user.setEmail(normalizedEmail);
         user.setSource(source);
         user.setStatus(UserStatus.ENABLED);
         // No local password exists, and none is invented: a hash here would be a second credential able
         // to outlive the external account it was created for.
         user.setPasswordHash(null);
         user.setMustChangePassword(NOT_REQUIRED);
-        adminUserMapper.insert(user);
+        insertUser(user, "username or email is already registered");
 
         if (source == UserSource.LDAP && properties.getAuth().getLdap().getGroupSync().isEnabled()) {
             log.info("directory user provisioned without default role, group sync owns the role set, "
@@ -224,16 +273,20 @@ public class UserService {
      *
      * @param userId      user business id
      * @param displayName new display label
-     * @param email       new contact address
+     * @param email       新联系邮箱；与邮箱格式登录名共享全局身份命名空间
      */
     @Transactional(rollbackFor = Exception.class)
     public void update(String userId, String displayName, String email) {
         AdminUser user = requireUser(userId);
+        String oldEmail = user.getEmail();
+        String normalizedEmail = emailIdentityClaimService.claimReplacement(user.getUserId(), email);
         if (displayName != null && !displayName.isBlank()) {
             user.setDisplayName(displayName);
         }
-        user.setEmail(email);
-        adminUserMapper.updateById(user);
+        user.setEmail(normalizedEmail);
+        updateUserOrFail(user);
+        emailIdentityClaimService.releaseReplacedContact(
+                user.getUserId(), user.getUsername(), oldEmail, normalizedEmail);
         principalResolver.evict(user.getUsername());
         log.info("user updated, userId={}", userId);
     }
@@ -249,7 +302,7 @@ public class UserService {
         AdminUser user = requireUser(userId);
         requireNotSelf(user, "you cannot disable your own account");
         user.setStatus(status);
-        adminUserMapper.updateById(user);
+        updateUserOrFail(user);
         principalResolver.evict(user.getUsername());
         if (status == UserStatus.DISABLED) {
             // Suspension has to take effect now. Leaving the sessions alive would keep the account working
@@ -275,7 +328,7 @@ public class UserService {
         requirePasswordStrength(newPassword);
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setMustChangePassword(MUST_CHANGE);
-        adminUserMapper.updateById(user);
+        updateUserOrFail(user);
         consoleSessionService.revokeAll(user.getUsername());
         log.info("user password reset, userId={}", userId);
     }
@@ -314,7 +367,7 @@ public class UserService {
             throw BizException.invalidParam("account already belongs to that tenant");
         }
         user.setTenantId(tenant.getTenantId());
-        adminUserMapper.updateById(user);
+        updateUserOrFail(user);
         userRoleMapper.deleteByUserId(userId);
         // The account changes what it may see entirely; ending its sessions makes it come back
         // through login and resolve inside the new tenant.
@@ -451,6 +504,27 @@ public class UserService {
         userRoleMapper.insert(binding);
     }
 
+    private void insertUser(AdminUser user, String duplicateMessage) {
+        try {
+            if (adminUserMapper.insert(user) != 1) {
+                log.error("user insert failed, errorCode={}, userId={}",
+                        ErrorCode.INTERNAL_ERROR, user.getUserId());
+                throw new BizException(ErrorCode.INTERNAL_ERROR, "用户保存失败，请稍后重试");
+            }
+        } catch (DuplicateKeyException duplicate) {
+            throw BizException.invalidParam(duplicateMessage);
+        }
+    }
+
+    /**
+     * 统一校验用户行的乐观锁写入结果，避免后续缓存、会话或角色副作用先于持久化成功发生。
+     */
+    private void updateUserOrFail(AdminUser user) {
+        if (adminUserMapper.updateById(user) != 1) {
+            throw BizException.invalidParam("user was updated concurrently; retry");
+        }
+    }
+
     private void requirePasswordStrength(String password) {
         if (password == null || password.length() < MIN_PASSWORD_LENGTH) {
             throw BizException.invalidParam(
@@ -483,7 +557,7 @@ public class UserService {
         if (username == null || username.isBlank()) {
             throw BizException.invalidParam("username is required");
         }
-        return username.trim().toLowerCase();
+        return username.trim().toLowerCase(Locale.ROOT);
     }
 
     private AdminUser findByUsername(String username) {

@@ -30,6 +30,33 @@ tomcat-embed-core / -el / -websocket 10.1.36.
 License: Apache-2.0. No conflict with this project's Apache-2.0 license.
 
 --------------------------------------------------------------------------
+Spring Boot Mail 3.3.9, Jakarta Mail API 2.1.3 and Eclipse Angus
+--------------------------------------------------------------------------
+Components: spring-boot-starter-mail 3.3.9,
+org.springframework:spring-context-support 6.1.17,
+org.eclipse.angus:jakarta.mail 2.0.4 (the default provider jar embeds the
+Jakarta Mail API 2.1.3 classes), jakarta.activation-api 2.1.3 and
+org.eclipse.angus:angus-activation 2.0.2.
+Licenses: the Spring artifacts are Apache-2.0. Jakarta Mail API and Angus Mail
+are available under EPL-2.0 or GPL-2.0-with-Classpath-Exception; their
+published pom also identifies EDL-1.0 content. Jakarta Activation API is
+EPL-2.0 / EDL-1.0 / GPL-2.0-with-Classpath-Exception, and Angus Activation is
+EDL-1.0 (SPDX BSD-3-Clause). These exact versions and declarations were
+verified from the Maven dependency tree and the published poms plus embedded
+LICENSE/NOTICE files.
+This distribution uses the EPL-2.0 and permissive EDL/BSD options, not the GPL
+secondary option. The Apache Software Foundation classifies EPL-2.0 as a
+Category B license and permits an appropriately labelled binary-only inclusion
+in an Apache product. The mail libraries are therefore distributable with this
+Apache-2.0 service as unmodified, separately licensed nested jars; their
+LICENSE/NOTICE files remain inside those jars and no mail source is copied into
+this project's Apache-2.0 files. Corresponding source is available from
+https://github.com/eclipse-ee4j/angus-mail,
+https://github.com/jakartaee/mail-api,
+https://github.com/eclipse-ee4j/angus-activation and
+https://github.com/jakartaee/jaf-api.
+
+--------------------------------------------------------------------------
 Elasticsearch Java client 8.13.4
 --------------------------------------------------------------------------
 Components: co.elastic.clients:elasticsearch-java,

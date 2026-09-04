@@ -5,10 +5,14 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Ticker;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.config.KbProperties;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -26,14 +30,34 @@ public class LoginCaptchaRateLimiter {
 
     private static final Duration WINDOW = Duration.ofMinutes(1);
     private static final int MAX_TRACKED_BUCKETS = 30_000;
+    private static final String GLOBAL_ISSUE_SUBJECT = "global";
+    private static final int DEFAULT_GLOBAL_ISSUE_LIMIT = 120;
+    private static final int DEFAULT_GENERATION_CONCURRENCY = 2;
 
     private final Cache<BucketKey, AtomicInteger> counters;
+    private final int globalIssueLimit;
+    private final Semaphore generationBulkhead;
 
-    public LoginCaptchaRateLimiter() {
-        this(Ticker.systemTicker());
+    @Autowired
+    public LoginCaptchaRateLimiter(KbProperties properties) {
+        this(Ticker.systemTicker(),
+                properties.getAuth().getCaptcha().getGlobalIssueRateLimitPerMinute(),
+                properties.getAuth().getCaptcha().getMaxGenerationConcurrency());
     }
 
     LoginCaptchaRateLimiter(Ticker ticker) {
+        this(ticker, DEFAULT_GLOBAL_ISSUE_LIMIT, DEFAULT_GENERATION_CONCURRENCY);
+    }
+
+    LoginCaptchaRateLimiter(Ticker ticker, int globalIssueLimit, int generationConcurrency) {
+        if (globalIssueLimit <= 0) {
+            throw new IllegalArgumentException("global captcha issue limit must be positive");
+        }
+        if (generationConcurrency <= 0) {
+            throw new IllegalArgumentException("captcha generation concurrency must be positive");
+        }
+        this.globalIssueLimit = globalIssueLimit;
+        this.generationBulkhead = new Semaphore(generationConcurrency, true);
         this.counters = Caffeine.newBuilder()
                 .expireAfterWrite(WINDOW)
                 .maximumSize(MAX_TRACKED_BUCKETS)
@@ -48,9 +72,29 @@ public class LoginCaptchaRateLimiter {
      * @param subjectHash 直连地址摘要
      */
     public void acquire(Action action, String subjectHash) {
+        acquireBucket(action, subjectHash, action.maxRequestsPerWindow);
+    }
+
+    /**
+     * 为一次图片生成同时申请来源额度、进程全局额度和并发许可。
+     *
+     * <p>许可只包围 CPU 密集的 PNG 生成，不包围缓存写入或网络响应。
+     */
+    public IssuePermit acquireIssue(String subjectHash) {
+        acquireBucket(Action.ISSUE, subjectHash, Action.ISSUE.maxRequestsPerWindow);
+        acquireBucket(Action.ISSUE, GLOBAL_ISSUE_SUBJECT, globalIssueLimit);
+        if (!generationBulkhead.tryAcquire()) {
+            log.info("login captcha call rejected by generation bulkhead, errorCode={}",
+                    ErrorCode.RATE_LIMITED);
+            throw new BizException(ErrorCode.RATE_LIMITED, "验证码生成繁忙，请稍后重试");
+        }
+        return new IssuePermit(generationBulkhead);
+    }
+
+    private void acquireBucket(Action action, String subjectHash, int limit) {
         BucketKey key = new BucketKey(action, subjectHash);
         AtomicInteger counter = counters.get(key, ignored -> new AtomicInteger());
-        if (counter != null && counter.incrementAndGet() <= action.maxRequestsPerWindow) {
+        if (counter != null && counter.incrementAndGet() <= limit) {
             return;
         }
         log.info("login captcha call rejected by rate limit, errorCode={}, action={}",
@@ -72,5 +116,23 @@ public class LoginCaptchaRateLimiter {
     }
 
     private record BucketKey(Action action, String subjectHash) {
+    }
+
+    /** 一次图片生成许可。重复关闭不会错误释放额外信号量。 */
+    public static final class IssuePermit implements AutoCloseable {
+
+        private final Semaphore semaphore;
+        private final AtomicBoolean closed = new AtomicBoolean();
+
+        private IssuePermit(Semaphore semaphore) {
+            this.semaphore = semaphore;
+        }
+
+        @Override
+        public void close() {
+            if (closed.compareAndSet(false, true)) {
+                semaphore.release();
+            }
+        }
     }
 }

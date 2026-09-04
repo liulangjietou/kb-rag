@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Locale;
 
 /**
  * Console authentication: credential verification, brute force protection and audit.
@@ -73,7 +74,11 @@ public class AuthService {
      */
     @Transactional(propagation = Propagation.NEVER)
     public LoginTicket login(String username, String password, LoginMode mode, String ip) {
-        String login = normalize(username);
+        // 完整邮箱精确命中时优先作为本地登录名；否则回退到旧版去 @ 后缀语义。
+        // 锁前查询只决定规范化键，绝不把账号或密码摘要带进锁内复用。回退在 LoginAttemptGuard
+        // 前完成，使 admin@a 和 admin@b 共用 admin 的失败计数键。
+        String login = mode == LoginMode.SSO
+                ? normalizeExternalLogin(username) : resolveLocalLogin(username);
         try (LoginAttemptGuard.Permit ignored = loginAttemptGuard.acquire(login, ip)) {
             if (isLocked(login, ip)) {
                 audit(login, ip, LoginResult.ACCOUNT_LOCKED);
@@ -99,6 +104,8 @@ public class AuthService {
     }
 
     private LoginTicket loginWithLocalPassword(String username, String password, String ip) {
+        // 必须在用户名/IP guard 内重读当前行。锁前缓存实体会让排队请求在改密或停用后继续
+        // 使用旧 BCrypt 摘要，并可能签发一枚新 token。
         AdminUser user = findByUsername(username);
         boolean localAccount = user != null && !user.directoryAccount();
         String passwordHash = localAccount && user.getPasswordHash() != null
@@ -170,7 +177,7 @@ public class AuthService {
      */
     @Transactional(propagation = Propagation.NEVER)
     public LoginTicket completeExternalLogin(UserSource source, ExternalIdentity identity, String ip) {
-        String login = normalize(identity.username());
+        String login = normalizeExternalLogin(identity.username());
         if (login.isBlank()) {
             // A verified assertion naming nobody is a provider misconfiguration, not a user error,
             // but it still must not mint a session keyed on an empty name.
@@ -235,7 +242,9 @@ public class AuthService {
         }
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setMustChangePassword(NOT_REQUIRED);
-        adminUserMapper.updateById(user);
+        if (adminUserMapper.updateById(user) != 1) {
+            throw BizException.invalidParam("user was updated concurrently; retry");
+        }
         consoleSessionService.revokeAll(username);
         log.info("password changed, username={}", username);
     }
@@ -308,18 +317,30 @@ public class AuthService {
                 .last("limit 1"));
     }
 
-    /**
-     * Folds a submitted login name to the stored form.
-     *
-     * <p>Lower case, and any domain suffix the user pasted in is dropped: {@code zhang@corp.example.com}
-     * and {@code Zhang} are one person, and the suffix is re-attached by the directory adapter from
-     * configuration. Without this the same colleague would be provisioned several accounts.
-     */
-    private String normalize(String username) {
+    private String resolveLocalLogin(String username) {
+        String exactLogin = normalizeLocalLogin(username);
+        if (findByUsername(exactLogin) != null || exactLogin.indexOf('@') <= 0) {
+            return exactLogin;
+        }
+        return normalizeExternalLogin(exactLogin);
+    }
+
+    /** 本地账号统一折叠大小写，但完整保留邮箱域名。 */
+    private String normalizeLocalLogin(String username) {
         if (username == null) {
             return "";
         }
-        String trimmed = username.trim().toLowerCase();
+        return username.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * 折叠目录或外部身份的登录名，并沿用既有的去域后缀规则。
+     *
+     * <p>{@code zhang@corp.example.com} 和 {@code Zhang} 在目录中是同一个人，后缀由目录适配器
+     * 根据配置重新附加。该规则不能用于本地邮箱账号，否则会把不同邮箱错误地合并。
+     */
+    private String normalizeExternalLogin(String username) {
+        String trimmed = normalizeLocalLogin(username);
         int at = trimmed.indexOf('@');
         return at > 0 ? trimmed.substring(0, at) : trimmed;
     }

@@ -48,7 +48,9 @@ public class AdminUser extends BaseEntity {
     @TableField("display_name")
     private String displayName;
 
-    /** Contact address, display only. */
+    /**
+     * 可选联系邮箱，同时参与全局邮箱身份命名空间；只能经 UserService 的声明事务变更。
+     */
     @TableField("email")
     private String email;
 

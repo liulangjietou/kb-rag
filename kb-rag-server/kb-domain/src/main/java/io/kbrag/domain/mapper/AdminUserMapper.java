@@ -29,4 +29,17 @@ public interface AdminUserMapper extends BaseMapper<AdminUser> {
     @InterceptorIgnore(tenantLine = "true")
     @Select("SELECT * FROM t_kb_admin_user WHERE username = #{username} AND deleted = 0 LIMIT 1")
     AdminUser selectByUsernameAcrossTenants(@Param("username") String username);
+
+    /**
+     * 按联系邮箱跨租户查找存量账号。
+     *
+     * <p>公开注册入口没有租户上下文；这里显式绕过租户插件，防止申请人用已有账号的联系邮箱
+     * 再注册一个同名邮箱账号。数据库使用大小写不敏感排序规则，因此无需在 SQL 中转换列值。
+     *
+     * @param email 已标准化的邮箱
+     * @return 已占用该邮箱的账号，不存在时返回 {@code null}
+     */
+    @InterceptorIgnore(tenantLine = "true")
+    @Select("SELECT * FROM t_kb_admin_user WHERE email = #{email} AND deleted = 0 LIMIT 1")
+    AdminUser selectByEmailAcrossTenants(@Param("email") String email);
 }

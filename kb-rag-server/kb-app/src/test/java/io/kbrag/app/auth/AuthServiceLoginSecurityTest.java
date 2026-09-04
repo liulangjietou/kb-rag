@@ -26,6 +26,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -33,6 +34,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntFunction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -41,6 +43,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -57,6 +61,7 @@ class AuthServiceLoginSecurityTest {
     private TenantMapper tenantMapper;
     private BCryptPasswordEncoder passwordEncoder;
     private DirectoryAuthenticator directoryAuthenticator;
+    private ConsoleSessionService consoleSessionService;
     private final List<LoginAudit> audits = new CopyOnWriteArrayList<>();
     private final AtomicInteger countedFailures = new AtomicInteger();
     private AuthService service;
@@ -72,6 +77,7 @@ class AuthServiceLoginSecurityTest {
 
         when(loginAuditMapper.selectOne(any())).thenReturn(null);
         when(loginAuditMapper.selectCount(any())).thenAnswer(ignored -> (long) countedFailures.get());
+        when(adminUserMapper.updateById(any(AdminUser.class))).thenReturn(1);
         when(loginAuditMapper.insert(any(LoginAudit.class))).thenAnswer(invocation -> {
             LoginAudit audit = invocation.getArgument(0);
             audits.add(audit);
@@ -82,7 +88,7 @@ class AuthServiceLoginSecurityTest {
             return 1;
         });
 
-        ConsoleSessionService consoleSessionService = mock(ConsoleSessionService.class);
+        consoleSessionService = mock(ConsoleSessionService.class);
         LoginSuccessService loginSuccessService = new LoginSuccessService(
                 adminUserMapper, loginAuditMapper, consoleSessionService, mock(UserService.class),
                 mock(DirectoryGroupSyncService.class), mock(PrincipalResolver.class));
@@ -146,6 +152,154 @@ class AuthServiceLoginSecurityTest {
                 () -> service.login("alice", "pw", LoginMode.LOCAL, IP));
 
         verify(passwordEncoder, times(2)).matches("pw", AuthService.DUMMY_PASSWORD_HASH);
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void shouldPreferAnExactEmailAndKeepLegacyUsernameCompatibility() {
+        when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
+        when(adminUserMapper.selectOne(any())).thenAnswer(invocation -> {
+            LambdaQueryWrapper<AdminUser> wrapper = invocation.getArgument(0);
+            wrapper.getSqlSegment();
+            if (wrapper.getParamNameValuePairs().containsValue("person@example.com")) {
+                return user("person@example.com", UserSource.LOCAL, UserStatus.ENABLED);
+            }
+            if (wrapper.getParamNameValuePairs().containsValue("person")) {
+                return user("person", UserSource.LOCAL, UserStatus.ENABLED);
+            }
+            if (wrapper.getParamNameValuePairs().containsValue("admin")) {
+                return user("admin", UserSource.LOCAL, UserStatus.ENABLED);
+            }
+            return null;
+        });
+
+        Locale previousLocale = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+            service.login(" Person@Example.com ", "pw", LoginMode.LOCAL, IP);
+            service.login(" ADMIN ", "pw", LoginMode.LOCAL, IP);
+        } finally {
+            Locale.setDefault(previousLocale);
+        }
+
+        assertEquals("person@example.com", audits.get(0).getUsername());
+        assertEquals("admin", audits.get(1).getUsername());
+    }
+
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void shouldFoldDifferentSuffixesToOneLegacyLoginAndGuardKey() {
+        LoginAttemptGuard guard = spy(new LoginAttemptGuard(16, "registration-login-test"));
+        service = new AuthService(adminUserMapper, loginAuditMapper, tenantMapper,
+                mock(ConsoleSessionService.class), new KbProperties(), passwordEncoder, directoryAuthenticator,
+                new LoginFailureAuditService(loginAuditMapper), mock(LoginSuccessService.class), guard);
+        when(passwordEncoder.matches("pw", "hash")).thenReturn(false);
+        when(adminUserMapper.selectOne(any())).thenAnswer(invocation -> {
+            LambdaQueryWrapper<AdminUser> wrapper = invocation.getArgument(0);
+            wrapper.getSqlSegment();
+            return wrapper.getParamNameValuePairs().containsValue("admin")
+                    ? user("admin", UserSource.LOCAL, UserStatus.ENABLED) : null;
+        });
+
+        assertThrows(BizException.class,
+                () -> service.login("admin@corp-one.example", "pw", LoginMode.LOCAL, IP));
+        assertThrows(BizException.class,
+                () -> service.login("admin@corp-two.example", "pw", LoginMode.LOCAL, IP));
+
+        verify(guard, times(2)).acquire("admin", IP);
+        assertTrue(audits.stream().allMatch(audit -> "admin".equals(audit.getUsername())));
+    }
+
+    @Test
+    void shouldReloadAQueuedLocalAccountAfterPasswordRotationBeforeIssuingAToken()
+            throws Exception {
+        String email = "person@example.com";
+        LoginAttemptGuard guard = new LoginAttemptGuard(16, "queued-password-rotation-test");
+        ConsoleSessionService queuedSessionService = mock(ConsoleSessionService.class);
+        LoginSuccessService successService = mock(LoginSuccessService.class);
+        service = new AuthService(adminUserMapper, loginAuditMapper, tenantMapper,
+                queuedSessionService, new KbProperties(), passwordEncoder, directoryAuthenticator,
+                new LoginFailureAuditService(loginAuditMapper), successService, guard);
+        AdminUser beforeRotation = user(email, UserSource.LOCAL, UserStatus.ENABLED);
+        beforeRotation.setPasswordHash("old-hash");
+        AdminUser afterRotation = user(email, UserSource.LOCAL, UserStatus.ENABLED);
+        afterRotation.setPasswordHash("new-hash");
+        AtomicReference<AdminUser> persisted = new AtomicReference<>(beforeRotation);
+        CountDownLatch canonicalLookupFinished = new CountDownLatch(1);
+        when(adminUserMapper.selectOne(any())).thenAnswer(ignored -> {
+            canonicalLookupFinished.countDown();
+            return persisted.get();
+        });
+        when(passwordEncoder.matches("old-password", "old-hash")).thenReturn(true);
+        when(passwordEncoder.matches("old-password", "new-hash")).thenReturn(false);
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<String> queued;
+        try {
+            try (LoginAttemptGuard.Permit ignored = guard.acquire(email, IP)) {
+                queued = executor.submit(() -> {
+                    try {
+                        service.login(email, "old-password", LoginMode.LOCAL, IP);
+                        return "unexpected success";
+                    } catch (BizException exception) {
+                        return exception.getMessage();
+                    }
+                });
+                assertTrue(canonicalLookupFinished.await(2, TimeUnit.SECONDS));
+                persisted.set(afterRotation);
+                queuedSessionService.revokeAll(email);
+            }
+
+            assertEquals(GENERIC_FAILURE, queued.get(5, TimeUnit.SECONDS));
+        } finally {
+            executor.shutdownNow();
+        }
+
+        verify(passwordEncoder).matches("old-password", "new-hash");
+        verify(passwordEncoder, never()).matches("old-password", "old-hash");
+        verify(queuedSessionService).revokeAll(email);
+        verify(successService, never()).issueExisting(any(), anyString(), anyString());
+    }
+
+    @Test
+    void shouldUseTheCurrentAccountStatusInsideTheLoginGuard() {
+        AdminUser enabledBeforeGuard = user("alice", UserSource.LOCAL, UserStatus.ENABLED);
+        AdminUser disabledInsideGuard = user("alice", UserSource.LOCAL, UserStatus.DISABLED);
+        when(adminUserMapper.selectOne(any())).thenReturn(enabledBeforeGuard, disabledInsideGuard);
+        when(passwordEncoder.matches("pw", "hash")).thenReturn(true);
+
+        assertGenericFailure(() -> service.login("alice", "pw", LoginMode.LOCAL, IP),
+                LoginResult.ACCOUNT_DISABLED);
+    }
+
+    @Test
+    void shouldFailPasswordChangeWhenTheAccountWasUpdatedConcurrently() {
+        AdminUser user = user("alice", UserSource.LOCAL, UserStatus.ENABLED);
+        user.setPasswordHash("old-hash");
+        when(adminUserMapper.selectOne(any())).thenReturn(user);
+        when(passwordEncoder.matches("old-password", "old-hash")).thenReturn(true);
+        when(passwordEncoder.encode("new-password")).thenReturn("new-hash");
+        when(adminUserMapper.updateById(user)).thenReturn(0);
+
+        BizException exception = assertThrows(BizException.class,
+                () -> service.changePassword("alice", "old-password", "new-password"));
+
+        assertEquals("user was updated concurrently; retry", exception.getMessage());
+        verify(consoleSessionService, never()).revokeAll("alice");
+    }
+
+    @Test
+    void shouldStillStripTheDomainSuffixOnTheDirectoryDoor() {
+        when(directoryAuthenticator.available()).thenReturn(true);
+        when(adminUserMapper.selectOne(any())).thenReturn(null);
+        when(directoryAuthenticator.bind("alice", "pw"))
+                .thenReturn(DirectoryBindOutcome.failure(DirectoryBindResult.INVALID_CREDENTIALS));
+
+        assertThrows(BizException.class,
+                () -> service.login(" Alice@Corp.Example.com ", "pw", LoginMode.SSO, IP));
+
+        verify(directoryAuthenticator).bind("alice", "pw");
+        assertEquals("alice", audits.get(0).getUsername());
     }
 
     @Test
@@ -248,7 +402,6 @@ class AuthServiceLoginSecurityTest {
         assertEquals(ATTEMPT_COUNT - 5,
                 messages.stream().filter(LOCKED_FAILURE::equals).count());
         verify(passwordEncoder, times(5)).matches("bad", "hash");
-        verify(adminUserMapper, times(5)).selectOne(any());
     }
 
     private void assertGenericFailure(Runnable attempt, LoginResult expectedReason) {

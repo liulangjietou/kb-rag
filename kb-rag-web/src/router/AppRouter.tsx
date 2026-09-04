@@ -1,3 +1,4 @@
+// Author: owlzhangfq@gmail.com
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { PERMISSIONS } from '../auth/permissions';
@@ -6,8 +7,10 @@ import { ModelStatusProvider } from '../context/ModelStatusContext';
 import MainLayout from '../layout/MainLayout';
 import { NO_ACCESS_PATH, landingPath } from '../layout/navigation';
 import ChangePasswordPage from '../pages/ChangePasswordPage';
+import HomePage from '../pages/HomePage';
 import LoginPage from '../pages/LoginPage';
 import NoAccessPage from '../pages/NoAccessPage';
+import RegisterPage from '../pages/RegisterPage';
 import AppDetailPage from '../pages/apps/AppDetailPage';
 import AppListPage from '../pages/apps/AppListPage';
 import ChatDebugPage from '../pages/chat/ChatDebugPage';
@@ -19,6 +22,7 @@ import MemoryLibraryDetailPage from '../pages/memory/MemoryLibraryDetailPage';
 import MemoryLibraryListPage from '../pages/memory/MemoryLibraryListPage';
 import SearchPage from '../pages/search/SearchPage';
 import OperationAuditPage from '../pages/settings/OperationAuditPage';
+import RegistrationReviewPage from '../pages/settings/RegistrationReviewPage';
 import RoleManagePage from '../pages/settings/RoleManagePage';
 import SettingsPage from '../pages/settings/SettingsPage';
 import TenantManagePage from '../pages/settings/TenantManagePage';
@@ -33,12 +37,7 @@ function AuthenticatedShell() {
   );
 }
 
-/**
- * Sends a session that named no screen to the first one it may open.
- *
- * Not a fixed /kb: an account without kb:read would be bounced to a 403 it never asked for, and an
- * account with nothing at all would bounce forever.
- */
+/** 未指定页面的会话进入登录后首页；深链接不会经过此处。 */
 function LandingRedirect() {
   const { canAny } = useAuth();
   return <Navigate to={landingPath(canAny)} replace />;
@@ -48,6 +47,7 @@ export default function AppRouter() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
 
       <Route element={<RequireAuth />}>
         <Route path="/change-password" element={<ChangePasswordPage />} />
@@ -56,6 +56,7 @@ export default function AppRouter() {
           <Route path={NO_ACCESS_PATH} element={<NoAccessPage />} />
 
           <Route element={<AuthenticatedShell />}>
+            <Route path="/home" element={<HomePage />} />
             <Route element={<RequirePermission anyOf={[PERMISSIONS.KB_READ]} />}>
               <Route path="/kb" element={<KbListPage />} />
               <Route path="/kb/:kbId" element={<KbDetailPage />} />
@@ -82,6 +83,9 @@ export default function AppRouter() {
             </Route>
             <Route element={<RequirePermission anyOf={[PERMISSIONS.USER_MANAGE]} />}>
               <Route path="/users" element={<UserManagePage />} />
+              <Route element={<RequirePermission anyOf={[PERMISSIONS.TENANT_MANAGE]} />}>
+                <Route path="/users/registration-reviews" element={<RegistrationReviewPage />} />
+              </Route>
             </Route>
             <Route element={<RequirePermission anyOf={[PERMISSIONS.ROLE_MANAGE]} />}>
               <Route path="/roles" element={<RoleManagePage />} />
