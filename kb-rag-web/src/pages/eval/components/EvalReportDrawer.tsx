@@ -215,7 +215,7 @@ export default function EvalReportDrawer({ datasetId, runIds, onClose }: EvalRep
       open={runIds !== null}
       onClose={onClose}
       width={960}
-      destroyOnClose
+      destroyOnHidden
     >
       <Spin spinning={loading}>
         {!comparable ? (

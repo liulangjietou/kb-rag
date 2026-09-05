@@ -36,6 +36,7 @@ import type {
 import { listRoles } from '../../api/role';
 import { listTenants } from '../../api/tenant';
 import type { PageResult, RoleSummary, TenantSummary } from '../../api/types';
+import AccessNavigation from './AccessNavigation';
 import PageHeader from '../../components/PageHeader';
 import '../../styles/registration-home.css';
 
@@ -271,10 +272,11 @@ export default function RegistrationReviewPage() {
     <div className="management-page registration-review-page">
       <PageHeader
         eyebrow="ACCESS GOVERNANCE"
-        title="注册审核"
+        title="用户与审核"
         description="邮箱只证明身份，租户和角色由管理员按最小权限原则确认。"
         actions={<Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>刷新</Button>}
       />
+      <AccessNavigation canReview={true} />
 
       {catalogueError && (
         <Alert

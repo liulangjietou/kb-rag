@@ -223,7 +223,7 @@ export default function TenantManagePage() {
         confirmLoading={submitting}
         okText="保存"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<TenantFormValues> form={form} layout="vertical" onFinish={submit} preserve={false}>
           <Form.Item
@@ -253,7 +253,7 @@ export default function TenantManagePage() {
         onCancel={() => setQuotaTenant(null)}
         onOk={() => quotaForm.submit()}
         confirmLoading={submitting}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<QuotaFormValues> form={quotaForm} layout="vertical" onFinish={submitQuota} preserve={false}>
           <Form.Item

@@ -178,7 +178,7 @@ export default function EntitiesTab({ libraryId, canWrite, onChanged }: Props) {
         width={720}
         open={activeUserId !== null}
         onClose={() => setActiveUserId(null)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Tabs
           defaultActiveKey="nodes"

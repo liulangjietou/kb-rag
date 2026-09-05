@@ -120,7 +120,7 @@ export default function ModelPriceDrawer({ open, onClose }: Props) {
       width={1000}
       title="模型价格配置"
       onClose={onClose}
-      destroyOnClose
+      destroyOnHidden
       extra={<Button type="primary" onClick={openCreate}>新增价格</Button>}
     >
       <Typography.Paragraph type="secondary">
@@ -141,7 +141,7 @@ export default function ModelPriceDrawer({ open, onClose }: Props) {
         onCancel={() => setModalOpen(false)}
         onOk={() => form.submit()}
         confirmLoading={saving}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<PriceFormValues> form={form} layout="vertical" onFinish={submit} preserve={false}>
           <Space style={{ width: '100%' }} align="start">

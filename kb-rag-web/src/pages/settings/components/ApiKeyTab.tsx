@@ -198,7 +198,7 @@ export default function ApiKeyTab() {
         confirmLoading={submitting}
         okText="创建"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<CreateApiKeyFormValues> form={form} layout="vertical" initialValues={{ qps_limit: 10, scope_all: true, app_scope: [] }}>
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
@@ -227,7 +227,7 @@ export default function ApiKeyTab() {
             我已保存，关闭
           </Button>
         }
-        destroyOnClose
+        destroyOnHidden
       >
         {secretModal && (
           <Space direction="vertical" style={{ width: '100%' }}>
@@ -249,7 +249,7 @@ export default function ApiKeyTab() {
         onOk={handleSaveScope}
         okText="保存"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={scopeForm} layout="vertical">
           <Form.Item name="scope_all" label="授权全部应用" valuePropName="checked">

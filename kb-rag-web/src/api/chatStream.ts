@@ -26,15 +26,18 @@ export async function streamChat(
   headers: Record<string, string>,
   payload: Omit<ChatRequest, 'stream'>,
   handlers: ChatStreamHandlers,
+  signal?: AbortSignal,
 ): Promise<void> {
   let response: Response;
   try {
     response = await fetch(url, {
       method: 'POST',
+      signal,
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...headers },
       body: JSON.stringify({ ...payload, stream: true }),
     });
   } catch {
+    if (signal?.aborted) return;
     handlers.onError({ code: 'NETWORK_ERROR', message: '请求发送失败，请检查网络或后端服务状态' });
     return;
   }
@@ -49,7 +52,9 @@ export async function streamChat(
     return;
   }
 
+  try {
   await consumeSse(response, (evt) => {
+    if (signal?.aborted) return;
     let data: unknown;
     try {
       data = JSON.parse(evt.data);
@@ -82,4 +87,7 @@ export async function streamChat(
         break;
     }
   });
+  } catch {
+    if (!signal?.aborted) handlers.onError({ code: 'NETWORK_ERROR', message: '回答连接中断，请重试' });
+  }
 }

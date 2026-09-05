@@ -195,7 +195,7 @@ export default function MemoryKeysTab({ libraryId, canWrite }: Props) {
         confirmLoading={submitting}
         okText="签发"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<MemoryAppKeyCreateRequest> form={form} layout="vertical" initialValues={{ qps_limit: 10 }}>
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
@@ -217,7 +217,7 @@ export default function MemoryKeysTab({ libraryId, canWrite }: Props) {
             我已保存，关闭
           </Button>
         }
-        destroyOnClose
+        destroyOnHidden
       >
         {secretModal && (
           <Space direction="vertical" style={{ width: '100%' }}>

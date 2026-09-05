@@ -1,5 +1,5 @@
 import { App as AntApp, ConfigProvider } from 'antd';
-import zhCN from 'antd/locale/zh_CN';
+import zhCN from 'antd/es/locale/zh_CN';
 import { useLayoutEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
@@ -28,7 +28,7 @@ function ThemedApplication() {
   return (
     <ConfigProvider locale={zhCN} theme={antThemeConfig}>
       <AntApp>
-        <BrowserRouter>
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <AuthProvider>
             <AppRouter />
           </AuthProvider>

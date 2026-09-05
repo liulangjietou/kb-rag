@@ -82,7 +82,7 @@ export default function VisibilityDrawer({ kbId, doc, onClose, onSaved }: Visibi
       width={480}
       title={`文档可见性 - ${doc?.file_name ?? ''}`}
       onClose={onClose}
-      destroyOnClose
+      destroyOnHidden
       extra={
         <Space>
           <Button onClick={onClose}>取消</Button>

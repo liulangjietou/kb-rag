@@ -1,3 +1,5 @@
+import { useAuth } from '../../../auth/AuthContext';
+import { PERMISSIONS } from '../../../auth/permissions';
 // Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Popconfirm, Space, Table, Tooltip, Typography, message } from 'antd';
@@ -20,6 +22,8 @@ const PAGE_SIZE = 20;
  * the trash exists for -- the first DELETE already needed a confirmation on the documents tab.
  */
 export default function TrashTab({ kbId, onRestored }: TrashTabProps) {
+  const { can } = useAuth();
+  const canReview = can(PERMISSIONS.DOC_REVIEW);
   const [items, setItems] = useState<KbDocument[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -106,7 +110,7 @@ export default function TrashTab({ kbId, onRestored }: TrashTabProps) {
           {
             title: '操作',
             width: 200,
-            render: (_, record) => (
+            render: (_, record) => canReview ? (
               <Space>
                 <Button
                   size="small"
@@ -135,7 +139,7 @@ export default function TrashTab({ kbId, onRestored }: TrashTabProps) {
                   </Button>
                 </Popconfirm>
               </Space>
-            ),
+            ) : null,
           },
         ]}
       />

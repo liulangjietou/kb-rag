@@ -121,7 +121,7 @@ export default function GateCompareDrawer({ version, onClose }: GateCompareDrawe
       open={version !== null}
       onClose={onClose}
       width={880}
-      destroyOnClose
+      destroyOnHidden
     >
       <Spin spinning={loading}>
         {version && (

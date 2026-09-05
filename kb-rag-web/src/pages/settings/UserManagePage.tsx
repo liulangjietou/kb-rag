@@ -35,6 +35,7 @@ import type { ListUsersParams } from '../../api/user';
 import type { PageResult, RoleSummary, TenantSummary, UserSummary } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
+import AccessNavigation from './AccessNavigation';
 import PageHeader from '../../components/PageHeader';
 
 const EMPTY_PAGE: PageResult<UserSummary> = { items: [], page: 1, size: 10, total: 0 };
@@ -322,8 +323,8 @@ export default function UserManagePage() {
     <div className="management-page users-page">
       <PageHeader
         eyebrow="IDENTITY & ACCESS"
-        title="用户管理"
-        description="管理平台账号、域账号映射、角色与租户归属。当前账号的自保护规则和后端权限边界保持不变。"
+        title="用户与审核"
+        description="管理成员账号、注册申请、角色与租户归属。"
         actions={
         <Space>
           {canTenantManage && (
@@ -340,6 +341,7 @@ export default function UserManagePage() {
         </Space>
       }
       />
+      <AccessNavigation canReview={canTenantManage} />
       <Card className="management-panel">
       <Space className="management-filter" wrap>
         <Input.Search
@@ -395,7 +397,7 @@ export default function UserManagePage() {
         confirmLoading={submitting}
         onOk={() => userForm.submit()}
         onCancel={() => setFormOpen(false)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<UserFormValues> form={userForm} layout="vertical" onFinish={submitUser} preserve={false}>
           <Form.Item
@@ -453,7 +455,7 @@ export default function UserManagePage() {
         confirmLoading={submitting}
         onOk={() => rolesForm.submit()}
         onCancel={() => setRolesTarget(null)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={rolesForm} layout="vertical" onFinish={submitRoles} preserve={false}>
           <Form.Item name="role_ids" label="角色" extra="保存的是完整集合，未勾选的角色将被收回">
@@ -470,7 +472,7 @@ export default function UserManagePage() {
         confirmLoading={submitting}
         onOk={() => resetForm.submit()}
         onCancel={() => setResetTarget(null)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={resetForm} layout="vertical" onFinish={submitReset} preserve={false}>
           <Form.Item
@@ -495,7 +497,7 @@ export default function UserManagePage() {
         confirmLoading={submitting}
         onOk={() => moveForm.submit()}
         onCancel={() => setMoveTarget(null)}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={moveForm} layout="vertical" onFinish={submitMove} preserve={false}>
           <Form.Item

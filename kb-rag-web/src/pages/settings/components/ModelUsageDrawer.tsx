@@ -124,7 +124,7 @@ export default function ModelUsageDrawer({ tenant, onClose }: Props) {
       title={tenant ? `模型用量 - ${tenant.name}` : '模型用量'}
       width={1100}
       onClose={onClose}
-      destroyOnClose
+      destroyOnHidden
       extra={(
         <Space>
           <Typography.Text type="secondary">月份（UTC+8）</Typography.Text>

@@ -143,7 +143,7 @@ export default function IkDictTab() {
         confirmLoading={submitting}
         okText="新增"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<CreateIkDictFormValues> form={form} layout="vertical" initialValues={{ dict_type: 'EXT' }}>
           <Form.Item name="word" label="词" rules={[{ required: true, message: '请输入词条内容' }]}>

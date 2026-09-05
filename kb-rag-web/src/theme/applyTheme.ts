@@ -5,6 +5,7 @@ type ThemeCssVariable = `--kb-${string}`;
 function paletteToCssVariables(palette: ThemePalette): Readonly<Record<ThemeCssVariable, string>> {
   return {
     '--kb-color-primary': palette.primary,
+    '--kb-color-primary-text': palette.primaryText,
     '--kb-color-primary-hover': palette.primaryHover,
     '--kb-color-primary-active': palette.primaryActive,
     '--kb-color-primary-soft': palette.primarySoft,

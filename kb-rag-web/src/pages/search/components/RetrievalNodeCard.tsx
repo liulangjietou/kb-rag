@@ -23,6 +23,7 @@ interface RetrievalNodeCardProps {
    */
   feedback?: RetrievalVerdict | null;
   onFeedback?: (verdict: RetrievalVerdict) => void;
+  onInspect?: () => void;
 }
 
 /** metadata keys shown as "各路原始分/归一化分/fused 分/rerank 分" tags, in display order. */
@@ -63,6 +64,7 @@ export default function RetrievalNodeCard({
   onSelectChange,
   feedback,
   onFeedback,
+  onInspect,
 }: RetrievalNodeCardProps) {
   const scoreTypeMeta = metaOf(SCORE_TYPE_META, node.score_type);
   const sourceMeta = metaOf(RETRIEVAL_SOURCE_META, node.retrieval_source);
@@ -75,7 +77,7 @@ export default function RetrievalNodeCard({
     <Card className={`retrieval-result-card${selected ? ' is-selected' : ''}`} size="small">
       <Space className="retrieval-result-card__signals" wrap>
         {onSelectChange && (
-          <Checkbox checked={!!selected} onChange={(e) => onSelectChange(e.target.checked)} />
+          <Checkbox aria-label={`选择第 ${rank} 条检索结果`} checked={!!selected} onChange={(e) => onSelectChange(e.target.checked)} />
         )}
         <Tag>#{rank}</Tag>
         <Tag color="blue">score: {formatScore(node.score)}</Tag>
@@ -175,6 +177,7 @@ export default function RetrievalNodeCard({
       <Typography.Text className="retrieval-result-card__identity" type="secondary">
         doc_id: {node.doc_id} · chunk_id: {node.chunk_id}
       </Typography.Text>
+      {onInspect && <Button type="link" size="small" onClick={onInspect}>查看命中证据</Button>}
       {children.length > 0 && (
         <Collapse
           size="small"

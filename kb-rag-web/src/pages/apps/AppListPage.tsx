@@ -1,12 +1,13 @@
 // Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useState } from 'react';
-import { PlusOutlined } from '@ant-design/icons';
-import { Button, Card, Col, Empty, Popconfirm, Row, Spin, Typography, message } from 'antd';
+import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { Button, Card, Col, Empty, Input, Row, Spin, Tag, Typography, message } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { deleteApp, listApps } from '../../api/app';
 import type { KbApp } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
+import ResourceMenu from '../../components/ResourceMenu';
 import PageHeader from '../../components/PageHeader';
 import CreateAppModal from './components/CreateAppModal';
 import EditAppModal from './components/EditAppModal';
@@ -14,6 +15,7 @@ import EditAppModal from './components/EditAppModal';
 /** 应用中心顶级菜单落点：应用列表 + 新建（M4c-CONTRACTS.md section 4）. */
 export default function AppListPage() {
   const [apps, setApps] = useState<KbApp[]>([]);
+  const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(true);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingApp, setEditingApp] = useState<KbApp | null>(null);
@@ -42,6 +44,10 @@ export default function AppListPage() {
     loadApps();
   };
 
+  const visibleResources = apps.filter((app) =>
+    `${app.name} ${app.description ?? ''}`.toLocaleLowerCase().includes(keyword.trim().toLocaleLowerCase()),
+  );
+
   return (
     <div className="catalog-eval-page catalog-list-page">
       <PageHeader
@@ -57,6 +63,17 @@ export default function AppListPage() {
         }
       />
 
+      <div className="catalog-filter-bar">
+        <Input
+          allowClear
+          prefix={<SearchOutlined />}
+          aria-label="搜索应用"
+          placeholder="按名称或描述搜索"
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
+        />
+        <Typography.Text type="secondary">共 {apps.length} 个应用</Typography.Text>
+      </div>
       <Spin spinning={loading}>
         {!loading && apps.length === 0 ? (
           <Empty
@@ -71,54 +88,42 @@ export default function AppListPage() {
             )}
           </Empty>
         ) : (
-          <Row gutter={[16, 16]}>
-            {apps.map((app) => (
-              <Col key={app.app_id} xs={24} sm={12} md={8} lg={6}>
-                <Card
-                  hoverable
-                  className="catalog-resource-card"
-                  title={app.name}
-                  actions={[
-                    <Button key="detail" type="text" size="small" onClick={() => navigate(`/apps/${app.app_id}`)}>
-                      查看详情
-                    </Button>,
-                    ...(canWrite
-                      ? [
-                          <Button
-                            key="edit"
-                            type="text"
-                            size="small"
-                            onClick={() => setEditingApp(app)}
-                          >
-                            编辑
-                          </Button>,
-                          <Popconfirm
-                            key="delete"
-                            title="确认删除该应用？"
-                            description="删除后其下全部版本与配置将一并清理，此操作不可恢复"
-                            okText="删除"
-                            okType="danger"
-                            cancelText="取消"
-                            onConfirm={() => handleDelete(app.app_id)}
-                          >
-                            <Button type="text" size="small" danger>
-                              删除
-                            </Button>
-                          </Popconfirm>,
-                        ]
-                      : []),
-                  ]}
-                >
-                  <Typography.Text className="catalog-resource-card__id" type="secondary">
-                    {app.app_id}
-                  </Typography.Text>
-                  <Typography.Paragraph ellipsis={{ rows: 2 }} type="secondary">
-                    {app.description || '暂无描述'}
-                  </Typography.Paragraph>
-                </Card>
-              </Col>
-            ))}
-          </Row>
+          <>
+            <Row gutter={[16, 16]}>
+              {visibleResources.map((app) => (
+                <Col key={app.app_id} xs={24} sm={12} xl={8} xxl={6}>
+                  <Card
+                    hoverable
+                    className="catalog-resource-card"
+                    title={app.name}
+                    extra={
+                      <ResourceMenu
+                        name={app.name}
+                        onEdit={canWrite ? () => setEditingApp(app) : undefined}
+                        onDelete={canWrite ? () => handleDelete(app.app_id) : undefined}
+                        deleteDescription="删除后全部版本与配置将一并清理，此操作不可恢复。"
+                      />
+                    }
+                    actions={[
+                      <Button key="detail" type="text" onClick={() => navigate(`/apps/${app.app_id}`)}>
+                        打开应用
+                      </Button>,
+                    ]}
+                  >
+                    <Tag color={app.released_version_id ? 'success' : 'default'}>
+                      {app.released_version_id ? `已发布 ${app.released_version ?? ''}` : '尚未发布'}
+                    </Tag>
+                    <Typography.Paragraph ellipsis={{ rows: 2 }} type="secondary">
+                      {app.description || '暂无描述'}
+                    </Typography.Paragraph>
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+            {!loading && visibleResources.length === 0 && (
+              <Empty description="没有匹配的资源，请调整搜索条件" />
+            )}
+          </>
         )}
       </Spin>
 

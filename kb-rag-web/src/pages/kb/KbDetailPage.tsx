@@ -5,7 +5,7 @@ import {
   CheckOutlined,
   DeleteOutlined,
   InboxOutlined,
-  MessageOutlined,
+  PlusOutlined,
   ReloadOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
@@ -15,11 +15,9 @@ import {
   Popconfirm,
   Progress,
   Space,
-  Switch,
-  Table,
+  Drawer,
+  Descriptions,
   Tabs,
-  Tag,
-  Tooltip,
   Typography,
   Upload,
   message,
@@ -43,13 +41,13 @@ import {
   rebuildKb,
   updateKbGovernance,
 } from '../../api/kb';
-import { PUBLISH_STATUS_META } from '../../api/types';
 import type { KbDocument, KnowledgeBase, RebuildStatus } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
 import PageHeader from '../../components/PageHeader';
-import { formatFileSize } from '../../utils/format';
-import { PROCESS_STATUS_META, metaOf } from '../../utils/statusMeta';
+import DocumentActions from './components/DocumentActions';
+import DocumentList from './components/DocumentList';
+import KbSettingsDrawer from './components/KbSettingsDrawer';
 import ChatImportWizard from './components/ChatImportWizard';
 import ChunkDrawer from './components/ChunkDrawer';
 import ExternalSourceTab from './components/ExternalSourceTab';
@@ -74,7 +72,6 @@ const POLL_INTERVAL_MS = 3000;
 // 可独立于 DocumentController 的 DEFAULT_PAGE_SIZE 设置；取 10 是控制台列表的默认观感，可选
 // 10/20/30/50 均在服务端 MAX_PAGE_SIZE(200) 之内。
 const DEFAULT_DOC_PAGE_SIZE = 10;
-const DOC_PAGE_SIZE_OPTIONS = ['10', '20', '30', '50'];
 
 export default function KbDetailPage() {
   const { kbId } = useParams<{ kbId: string }>();
@@ -82,6 +79,13 @@ export default function KbDetailPage() {
   const { can } = useAuth();
   // M16: the visibility editor writes through a doc:review endpoint, so only reviewers get it.
   const canDocReview = can(PERMISSIONS.DOC_REVIEW);
+  const canDocWrite = can(PERMISSIONS.DOC_WRITE);
+  const canKbWrite = can(PERMISSIONS.KB_WRITE);
+  const canFeedback = can(PERMISSIONS.FEEDBACK_MANAGE);
+  const canInsight = canFeedback || can(PERMISSIONS.AUDIT_READ);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [reviewDoc, setReviewDoc] = useState<KbDocument | null>(null);
   const [kb, setKb] = useState<KnowledgeBase | null>(null);
   const [documents, setDocuments] = useState<KbDocument[]>([]);
   const [docPage, setDocPage] = useState(1);
@@ -129,31 +133,43 @@ export default function KbDetailPage() {
    */
   const docPageRef = useRef(1);
   const docPageSizeRef = useRef(DEFAULT_DOC_PAGE_SIZE);
+  const docRequestSequence = useRef(0);
 
-  const loadDocuments = useCallback(async (page?: number, size?: number) => {
-    if (!kbId) return;
-    const targetPage = page ?? docPageRef.current;
-    const targetSize = size ?? docPageSizeRef.current;
-    const result = await listDocuments(kbId, { page: targetPage, size: targetSize });
-    // 删掉末页最后一条后该页会空掉，此时按 total 直接跳到真正的末页——逐页回退在页码
-    // 远超范围时会递归几十次，而服务端对越界页码只是返回空列表、并不纠正 page
-    const lastPage = Math.max(1, Math.ceil(result.total / targetSize));
-    if (result.items.length === 0 && targetPage > lastPage) {
-      await loadDocuments(lastPage, targetSize);
-      return;
-    }
-    setDocuments(result.items);
-    setDocTotal(result.total);
-    docPageRef.current = result.page;
-    docPageSizeRef.current = result.size;
-    setDocPage(result.page);
-    setDocPageSize(result.size);
-  }, [kbId]);
+  const loadDocuments = useCallback(
+    async (page?: number, size?: number) => {
+      if (!kbId) return;
+      const targetPage = page ?? docPageRef.current;
+      const targetSize = size ?? docPageSizeRef.current;
+      const sequence = ++docRequestSequence.current;
+      // 翻页意图立即供轮询读取；旧页的慢响应不能覆盖新页或恢复旧页勾选。
+      docPageRef.current = targetPage;
+      docPageSizeRef.current = targetSize;
+      const result = await listDocuments(kbId, { page: targetPage, size: targetSize });
+      if (sequence !== docRequestSequence.current) return;
+      // 删掉末页最后一条后该页会空掉，此时按 total 直接跳到真正的末页——逐页回退在页码
+      // 远超范围时会递归几十次，而服务端对越界页码只是返回空列表、并不纠正 page
+      const lastPage = Math.max(1, Math.ceil(result.total / targetSize));
+      if (result.items.length === 0 && targetPage > lastPage) {
+        await loadDocuments(lastPage, targetSize);
+        return;
+      }
+      setDocuments(result.items);
+      setDocTotal(result.total);
+      docPageRef.current = result.page;
+      docPageSizeRef.current = result.size;
+      setDocPage(result.page);
+      setDocPageSize(result.size);
+    },
+    [kbId],
+  );
 
   useEffect(() => {
     if (!kbId) return;
     setLoading(true);
     Promise.all([loadKb(), loadDocuments(), loadRebuildStatus()]).finally(() => setLoading(false));
+    return () => {
+      docRequestSequence.current += 1;
+    };
   }, [kbId, loadKb, loadDocuments, loadRebuildStatus]);
 
   useEffect(() => {
@@ -295,7 +311,11 @@ export default function KbDetailPage() {
     setGovernanceSaving(true);
     try {
       await updateKbGovernance(kbId, checked);
-      message.success(checked ? '已开启审核：之后上传的新文档需审核通过后才参与检索' : '已关闭审核：之后上传的新文档直接发布');
+      message.success(
+        checked
+          ? '已开启审核：之后上传的新文档需审核通过后才参与检索'
+          : '已关闭审核：之后上传的新文档直接发布',
+      );
       loadKb();
     } finally {
       setGovernanceSaving(false);
@@ -395,30 +415,27 @@ export default function KbDetailPage() {
         title={kb?.name ?? '知识库详情'}
         description={kb?.description || '管理文档生命周期、索引策略、知识图谱与检索质量。'}
         before={
-          <Button className="page-back-button" type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/kb')}>
+          <Button
+            className="page-back-button"
+            type="text"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate('/kb')}
+          >
             返回知识库
           </Button>
         }
         actions={
           <Space className="kb-detail-actions" wrap>
-            <Tooltip title="开启后，之后上传的新文档默认为草稿，需提交审核并通过后才参与检索；已有文档不受影响">
-              <Space className="kb-review-toggle" size={6}>
-                <Typography.Text type="secondary">新文档需审核</Typography.Text>
-                <Switch
-                  size="small"
-                  checked={kb?.review_required ?? false}
-                  loading={governanceSaving}
-                  aria-label="新文档需审核"
-                  onChange={handleGovernanceToggle}
-                />
-              </Space>
-            </Tooltip>
-            <Button icon={<MessageOutlined />} onClick={() => setChatImportOpen(true)}>
-              导入聊天记录
-            </Button>
-            <Button icon={<SettingOutlined />} onClick={() => setIndexConfigOpen(true)}>
-              索引配置
-            </Button>
+            {canKbWrite && (
+              <Button icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)}>
+                知识库设置
+              </Button>
+            )}
+            {canDocWrite && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setUploadOpen(true)}>
+                添加文档
+              </Button>
+            )}
           </Space>
         }
       />
@@ -428,7 +445,7 @@ export default function KbDetailPage() {
         items={[
           {
             key: 'documents',
-            label: '文档管理',
+            label: `文档${loading ? '' : `（${docTotal}）`}`,
             children: (
               <>
                 {staleCount > 0 && (
@@ -460,15 +477,17 @@ export default function KbDetailPage() {
                       )
                     }
                     action={
-                      <Button
-                        size="small"
-                        type="primary"
-                        loading={rebuildSubmitting || rebuildInProgress}
-                        disabled={rebuildSubmitting || rebuildInProgress}
-                        onClick={handleRebuildStale}
-                      >
-                        {rebuildInProgress ? '重建中' : '按新配置重建'}
-                      </Button>
+                      canKbWrite && (
+                        <Button
+                          size="small"
+                          type="primary"
+                          loading={rebuildSubmitting || rebuildInProgress}
+                          disabled={rebuildSubmitting || rebuildInProgress}
+                          onClick={handleRebuildStale}
+                        >
+                          {rebuildInProgress ? '重建中' : '按新配置重建'}
+                        </Button>
+                      )
                     }
                     style={{ marginBottom: 16 }}
                   />
@@ -481,32 +500,26 @@ export default function KbDetailPage() {
                     message={`${pendingConfirmDocs.length} 篇文档待预览确认`}
                     description="已开启解析预览确认，文档清洗完成后会暂停在此状态；可逐篇预览后确认，或直接批量确认全部"
                     action={
-                      <Button
-                        size="small"
-                        type="primary"
-                        icon={<CheckOutlined />}
-                        loading={batchConfirming}
-                        onClick={handleBatchConfirm}
-                      >
-                        批量确认
-                        {selectedPendingConfirmIds.length > 0 ? `（${selectedPendingConfirmIds.length}）` : '（全部）'}
-                      </Button>
+                      canDocWrite && (
+                        <Button
+                          size="small"
+                          type="primary"
+                          icon={<CheckOutlined />}
+                          loading={batchConfirming}
+                          onClick={handleBatchConfirm}
+                        >
+                          批量确认
+                          {selectedPendingConfirmIds.length > 0
+                            ? `（${selectedPendingConfirmIds.length}）`
+                            : '（全部）'}
+                        </Button>
+                      )
                     }
                     style={{ marginBottom: 16 }}
                   />
                 )}
 
-                <Upload.Dragger {...uploadProps} className="document-upload-zone">
-                  <p className="ant-upload-drag-icon">
-                    <InboxOutlined />
-                  </p>
-                  <p className="ant-upload-text">点击或拖拽文件到此处上传</p>
-                  <p className="ant-upload-hint">
-                    支持 pdf / docx / txt / md / sql / xlsx / csv / html，单文件不超过 100MB，可批量上传
-                  </p>
-                </Upload.Dragger>
-
-                {selectedDocIds.length > 0 && (
+                {canDocWrite && selectedDocIds.length > 0 && (
                   <Alert
                     type="info"
                     showIcon
@@ -552,229 +565,197 @@ export default function KbDetailPage() {
                   />
                 )}
 
-                <Table<KbDocument>
-                  className="document-management-table"
-                  rowKey="doc_id"
+                <DocumentList
+                  documents={documents}
                   loading={loading}
-                  dataSource={documents}
-                  scroll={{ x: 1180 }}
-                  pagination={{
-                    current: docPage,
-                    pageSize: docPageSize,
-                    total: docTotal,
-                    showSizeChanger: true,
-                    pageSizeOptions: DOC_PAGE_SIZE_OPTIONS,
-                    showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 个文档`,
-                    // 翻页即清空勾选：勾选驱动的是删除，"已选 30 个"里混进翻走后看不见的文档太危险
-                    onChange: (page, size) => {
-                      setSelectedDocIds([]);
-                      loadDocuments(page, size);
-                    },
+                  page={docPage}
+                  pageSize={docPageSize}
+                  total={docTotal}
+                  selectedIds={selectedDocIds}
+                  canSelect={canDocWrite}
+                  onSelect={setSelectedDocIds}
+                  onPageChange={(page, size) => {
+                    setSelectedDocIds([]);
+                    void loadDocuments(page, size);
                   }}
-                  rowSelection={{
-                    selectedRowKeys: selectedDocIds,
-                    onChange: (keys) => setSelectedDocIds(keys as string[]),
-                    // 全选 / 反选 / 清空，作用范围与表头复选框一致：当前页
-                    selections: [Table.SELECTION_ALL, Table.SELECTION_INVERT, Table.SELECTION_NONE],
-                  }}
-                  columns={[
-                    {
-                      title: '文件名',
-                      dataIndex: 'file_name',
-                      render: (name: string, record: KbDocument) => (
-                        <Space size={4}>
-                          <Typography.Text>{name}</Typography.Text>
-                          {record.restricted && (
-                            // M16: restriction hides content, not the row -- the tag says why a
-                            // reader may still be told "无权查看" when opening it.
-                            <Tooltip title="仅限授权角色查看内容与命中检索">
-                              <Tag color="orange">受限</Tag>
-                            </Tooltip>
-                          )}
-                        </Space>
-                      ),
-                    },
-                    { title: '类型', dataIndex: 'file_ext', width: 80 },
-                    {
-                      title: '大小',
-                      dataIndex: 'file_size',
-                      width: 100,
-                      render: (size: number) => formatFileSize(size),
-                    },
-                    {
-                      title: '处理状态',
-                      dataIndex: 'process_status',
-                      width: 120,
-                      render: (status: KbDocument['process_status'], record: KbDocument) => {
-                        const meta = metaOf(PROCESS_STATUS_META, status);
-                        const tag = <Tag color={meta.color}>{meta.label}</Tag>;
-                        return record.fail_reason ? (
-                          <Tooltip title={record.fail_reason}>{tag}</Tooltip>
-                        ) : (
-                          tag
-                        );
-                      },
-                    },
-                    {
-                      title: '发布状态',
-                      dataIndex: 'publish_status',
-                      width: 100,
-                      render: (status: KbDocument['publish_status'], record: KbDocument) => {
-                        const meta = metaOf(PUBLISH_STATUS_META, status);
-                        const tag = <Tag color={meta.color}>{meta.label}</Tag>;
-                        // Surface the rejection reason right on the tag, per M11's review loop.
-                        return status === 'REJECTED' && record.review_note ? (
-                          <Tooltip title={`驳回原因：${record.review_note}`}>{tag}</Tooltip>
-                        ) : (
-                          tag
-                        );
-                      },
-                    },
-                    {
-                      title: '有效期',
-                      width: 90,
-                      render: (_, record: KbDocument) =>
-                        record.effective_at || record.expires_at ? (
-                          <Tooltip
-                            title={`生效：${record.effective_at ?? '不限'}，失效：${record.expires_at ?? '不限'}`}
-                          >
-                            <Tag
-                              color={
-                                record.expires_at && new Date(record.expires_at) <= new Date() ? 'error' : 'blue'
-                              }
-                            >
-                              {record.expires_at && new Date(record.expires_at) <= new Date() ? '已过期' : '已设置'}
-                            </Tag>
-                          </Tooltip>
-                        ) : (
-                          <Tag color="default">长期</Tag>
-                        ),
-                    },
-                    {
-                      title: '索引配置',
-                      dataIndex: 'config_stale',
-                      width: 100,
-                      render: (stale: boolean) => (stale ? <Tag color="warning">配置过期</Tag> : <Tag color="success">最新</Tag>),
-                    },
-                    {
-                      title: '操作',
-                      width: 380,
-                      render: (_, record: KbDocument) => (
-                        <Space className="document-row-actions" wrap>
-                          <Button size="small" onClick={() => setChunkDoc(record)}>
-                            查看分片
-                          </Button>
-                          <Button size="small" onClick={() => setVersionDocId(record.doc_id)}>
-                            版本
-                          </Button>
-                          {record.process_status === 'PENDING_CONFIRM' && (
-                            <Button size="small" type="link" onClick={() => setPreviewDoc(record)}>
-                              预览确认
-                            </Button>
-                          )}
-                          {(record.publish_status === 'DRAFT' || record.publish_status === 'REJECTED') && (
-                            <Button size="small" type="link" onClick={() => handleSubmitReview(record)}>
-                              提交审核
-                            </Button>
-                          )}
-                          {record.publish_status === 'PENDING_REVIEW' && (
-                            <>
-                              <Popconfirm
-                                title="通过审核并发布？"
-                                description="发布后文档即参与检索，且不可退回草稿（下架需设置失效时间或移入回收站）"
-                                okText="通过"
-                                cancelText="取消"
-                                onConfirm={() => handleApprove(record)}
-                              >
-                                <Button size="small" type="link">
-                                  通过
-                                </Button>
-                              </Popconfirm>
-                              <Button size="small" type="link" danger onClick={() => setRejectDoc(record)}>
-                                驳回
-                              </Button>
-                            </>
-                          )}
-                          <Button size="small" type="link" onClick={() => setValidityDoc(record)}>
-                            有效期
-                          </Button>
-                          {canDocReview && (
-                            <Button size="small" type="link" onClick={() => setVisibilityDoc(record)}>
-                              可见性
-                            </Button>
-                          )}
-                          <Popconfirm
-                            title="确认重建该文档的解析与索引？"
-                            okText="重建"
-                            cancelText="取消"
-                            onConfirm={() => handleReindex(record.doc_id)}
-                          >
-                            <Button size="small" icon={<ReloadOutlined />}>
-                              重建
-                            </Button>
-                          </Popconfirm>
-                          <Popconfirm
-                            title="移入回收站？"
-                            description={
-                              <>
-                                文档将移入回收站并立即从检索中下线；
-                                <br />
-                                可在「回收站」标签页随时还原，超过保留期后自动清除。
-                              </>
-                            }
-                            okText="移入回收站"
-                            okButtonProps={{ danger: true }}
-                            cancelText="取消"
-                            onConfirm={() => handleDelete(record)}
-                          >
-                            <Button size="small" danger icon={<DeleteOutlined />} loading={deletingId === record.doc_id}>
-                              删除
-                            </Button>
-                          </Popconfirm>
-                        </Space>
-                      ),
-                    },
-                  ]}
+                  actions={(doc) => (
+                    <DocumentActions
+                      doc={doc}
+                      canWrite={canDocWrite}
+                      canReview={canDocReview}
+                      deleting={deletingId === doc.doc_id}
+                      onView={() => setChunkDoc(doc)}
+                      onVersions={() => setVersionDocId(doc.doc_id)}
+                      onPreview={() => setPreviewDoc(doc)}
+                      onReview={() => setReviewDoc(doc)}
+                      onSubmitReview={() => handleSubmitReview(doc)}
+                      onValidity={() => setValidityDoc(doc)}
+                      onVisibility={() => setVisibilityDoc(doc)}
+                      onReindex={() => handleReindex(doc.doc_id)}
+                      onDelete={() => handleDelete(doc)}
+                    />
+                  )}
                 />
               </>
             ),
+          },
+          {
+            key: 'sources',
+            label: '数据来源',
+            children: kbId ? (
+              <Tabs
+                className="workspace-secondary-tabs"
+                items={[
+                  {
+                    key: 'webSources',
+                    label: '网页导入',
+                    children: <WebSourcesTab kbId={kbId} onSynced={loadDocuments} />,
+                  },
+                  {
+                    key: 'extSources',
+                    label: '外部数据源',
+                    children: <ExternalSourceTab kbId={kbId} onSynced={loadDocuments} />,
+                  },
+                  ...(canDocWrite
+                    ? [
+                        {
+                          key: 'chatImport',
+                          label: '聊天导入',
+                          children: (
+                            <div className="workspace-intro-panel">
+                              <Typography.Title level={5}>导入聊天记录</Typography.Title>
+                              <Typography.Paragraph type="secondary">
+                                预览字段与聚合方式后再确认导入。
+                              </Typography.Paragraph>
+                              <Button type="primary" onClick={() => setChatImportOpen(true)}>
+                                导入聊天记录
+                              </Button>
+                            </div>
+                          ),
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            ) : null,
           },
           {
             key: 'graph',
             label: '知识图谱',
             children: kbId ? <GraphTab kbId={kbId} kb={kb} onKbChanged={loadKb} /> : null,
           },
-          // M10-CONTRACTS.md section 3: the retrieval quality loop's two console entrances.
-          {
-            key: 'feedback',
-            label: '反馈管理',
-            children: kbId ? <FeedbackTab kbId={kbId} /> : null,
-          },
-          {
-            key: 'insight',
-            label: '检索洞察',
-            children: kbId ? <InsightTab kbId={kbId} /> : null,
-          },
-          // M11-CONTRACTS.md section 2.2: reversible deletion lives here until retention expiry.
-          {
-            key: 'trash',
-            label: '回收站',
-            children: kbId ? <TrashTab kbId={kbId} onRestored={loadDocuments} /> : null,
-          },
-          // M12-CONTRACTS.md section 3.4: URL registration + incremental sync management.
-          {
-            key: 'webSources',
-            label: '网页导入',
-            children: kbId ? <WebSourcesTab kbId={kbId} onSynced={loadDocuments} /> : null,
-          },
-          // M14 contract section 2.3: S3/OSS compatible object store connector + per-object sync.
-          {
-            key: 'extSources',
-            label: '外部数据源',
-            children: kbId ? <ExternalSourceTab kbId={kbId} onSynced={loadDocuments} /> : null,
-          },
+          ...(canFeedback || canInsight
+            ? [
+                {
+                  key: 'quality',
+                  label: '质量与反馈',
+                  children: kbId ? (
+                    <Tabs
+                      className="workspace-secondary-tabs"
+                      items={[
+                        ...(canFeedback
+                          ? [{ key: 'feedback', label: '反馈管理', children: <FeedbackTab kbId={kbId} /> }]
+                          : []),
+                        ...(canInsight
+                          ? [{ key: 'insight', label: '检索洞察', children: <InsightTab kbId={kbId} /> }]
+                          : []),
+                      ]}
+                    />
+                  ) : null,
+                },
+              ]
+            : []),
+          ...(canDocWrite || canDocReview
+            ? [
+                {
+                  key: 'trash',
+                  label: '回收站',
+                  children: kbId ? <TrashTab kbId={kbId} onRestored={loadDocuments} /> : null,
+                },
+              ]
+            : []),
         ]}
       />
+
+      {canDocWrite && (
+        <Drawer title="添加文档" open={uploadOpen} width={540} onClose={() => setUploadOpen(false)}>
+          <Typography.Paragraph type="secondary">
+            文件上传后会自动解析。处理进度与审核状态可在文档列表查看。
+          </Typography.Paragraph>
+          <Upload.Dragger {...uploadProps} className="document-upload-zone">
+            <p className="ant-upload-drag-icon">
+              <InboxOutlined />
+            </p>
+            <p className="ant-upload-text">点击或拖拽文件到此处上传</p>
+            <p className="ant-upload-hint">
+              支持 pdf / docx / txt / md / sql / xlsx / csv / html，单文件不超过 100MB，可批量上传
+            </p>
+          </Upload.Dragger>
+        </Drawer>
+      )}
+      {canKbWrite && settingsOpen && kb && (
+        <KbSettingsDrawer
+          kb={kb}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={loadKb}
+          onIndexConfig={() => {
+            setSettingsOpen(false);
+            setIndexConfigOpen(true);
+          }}
+          onGovernance={handleGovernanceToggle}
+          governanceSaving={governanceSaving}
+        />
+      )}
+      {canDocReview && (
+        <Drawer
+          title="审核文档"
+          open={Boolean(reviewDoc)}
+          width={580}
+          onClose={() => setReviewDoc(null)}
+          footer={
+            reviewDoc && (
+              <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <Button
+                  danger
+                  onClick={() => {
+                    setRejectDoc(reviewDoc);
+                    setReviewDoc(null);
+                  }}
+                >
+                  驳回
+                </Button>
+                <Popconfirm
+                  title="通过审核并发布？"
+                  description="发布后文档将参与检索；下架需设置失效时间或移入回收站。"
+                  okText="通过并发布"
+                  cancelText="取消"
+                  onConfirm={async () => {
+                    await handleApprove(reviewDoc);
+                    setReviewDoc(null);
+                  }}
+                >
+                  <Button type="primary">通过并发布</Button>
+                </Popconfirm>
+              </Space>
+            )
+          }
+        >
+          {reviewDoc && (
+            <>
+              <Descriptions
+                column={1}
+                items={[
+                  { key: 'name', label: '文档', children: reviewDoc.file_name },
+                  { key: 'process', label: '处理状态', children: reviewDoc.process_status },
+                  { key: 'publish', label: '发布状态', children: '待审核' },
+                  { key: 'note', label: '审核说明', children: reviewDoc.review_note || '暂无' },
+                ]}
+              />
+              <Button onClick={() => setChunkDoc(reviewDoc)}>查看文档分片</Button>
+            </>
+          )}
+        </Drawer>
+      )}
 
       <ChunkDrawer
         docId={chunkDoc?.doc_id ?? null}
@@ -782,13 +763,20 @@ export default function KbDetailPage() {
         onClose={() => setChunkDoc(null)}
       />
 
-      <ParsePreviewDrawer
-        doc={previewDoc}
-        onClose={() => setPreviewDoc(null)}
-        onConfirmed={handlePreviewConfirmed}
-      />
+      {previewDoc && canDocWrite && (
+        <ParsePreviewDrawer
+          key={previewDoc.doc_id}
+          doc={previewDoc}
+          onClose={() => setPreviewDoc(null)}
+          onConfirmed={handlePreviewConfirmed}
+        />
+      )}
 
-      <VersionDrawer doc={versionDoc} onClose={() => setVersionDocId(null)} onActivated={handleVersionActivated} />
+      <VersionDrawer
+        doc={versionDoc}
+        onClose={() => setVersionDocId(null)}
+        onActivated={handleVersionActivated}
+      />
 
       <ValidityModal doc={validityDoc} onClose={() => setValidityDoc(null)} onSaved={loadDocuments} />
 
@@ -803,7 +791,7 @@ export default function KbDetailPage() {
         />
       )}
 
-      {kbId && (
+      {kbId && canDocWrite && chatImportOpen && (
         <ChatImportWizard
           kbId={kbId}
           open={chatImportOpen}
@@ -812,7 +800,7 @@ export default function KbDetailPage() {
         />
       )}
 
-      {kbId && (
+      {kbId && canKbWrite && indexConfigOpen && (
         <IndexConfigDrawer
           kbId={kbId}
           open={indexConfigOpen}

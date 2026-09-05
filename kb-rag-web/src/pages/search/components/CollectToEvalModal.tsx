@@ -82,7 +82,7 @@ export default function CollectToEvalModal({ open, kbId, query, selectedNodes, o
       confirmLoading={submitting}
       okText="收进"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       <Typography.Paragraph type="secondary">
         将勾选的 {selectedNodes.length} 条检索结果作为证据，连同当前 query 收进一条评测 case（source=DEBUG_PAGE）。

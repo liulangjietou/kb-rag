@@ -67,7 +67,7 @@ export function ValidityModal({ doc, onClose, onSaved }: ValidityModalProps) {
       confirmLoading={submitting}
       okText="保存"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       <Typography.Paragraph type="secondary">
         仅在有效期窗口内的文档参与检索。两端均可留空表示不设界；将「失效时间」设为过去可立即下架。
@@ -143,7 +143,7 @@ export function RejectModal({ doc, onClose, onRejected }: RejectModalProps) {
       okText="驳回"
       okButtonProps={{ danger: true }}
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       <Form<RejectFormValues> form={form} layout="vertical">
         <Form.Item

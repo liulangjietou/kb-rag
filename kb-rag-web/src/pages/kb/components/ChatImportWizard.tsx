@@ -98,7 +98,7 @@ export default function ChatImportWizard({ kbId, open, onClose, onImported }: Ch
       open={open}
       onCancel={handleClose}
       width={760}
-      destroyOnClose
+      destroyOnHidden
       footer={
         sessions.length > 0
           ? [

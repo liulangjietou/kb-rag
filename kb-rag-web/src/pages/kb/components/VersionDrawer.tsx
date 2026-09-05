@@ -1,3 +1,5 @@
+import { useAuth } from '../../../auth/AuthContext';
+import { PERMISSIONS } from '../../../auth/permissions';
 // Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -59,6 +61,8 @@ interface ImpactModalState {
  * old-version annotations that were not carried over automatically.
  */
 export default function VersionDrawer({ doc, onClose, onActivated }: VersionDrawerProps) {
+  const { can } = useAuth();
+  const canWrite = can(PERMISSIONS.DOC_WRITE);
   const docId = doc?.doc_id ?? null;
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [loading, setLoading] = useState(false);
@@ -84,8 +88,9 @@ export default function VersionDrawer({ doc, onClose, onActivated }: VersionDraw
     }
   }, [docId]);
 
+  const mayReadPending = canWrite || can(PERMISSIONS.DOC_REVIEW);
   const loadPending = useCallback(async () => {
-    if (!docId) return;
+    if (!docId || !mayReadPending) return;
     setPendingLoading(true);
     try {
       const result = await listPendingReviewAnnotations(docId);
@@ -93,7 +98,7 @@ export default function VersionDrawer({ doc, onClose, onActivated }: VersionDraw
     } finally {
       setPendingLoading(false);
     }
-  }, [docId]);
+  }, [docId, mayReadPending]);
 
   /**
    * M9-CONTRACTS.md section 0.5: apply the pending row's edit/disable semantics onto the operator-
@@ -184,7 +189,7 @@ export default function VersionDrawer({ doc, onClose, onActivated }: VersionDraw
   const pendingCount = pendingAnnotations.length;
 
   return (
-    <Drawer title={`版本管理${doc ? ` - ${doc.file_name}` : ''}`} open={doc !== null} onClose={onClose} width={760} destroyOnClose>
+    <Drawer title={`版本管理${doc ? ` - ${doc.file_name}` : ''}`} open={doc !== null} onClose={onClose} width={760} destroyOnHidden>
       <Spin spinning={loading}>
         {pendingCount > 0 && (
           <Alert
@@ -255,7 +260,7 @@ export default function VersionDrawer({ doc, onClose, onActivated }: VersionDraw
                                           cancelText="取消"
                                           onConfirm={() => handleMigrate(item.annotation_id, suggestion.chunk_id)}
                                         >
-                                          <Button size="small" type="link" loading={migratingKey === migrateKey}>
+                                          <Button hidden={!canWrite} size="small" type="link" loading={migratingKey === migrateKey}>
                                             迁移到此分片
                                           </Button>
                                         </Popconfirm>,
@@ -362,7 +367,7 @@ export default function VersionDrawer({ doc, onClose, onActivated }: VersionDraw
                   <Button
                     size="small"
                     type="primary"
-                    disabled={record.active}
+                    disabled={record.active || !canWrite}
                     loading={impactLoadingVersionId === record.version_id}
                     onClick={() => openImpact(record)}
                   >
@@ -383,7 +388,7 @@ export default function VersionDrawer({ doc, onClose, onActivated }: VersionDraw
         okText="确认切换"
         cancelText="取消"
         confirmLoading={confirming}
-        destroyOnClose
+        destroyOnHidden
       >
         {impactModal && (
           <Space direction="vertical" style={{ width: '100%' }} size={12}>

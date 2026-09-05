@@ -3,6 +3,7 @@
 import { App as AntApp } from 'antd';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import RegistrationReviewPage from './RegistrationReviewPage';
 
 const mocks = vi.hoisted(() => ({
@@ -83,7 +84,7 @@ afterEach(() => {
 
 describe('RegistrationReviewPage', () => {
   it('切换租户会清空角色，且必须重新选择该租户至少一个角色才能通过', async () => {
-    render(<AntApp><RegistrationReviewPage /></AntApp>);
+    render(<AntApp><MemoryRouter><RegistrationReviewPage /></MemoryRouter></AntApp>);
     expect(await screen.findByText('林澈')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '审核' }));
 
@@ -118,7 +119,7 @@ describe('RegistrationReviewPage', () => {
 
   it('驳回失败时保留弹窗和已填写原因', async () => {
     mocks.rejectRegistration.mockRejectedValueOnce(new Error('temporary failure'));
-    render(<AntApp><RegistrationReviewPage /></AntApp>);
+    render(<AntApp><MemoryRouter><RegistrationReviewPage /></MemoryRouter></AntApp>);
     expect(await screen.findByText('林澈')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '审核' }));
     fireEvent.click(await screen.findByRole('button', { name: '驳回申请' }));
@@ -136,7 +137,7 @@ describe('RegistrationReviewPage', () => {
     mocks.listRegistrationReviews
       .mockResolvedValueOnce({ items: [pendingApplication], page: 1, size: 10, total: 1 })
       .mockRejectedValueOnce(new Error('refresh failed'));
-    render(<AntApp><RegistrationReviewPage /></AntApp>);
+    render(<AntApp><MemoryRouter><RegistrationReviewPage /></MemoryRouter></AntApp>);
     expect(await screen.findByText('林澈')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '审核' }));
     fireEvent.click(await screen.findByRole('button', { name: '驳回申请' }));
@@ -164,7 +165,7 @@ describe('RegistrationReviewPage', () => {
       size: 10,
       total: 1,
     });
-    render(<AntApp><RegistrationReviewPage /></AntApp>);
+    render(<AntApp><MemoryRouter><RegistrationReviewPage /></MemoryRouter></AntApp>);
     fireEvent.click(await screen.findByRole('button', { name: '查看' }));
 
     expect(await screen.findByText('租户乙（B）')).toBeTruthy();

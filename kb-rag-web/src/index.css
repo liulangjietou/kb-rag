@@ -2,35 +2,36 @@
   color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --kb-color-primary: #0a756a;
-  --kb-color-primary-hover: #08665d;
-  --kb-color-primary-active: #064f49;
-  --kb-color-primary-soft: #ddf2ee;
-  --kb-color-bg: #f3f7f5;
+  --kb-color-primary: #176b5b;
+  --kb-color-primary-text: #176b5b;
+  --kb-color-primary-hover: #125a4c;
+  --kb-color-primary-active: #104b40;
+  --kb-color-primary-soft: #e8f3ef;
+  --kb-color-bg: #f5f7fa;
   --kb-color-surface: #ffffff;
   --kb-color-surface-raised: #ffffff;
-  --kb-color-surface-subtle: #eaf1ee;
-  --kb-color-text: #132e32;
-  --kb-color-text-secondary: #4b6264;
-  --kb-color-text-tertiary: #708285;
-  --kb-color-border: #d8e3df;
-  --kb-color-border-strong: #b8cac4;
-  --kb-color-sidebar: #112f32;
-  --kb-color-sidebar-text: #f2f8f6;
-  --kb-color-sidebar-muted: #a9bfba;
-  --kb-color-sidebar-active: #1c4849;
+  --kb-color-surface-subtle: #f2f5f8;
+  --kb-color-text: #202d3d;
+  --kb-color-text-secondary: #5f6c7d;
+  --kb-color-text-tertiary: #5f6c7d;
+  --kb-color-border: #dfe5ec;
+  --kb-color-border-strong: #b8c4d2;
+  --kb-color-sidebar: #f2f5f8;
+  --kb-color-sidebar-text: #202d3d;
+  --kb-color-sidebar-muted: #5f6c7d;
+  --kb-color-sidebar-active: #e8f3ef;
   --kb-color-success: #287a55;
-  --kb-color-warning: #a95f18;
+  --kb-color-warning: #94510f;
   --kb-color-danger: #b42318;
-  --kb-color-info: #2767a8;
+  --kb-color-info: #235c98;
   --kb-focus-ring: rgba(10, 117, 106, 0.24);
   --kb-shadow: 0 10px 30px rgba(19, 46, 50, 0.08);
   --kb-shadow-strong: 0 20px 50px rgba(19, 46, 50, 0.14);
   --kb-code-bg: #10282b;
   --kb-code-text: #e3f0ed;
-  --kb-radius-sm: 7px;
-  --kb-radius-md: 10px;
-  --kb-radius-lg: 16px;
+  --kb-radius-sm: 6px;
+  --kb-radius-md: 8px;
+  --kb-radius-lg: 9px;
 }
 
 * {
@@ -54,13 +55,20 @@ body {
 body {
   color: var(--kb-color-text);
   font-family:
-    Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Microsoft YaHei', sans-serif;
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'PingFang SC',
+    'Microsoft YaHei',
+    sans-serif;
   font-size: 14px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
-  transition: color 160ms ease, background-color 160ms ease;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease;
 }
 
 button,
@@ -107,7 +115,11 @@ kbd,
   min-width: 0;
   font-weight: 620;
   box-shadow: none;
-  transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background-color 140ms ease,
+    transform 140ms ease;
 }
 
 .ant-btn:not(:disabled):active {
@@ -115,7 +127,7 @@ kbd,
 }
 
 .ant-btn-primary {
-  box-shadow: 0 5px 14px color-mix(in srgb, var(--kb-color-primary) 20%, transparent);
+  box-shadow: none;
 }
 
 .ant-card {
@@ -268,7 +280,7 @@ main pre,
   place-items: center;
   width: 36px;
   height: 36px;
-  color: var(--kb-color-primary);
+  color: var(--kb-color-primary-text);
   background: var(--kb-color-primary-soft);
   border: 1px solid color-mix(in srgb, var(--kb-color-primary) 45%, var(--kb-color-border));
   border-radius: var(--kb-radius-sm);
@@ -377,12 +389,15 @@ main pre,
 
 .auth-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(440px, 0.92fr);
+  grid-template-columns: minmax(0, 1fr) minmax(440px, 1fr);
   min-height: 100vh;
   background: var(--kb-color-surface);
 }
 
 .auth-shell__stage {
+  --kb-color-sidebar: var(--kb-code-bg);
+  --kb-color-sidebar-text: #eef5f3;
+  --kb-color-sidebar-muted: #b7cbc9;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -401,7 +416,7 @@ main pre,
 .auth-overline {
   display: block;
   margin-bottom: 8px;
-  color: var(--kb-color-primary);
+  color: var(--kb-color-primary-text);
   font-size: 11px;
   font-weight: 760;
   letter-spacing: 0.12em;
@@ -416,7 +431,7 @@ main pre,
   max-width: 740px;
   margin: 0 0 20px;
   color: #ffffff;
-  font-size: clamp(40px, 5vw, 68px);
+  font-size: clamp(36px, 4vw, 56px);
   font-weight: 710;
   letter-spacing: -0.055em;
   line-height: 1.08;
@@ -478,9 +493,8 @@ main pre,
   padding: 36px;
   background: var(--kb-color-surface-raised);
   border: 1px solid var(--kb-color-border);
-  border-top: 3px solid var(--kb-color-primary);
   border-radius: var(--kb-radius-lg);
-  box-shadow: var(--kb-shadow-strong);
+  box-shadow: none;
 }
 
 .auth-card--compact {
@@ -509,7 +523,7 @@ main pre,
   align-items: center;
   gap: 8px;
   margin-bottom: 22px;
-  color: var(--kb-color-primary);
+  color: var(--kb-color-primary-text);
   font-size: 11px;
   font-weight: 720;
 }
@@ -571,7 +585,7 @@ main pre,
   width: 46px;
   height: 46px;
   margin-bottom: 20px;
-  color: var(--kb-color-primary);
+  color: var(--kb-color-primary-text);
   background: var(--kb-color-primary-soft);
   border: 1px solid color-mix(in srgb, var(--kb-color-primary) 35%, var(--kb-color-border));
   border-radius: var(--kb-radius-md);
@@ -594,7 +608,7 @@ main pre,
 }
 
 .auth-text-action:hover {
-  color: var(--kb-color-primary);
+  color: var(--kb-color-primary-text);
 }
 
 .auth-account-row {
@@ -629,7 +643,7 @@ main pre,
   height: 100vh;
   overflow: hidden auto;
   background: var(--kb-color-sidebar) !important;
-  box-shadow: 7px 0 30px color-mix(in srgb, var(--kb-color-sidebar) 12%, transparent);
+  border-right: 1px solid var(--kb-color-border);
 }
 
 .app-sider .ant-layout-sider-children {
@@ -697,7 +711,7 @@ main pre,
 
 .app-navigation .ant-menu-item-group-title {
   padding: 14px 10px 5px !important;
-  color: color-mix(in srgb, var(--kb-color-sidebar-muted) 70%, transparent) !important;
+  color: var(--kb-color-sidebar-muted) !important;
   font-size: 10px;
   font-weight: 760;
   letter-spacing: 0.12em;
@@ -796,8 +810,8 @@ main pre,
   display: flex;
   align-items: center;
   gap: 20px;
-  height: 66px;
-  padding: 0 28px;
+  height: 64px;
+  padding: 0 32px;
   line-height: normal;
   background: color-mix(in srgb, var(--kb-color-surface) 94%, transparent) !important;
   border-bottom: 1px solid var(--kb-color-border);
@@ -889,7 +903,7 @@ main pre,
   width: min(1660px, 100%);
   min-width: 0;
   margin: 0 auto;
-  padding: 30px clamp(20px, 3vw, 44px) 80px;
+  padding: 32px 32px 48px;
   background: transparent;
 }
 
@@ -928,9 +942,9 @@ main pre,
 }
 
 .page-header__eyebrow {
-  display: block;
+  display: none;
   margin-bottom: 7px;
-  color: var(--kb-color-primary);
+  color: var(--kb-color-primary-text);
   font-size: 10px;
   font-weight: 780;
   letter-spacing: 0.13em;
@@ -940,7 +954,7 @@ main pre,
 .page-header h1 {
   margin: 0;
   color: var(--kb-color-text);
-  font-size: clamp(25px, 2.2vw, 34px);
+  font-size: 28px;
   font-weight: 760;
   letter-spacing: -0.04em;
   line-height: 1.12;
@@ -1202,8 +1216,158 @@ main pre,
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* 页面跳转与统一键盘入口。 */
+.page-command-trigger {
+  color: var(--kb-color-text-secondary);
+  background: var(--kb-color-surface-subtle);
+  font-size: 12px;
+}
+.page-command-trigger kbd {
+  margin-left: 6px;
+  padding: 1px 4px;
+  border: 1px solid var(--kb-color-border);
+  border-radius: 3px;
+  font-size: 10px;
+}
+.page-command-results {
+  display: grid;
+  gap: 4px;
+  max-height: min(55vh, 430px);
+  overflow: auto;
+  margin-top: 12px;
+}
+.page-command-results button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  padding: 12px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--kb-color-text);
+  background: transparent;
+}
+.page-command-results button:hover,
+.page-command-results button:focus-visible {
+  background: var(--kb-color-primary-soft);
+}
+.page-command-results button > span:nth-child(2) {
+  flex: 1;
+  display: grid;
+}
+.page-command-results small,
+.page-command-help {
+  color: var(--kb-color-text-secondary);
+  font-size: 12px;
+}
+.page-command-help {
+  margin: 14px 0 0;
+}
+.app-navigation .ant-menu-item-selected {
+  color: var(--kb-color-primary-text) !important;
+}
+.app-navigation .ant-menu-item-selected::before {
+  background: var(--kb-color-primary);
+}
+.brand-mark__symbol {
+  color: #fff;
+  background: var(--kb-color-primary);
+}
+.brand-mark__copy strong {
+  font-size: 15px;
+}
+@media (max-width: 600px) {
+  .app-content {
+    padding: 20px 16px 32px;
+  }
+  .page-header {
+    gap: 14px;
+  }
+  .page-header h1 {
+    font-size: 24px;
+  }
+  .ant-btn:not(.ant-btn-sm) {
+    min-height: 40px;
+  }
+}
+
+/* 显式隐藏的权限入口不参与布局或键盘导航。 */
+[hidden] {
+  display: none !important;
+}
+
+.ant-tag-success {
+  background: color-mix(in srgb, var(--kb-color-success) 8%, var(--kb-color-surface)) !important;
+  color: var(--kb-color-success) !important;
+  border-color: color-mix(in srgb, var(--kb-color-success) 18%, var(--kb-color-border)) !important;
+}
+.ant-tag-warning {
+  background: color-mix(in srgb, var(--kb-color-warning) 7%, var(--kb-color-surface)) !important;
+  color: var(--kb-color-warning) !important;
+}
+.ant-alert-warning {
+  background: color-mix(in srgb, var(--kb-color-warning) 7%, var(--kb-color-surface));
+  border-color: color-mix(in srgb, var(--kb-color-warning) 24%, var(--kb-color-border));
+}
+
+/* 测量行只负责列宽，克隆的表头控件不应进入键盘和读屏导航。 */
+.ant-table-measure-cell-content {
+  visibility: hidden;
+}
+.ant-tag-processing {
+  color: var(--kb-color-info) !important;
+  background: color-mix(in srgb, var(--kb-color-info) 7%, var(--kb-color-surface)) !important;
+}
+.ant-tag-error {
+  color: var(--kb-color-danger) !important;
+  background: color-mix(in srgb, var(--kb-color-danger) 7%, var(--kb-color-surface)) !important;
+}
+
+/* 首页与注册审核共用的内容面板。 */
+.atlas-panel {
+  background: var(--kb-color-surface);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-lg);
+}
+.atlas-panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 20px 22px;
+  border-bottom: 1px solid var(--kb-color-border);
+}
+.atlas-panel h2 {
+  margin: 0;
+  font-size: 17px;
+}
+.atlas-panel__head p {
+  margin: 3px 0 0;
+  color: var(--kb-color-text-secondary);
+  font-size: 12px;
+}
+.atlas-panel__loading,
+.atlas-panel__empty,
+.atlas-panel__resource-error {
+  margin: 22px;
+}
+
+@media (max-width: 720px) {
+  /* 空表提示随可视区域呈现，不落在横向表格屏幕外的中心位置。 */
+  .ant-table-placeholder .ant-table-cell {
+    text-align: left;
+  }
+  .ant-table-placeholder .ant-empty {
+    position: sticky;
+    left: 0;
+    width: calc(100vw - 96px);
+    max-width: 100%;
+    margin-inline: 0;
   }
 }

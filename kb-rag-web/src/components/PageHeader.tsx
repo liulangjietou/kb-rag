@@ -15,7 +15,7 @@ export default function PageHeader({ eyebrow, title, description, actions, befor
       {before && <div className="page-header__before">{before}</div>}
       <header className="page-header">
         <div className="page-header__copy">
-          <span className="page-header__eyebrow">{eyebrow}</span>
+          <span className="page-header__eyebrow" aria-hidden="true">{eyebrow}</span>
           <h1>{title}</h1>
           {description && <p>{description}</p>}
         </div>

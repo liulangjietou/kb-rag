@@ -43,7 +43,7 @@ export default function CreateAppModal({ open, onClose, onCreated }: CreateAppMo
       confirmLoading={submitting}
       okText="创建"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       <Form<CreateAppRequest> form={form} layout="vertical">
         <Form.Item name="name" label="应用名称" rules={[{ required: true, message: '请输入应用名称' }]}>

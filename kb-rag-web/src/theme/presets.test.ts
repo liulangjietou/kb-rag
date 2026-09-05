@@ -21,6 +21,7 @@ import {
 function expectedCssVariables(palette: ThemePalette): Record<string, string> {
   return {
     '--kb-color-primary': palette.primary,
+    '--kb-color-primary-text': palette.primaryText,
     '--kb-color-primary-hover': palette.primaryHover,
     '--kb-color-primary-active': palette.primaryActive,
     '--kb-color-primary-soft': palette.primarySoft,
@@ -101,6 +102,10 @@ describe('theme presets', () => {
 
   it('keeps workbench, code block, and sidebar copy above WCAG AA contrast', () => {
     for (const preset of THEME_PRESETS) {
+      expect(
+        contrastRatio(preset.palette.primaryText, preset.palette.primarySoft),
+        `${preset.id} selected navigation and accent text`,
+      ).toBeGreaterThanOrEqual(4.5);
       expect(contrastRatio(preset.palette.text, preset.palette.background), `${preset.id} text`).toBeGreaterThanOrEqual(4.5);
       expect(
         contrastRatio(preset.palette.textSecondary, preset.palette.background),

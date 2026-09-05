@@ -1,5 +1,6 @@
+import RequiredSelect from '../../components/RequiredSelect';
 // Author: owlzhangfq@gmail.com
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SearchOutlined } from '@ant-design/icons';
 import {
   Alert,
@@ -8,6 +9,7 @@ import {
   Collapse,
   DatePicker,
   Empty,
+  Drawer,
   Form,
   Input,
   InputNumber,
@@ -24,12 +26,25 @@ import type { Dayjs } from 'dayjs';
 import { search } from '../../api/search';
 import { listKnowledgeBases } from '../../api/kb';
 import { submitRetrievalFeedback, type RetrievalVerdict } from '../../api/retrievalFeedback';
-import type { FusionMode, KnowledgeBase, MetadataFilter, RerankMode, SearchRequest, SearchResponse } from '../../api/types';
+import type {
+  FusionMode,
+  KnowledgeBase,
+  MetadataFilter,
+  RerankMode,
+  SearchRequest,
+  SearchResponse,
+  RetrievalNode,
+} from '../../api/types';
 import { useModelStatus } from '../../context/ModelStatusContext';
-import { GRAPH_FUSION_MUTEX_HINT, describeDegradedReason, describeThresholdApplied } from '../../utils/statusMeta';
+import {
+  GRAPH_FUSION_MUTEX_HINT,
+  describeDegradedReason,
+  describeThresholdApplied,
+} from '../../utils/statusMeta';
 import ImagePicker, { toImagesPayload, type PickedImage } from '../../components/ImagePicker';
 import PageHeader from '../../components/PageHeader';
-import RetrievalPipeline from '../../components/RetrievalPipeline';
+import { useAuth } from '../../auth/AuthContext';
+import { PERMISSIONS } from '../../auth/permissions';
 import AppliedInfoBar from './components/AppliedInfoBar';
 import CollectToEvalModal from './components/CollectToEvalModal';
 import RetrievalNodeCard from './components/RetrievalNodeCard';
@@ -88,11 +103,16 @@ function buildMetadataFilter(values: SearchFormValues): MetadataFilter | undefin
 }
 
 export default function SearchPage() {
+  const { can } = useAuth();
+  const canCollect = can(PERMISSIONS.EVAL_WRITE) && can(PERMISSIONS.EVAL_READ);
+  const [evidenceNode, setEvidenceNode] = useState<RetrievalNode | null>(null);
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [searchedQuery, setSearchedQuery] = useState('');
   const [searchedKbId, setSearchedKbId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [searchError, setSearchError] = useState(false);
+  const searchInFlight = useRef(false);
   const [hasSearched, setHasSearched] = useState(false);
   // "收进评测集" selection state (M4b-CONTRACTS.md section 5), keyed by chunk_id; cleared on every new search.
   const [selectedChunkIds, setSelectedChunkIds] = useState<string[]>([]);
@@ -136,7 +156,13 @@ export default function SearchPage() {
   }, [modelStatus, form]);
 
   const handleFinish = async (values: SearchFormValues) => {
+    if (searchInFlight.current) return;
+    searchInFlight.current = true;
     setLoading(true);
+    setSearchError(false);
+    setResult(null);
+    setEvidenceNode(null);
+    setHasSearched(false);
     try {
       const payload: SearchRequest = {
         query: values.query,
@@ -168,7 +194,10 @@ export default function SearchPage() {
       setSelectedChunkIds([]);
       setFeedbackByChunkId({});
       setHasSearched(true);
+    } catch {
+      setSearchError(true);
     } finally {
+      searchInFlight.current = false;
       setLoading(false);
     }
   };
@@ -198,280 +227,346 @@ export default function SearchPage() {
 
   const selectedNodes = result?.nodes.filter((node) => selectedChunkIds.includes(node.chunk_id)) ?? [];
 
-  const thresholdTag = result ? describeThresholdApplied(result.applied.threshold_applied_on, result.degraded) : null;
+  const thresholdTag = result
+    ? describeThresholdApplied(result.applied.threshold_applied_on, result.degraded)
+    : null;
 
   return (
     <div className="knowledge-workbench-page search-workbench-page">
       <PageHeader
         eyebrow="RETRIEVAL LAB"
         title="检索调试"
-        description="逐段配置召回、融合、重排与过滤参数，并把每次结果沉淀为可复用的评测样本。"
-        before={<RetrievalPipeline />}
+        description="验证知识召回效果，查看命中证据并收集评测样本。"
       />
 
-      <Card className="workbench-config-card search-config-card">
-        <Form<SearchFormValues>
-          form={form}
-          layout="vertical"
-          onFinish={handleFinish}
-          initialValues={{
-            recall_top_k: DEFAULT_RECALL_TOP_K,
-            top_n: DEFAULT_TOP_N,
-            rewrite_enabled: false,
-            fusion_mode: 'rrf',
-            w_vec: DEFAULT_W_VEC,
-            rrf_k: DEFAULT_RRF_K,
-            rerank_enabled: true,
-            rerank_mode: 'semantic',
-            rerank_w_semantic: DEFAULT_RERANK_W_SEMANTIC,
-            threshold_enabled: false,
-            score_threshold: DEFAULT_SCORE_THRESHOLD,
-          }}
-        >
-          <Form.Item name="kb_id" label="知识库" rules={[{ required: true, message: '请选择知识库' }]}>
-            <Select
-              placeholder="请选择要检索的知识库"
-              options={kbs.map((kb) => ({ label: kb.name, value: kb.kb_id }))}
-            />
-          </Form.Item>
-          <Form.Item name="query" label="检索内容" rules={[{ required: true, message: '请输入检索内容' }]}>
-            <Input.TextArea placeholder="输入需要检索的问题或关键词" rows={3} />
-          </Form.Item>
-          <Form.Item
-            label="以图搜图（可选）"
-            tooltip="附带图片查询：知识库开启多模态时图片直接进入多模态空间检索，否则回落 VLM 转写为文本后检索；检索内容仍必填"
+      <div className="search-workspace-grid">
+        <Card title="检索配置" className="workbench-config-card search-config-card">
+          <Form<SearchFormValues>
+            form={form}
+            layout="vertical"
+            onFinish={handleFinish}
+            initialValues={{
+              recall_top_k: DEFAULT_RECALL_TOP_K,
+              top_n: DEFAULT_TOP_N,
+              rewrite_enabled: false,
+              fusion_mode: 'rrf',
+              w_vec: DEFAULT_W_VEC,
+              rrf_k: DEFAULT_RRF_K,
+              rerank_enabled: true,
+              rerank_mode: 'semantic',
+              rerank_w_semantic: DEFAULT_RERANK_W_SEMANTIC,
+              threshold_enabled: false,
+              score_threshold: DEFAULT_SCORE_THRESHOLD,
+            }}
           >
-            <ImagePicker value={queryImages} onChange={setQueryImages} />
-          </Form.Item>
+            <Form.Item name="kb_id" label="知识库" rules={[{ required: true, message: '请选择知识库' }]}>
+              <RequiredSelect
+                aria-label="知识库"
+                placeholder="请选择要检索的知识库"
+                options={kbs.map((kb) => ({ label: kb.name, value: kb.kb_id }))}
+              />
+            </Form.Item>
+            <Form.Item name="query" label="检索内容" rules={[{ required: true, message: '请输入检索内容' }]}>
+              <Input.TextArea placeholder="输入需要检索的问题或关键词" rows={3} />
+            </Form.Item>
+            <Form.Item
+              label="以图搜图（可选）"
+              tooltip="附带图片查询：知识库开启多模态时图片直接进入多模态空间检索，否则回落 VLM 转写为文本后检索；检索内容仍必填"
+            >
+              <ImagePicker value={queryImages} onChange={setQueryImages} />
+            </Form.Item>
 
-          <Collapse
-            className="retrieval-parameter-panel"
-            defaultActiveKey={['recall', 'fusion', 'rerank', 'filter', 'return']}
-            items={[
-              {
-                key: 'rewrite',
-                label: '改写',
-                children: (
-                  <Space direction="vertical">
-                    <Form.Item
-                      name="rewrite_enabled"
-                      label="启用查询改写"
-                      valuePropName="checked"
-                      tooltip="超时 800ms 或未配置对话模型时自动降级为原始 query"
-                      style={{ marginBottom: rewriteAvailable ? 0 : 8 }}
-                    >
-                      <Switch disabled={!rewriteAvailable} />
-                    </Form.Item>
-                    {!rewriteAvailable && (
-                      <Typography.Text type="secondary">未配置对话模型（chat），查询改写不可用</Typography.Text>
-                    )}
-                  </Space>
-                ),
-              },
-              {
-                key: 'recall',
-                label: '召回',
-                children: (
-                  <Form.Item name="recall_top_k" label="recall_top_k（召回数量）" style={{ marginBottom: 0 }}>
-                    <InputNumber min={1} max={200} style={{ width: '100%' }} />
-                  </Form.Item>
-                ),
-              },
-              {
-                key: 'fusion',
-                label: '融合',
-                children: (
-                  <>
-                    <Form.Item name="fusion_mode" label="融合模式">
-                      <Radio.Group
-                        optionType="button"
-                        options={[
-                          { label: 'RRF', value: 'rrf' },
-                          { label: '加权归一化', value: 'weighted', disabled: selectedKbGraphEnabled },
-                        ]}
-                      />
-                    </Form.Item>
-                    {selectedKbGraphEnabled && (
-                      <Typography.Text type="secondary">{GRAPH_FUSION_MUTEX_HINT}</Typography.Text>
-                    )}
-                    {fusionMode === 'weighted' && (
+            <Collapse
+              className="retrieval-parameter-panel"
+              defaultActiveKey={['recall', 'return']}
+              items={[
+                {
+                  key: 'rewrite',
+                  forceRender: true,
+                  label: '改写',
+                  children: (
+                    <Space direction="vertical">
                       <Form.Item
-                        name="w_vec"
-                        label="向量路权重 w_vec（BM25 权重 = 1 - w_vec）"
-                        tooltip="每路候选集内 min-max 归一化后按权重加权求和"
+                        name="rewrite_enabled"
+                        label="启用查询改写"
+                        valuePropName="checked"
+                        tooltip="超时 800ms 或未配置对话模型时自动降级为原始 query"
+                        style={{ marginBottom: rewriteAvailable ? 0 : 8 }}
                       >
-                        <Slider min={0} max={1} step={0.01} marks={{ 0: '0', 0.5: '0.5', 1: '1' }} />
+                        <Switch disabled={!rewriteAvailable} />
                       </Form.Item>
-                    )}
-                    {fusionMode === 'rrf' && (
-                      <Form.Item name="rrf_k" label="rrf_k" style={{ marginBottom: 0 }}>
-                        <InputNumber min={1} max={200} style={{ width: '100%' }} />
-                      </Form.Item>
-                    )}
-                  </>
-                ),
-              },
-              {
-                key: 'rerank',
-                label: '重排',
-                children: (
-                  <Space direction="vertical" style={{ width: '100%' }}>
-                    <Form.Item
-                      name="rerank_enabled"
-                      label="启用重排序"
-                      valuePropName="checked"
-                      tooltip="候选上限 50；超时 1.5s 或失败降级为融合结果排序"
-                      style={{ marginBottom: rerankAvailable ? 0 : 8 }}
-                    >
-                      <Switch disabled={!rerankAvailable} />
-                    </Form.Item>
-                    {!rerankAvailable && (
-                      <Typography.Text type="secondary">未配置重排模型（rerank），重排序不可用</Typography.Text>
-                    )}
-                    {rerankAvailable && rerankEnabled && (
-                      <>
-                        <Form.Item
-                          name="rerank_mode"
-                          label="重排模式"
-                          tooltip="hybrid 将语义重排分与归一化 BM25 分线性加权，仅影响排序；semantic 为纯语义重排"
-                        >
-                          <Radio.Group
-                            optionType="button"
-                            options={[
-                              { label: '语义（semantic）', value: 'semantic' },
-                              { label: '混合（hybrid）', value: 'hybrid' },
-                            ]}
-                          />
-                        </Form.Item>
-                        {rerankMode === 'hybrid' && (
-                          <>
-                            <Form.Item
-                              name="rerank_w_semantic"
-                              label="语义分权重 w_semantic（BM25 权重 = 1 - w_semantic）"
-                              tooltip="排序分 = w × 语义重排分 + (1 - w) × 归一化 BM25 分，min-max 在本次候选集内归一化"
-                            >
-                              <Slider min={0} max={1} step={0.01} marks={{ 0: '0', 0.7: '0.7', 1: '1' }} />
-                            </Form.Item>
-                            <Typography.Text type="secondary">
-                              阈值过滤仍作用于纯语义重排分，hybrid 只改变排序，不影响 score_threshold 的绝对语义
-                            </Typography.Text>
-                          </>
-                        )}
-                      </>
-                    )}
-                  </Space>
-                ),
-              },
-              {
-                key: 'filter',
-                label: '过滤',
-                children: (
-                  <>
-                    <Form.Item name="threshold_enabled" label="启用阈值过滤" valuePropName="checked">
-                      <Switch />
-                    </Form.Item>
-                    {thresholdEnabled && (
-                      <Form.Item
-                        name="score_threshold"
-                        label="score_threshold（0.01-1.0）"
-                        tooltip="rerank 开启时作用于 rerank 分；关闭/降级时作用于向量 cosine 分；BM25 单路时不生效"
-                      >
-                        <Slider min={0.01} max={1} step={0.01} />
-                      </Form.Item>
-                    )}
-                    <Typography.Title level={5} style={{ marginTop: 8 }}>
-                      metadata_filter
-                    </Typography.Title>
-                    <Form.Item
-                      name="tag_ids"
-                      label="标签（tag_ids）"
-                      tooltip="按文档标签过滤；暂无标签字典接口，可直接输入标签值后回车"
-                    >
-                      <Select mode="tags" placeholder="输入标签后回车，可多选" tokenSeparators={[',']} />
-                    </Form.Item>
-                    <Space size="large" wrap style={{ width: '100%' }}>
-                      <Form.Item name="session_id" label="会话 ID">
-                        <Input placeholder="按会话精确匹配" style={{ width: 220 }} />
-                      </Form.Item>
-                      <Form.Item name="sender" label="发送人">
-                        <Input placeholder="按发送人精确匹配" style={{ width: 220 }} />
-                      </Form.Item>
+                      {!rewriteAvailable && (
+                        <Typography.Text type="secondary">
+                          未配置对话模型（chat），查询改写不可用
+                        </Typography.Text>
+                      )}
                     </Space>
-                    <Form.Item name="msg_time_range" label="时间范围（msg_time）" style={{ marginBottom: 0 }}>
-                      <DatePicker.RangePicker showTime style={{ width: '100%' }} />
+                  ),
+                },
+                {
+                  key: 'recall',
+                  forceRender: true,
+                  label: '召回',
+                  children: (
+                    <Form.Item
+                      name="recall_top_k"
+                      label="recall_top_k（召回数量）"
+                      style={{ marginBottom: 0 }}
+                    >
+                      <InputNumber min={1} max={200} style={{ width: '100%' }} />
                     </Form.Item>
-                  </>
-                ),
-              },
-              {
-                key: 'return',
-                label: '返回',
-                children: (
-                  <Form.Item name="top_n" label="top_n（返回结果数）" style={{ marginBottom: 0 }}>
-                    <InputNumber min={1} max={50} style={{ width: '100%' }} />
-                  </Form.Item>
-                ),
-              },
-            ]}
-          />
+                  ),
+                },
+                {
+                  key: 'fusion',
+                  forceRender: true,
+                  label: '融合',
+                  children: (
+                    <>
+                      <Form.Item name="fusion_mode" label="融合模式">
+                        <Radio.Group
+                          optionType="button"
+                          options={[
+                            { label: 'RRF', value: 'rrf' },
+                            { label: '加权归一化', value: 'weighted', disabled: selectedKbGraphEnabled },
+                          ]}
+                        />
+                      </Form.Item>
+                      {selectedKbGraphEnabled && (
+                        <Typography.Text type="secondary">{GRAPH_FUSION_MUTEX_HINT}</Typography.Text>
+                      )}
+                      {fusionMode === 'weighted' && (
+                        <Form.Item
+                          name="w_vec"
+                          label="向量路权重 w_vec（BM25 权重 = 1 - w_vec）"
+                          tooltip="每路候选集内 min-max 归一化后按权重加权求和"
+                        >
+                          <Slider min={0} max={1} step={0.01} marks={{ 0: '0', 0.5: '0.5', 1: '1' }} />
+                        </Form.Item>
+                      )}
+                      {fusionMode === 'rrf' && (
+                        <Form.Item name="rrf_k" label="rrf_k" style={{ marginBottom: 0 }}>
+                          <InputNumber min={1} max={200} style={{ width: '100%' }} />
+                        </Form.Item>
+                      )}
+                    </>
+                  ),
+                },
+                {
+                  key: 'rerank',
+                  forceRender: true,
+                  label: '重排',
+                  children: (
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      <Form.Item
+                        name="rerank_enabled"
+                        label="启用重排序"
+                        valuePropName="checked"
+                        tooltip="候选上限 50；超时 1.5s 或失败降级为融合结果排序"
+                        style={{ marginBottom: rerankAvailable ? 0 : 8 }}
+                      >
+                        <Switch disabled={!rerankAvailable} />
+                      </Form.Item>
+                      {!rerankAvailable && (
+                        <Typography.Text type="secondary">
+                          未配置重排模型（rerank），重排序不可用
+                        </Typography.Text>
+                      )}
+                      {rerankAvailable && rerankEnabled && (
+                        <>
+                          <Form.Item
+                            name="rerank_mode"
+                            label="重排模式"
+                            tooltip="hybrid 将语义重排分与归一化 BM25 分线性加权，仅影响排序；semantic 为纯语义重排"
+                          >
+                            <Radio.Group
+                              optionType="button"
+                              options={[
+                                { label: '语义（semantic）', value: 'semantic' },
+                                { label: '混合（hybrid）', value: 'hybrid' },
+                              ]}
+                            />
+                          </Form.Item>
+                          {rerankMode === 'hybrid' && (
+                            <>
+                              <Form.Item
+                                name="rerank_w_semantic"
+                                label="语义分权重 w_semantic（BM25 权重 = 1 - w_semantic）"
+                                tooltip="排序分 = w × 语义重排分 + (1 - w) × 归一化 BM25 分，min-max 在本次候选集内归一化"
+                              >
+                                <Slider min={0} max={1} step={0.01} marks={{ 0: '0', 0.7: '0.7', 1: '1' }} />
+                              </Form.Item>
+                              <Typography.Text type="secondary">
+                                阈值过滤仍作用于纯语义重排分，hybrid 只改变排序，不影响 score_threshold
+                                的绝对语义
+                              </Typography.Text>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </Space>
+                  ),
+                },
+                {
+                  key: 'filter',
+                  forceRender: true,
+                  label: '过滤',
+                  children: (
+                    <>
+                      <Form.Item name="threshold_enabled" label="启用阈值过滤" valuePropName="checked">
+                        <Switch />
+                      </Form.Item>
+                      {thresholdEnabled && (
+                        <Form.Item
+                          name="score_threshold"
+                          label="score_threshold（0.01-1.0）"
+                          tooltip="rerank 开启时作用于 rerank 分；关闭/降级时作用于向量 cosine 分；BM25 单路时不生效"
+                        >
+                          <Slider min={0.01} max={1} step={0.01} />
+                        </Form.Item>
+                      )}
+                      <Typography.Title level={5} style={{ marginTop: 8 }}>
+                        metadata_filter
+                      </Typography.Title>
+                      <Form.Item
+                        name="tag_ids"
+                        label="标签（tag_ids）"
+                        tooltip="按文档标签过滤；暂无标签字典接口，可直接输入标签值后回车"
+                      >
+                        <Select mode="tags" placeholder="输入标签后回车，可多选" tokenSeparators={[',']} />
+                      </Form.Item>
+                      <Space size="large" wrap style={{ width: '100%' }}>
+                        <Form.Item name="session_id" label="会话 ID">
+                          <Input placeholder="按会话精确匹配" style={{ width: 220 }} />
+                        </Form.Item>
+                        <Form.Item name="sender" label="发送人">
+                          <Input placeholder="按发送人精确匹配" style={{ width: 220 }} />
+                        </Form.Item>
+                      </Space>
+                      <Form.Item
+                        name="msg_time_range"
+                        label="时间范围（msg_time）"
+                        style={{ marginBottom: 0 }}
+                      >
+                        <DatePicker.RangePicker showTime style={{ width: '100%' }} />
+                      </Form.Item>
+                    </>
+                  ),
+                },
+                {
+                  key: 'return',
+                  forceRender: true,
+                  label: '返回',
+                  children: (
+                    <Form.Item name="top_n" label="top_n（返回结果数）" style={{ marginBottom: 0 }}>
+                      <InputNumber min={1} max={50} style={{ width: '100%' }} />
+                    </Form.Item>
+                  ),
+                },
+              ]}
+            />
 
-          {modelStatus && !modelStatus.embedding_configured && (
+            {modelStatus && !modelStatus.embedding_configured && (
+              <Alert
+                type="info"
+                showIcon
+                message="零 Key 模式下仅 BM25 召回生效，recall_top_k/top_n 仍作用于该单路检索，score_threshold 不生效"
+                style={{ marginBottom: 16 }}
+              />
+            )}
+            <Form.Item className="workbench-primary-action">
+              <Button
+                type="primary"
+                size="large"
+                htmlType="submit"
+                icon={<SearchOutlined />}
+                loading={loading}
+              >
+                开始检索
+              </Button>
+            </Form.Item>
+          </Form>
+        </Card>
+
+        <section className="search-results-pane" aria-label="检索结果">
+          <header className="workspace-section-heading">
+            <h2>检索结果</h2>
+            <span>每条结果保留来源、评分与降级信息</span>
+          </header>
+          {searchError && (
             <Alert
-              type="info"
+              type="error"
               showIcon
-              message="零 Key 模式下仅 BM25 召回生效，recall_top_k/top_n 仍作用于该单路检索，score_threshold 不生效"
+              message="检索失败"
+              description="请检查检索参数或稍后重试，输入内容已保留。"
               style={{ marginBottom: 16 }}
             />
           )}
-          <Form.Item className="workbench-primary-action">
-            <Button type="primary" size="large" htmlType="submit" icon={<SearchOutlined />} loading={loading}>
-              开始检索
-            </Button>
-          </Form.Item>
-        </Form>
-      </Card>
+          {result && result.degraded.length > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              message="检索已降级"
+              description={result.degraded.map(describeDegradedReason).join('；')}
+              style={{ marginBottom: 16 }}
+            />
+          )}
 
-      {result && result.degraded.length > 0 && (
-        <Alert
-          type="warning"
-          showIcon
-          message="检索已降级"
-          description={result.degraded.map(describeDegradedReason).join('；')}
-          style={{ marginBottom: 16 }}
-        />
-      )}
+          {result && (
+            <AppliedInfoBar
+              applied={result.applied}
+              degraded={result.degraded}
+              originalQuery={searchedQuery}
+            />
+          )}
 
-      {result && <AppliedInfoBar applied={result.applied} degraded={result.degraded} originalQuery={searchedQuery} />}
+          {result && result.nodes.length > 0 && (
+            <Space className="search-result-toolbar" wrap>
+              <Typography.Text type="secondary">
+                共 {result.nodes.length} 条结果 · 已选 {selectedChunkIds.length} 项
+              </Typography.Text>
+              <Button
+                disabled={!canCollect || selectedChunkIds.length === 0}
+                onClick={() => setCollectModalOpen(true)}
+              >
+                收进评测集
+              </Button>
+            </Space>
+          )}
 
-      {result && result.nodes.length > 0 && (
-        <Space className="search-result-toolbar" wrap>
-          <Typography.Text type="secondary">
-            共 {result.nodes.length} 条结果 · 已选 {selectedChunkIds.length} 项
-          </Typography.Text>
-          <Button disabled={selectedChunkIds.length === 0} onClick={() => setCollectModalOpen(true)}>
-            收进评测集
-          </Button>
-        </Space>
-      )}
-
-      <Spin className="search-result-list" spinning={loading}>
-        {hasSearched && result && result.nodes.length === 0 && <Empty description="未检索到相关结果" />}
-        {result?.nodes.map((node, index) => (
+          <Spin className="search-result-list" spinning={loading}>
+            {hasSearched && result && result.nodes.length === 0 && <Empty description="未检索到相关结果" />}
+            {result?.nodes.map((node, index) => (
+              <RetrievalNodeCard
+                key={node.chunk_id}
+                node={node}
+                rank={index + 1}
+                thresholdTag={thresholdTag}
+                selected={selectedChunkIds.includes(node.chunk_id)}
+                onSelectChange={
+                  canCollect ? (checked) => toggleChunkSelected(node.chunk_id, checked) : undefined
+                }
+                onInspect={() => setEvidenceNode(node)}
+                feedback={feedbackByChunkId[node.chunk_id] ?? null}
+                onFeedback={(verdict) => handleFeedback(node.chunk_id, verdict)}
+              />
+            ))}
+            {!hasSearched && !loading && !searchError && (
+              <Empty description="请选择知识库并输入检索内容开始调试" />
+            )}
+          </Spin>
+        </section>
+      </div>
+      <Drawer title="命中证据" open={Boolean(evidenceNode)} onClose={() => setEvidenceNode(null)} width={620}>
+        {evidenceNode && (
           <RetrievalNodeCard
-            key={node.chunk_id}
-            node={node}
-            rank={index + 1}
+            node={evidenceNode}
+            rank={(result?.nodes.indexOf(evidenceNode) ?? 0) + 1}
             thresholdTag={thresholdTag}
-            selected={selectedChunkIds.includes(node.chunk_id)}
-            onSelectChange={(checked) => toggleChunkSelected(node.chunk_id, checked)}
-            feedback={feedbackByChunkId[node.chunk_id] ?? null}
-            onFeedback={(verdict) => handleFeedback(node.chunk_id, verdict)}
           />
-        ))}
-        {!hasSearched && <Empty description="请选择知识库并输入检索内容开始调试" />}
-      </Spin>
-
-      {searchedKbId && (
+        )}
+      </Drawer>
+      {searchedKbId && canCollect && collectModalOpen && (
         <CollectToEvalModal
           open={collectModalOpen}
           kbId={searchedKbId}

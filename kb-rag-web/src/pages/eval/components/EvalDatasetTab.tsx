@@ -149,7 +149,7 @@ export default function EvalDatasetTab({
         confirmLoading={submitting}
         okText="创建"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<CreateEvalDatasetRequest> form={form} layout="vertical">
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入评测集名称' }]}>
