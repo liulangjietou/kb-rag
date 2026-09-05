@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Author: owlzhangfq@gmail.com
 import { App as AntApp } from 'antd';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import RegistrationReviewPage from './RegistrationReviewPage';
@@ -84,42 +84,58 @@ afterEach(() => {
 
 describe('RegistrationReviewPage', () => {
   it('切换租户会清空角色，且必须重新选择该租户至少一个角色才能通过', async () => {
-    render(<AntApp><MemoryRouter><RegistrationReviewPage /></MemoryRouter></AntApp>);
+    render(<AntApp><MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><RegistrationReviewPage /></MemoryRouter></AntApp>);
     expect(await screen.findByText('林澈')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '审核' }));
 
-    const tenantSelect = await screen.findByRole('combobox', { name: '所属租户' });
+    const drawer = within(await screen.findByRole('dialog', { name: '审核与角色开通' }));
+    const tenantSelect = drawer.getByLabelText('所属租户');
     fireEvent.mouseDown(tenantSelect);
     fireEvent.click(await screen.findByText('租户甲（A）'));
 
-    let roleSelect = screen.getByRole('combobox', { name: '分配角色' });
-    fireEvent.mouseDown(roleSelect);
+    fireEvent.mouseDown(drawer.getByLabelText('分配角色'));
     fireEvent.click(await screen.findByText('编辑者 A（EDITOR_A）'));
 
     fireEvent.mouseDown(tenantSelect);
     fireEvent.click(await screen.findByText('租户乙（B）'));
-    fireEvent.click(screen.getByRole('button', { name: /通过并开通账号/ }));
-    await waitFor(() => expect(mocks.approveRegistration).not.toHaveBeenCalled());
+    const approveButton = drawer.getByRole('button', { name: /通过并开通账号/ });
+    fireEvent.click(approveButton);
+    expect(await drawer.findByText('请至少选择一个角色')).toBeTruthy();
+    expect(mocks.approveRegistration).not.toHaveBeenCalled();
 
-    roleSelect = screen.getByRole('combobox', { name: '分配角色' });
-    fireEvent.mouseDown(roleSelect);
+    fireEvent.mouseDown(drawer.getByLabelText('分配角色'));
     fireEvent.click(await screen.findByText('访客 B（VIEWER_B）'));
-    mocks.approveRegistration.mockRejectedValueOnce(new Error('temporary failure'));
-    fireEvent.click(screen.getByRole('button', { name: /通过并开通账号/ }));
-
-    expect(await screen.findByText(/账号开通失败/)).toBeTruthy();
-    expect(screen.getByRole('button', { name: /通过并开通账号/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /通过并开通账号/ }));
-    await waitFor(() => expect(mocks.approveRegistration).toHaveBeenCalledTimes(2));
-    expect(mocks.approveRegistration).toHaveBeenLastCalledWith('REG-1', {
+    fireEvent.click(approveButton);
+    await waitFor(() => expect(mocks.approveRegistration).toHaveBeenCalledOnce());
+    expect(mocks.approveRegistration).toHaveBeenCalledWith('REG-1', {
       tenant_id: 'tenant-b',
       role_ids: ['role-b'],
     });
   }, 20_000);
 
+  it('开通失败保留租户和角色，重试仍提交同一份授权', async () => {
+    mocks.approveRegistration.mockRejectedValueOnce(new Error('temporary failure'));
+    render(<AntApp><MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><RegistrationReviewPage /></MemoryRouter></AntApp>);
+    fireEvent.click(await screen.findByRole('button', { name: '审核' }));
+    const drawer = within(await screen.findByRole('dialog', { name: '审核与角色开通' }));
+    fireEvent.mouseDown(drawer.getByLabelText('所属租户'));
+    fireEvent.click(await screen.findByText('租户乙（B）'));
+    fireEvent.mouseDown(drawer.getByLabelText('分配角色'));
+    fireEvent.click(await screen.findByText('访客 B（VIEWER_B）'));
+    const approveButton = drawer.getByRole('button', { name: /通过并开通账号/ });
+    fireEvent.click(approveButton);
+    expect(await drawer.findByText(/账号开通失败/)).toBeTruthy();
+    fireEvent.click(approveButton);
+    await waitFor(() => expect(mocks.approveRegistration).toHaveBeenCalledTimes(2));
+    expect(mocks.approveRegistration.mock.calls).toEqual(Array(2).fill(['REG-1', {
+      tenant_id: 'tenant-b',
+      role_ids: ['role-b'],
+    }]));
+  }, 20_000);
+
   it('驳回失败时保留弹窗和已填写原因', async () => {
     mocks.rejectRegistration.mockRejectedValueOnce(new Error('temporary failure'));
-    render(<AntApp><MemoryRouter><RegistrationReviewPage /></MemoryRouter></AntApp>);
+    render(<AntApp><MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><RegistrationReviewPage /></MemoryRouter></AntApp>);
     expect(await screen.findByText('林澈')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '审核' }));
     fireEvent.click(await screen.findByRole('button', { name: '驳回申请' }));
@@ -137,7 +153,7 @@ describe('RegistrationReviewPage', () => {
     mocks.listRegistrationReviews
       .mockResolvedValueOnce({ items: [pendingApplication], page: 1, size: 10, total: 1 })
       .mockRejectedValueOnce(new Error('refresh failed'));
-    render(<AntApp><MemoryRouter><RegistrationReviewPage /></MemoryRouter></AntApp>);
+    render(<AntApp><MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><RegistrationReviewPage /></MemoryRouter></AntApp>);
     expect(await screen.findByText('林澈')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '审核' }));
     fireEvent.click(await screen.findByRole('button', { name: '驳回申请' }));
@@ -165,7 +181,7 @@ describe('RegistrationReviewPage', () => {
       size: 10,
       total: 1,
     });
-    render(<AntApp><MemoryRouter><RegistrationReviewPage /></MemoryRouter></AntApp>);
+    render(<AntApp><MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><RegistrationReviewPage /></MemoryRouter></AntApp>);
     fireEvent.click(await screen.findByRole('button', { name: '查看' }));
 
     expect(await screen.findByText('租户乙（B）')).toBeTruthy();

@@ -17,6 +17,7 @@ test.describe('授权页面快捷跳转', () => {
     await expect(page).toHaveURL(/\/kb$/);
     const trigger = page.getByRole('button', { name: '搜索页面与功能' });
     await trigger.click();
+    await expect(input).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toBeHidden();
     await expect(trigger).toBeFocused();
