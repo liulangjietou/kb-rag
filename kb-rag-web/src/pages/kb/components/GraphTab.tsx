@@ -1,3 +1,5 @@
+import { useAuth } from '../../../auth/AuthContext';
+import { PERMISSIONS } from '../../../auth/permissions';
 // Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
@@ -29,6 +31,8 @@ interface GraphTabProps {
  * button, and the top-50 entity relationship visualization.
  */
 export default function GraphTab({ kbId, kb, onKbChanged }: GraphTabProps) {
+  const { can } = useAuth();
+  const canWrite = can(PERMISSIONS.DOC_WRITE);
   const [summary, setSummary] = useState<GraphSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
@@ -144,7 +148,7 @@ export default function GraphTab({ kbId, kb, onKbChanged }: GraphTabProps) {
       <Card size="small" style={{ marginBottom: 16 }}>
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           <Space align="center">
-            <Switch checked={graphEnabled} loading={toggling || summaryLoading} onChange={handleToggle} />
+            <Switch aria-label="启用知识图谱" disabled={!can(PERMISSIONS.KB_WRITE)} checked={graphEnabled} loading={toggling || summaryLoading} onChange={handleToggle} />
             <Typography.Text strong>启用知识图谱（GraphRAG）</Typography.Text>
           </Space>
           {graphEnabled && (
@@ -156,7 +160,7 @@ export default function GraphTab({ kbId, kb, onKbChanged }: GraphTabProps) {
             />
           )}
           <Space>
-            <Button icon={<ReloadOutlined />} disabled={!graphEnabled || taskInProgress} loading={extracting} onClick={handleExtract}>
+            <Button hidden={!canWrite} icon={<ReloadOutlined />} disabled={!graphEnabled || taskInProgress} loading={extracting} onClick={handleExtract}>
               重新抽取
             </Button>
             {!graphEnabled && <Typography.Text type="secondary">开启开关后才能触发抽取</Typography.Text>}

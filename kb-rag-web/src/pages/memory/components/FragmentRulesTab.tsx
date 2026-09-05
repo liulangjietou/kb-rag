@@ -226,7 +226,7 @@ export default function FragmentRulesTab({ libraryId, canWrite, onChanged }: Pro
         confirmLoading={submitting}
         okText={editing ? '保存' : '创建'}
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<FragmentRuleFormValues>
           form={form}

@@ -131,7 +131,7 @@ export default function EvalCaseFormModal({
       okText="保存"
       cancelText="取消"
       width={720}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form<EvalCaseFormValues> form={form} layout="vertical">
         <Form.Item name="query" label="query（当前提问）" rules={[{ required: true, message: '请输入 query' }]}>

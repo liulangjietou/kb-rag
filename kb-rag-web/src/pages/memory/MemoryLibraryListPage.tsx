@@ -10,7 +10,6 @@ import {
   Input,
   Modal,
   Pagination,
-  Popconfirm,
   Row,
   Space,
   Spin,
@@ -28,6 +27,7 @@ import {
 import type { MemoryLibrary, MemoryLibraryUpsertRequest } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
+import ResourceMenu from '../../components/ResourceMenu';
 import PageHeader from '../../components/PageHeader';
 
 const PAGE_SIZE = 12;
@@ -152,40 +152,27 @@ export default function MemoryLibraryListPage() {
         ) : (
           <Row gutter={[16, 16]}>
             {libraries.map((library) => (
-              <Col key={library.library_id} xs={24} sm={12} md={8} lg={6}>
+              <Col key={library.library_id} xs={24} sm={12} xl={8} xxl={6}>
                 <Card
                   hoverable
                   className="catalog-resource-card catalog-memory-card"
                   title={library.name}
+                  extra={
+                    <ResourceMenu
+                      name={library.name}
+                      onEdit={canWrite ? () => openEdit(library) : undefined}
+                      onDelete={canWrite ? () => handleDelete(library.library_id) : undefined}
+                      deleteDescription="规则、记忆节点、用户画像与 Memory Key 将一并清理，此操作不可恢复。"
+                    />
+                  }
                   actions={[
-                    <Button key="detail" type="text" size="small" onClick={() => navigate(`/memory/${library.library_id}`)}>
-                      查看详情
+                    <Button
+                      key="detail"
+                      type="text"
+                      onClick={() => navigate(`/memory/${library.library_id}`)}
+                    >
+                      打开记忆库
                     </Button>,
-                    ...(canWrite
-                      ? [
-                          <Button
-                            key="edit"
-                            type="text"
-                            size="small"
-                            onClick={() => openEdit(library)}
-                          >
-                            编辑
-                          </Button>,
-                          <Popconfirm
-                            key="delete"
-                            title="确认删除该记忆库？"
-                            description="其下的规则、记忆节点、用户画像与 Memory Key 将一并清理，此操作不可恢复"
-                            okText="删除"
-                            okType="danger"
-                            cancelText="取消"
-                            onConfirm={() => handleDelete(library.library_id)}
-                          >
-                            <Button type="text" size="small" danger>
-                              删除
-                            </Button>
-                          </Popconfirm>,
-                        ]
-                      : []),
                   ]}
                 >
                   <Typography.Text className="catalog-resource-card__id" type="secondary">
@@ -199,7 +186,11 @@ export default function MemoryLibraryListPage() {
                       <Statistic title="记忆节点" value={library.node_count} valueStyle={{ fontSize: 16 }} />
                     </Col>
                     <Col span={8}>
-                      <Statistic title="记忆实体" value={library.entity_count} valueStyle={{ fontSize: 16 }} />
+                      <Statistic
+                        title="记忆实体"
+                        value={library.entity_count}
+                        valueStyle={{ fontSize: 16 }}
+                      />
                     </Col>
                     <Col span={8}>
                       <Statistic
@@ -237,7 +228,7 @@ export default function MemoryLibraryListPage() {
         confirmLoading={submitting}
         okText={editing ? '保存' : '创建'}
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<MemoryLibraryUpsertRequest> form={form} layout="vertical">
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入记忆库名称' }]}>

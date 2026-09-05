@@ -25,9 +25,20 @@ function initialThemePresetId(): ThemePresetId {
 }
 
 export function ThemePresetProvider({ children }: ThemePresetProviderProps) {
+  const [reducedMotion, setReducedMotion] = useState(() => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [presetId, setPresetId] = useState<ThemePresetId>(initialThemePresetId);
   const preset = useMemo(() => getThemePreset(presetId), [presetId]);
-  const antThemeConfig = useMemo(() => createAntThemeConfig(preset), [preset]);
+  const antThemeConfig = useMemo(() => {
+    const config = createAntThemeConfig(preset);
+    return { ...config, token: { ...config.token, motion: !reducedMotion } };
+  }, [preset, reducedMotion]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updateMotion = () => setReducedMotion(media.matches);
+    media.addEventListener('change', updateMotion);
+    return () => media.removeEventListener('change', updateMotion);
+  }, []);
 
   const selectPreset = useCallback((id: ThemePresetId) => {
     setPresetId(id);

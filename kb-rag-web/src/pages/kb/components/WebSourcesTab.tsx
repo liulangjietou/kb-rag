@@ -1,3 +1,5 @@
+import { useAuth } from '../../../auth/AuthContext';
+import { PERMISSIONS } from '../../../auth/permissions';
 // Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useState } from 'react';
 import { Button, Form, Input, Popconfirm, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
@@ -46,6 +48,8 @@ function reportOutcome(entry: WebSourceEntry) {
  * always resolve and carry the outcome on the row, which is why every action re-reads the list.
  */
 export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
+  const { can } = useAuth();
+  const canWrite = can(PERMISSIONS.DOC_WRITE);
   const [items, setItems] = useState<WebSourceEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -143,7 +147,7 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
         移除登记不会删除已入库的文档。
       </Typography.Paragraph>
 
-      <Form form={form} layout="inline" onFinish={handleRegister} style={{ marginBottom: 16 }}>
+      <Form hidden={!canWrite} form={form} layout="inline" onFinish={handleRegister} style={{ marginBottom: 16 }}>
         <Form.Item
           name="url"
           style={{ flex: 1, maxWidth: 560 }}
@@ -216,6 +220,7 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
             width: 100,
             render: (_, record) => (
               <Switch
+                disabled={!canWrite}
                 size="small"
                 checked={record.sync_enabled}
                 loading={actingId === record.source_id}
@@ -229,6 +234,7 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
             width: 100,
             render: (_, record) => (
               <Switch
+                disabled={!canWrite}
                 size="small"
                 checked={record.render_js}
                 loading={actingId === record.source_id}
@@ -254,7 +260,7 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
           {
             title: '操作',
             width: 180,
-            render: (_, record) => (
+            render: (_, record) => canWrite ? (
               <Space>
                 <Button
                   size="small"
@@ -277,7 +283,7 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
                   </Button>
                 </Popconfirm>
               </Space>
-            ),
+            ) : null,
           },
         ]}
       />

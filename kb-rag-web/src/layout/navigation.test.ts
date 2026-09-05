@@ -11,14 +11,16 @@ function permissionChecker(granted: string[]) {
 describe('navigation model', () => {
   it('keeps workspace and platform entries in their declared sections', () => {
     const entries = visibleNavEntries(() => true);
-    expect(NAV_SECTIONS.map((section) => section.key)).toEqual(['workspace', 'platform']);
-    expect(entries.filter((entry) => entry.section === 'workspace')).toHaveLength(8);
+    expect(NAV_SECTIONS.map((section) => section.key)).toEqual(['overview', 'assets', 'build', 'platform']);
+    expect(entries.filter((entry) => entry.section === 'overview')).toHaveLength(1);
+    expect(entries.filter((entry) => entry.section === 'assets')).toHaveLength(2);
+    expect(entries.filter((entry) => entry.section === 'build')).toHaveLength(5);
     expect(entries.filter((entry) => entry.section === 'platform')).toHaveLength(5);
   });
 
   it('filters entries with any-of permission semantics', () => {
     const entries = visibleNavEntries(permissionChecker([PERMISSIONS.APP_READ]));
-    expect(entries.map((entry) => entry.key)).toEqual(['/home', '/chat', '/apps', '/mcp']);
+    expect(entries.map((entry) => entry.key)).toEqual(['/home', '/apps', '/chat', '/mcp']);
   });
 
   it('lands every authenticated account on home regardless of its functional grants', () => {

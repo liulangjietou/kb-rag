@@ -195,7 +195,7 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
       open={open}
       onClose={onClose}
       width={560}
-      destroyOnClose
+      destroyOnHidden
       footer={
         <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button onClick={onClose}>取消</Button>

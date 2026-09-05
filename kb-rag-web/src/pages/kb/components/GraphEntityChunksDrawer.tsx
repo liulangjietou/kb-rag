@@ -33,7 +33,7 @@ export default function GraphEntityChunksDrawer({ kbId, entityName, onClose }: G
   }, [kbId, entityName]);
 
   return (
-    <Drawer title={`来源分片${entityName ? ` - ${entityName}` : ''}`} open={entityName !== null} onClose={onClose} width={640} destroyOnClose>
+    <Drawer title={`来源分片${entityName ? ` - ${entityName}` : ''}`} open={entityName !== null} onClose={onClose} width={640} destroyOnHidden>
       <Spin spinning={loading}>
         {chunks.length === 0 && !loading ? (
           <Empty description="暂无来源分片" />

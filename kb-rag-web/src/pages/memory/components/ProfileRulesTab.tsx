@@ -178,7 +178,7 @@ export default function ProfileRulesTab({ libraryId, canWrite, onChanged }: Prop
         okText={editing ? '保存' : '创建'}
         cancelText="取消"
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<ProfileRuleFormValues> form={form} layout="vertical" initialValues={{ extract_version: 'PRO' }}>
           <Form.Item name="name" label="规则名称" rules={[{ required: true, message: '请输入规则名称' }]}>

@@ -55,7 +55,7 @@ export default function EditAppModal({ app, onClose, onUpdated }: EditAppModalPr
       confirmLoading={submitting}
       okText="保存"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       <Form<UpdateAppRequest> form={form} layout="vertical">
         <Form.Item name="name" label="应用名称" rules={[{ required: true, message: '请输入应用名称' }]}>

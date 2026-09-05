@@ -22,7 +22,7 @@ export default function SettingsPage() {
       <PageHeader
         eyebrow="PLATFORM CONFIGURATION"
         title="系统设置"
-        description="集中维护模型能力、调用凭据、导入规则与运行告警。设置变更继续沿用各模块原有校验与保存边界。"
+        description="维护模型配置、检索词典、访问凭据与运行告警。"
       />
       <Tabs
         className="settings-tabs"
@@ -30,7 +30,7 @@ export default function SettingsPage() {
         items={[
           {
             key: 'model-status',
-            label: '模型状态',
+            label: <span className="settings-nav-label"><small>模型与检索</small>模型配置</span>,
             children: (
               <Card className="settings-panel" loading={loading}>
                 {modelStatus ? (
@@ -49,7 +49,7 @@ export default function SettingsPage() {
           },
           {
             key: 'ik-dict',
-            label: 'ik 词典',
+            label: '检索词典',
             children: (
               <Card className="settings-panel">
                 <IkDictTab />
@@ -57,17 +57,8 @@ export default function SettingsPage() {
             ),
           },
           {
-            key: 'alert',
-            label: '告警',
-            children: (
-              <Card className="settings-panel">
-                <AlertConfigTab />
-              </Card>
-            ),
-          },
-          {
             key: 'api-key',
-            label: 'API Key 管理',
+            label: <span className="settings-nav-label"><small>访问与集成</small>API Key</span>,
             children: (
               <Card className="settings-panel">
                 <ApiKeyTab />
@@ -75,11 +66,11 @@ export default function SettingsPage() {
             ),
           },
           {
-            key: 'audit-log',
-            label: '审计日志查询',
+            key: 'web-credential',
+            label: '站点凭据',
             children: (
               <Card className="settings-panel">
-                <AuditLogTab />
+                <WebCredentialTab />
               </Card>
             ),
           },
@@ -93,11 +84,20 @@ export default function SettingsPage() {
             ),
           },
           {
-            key: 'web-credential',
-            label: '站点凭据',
+            key: 'alert',
+            label: <span className="settings-nav-label"><small>运行管理</small>告警配置</span>,
             children: (
               <Card className="settings-panel">
-                <WebCredentialTab />
+                <AlertConfigTab />
+              </Card>
+            ),
+          },
+          {
+            key: 'audit-log',
+            label: 'API 调用日志',
+            children: (
+              <Card className="settings-panel">
+                <AuditLogTab />
               </Card>
             ),
           },

@@ -1,12 +1,13 @@
 // Author: owlzhangfq@gmail.com
 import { DownOutlined, LogoutOutlined, MenuOutlined, UserOutlined } from '@ant-design/icons';
-import { Alert, Avatar, Breadcrumb, Button, Dropdown, Layout, Menu, Tag } from 'antd';
+import { Alert, Avatar, Breadcrumb, Button, Dropdown, Layout, Menu } from 'antd';
 import type { MenuProps } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { PERMISSIONS } from '../auth/permissions';
 import BrandMark from '../components/BrandMark';
+import PageCommandPalette from './PageCommandPalette';
 import ThemePresetSwitcher from '../components/ThemePresetSwitcher';
 import { useModelStatus } from '../context/ModelStatusContext';
 import { landingPath, NAV_SECTIONS, visibleNavEntries } from './navigation';
@@ -180,7 +181,7 @@ export default function MainLayout() {
       <Sider
         id="app-primary-navigation"
         className="app-sider"
-        width={252}
+        width={228}
         collapsedWidth={0}
         trigger={null}
         collapsed={compactNavigation && !navigationOpen}
@@ -189,7 +190,7 @@ export default function MainLayout() {
         aria-label="主导航"
       >
         <div className="app-sider__brand">
-          <BrandMark inverse />
+          <BrandMark />
         </div>
         <div className="workspace-chip" aria-label="当前工作空间：企业知识中台">
           <span>企</span>
@@ -201,7 +202,7 @@ export default function MainLayout() {
         <nav ref={navigationRegionRef} className="app-navigation-region" aria-label="功能导航">
           <Menu
             className="app-navigation"
-            theme="dark"
+            theme="light"
             mode="inline"
             selectedKeys={[selectedKey]}
             items={menuItems}
@@ -241,17 +242,13 @@ export default function MainLayout() {
           <Breadcrumb
             className="app-breadcrumb"
             items={[
-              { title: '控制台' },
+              { title: NAV_SECTIONS.find((section) => section.key === selectedEntry?.section)?.label ?? '控制台' },
               { title: selectedEntry?.label ?? '工作台' },
               ...(detailRoute ? [{ title: '详情' }] : []),
             ]}
           />
           <div className="app-topbar__actions">
-            {modelStatus && (
-              <Tag className="model-health" color={modelStatus.embedding_configured ? 'success' : 'warning'}>
-                {modelStatus.embedding_configured ? 'Embedding 已配置' : 'BM25 模式'}
-              </Tag>
-            )}
+            <PageCommandPalette entries={navEntries} compact={compactNavigation} />
             <ThemePresetSwitcher compact={compactNavigation} />
             <Dropdown menu={accountMenu} trigger={['click']} placement="bottomRight">
               <button className="account-chip" type="button" aria-label="打开账号菜单">

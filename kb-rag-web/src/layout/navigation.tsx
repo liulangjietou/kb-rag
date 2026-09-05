@@ -34,39 +34,41 @@ export interface NavEntry {
   anyOf: string[];
 }
 
-export type NavSection = 'workspace' | 'platform';
+export type NavSection = 'overview' | 'assets' | 'build' | 'platform';
 
 export const NAV_SECTIONS: Array<{ key: NavSection; label: string }> = [
-  { key: 'workspace', label: '知识工作台' },
+  { key: 'overview', label: '概览' },
+  { key: 'assets', label: '知识资产' },
+  { key: 'build', label: '构建与验证' },
   { key: 'platform', label: '平台管理' },
 ];
 
 export const NAV_ENTRIES: NavEntry[] = [
-  { key: '/home', icon: <HomeOutlined />, label: '首页', section: 'workspace', anyOf: [] },
-  { key: '/kb', icon: <DatabaseOutlined />, label: '知识库', section: 'workspace', anyOf: [PERMISSIONS.KB_READ] },
-  { key: '/search', icon: <SearchOutlined />, label: '检索调试', section: 'workspace', anyOf: [PERMISSIONS.SEARCH_DEBUG] },
+  { key: '/home', icon: <HomeOutlined />, label: '工作概览', section: 'overview', anyOf: [] },
+  { key: '/kb', icon: <DatabaseOutlined />, label: '知识库', section: 'assets', anyOf: [PERMISSIONS.KB_READ] },
+  { key: '/apps', icon: <AppstoreOutlined />, label: '应用中心', section: 'build', anyOf: [PERMISSIONS.APP_READ] },
+  { key: '/search', icon: <SearchOutlined />, label: '检索调试', section: 'build', anyOf: [PERMISSIONS.SEARCH_DEBUG] },
   {
     key: '/chat',
     icon: <MessageOutlined />,
     label: '问答调试',
-    section: 'workspace',
+    section: 'build',
     anyOf: [PERMISSIONS.APP_READ, PERMISSIONS.SEARCH_DEBUG],
   },
-  { key: '/apps', icon: <AppstoreOutlined />, label: '应用中心', section: 'workspace', anyOf: [PERMISSIONS.APP_READ] },
-  { key: '/memory', icon: <BulbOutlined />, label: '记忆库', section: 'workspace', anyOf: [PERMISSIONS.MEMORY_READ] },
+  { key: '/memory', icon: <BulbOutlined />, label: '记忆库', section: 'assets', anyOf: [PERMISSIONS.MEMORY_READ] },
   {
     key: '/mcp',
     icon: <ApiOutlined />,
     label: 'MCP 调试',
-    section: 'workspace',
+    section: 'build',
     anyOf: [PERMISSIONS.APP_READ, PERMISSIONS.MEMORY_READ],
   },
-  { key: '/eval', icon: <ExperimentOutlined />, label: '评测中心', section: 'workspace', anyOf: [PERMISSIONS.EVAL_READ] },
-  { key: '/users', icon: <TeamOutlined />, label: '用户管理', section: 'platform', anyOf: [PERMISSIONS.USER_MANAGE] },
+  { key: '/eval', icon: <ExperimentOutlined />, label: '评测中心', section: 'build', anyOf: [PERMISSIONS.EVAL_READ] },
+  { key: '/users', icon: <TeamOutlined />, label: '用户与审核', section: 'platform', anyOf: [PERMISSIONS.USER_MANAGE] },
   {
     key: '/roles',
     icon: <SafetyCertificateOutlined />,
-    label: '角色管理',
+    label: '角色与权限',
     section: 'platform',
     anyOf: [PERMISSIONS.ROLE_MANAGE],
   },

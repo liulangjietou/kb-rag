@@ -222,7 +222,7 @@ export default function RoleManagePage() {
       width: 140,
       render: (_, record) => (
         <Space size={8}>
-          <a onClick={() => openEdit(record)}>编辑</a>
+          <Button type="link" size="small" onClick={() => openEdit(record)}>编辑权限</Button>
           {record.builtin ? (
             <Tooltip title="内置角色不可删除">
               <Typography.Text type="secondary">删除</Typography.Text>
@@ -236,7 +236,7 @@ export default function RoleManagePage() {
               cancelText="取消"
               onConfirm={() => removeRole(record)}
             >
-              <Typography.Link type="danger">删除</Typography.Link>
+              <Button type="link" size="small" danger>删除</Button>
             </Popconfirm>
           )}
         </Space>
@@ -248,7 +248,7 @@ export default function RoleManagePage() {
     <div className="management-page roles-page">
       <PageHeader
         eyebrow="ROLE GOVERNANCE"
-        title="角色管理"
+        title="角色与权限"
         description="将功能权限与知识库数据范围分别建模，明确每个角色能做什么、能看到哪些知识。"
         actions={
         <Space>
@@ -277,7 +277,7 @@ export default function RoleManagePage() {
         width={720}
         title={editing ? `编辑角色 - ${editing.name}` : '新建角色'}
         onClose={() => setDrawerOpen(false)}
-        destroyOnClose
+        destroyOnHidden
         extra={
           <Space>
             <Button onClick={() => setDrawerOpen(false)}>取消</Button>
@@ -289,7 +289,7 @@ export default function RoleManagePage() {
       >
         {/* key 随每次打开自增，保证 Form 组件重新挂载——rc-field-form 只在挂载那一次把 initialValues
             写进 store（`setInitialValues(values, !mountRef.current)`），沿用同一个组件实例时它只更新
-            引用。destroyOnClose 通常也能触发重挂载，但要等关闭动画跑完，抽屉被快速关掉再打开就赶不上。
+            引用。destroyOnHidden 通常也能触发重挂载，但要等关闭动画跑完，抽屉被快速关掉再打开就赶不上。
             下面的 preserve={false} 是同一件事的另一半，不能单独删：卸载时它把这些字段记进
             prevWithoutPreserves，重挂载时才会被强制取 initialValues，否则 merge 里残留的旧值会赢。 */}
         <Form<RoleFormValues>

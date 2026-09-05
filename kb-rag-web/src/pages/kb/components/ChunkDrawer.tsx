@@ -1,3 +1,5 @@
+import { useAuth } from '../../../auth/AuthContext';
+import { PERMISSIONS } from '../../../auth/permissions';
 // Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -43,6 +45,8 @@ const DEFAULT_PAGE = 1;
  * than trying to patch local state from the mutation response.
  */
 export default function ChunkDrawer({ docId, docName, onClose }: ChunkDrawerProps) {
+  const { can } = useAuth();
+  const canWrite = can(PERMISSIONS.DOC_WRITE);
   const [chunks, setChunks] = useState<KbChunk[]>([]);
   const [total, setTotal] = useState(0);
   const [pageSize, setPageSize] = useState(10);
@@ -207,8 +211,8 @@ export default function ChunkDrawer({ docId, docName, onClose }: ChunkDrawerProp
       open={docId !== null}
       onClose={onClose}
       width={720}
-      destroyOnClose
-      extra={
+      destroyOnHidden
+      extra={canWrite &&
         <Button size="small" type="primary" disabled={selectedIds.length < 2} loading={merging} onClick={handleMerge}>
           合并所选（{selectedIds.length}）
         </Button>
@@ -233,7 +237,7 @@ export default function ChunkDrawer({ docId, docName, onClose }: ChunkDrawerProp
                   <Space direction="vertical" style={{ width: '100%' }}>
                     <Space wrap style={{ width: '100%', justifyContent: 'space-between' }}>
                       <Space wrap>
-                        <Checkbox
+                        <Checkbox style={{ display: canWrite ? undefined : 'none' }} aria-label={`选择分片 ${chunk.seq}`}
                           checked={selectedIds.includes(chunk.chunk_id)}
                           onChange={(e) => toggleSelected(chunk.chunk_id, e.target.checked)}
                         />
@@ -242,8 +246,8 @@ export default function ChunkDrawer({ docId, docName, onClose }: ChunkDrawerProp
                           {metaOf(EMBEDDING_STATUS_META, chunk.embedding_status).label}
                         </Tag>
                       </Space>
-                      <Space>
-                        <Switch
+                      {canWrite && <Space>
+                        <Switch aria-label={`启用分片 ${chunk.seq}`}
                           size="small"
                           checked={chunk.enabled}
                           checkedChildren="启用"
@@ -259,7 +263,7 @@ export default function ChunkDrawer({ docId, docName, onClose }: ChunkDrawerProp
                         <Button size="small" onClick={() => openSplit(chunk)}>
                           拆分
                         </Button>
-                      </Space>
+                      </Space>}
                     </Space>
 
                     {disabledChildIds.length > 0 && (
@@ -327,7 +331,7 @@ export default function ChunkDrawer({ docId, docName, onClose }: ChunkDrawerProp
         cancelText="取消"
         confirmLoading={splitting}
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         {splitTarget && (
           <Space direction="vertical" style={{ width: '100%' }}>

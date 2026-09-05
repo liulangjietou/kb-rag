@@ -192,7 +192,7 @@ export default function SourceMappingTab() {
         okText={editTarget ? '保存' : '创建'}
         cancelText="取消"
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<MappingFormValues> form={form} layout="vertical">
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入映射名称' }]}>
@@ -223,7 +223,7 @@ export default function SourceMappingTab() {
         confirmLoading={copying}
         okText="复制"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Typography.Paragraph type="secondary">
           将内置模板「{copyTarget?.name}」复制为一份可编辑的自定义映射，原内置模板不受影响。

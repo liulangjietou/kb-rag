@@ -118,7 +118,7 @@ export default function FeedbackTab({ kbId }: FeedbackTabProps) {
 
   return (
     <>
-      <Space style={{ marginBottom: 16 }}>
+      <Space wrap style={{ marginBottom: 16 }}>
         <Select
           allowClear
           placeholder="好/坏筛选"
@@ -265,7 +265,7 @@ export default function FeedbackTab({ kbId }: FeedbackTabProps) {
         confirmLoading={submitting}
         okText="转入"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Typography.Paragraph type="secondary">
           将该条好结果反馈（query + 命中分片）转成一条评测 case（source=FEEDBACK），反馈状态随之变为「已转评测集」。

@@ -12,6 +12,8 @@ import { listEvalDatasets } from '../../../api/evalDataset';
 import type { AppVersion, AppVersionIndexSnapshot, EvalDataset, KnowledgeBase } from '../../../api/types';
 import { APP_VERSION_STATUS_META, metaOf } from '../../../utils/statusMeta';
 import { kbNameOf, resolveKbRefs } from '../../../utils/kbRefs';
+import { useAuth } from '../../../auth/AuthContext';
+import { PERMISSIONS } from '../../../auth/permissions';
 import GateCompareDrawer from './GateCompareDrawer';
 
 interface AppVersionTabProps {
@@ -30,6 +32,11 @@ const POLL_INTERVAL_MS = 3000;
  * force-release confirmation dialog. Double-run comparison results are shown via GateCompareDrawer.
  */
 export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVersionTabProps) {
+  const { can } = useAuth();
+  const canWrite = can(PERMISSIONS.APP_WRITE);
+  const canRelease = can(PERMISSIONS.APP_RELEASE);
+  const canReadEval = can(PERMISSIONS.EVAL_READ);
+  const [loadError, setLoadError] = useState(false);
   const [versions, setVersions] = useState<AppVersion[]>([]);
   const [loading, setLoading] = useState(false);
   const [datasetsByKb, setDatasetsByKb] = useState<Map<string, EvalDataset[]>>(new Map());
@@ -43,9 +50,12 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
     setLoading(true);
     try {
       const result = await listAppVersions(appId);
+      setLoadError(false);
       setVersions(result);
       onVersionsChanged(result);
       return result;
+    } catch {
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -55,20 +65,25 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
     loadVersions();
   }, [loadVersions]);
 
-  // Load the gate-dataset picker options for every distinct kb_id referenced across this app's
-  // versions' kb_refs (M5: a version can span several kbs, so this is now a flatMap/union rather
-  // than one id per version).
+  // 相同知识库集合只加载一次选项；只读查看不会触发评测接口。
+  const datasetKbKey = JSON.stringify(
+    Array.from(new Set(versions.flatMap((v) => resolveKbRefs(v.config).map((ref) => ref.kb_id)))).sort(),
+  );
   useEffect(() => {
-    const kbIds = Array.from(new Set(versions.flatMap((v) => resolveKbRefs(v.config).map((ref) => ref.kb_id))));
-    kbIds.forEach((kbId) => {
-      if (!datasetsByKb.has(kbId)) {
-        listEvalDatasets(kbId).then((datasets) => {
-          setDatasetsByKb((prev) => new Map(prev).set(kbId, datasets));
-        });
-      }
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [versions]);
+    if (!canWrite || !canReadEval) return;
+    let cancelled = false;
+    const kbIds: string[] = JSON.parse(datasetKbKey);
+    Promise.all(kbIds.map(async (kbId) => [kbId, await listEvalDatasets(kbId)] as const))
+      .then((entries) => {
+        if (!cancelled) setDatasetsByKb(new Map(entries));
+      })
+      .catch(() => {
+        if (!cancelled) message.error('门禁评测集加载失败，可刷新页面重试');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [datasetKbKey, canWrite, canReadEval]);
 
   const hasGatingVersion = versions.some((v) => v.status === 'GATING');
   useEffect(() => {
@@ -144,6 +159,14 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
 
   return (
     <div className="catalog-data-surface">
+      {loadError && (
+        <Alert
+          type="error"
+          showIcon
+          message="版本加载失败"
+          action={<Button onClick={() => void loadVersions()}>重试</Button>}
+        />
+      )}
       <Table<AppVersion>
         rowKey="app_version_id"
         loading={loading}
@@ -166,7 +189,7 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
             title: '门禁评测集',
             width: 220,
             render: (_, record: AppVersion) => {
-              const canBind = record.status === 'DRAFT' || record.status === 'TESTING';
+              const canBind = canWrite && (record.status === 'DRAFT' || record.status === 'TESTING');
               // M5: a version may span several kbs (M4b's eval dataset is still single-kb, per
               // M5-CONTRACTS.md section 2.2 "评测不涉及多库，不改"), so the picker offers the
               // union of every referenced kb's datasets, prefixed with the kb name once there is
@@ -181,6 +204,7 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
               return (
                 <Select
                   size="small"
+                  aria-label={`${record.version} 的门禁评测集`}
                   style={{ width: 200 }}
                   allowClear
                   disabled={!canBind}
@@ -189,12 +213,15 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
                   value={record.gate_dataset_id ?? undefined}
                   options={options}
                   onChange={(value) => handleBindDataset(record.app_version_id, value ?? null)}
-                  onClear={() => handleBindDataset(record.app_version_id, null)}
                 />
               );
             },
           },
-          { title: '变更说明', dataIndex: 'changelog', render: (changelog: string | null) => changelog || '-' },
+          {
+            title: '变更说明',
+            dataIndex: 'changelog',
+            render: (changelog: string | null) => changelog || '-',
+          },
           { title: '创建时间', dataIndex: 'created_at', width: 170 },
           {
             title: '操作',
@@ -204,12 +231,16 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
               const hasCompareResult = (record.gate_run_ids?.length ?? 0) > 0;
               return (
                 <Space wrap>
-                  {record.status === 'DRAFT' && (
-                    <Button size="small" loading={acting} onClick={() => handleSubmitTest(record.app_version_id)}>
+                  {canWrite && record.status === 'DRAFT' && (
+                    <Button
+                      size="small"
+                      loading={acting}
+                      onClick={() => handleSubmitTest(record.app_version_id)}
+                    >
                       提交测试
                     </Button>
                   )}
-                  {(record.status === 'TESTING' || record.status === 'GATE_PASSED') && (
+                  {canRelease && (record.status === 'TESTING' || record.status === 'GATE_PASSED') && (
                     <Popconfirm
                       title="确认发布该版本？"
                       description="若绑定了门禁评测集，将先执行同语料双跑评测"
@@ -222,12 +253,12 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
                       </Button>
                     </Popconfirm>
                   )}
-                  {record.status === 'GATE_LOG_ONLY' && (
+                  {canRelease && record.status === 'GATE_LOG_ONLY' && (
                     <Button size="small" danger loading={acting} onClick={() => setForceModalVersion(record)}>
                       强制发布
                     </Button>
                   )}
-                  {record.status === 'SUPERSEDED' && (
+                  {canRelease && record.status === 'SUPERSEDED' && (
                     <Popconfirm
                       title="确认回滚到该历史版本？"
                       description="将以该版本固化的配置重新发布，原当前正式版将变为已下线"
@@ -240,7 +271,7 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
                       </Button>
                     </Popconfirm>
                   )}
-                  {hasCompareResult && (
+                  {canReadEval && hasCompareResult && (
                     <Button size="small" onClick={() => setCompareVersion(record)}>
                       查看双跑结果
                     </Button>
@@ -264,7 +295,9 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
               snapshotsByKb.set(snap.kb_id, list);
             });
             const visibleCountByKb = new Map<string, number>();
-            (record.visible_version_kb_count ?? []).forEach((v) => visibleCountByKb.set(v.kb_id, v.version_count));
+            (record.visible_version_kb_count ?? []).forEach((v) =>
+              visibleCountByKb.set(v.kb_id, v.version_count),
+            );
 
             return (
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -281,7 +314,8 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
                 </Space>
                 <Typography.Paragraph style={{ marginBottom: 0 }} type="secondary">
                   recall_top_k={record.config.retrieval.recall_top_k}；top_n=
-                  {record.config.retrieval.top_n}；rerank_enabled={String(record.config.retrieval.rerank_enabled ?? false)}
+                  {record.config.retrieval.top_n}；rerank_enabled=
+                  {String(record.config.retrieval.rerank_enabled ?? false)}
                 </Typography.Paragraph>
                 <div>
                   <Typography.Text type="secondary">索引快照：</Typography.Text>
@@ -336,9 +370,10 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
         onCancel={() => setForceModalVersion(null)}
         onOk={() => forceModalVersion && handleRelease(forceModalVersion.app_version_id, true)}
         okText="确认强制发布"
+        confirmLoading={actingVersionId !== null}
         okButtonProps={{ danger: true }}
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         {forceModalVersion && (
           <Space direction="vertical" style={{ width: '100%' }}>
@@ -351,7 +386,9 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
                 '未绑定评测集 / 有效 case 不足 50 / 重试后仍含降级 case / 待复核占比超过 15% 中的一种或多种'
               }
             />
-            <Typography.Text>强制发布将跳过门禁拦截直接生效，本次操作会留痕记录，请确认后再继续。</Typography.Text>
+            <Typography.Text>
+              强制发布将跳过门禁拦截直接生效，本次操作会留痕记录，请确认后再继续。
+            </Typography.Text>
           </Space>
         )}
       </Modal>

@@ -31,7 +31,6 @@
 .workbench-config-card,
 .workbench-toolbar-card {
   margin-bottom: 18px;
-  border-top: 3px solid var(--kb-color-primary);
 }
 
 .workbench-empty-card {
@@ -54,7 +53,10 @@
   width: 100%;
   min-height: 224px;
   overflow: hidden;
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
 }
 
 .knowledge-card:hover,
@@ -96,7 +98,7 @@
 }
 
 .page-back-button:hover {
-  color: var(--kb-color-primary) !important;
+  color: var(--kb-color-primary-text) !important;
   background: transparent !important;
 }
 
@@ -171,8 +173,7 @@
   height: 480px;
   background:
     linear-gradient(var(--kb-color-border) 1px, transparent 1px),
-    linear-gradient(90deg, var(--kb-color-border) 1px, transparent 1px),
-    var(--kb-color-surface-subtle);
+    linear-gradient(90deg, var(--kb-color-border) 1px, transparent 1px), var(--kb-color-surface-subtle);
   background-size: 28px 28px;
   border: 1px solid var(--kb-color-border);
   border-radius: var(--kb-radius-lg);
@@ -239,7 +240,9 @@
 .retrieval-result-card {
   margin-bottom: 12px;
   border-left: 3px solid transparent;
-  transition: border-color 140ms ease, box-shadow 140ms ease;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
 }
 
 .retrieval-result-card:hover {
@@ -487,8 +490,7 @@
   }
 
   .kb-detail-tabs > .ant-tabs-nav .ant-tabs-nav-wrap {
-    overflow-x: auto;
-    scrollbar-width: thin;
+    overflow-x: hidden;
   }
 
   .knowledge-graph-canvas {
@@ -603,5 +605,230 @@
   .knowledge-card,
   .retrieval-result-card {
     transition: none;
+  }
+}
+
+/* 文档操作与移动端列表使用同一组数据和权限。 */
+.document-name {
+  display: grid;
+  gap: 5px;
+  overflow-wrap: anywhere;
+}
+.document-name strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.document-name small {
+  color: var(--kb-color-text-secondary);
+  font-size: 11px;
+}
+.document-expired {
+  color: var(--kb-color-danger);
+}
+.document-row-actions {
+  white-space: nowrap;
+}
+.document-mobile-list {
+  display: grid;
+  gap: 12px;
+}
+.document-mobile-item {
+  padding: 16px;
+  background: var(--kb-color-surface);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-md);
+}
+.document-mobile-item header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.document-mobile-item strong {
+  overflow-wrap: anywhere;
+}
+.document-mobile-item > small {
+  display: block;
+  margin: 8px 0 12px;
+  color: var(--kb-color-text-secondary);
+}
+.document-mobile-item footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding-top: 12px;
+  margin-top: 12px;
+  border-top: 1px solid var(--kb-color-border);
+  font-size: 12px;
+}
+.document-mobile-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 0;
+  margin-top: 18px;
+}
+.workspace-intro-panel {
+  padding: 24px;
+  background: var(--kb-color-surface);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-lg);
+}
+.workspace-secondary-tabs > .ant-tabs-nav {
+  background: var(--kb-color-surface);
+  padding-inline: 16px;
+  border-radius: var(--kb-radius-sm);
+}
+.search-workspace-grid {
+  display: grid;
+  grid-template-columns: 350px minmax(0, 1fr);
+  align-items: start;
+  gap: 22px;
+}
+.search-config-card {
+  position: sticky;
+  top: 86px;
+  max-height: calc(100vh - 108px);
+  overflow-y: auto;
+}
+.search-config-card .ant-card-body {
+  padding: 20px;
+}
+.search-config-card .ant-form-item {
+  margin-bottom: 18px;
+}
+.search-config-card .ant-collapse {
+  margin-bottom: 18px;
+}
+.search-config-card .ant-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+}
+.search-config-card .ant-radio-button-wrapper {
+  padding-inline: 8px;
+  font-size: 12px;
+}
+.search-config-card .workbench-primary-action {
+  position: sticky;
+  bottom: -20px;
+  margin: 0 -20px -20px;
+  padding: 14px 20px;
+  background: var(--kb-color-surface);
+  border-top: 1px solid var(--kb-color-border);
+  z-index: 2;
+}
+.search-config-card .workbench-primary-action .ant-btn {
+  width: 100%;
+}
+.search-results-pane {
+  min-width: 0;
+}
+.workspace-section-heading {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.workspace-section-heading h2 {
+  font-size: 17px;
+  margin: 0;
+}
+.workspace-section-heading span {
+  font-size: 12px;
+  color: var(--kb-color-text-secondary);
+}
+.search-results-pane > .ant-spin-nested-loading {
+  min-height: 360px;
+  background: var(--kb-color-surface);
+  border-radius: var(--kb-radius-lg);
+}
+.search-results-pane .ant-empty {
+  padding: 100px 20px;
+}
+.retrieval-result-card__identity {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1199px) {
+  .search-workspace-grid {
+    grid-template-columns: 310px minmax(0, 1fr);
+    gap: 16px;
+  }
+}
+@media (max-width: 767px) {
+  .search-workspace-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .search-config-card {
+    position: static;
+    max-height: none;
+  }
+  .search-config-card .workbench-primary-action {
+    position: static;
+  }
+}
+
+.chat-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 22px;
+  align-items: start;
+}
+.chat-main-pane {
+  position: relative;
+  min-width: 0;
+}
+.chat-evidence-pane {
+  padding: 20px;
+  background: var(--kb-color-surface);
+  border: 1px solid var(--kb-color-border);
+  border-radius: var(--kb-radius-lg);
+  min-height: 530px;
+  min-width: 0;
+}
+.chat-reference-card {
+  margin-bottom: 14px;
+  overflow-wrap: anywhere;
+}
+.chat-reference-card .ant-card-head-title {
+  white-space: normal;
+  font-size: 12px;
+}
+.chat-reference-id {
+  font-size: 11px;
+  display: block;
+  overflow-wrap: anywhere;
+}
+.chat-transcript-card {
+  min-height: 410px;
+  max-height: calc(100vh - 380px);
+  overflow-y: auto;
+}
+.chat-transcript-card > .ant-card-body {
+  padding: 22px;
+}
+.chat-turn__bubble {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-stop-button {
+  display: flex;
+  margin: 12px auto 0;
+}
+@media (max-width: 1199px) {
+  .chat-workspace-grid {
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: 16px;
+  }
+}
+@media (max-width: 767px) {
+  .chat-workspace-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .chat-evidence-pane {
+    min-height: 220px;
+  }
+  .chat-transcript-card {
+    min-height: 320px;
+    max-height: 500px;
   }
 }

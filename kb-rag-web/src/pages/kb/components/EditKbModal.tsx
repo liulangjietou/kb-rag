@@ -52,7 +52,7 @@ export default function EditKbModal({ kb, onClose, onUpdated }: EditKbModalProps
       confirmLoading={submitting}
       okText="保存"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       <Form<UpdateKbRequest> form={form} layout="vertical">
         <Form.Item

@@ -106,8 +106,8 @@ export function chatPreview(appId: string, payload: ChatPreviewRequest): Promise
  * Streaming counterpart of chatPreview. Carries the console session token, read straight from
  * storage because this call bypasses the shared axios client -- see chatStream.ts.
  */
-export function streamChatPreview(appId: string, payload: ChatPreviewRequest, handlers: ChatStreamHandlers): Promise<void> {
+export function streamChatPreview(appId: string, payload: ChatPreviewRequest, handlers: ChatStreamHandlers, signal?: AbortSignal): Promise<void> {
   const token = getToken();
   const headers: Record<string, string> = token ? { [SESSION_HEADER]: token } : {};
-  return streamChat(`/api/v1/apps/${appId}/chat-preview`, headers, { ...payload, app_id: appId }, handlers);
+  return streamChat(`/api/v1/apps/${appId}/chat-preview`, headers, { ...payload, app_id: appId }, handlers, signal);
 }

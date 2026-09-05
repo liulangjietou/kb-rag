@@ -80,13 +80,12 @@ describe('HomePage permission-aware data loading', () => {
     render(<AntApp><MemoryRouter><HomePage /></MemoryRouter></AntApp>);
 
     await waitFor(() => expect(mocks.listApps).toHaveBeenCalledOnce());
-    expect(screen.getByText('向量模型')).toBeTruthy();
-    expect(screen.getByText('CONFIGURED')).toBeTruthy();
-    expect(screen.getByText('混合检索')).toBeTruthy();
-    expect(screen.getByText('HYBRID AVAILABLE')).toBeTruthy();
-    expect(screen.getByText('1 RELEASED')).toBeTruthy();
-    expect(screen.queryByText('向量索引')).toBeNull();
-    expect(screen.queryByText('引用回答')).toBeNull();
+    expect(screen.getByText('检索能力')).toBeTruthy();
+    expect(screen.getByText('混合')).toBeTruthy();
+    expect(screen.getByText('向量与关键词检索已配置')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('其中 1 个已有发布版本')).toBeTruthy());
+    expect(screen.queryByText('服务正常')).toBeNull();
+    expect(screen.queryByText('索引健康')).toBeNull();
   });
 
   it('只请求有权限的真实资源，并裁剪无权快捷入口', async () => {

@@ -1,3 +1,5 @@
+import { useAuth } from '../../../auth/AuthContext';
+import { PERMISSIONS } from '../../../auth/permissions';
 // Author: owlzhangfq@gmail.com
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -105,6 +107,8 @@ interface SourceFormValues {
  * the request thread, so sync only acknowledges acceptance and the list is re-read for its outcome.
  */
 export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabProps) {
+  const { can } = useAuth();
+  const canWrite = can(PERMISSIONS.DOC_WRITE);
   const [items, setItems] = useState<ExtSource[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -267,7 +271,7 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
       </Typography.Paragraph>
 
       <Space style={{ marginBottom: 16 }}>
-        <Button type="primary" onClick={openCreate}>
+        <Button hidden={!canWrite} type="primary" onClick={openCreate}>
           登记数据源
         </Button>
         <Button onClick={() => load(page)}>刷新</Button>
@@ -325,6 +329,7 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
             width: 100,
             render: (_, record) => (
               <Switch
+                disabled={!canWrite}
                 size="small"
                 checked={record.sync_enabled}
                 loading={actingId === record.source_id}
@@ -352,7 +357,7 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
             width: 300,
             render: (_, record) => (
               <Space size={0} wrap>
-                <Button
+                <Button hidden={!canWrite}
                   size="small"
                   type="link"
                   loading={actingId === record.source_id}
@@ -360,7 +365,7 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
                 >
                   立即同步
                 </Button>
-                <Button
+                <Button hidden={!canWrite}
                   size="small"
                   type="link"
                   loading={actingId === record.source_id}
@@ -371,10 +376,10 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
                 <Button size="small" type="link" onClick={() => setItemsSource(record)}>
                   查看对象
                 </Button>
-                <Button size="small" type="link" onClick={() => openEdit(record)}>
+                <Button hidden={!canWrite} size="small" type="link" onClick={() => openEdit(record)}>
                   编辑
                 </Button>
-                <Popconfirm
+                <Popconfirm disabled={!canWrite}
                   title="移除该数据源？"
                   description="仅移除数据源登记，已扫描入库的文档会保留在知识库中。"
                   okText="移除"
@@ -382,7 +387,7 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
                   cancelText="取消"
                   onConfirm={() => handleRemove(record)}
                 >
-                  <Button size="small" type="link" danger loading={actingId === record.source_id}>
+                  <Button hidden={!canWrite} size="small" type="link" danger loading={actingId === record.source_id}>
                     移除
                   </Button>
                 </Popconfirm>
@@ -510,7 +515,7 @@ function ExtSourceItemsDrawer({ source, onClose }: ExtSourceItemsDrawerProps) {
       width={720}
       open={Boolean(source)}
       onClose={onClose}
-      destroyOnClose
+      destroyOnHidden
     >
       <Table<ExtSourceItem>
         rowKey="object_key"

@@ -40,7 +40,7 @@ export default function CreateKbModal({ open, onClose, onCreated }: CreateKbModa
       confirmLoading={submitting}
       okText="创建"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
     >
       <Form<CreateKbRequest> form={form} layout="vertical">
         <Form.Item

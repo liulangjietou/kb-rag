@@ -118,7 +118,7 @@ export default function OperationAuditPage() {
       <PageHeader
         eyebrow="AUDIT EVIDENCE"
         title="操作审计"
-        description="按操作者、模块和时间追溯写操作。审计记录只读保存，确保平台治理证据不会被页面自身改写。"
+        description="按操作者、模块和时间追溯平台变更，查看操作结果与请求详情。"
       />
       <Card className="management-panel">
       <Space className="management-filter audit-filter" wrap>

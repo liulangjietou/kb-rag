@@ -37,10 +37,6 @@ export default function ParsePreviewDrawer({ doc, onClose, onConfirmed }: ParseP
   const [reparseForm] = Form.useForm<CleanRules>();
 
   useEffect(() => {
-    // reparseForm is a single long-lived FormInstance owned by this component (it outlives the
-    // per-document Drawer content because of destroyOnClose), so its store must be reset here --
-    // otherwise unsaved edits typed for one document would leak into the next document's form.
-    reparseForm.resetFields();
     if (!doc) {
       setPreview(null);
       setReparseOpen(false);
@@ -50,7 +46,7 @@ export default function ParsePreviewDrawer({ doc, onClose, onConfirmed }: ParseP
     getDocumentPreview(doc.doc_id)
       .then(setPreview)
       .finally(() => setLoading(false));
-  }, [doc, reparseForm]);
+  }, [doc]);
 
   const handleConfirm = async () => {
     if (!doc) return;
@@ -84,7 +80,7 @@ export default function ParsePreviewDrawer({ doc, onClose, onConfirmed }: ParseP
       open={doc !== null}
       onClose={onClose}
       width={720}
-      destroyOnClose
+      destroyOnHidden
       footer={
         <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button onClick={() => setReparseOpen((prev) => !prev)}>改规则重解析</Button>

@@ -6,6 +6,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { getApp, listAppVersions } from '../../api/app';
 import { listKnowledgeBases } from '../../api/kb';
 import type { AppVersion, KbApp, KnowledgeBase } from '../../api/types';
+import { useAuth } from '../../auth/AuthContext';
+import { PERMISSIONS } from '../../auth/permissions';
 import PageHeader from '../../components/PageHeader';
 import AppConfigTab from './components/AppConfigTab';
 import AppVersionTab from './components/AppVersionTab';
@@ -18,6 +20,8 @@ import ApiDebugTab from './components/ApiDebugTab';
 export default function AppDetailPage() {
   const { appId } = useParams<{ appId: string }>();
   const navigate = useNavigate();
+  const { can } = useAuth();
+  const canReadKb = can(PERMISSIONS.KB_READ);
   const [app, setApp] = useState<KbApp | null>(null);
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [versions, setVersions] = useState<AppVersion[]>([]);
@@ -32,10 +36,10 @@ export default function AppDetailPage() {
   useEffect(() => {
     if (!appId) return;
     setLoading(true);
-    Promise.all([loadApp(), listKnowledgeBases().then(setKbs), listAppVersions(appId).then(setVersions)]).finally(() =>
+    Promise.all([loadApp(), canReadKb ? listKnowledgeBases().then(setKbs) : Promise.resolve(), listAppVersions(appId).then(setVersions)]).finally(() =>
       setLoading(false),
     );
-  }, [appId, loadApp]);
+  }, [appId, loadApp, canReadKb]);
 
   if (!appId) {
     return null;
@@ -70,8 +74,8 @@ export default function AppDetailPage() {
           items={[
             {
               key: 'config',
-              label: '配置编辑',
-              children: (
+              label: '应用配置',
+              children: !loading && (
                 <AppConfigTab
                   appId={appId}
                   kbs={kbs}
@@ -82,7 +86,7 @@ export default function AppDetailPage() {
             },
             {
               key: 'versions',
-              label: '版本列表',
+              label: '版本与发布',
               children: <AppVersionTab appId={appId} kbs={kbs} onVersionsChanged={setVersions} />,
             },
             {
