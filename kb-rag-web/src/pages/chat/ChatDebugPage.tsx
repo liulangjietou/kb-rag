@@ -1,16 +1,16 @@
 // Author: owlzhangfq@gmail.com
 import { useEffect, useRef, useState } from 'react';
 import { PauseOutlined, PlusOutlined, SendOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Empty, Input, Select, Space, Switch, Tag, Typography } from 'antd';
-import { chatPreview, listApps, streamChatPreview } from '../../api/app';
+import { Alert, Button, Card, Empty, Input, Select, Skeleton, Space, Switch, Tag, Typography } from 'antd';
+import { chatPreview, listPreviewApps, streamChatPreview } from '../../api/app';
 import { listKnowledgeBases } from '../../api/kb';
 import ImagePicker, { toImagesPayload, type PickedImage } from '../../components/ImagePicker';
 import PageHeader from '../../components/PageHeader';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
-import type { ChatMessage, KbApp, KnowledgeBase, RetrievalNode } from '../../api/types';
+import type { AppPreviewOption, ChatMessage, KnowledgeBase, RetrievalNode } from '../../api/types';
 import { kbNameOf } from '../../utils/kbRefs';
-import { describeDegradedReason } from '../../utils/statusMeta';
+import { APP_VERSION_STATUS_META, describeDegradedReason } from '../../utils/statusMeta';
 
 interface ChatTurn {
   role: 'user' | 'assistant';
@@ -27,7 +27,10 @@ interface ChatTurn {
 export default function ChatDebugPage() {
   const { can } = useAuth();
   const canReadKb = can(PERMISSIONS.KB_READ);
-  const [apps, setApps] = useState<KbApp[]>([]);
+  const [apps, setApps] = useState<AppPreviewOption[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState(false);
+  const [catalogRefresh, setCatalogRefresh] = useState(0);
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [appId, setAppId] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState<string>('');
@@ -42,11 +45,29 @@ export default function ChatDebugPage() {
   const [referenceTurn, setReferenceTurn] = useState<number | null>(null);
 
   useEffect(() => {
-    listApps().then((list) => {
+    let active = true;
+    setCatalogLoading(true);
+    setCatalogError(false);
+    listPreviewApps().then((list) => {
+      if (!active) return;
       setApps(list);
-      setAppId((prev) => prev ?? list[0]?.app_id ?? null);
+      setAppId(list[0]?.app_id ?? null);
+      setAppVersion(list[0]?.versions[0]?.app_version_id ?? '');
+    }).catch(() => {
+      if (active) setCatalogError(true);
+    }).finally(() => {
+      if (active) setCatalogLoading(false);
     });
-    if (canReadKb) listKnowledgeBases().then(setKbs);
+    return () => { active = false; };
+  }, [catalogRefresh]);
+
+  useEffect(() => {
+    let active = true;
+    if (canReadKb) listKnowledgeBases().then((list) => {
+      if (active) setKbs(list);
+    }).catch(() => { /* 名称补齐失败不阻断问答，证据仍显示业务 ID。 */ });
+    else setKbs([]);
+    return () => { active = false; };
   }, [canReadKb]);
 
   useEffect(() => {
@@ -83,7 +104,7 @@ export default function ChatDebugPage() {
   };
 
   const handleSend = async () => {
-    if (!appId || !input.trim() || requestRef.current) return;
+    if (!appId || !appVersion || catalogLoading || catalogError || !input.trim() || requestRef.current) return;
     const controller = new AbortController();
     requestRef.current = controller;
     const sequence = ++requestSequence.current;
@@ -108,7 +129,7 @@ export default function ChatDebugPage() {
       if (streamEnabled) {
         await streamChatPreview(
           appId,
-          { query, messages: history, app_version: appVersion || undefined, images: imagesPayload },
+          { query, messages: history, app_version_id: appVersion, images: imagesPayload },
           {
             onDelta: (delta) => updateAnswer((turn) => ({ ...turn, content: turn.content + delta })),
             onReferences: (references) => updateAnswer((turn) => ({ ...turn, references })),
@@ -122,7 +143,7 @@ export default function ChatDebugPage() {
         const response = await chatPreview(appId, {
           query,
           messages: history,
-          app_version: appVersion || undefined,
+          app_version_id: appVersion,
           images: imagesPayload,
         });
         updateAnswer((turn) => ({
@@ -149,6 +170,8 @@ export default function ChatDebugPage() {
   };
 
   const activeReferences = referenceTurn === null ? [] : (turns[referenceTurn]?.references ?? []);
+  const activeVersions = apps.find((app) => app.app_id === appId)?.versions ?? [];
+  const inputDisabled = !appId || !appVersion || catalogLoading || catalogError;
 
   return (
     <div className="knowledge-workbench-page chat-workbench-page">
@@ -169,20 +192,30 @@ export default function ChatDebugPage() {
             className="chat-app-select"
             aria-label="调试应用"
             placeholder="请选择应用"
+            loading={catalogLoading}
+            disabled={catalogLoading || catalogError}
             value={appId ?? undefined}
             options={apps.map((app) => ({ label: app.name, value: app.app_id }))}
             onChange={(value) => {
               setAppId(value);
+              setAppVersion(apps.find((app) => app.app_id === value)?.versions[0]?.app_version_id ?? '');
               newConversation();
             }}
           />
-          <Input
+          <Select
             className="chat-version-input"
-            placeholder="app_version（留空=当前正式版）"
-            value={appVersion}
-            disabled={sending}
+            placeholder="请选择应用版本"
+            value={appVersion || undefined}
+            disabled={sending || inputDisabled}
             aria-label="应用版本"
-            onChange={(e) => setAppVersion(e.target.value)}
+            options={activeVersions.map((version) => ({
+              value: version.app_version_id,
+              label: `${version.version} · ${APP_VERSION_STATUS_META[version.status]?.label ?? version.status}`,
+            }))}
+            onChange={(value) => {
+              setAppVersion(value);
+              newConversation();
+            }}
           />
           <Space className="chat-stream-toggle">
             <Typography.Text>流式</Typography.Text>
@@ -194,16 +227,24 @@ export default function ChatDebugPage() {
             />
           </Space>
         </Space>
+        <div className="chat-corpus-note">
+          <Tag>当前语料</Tag>
+          <Typography.Text type="secondary">按所选版本配置调试，读取当前活动文档。正式调用的语料范围请核对发布快照。</Typography.Text>
+        </div>
       </Card>
 
       <div className="chat-workspace-grid">
         <section className="chat-main-pane" aria-label="调试对话">
-          {!appId ? (
+          {catalogLoading ? <Card><Skeleton active paragraph={{ rows: 3 }} /></Card> : catalogError ? (
+            <Alert type="error" showIcon message="可调试应用加载失败" description="请检查网络连接后重试，输入内容已保留。"
+              action={<Button onClick={() => setCatalogRefresh((value) => value + 1)}>重新加载</Button>} />
+          ) : !appId ? (
             <Alert
               className="chat-prerequisite"
               type="info"
               showIcon
-              message="请先在「应用中心」创建应用后再使用问答调试"
+              message="暂无可调试应用"
+              description="需要应用版本已配置，且关联的知识库全部在你的访问范围内。请联系应用管理员。"
             />
           ) : (
             <Card className="chat-transcript-card">
@@ -274,7 +315,7 @@ export default function ChatDebugPage() {
           )}
 
           <div className="chat-image-picker">
-            <ImagePicker value={images} onChange={setImages} disabled={!appId} />
+            <ImagePicker value={images} onChange={setImages} disabled={inputDisabled} />
           </div>
           <Space.Compact className="chat-composer">
             <Input.TextArea
@@ -288,14 +329,15 @@ export default function ChatDebugPage() {
                   handleSend();
                 }
               }}
-              disabled={!appId}
+              disabled={inputDisabled}
             />
             <Button
               className="chat-send-button"
+              aria-label="发送问题"
               type="primary"
               icon={<SendOutlined />}
               loading={sending}
-              disabled={!appId || !input.trim() || sending}
+              disabled={inputDisabled || !input.trim() || sending}
               onClick={handleSend}
             >
               发送

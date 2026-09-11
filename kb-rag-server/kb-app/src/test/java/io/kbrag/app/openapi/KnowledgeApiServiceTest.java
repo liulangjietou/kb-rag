@@ -158,6 +158,32 @@ class KnowledgeApiServiceTest {
     }
 
     @Test
+    void shouldRejectAPreviewVersionBelongingToAnotherApplicationBeforeRetrieval() {
+        AppVersion version = stubVersionWithSnapshot(AppVersionStatus.RELEASED);
+        version.setAppId("app_other");
+        stubSearch(node("doc_1", "不应访问的内容"));
+        when(chatProvider.isConfigured()).thenReturn(true);
+
+        BizException error = assertThrows(BizException.class,
+                () -> service.preview(APP_ID, VERSION_ID, command(null, null, null), null));
+
+        assertEquals(ErrorCode.VERSION_NOT_FOUND, error.getErrorCode());
+        verify(retrievalService, never()).search(anyList(), any());
+        verify(chatProvider, never()).complete(anyString(), anyList());
+    }
+
+    @Test
+    void shouldRejectAMismatchedVersionOnTheRequestThreadBeforeCheckingKbScope() {
+        AppVersion version = stubVersionWithSnapshot(AppVersionStatus.RELEASED);
+        version.setAppId("app_other");
+
+        BizException error = assertThrows(BizException.class,
+                () -> service.requirePreviewKbAccess(APP_ID, VERSION_ID));
+
+        assertEquals(ErrorCode.VERSION_NOT_FOUND, error.getErrorCode());
+    }
+
+    @Test
     void shouldNotBindASnapshotForAConsolePreviewOfTheReleasedVersion() {
         stubVersionWithSnapshot(AppVersionStatus.RELEASED);
         stubSearch(node("doc_1", "第一段"));

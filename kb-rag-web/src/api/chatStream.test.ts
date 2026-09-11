@@ -5,6 +5,40 @@ const handlers = () => ({ onDelta: vi.fn(), onReferences: vi.fn(), onDone: vi.fn
 afterEach(() => vi.unstubAllGlobals());
 
 describe('可取消的回答流', () => {
+  it('正常 EOF 缺少业务终态时保留增量并明确报告未完成', async () => {
+    const callbacks = handlers();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('event: message_delta\ndata: {"delta":"部分回答"}\n\n', { headers: { 'content-type': 'text/event-stream' } })));
+    await streamChat('/api/chat', {}, { app_id: 'app-1', query: '问题' }, callbacks);
+    expect(callbacks.onDelta).toHaveBeenCalledWith('部分回答');
+    expect(callbacks.onError).toHaveBeenCalledExactlyOnceWith({ code: 'STREAM_INCOMPLETE', message: '回答尚未完成，连接已结束。已保留收到的内容，请重试' });
+    expect(callbacks.onDone).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['event: error\ndata: {"code":"MODEL_ERROR","message":"模型失败"}\n\n', 'MODEL_ERROR'],
+    ['event: message_delta\ndata: invalid\n\n', 'PARSE_ERROR'],
+    ['event: done\ndata: null\n\n', 'PARSE_ERROR'],
+  ])('错误是唯一终态，不接受后续完成和增量：%s', async (first, code) => {
+    const callbacks = handlers();
+    const content = `${first}event: done\ndata: {"request_id":"later"}\n\nevent: message_delta\ndata: {"delta":"late"}\n\n`;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(content, { headers: { 'content-type': 'text/event-stream' } })));
+    await streamChat('/api/chat', {}, { app_id: 'app-1', query: '问题' }, callbacks);
+    expect(callbacks.onError).toHaveBeenCalledTimes(1);
+    expect(callbacks.onError).toHaveBeenCalledWith(expect.objectContaining({ code }));
+    expect(callbacks.onDone).not.toHaveBeenCalled();
+    expect(callbacks.onDelta).not.toHaveBeenCalled();
+  });
+
+  it('忽略扩展事件，并在完成后忽略重复终态与迟到增量', async () => {
+    const callbacks = handlers();
+    const content = 'event: heartbeat\ndata: ping\n\nevent: done\ndata: {"request_id":"req-1"}\n\nevent: done\ndata: {"request_id":"req-2"}\n\nevent: message_delta\ndata: {"delta":"late"}\n\n';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(content, { headers: { 'content-type': 'text/event-stream' } })));
+    await streamChat('/api/chat', {}, { app_id: 'app-1', query: '问题' }, callbacks);
+    expect(callbacks.onDone).toHaveBeenCalledExactlyOnceWith('req-1', [], []);
+    expect(callbacks.onDelta).not.toHaveBeenCalled();
+    expect(callbacks.onError).not.toHaveBeenCalled();
+  });
+
   it('保留增量、引用、路由和完成标识的真实 SSE 协议', async () => {
     const callbacks = handlers();
     const content = 'event: message_delta\ndata: {"delta":"根据资料"}\n\nevent: references\ndata: {"references":[]}\n\nevent: done\ndata: {"request_id":"req-1","degraded":["bm25_only"],"routed_kb_ids":["kb-1"]}\n\n';

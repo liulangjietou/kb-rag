@@ -1,6 +1,6 @@
 // Author: owlzhangfq@gmail.com
 import { consumeSse } from '../utils/sse';
-import type { ChatDeltaEvent, ChatDoneEvent, ChatErrorEvent, ChatReferencesEvent, ChatRequest, RetrievalNode } from './types';
+import type { ChatDeltaEvent, ChatDoneEvent, ChatErrorEvent, ChatPreviewRequest, ChatReferencesEvent, ChatRequest, RetrievalNode } from './types';
 
 export interface ChatStreamHandlers {
   onDelta: (delta: string) => void;
@@ -24,7 +24,7 @@ export interface ChatStreamHandlers {
 export async function streamChat(
   url: string,
   headers: Record<string, string>,
-  payload: Omit<ChatRequest, 'stream'>,
+  payload: Omit<ChatRequest, 'stream'> | Omit<ChatPreviewRequest, 'stream'>,
   handlers: ChatStreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -52,42 +52,55 @@ export async function streamChat(
     return;
   }
 
+  let terminal = false;
+  const fail = (code: string, message: string) => {
+    if (terminal || signal?.aborted) return;
+    terminal = true;
+    handlers.onError({ code, message });
+  };
   try {
-  await consumeSse(response, (evt) => {
-    if (signal?.aborted) return;
-    let data: unknown;
-    try {
-      data = JSON.parse(evt.data);
-    } catch {
-      handlers.onError({ code: 'PARSE_ERROR', message: 'SSE 数据解析失败' });
-      return;
-    }
-    switch (evt.event) {
-      case 'message_delta': {
-        const delta = data as ChatDeltaEvent;
-        handlers.onDelta(delta.delta ?? '');
-        break;
+    await consumeSse(response, (evt) => {
+      if (signal?.aborted || terminal) return false;
+      // 心跳及未来扩展事件不属于当前业务协议，不要求它们携带 JSON。
+      if (!['message_delta', 'references', 'done', 'error'].includes(evt.event)) return;
+      let data: unknown;
+      try {
+        data = JSON.parse(evt.data);
+        if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid SSE payload');
+      } catch {
+        fail('PARSE_ERROR', 'SSE 数据解析失败');
+        return false;
       }
-      case 'references': {
-        const references = data as ChatReferencesEvent;
-        handlers.onReferences(references.references ?? []);
-        break;
+      switch (evt.event) {
+        case 'message_delta': {
+          const delta = data as ChatDeltaEvent;
+          handlers.onDelta(delta.delta ?? '');
+          break;
+        }
+        case 'references': {
+          const references = data as ChatReferencesEvent;
+          handlers.onReferences(references.references ?? []);
+          break;
+        }
+        case 'done': {
+          const done = data as ChatDoneEvent;
+          if (typeof done.request_id !== 'string' || !done.request_id) {
+            fail('PARSE_ERROR', 'SSE 完成事件缺少请求标识');
+          } else {
+            terminal = true;
+            handlers.onDone(done.request_id, done.degraded ?? [], done.routed_kb_ids ?? []);
+          }
+          return false;
+        }
+        case 'error': {
+          const error = data as ChatErrorEvent;
+          fail(error.code ?? 'UPSTREAM_MODEL_ERROR', error.message ?? '生成失败');
+          return false;
+        }
       }
-      case 'done': {
-        const done = data as ChatDoneEvent;
-        handlers.onDone(done.request_id, done.degraded ?? [], done.routed_kb_ids ?? []);
-        break;
-      }
-      case 'error': {
-        const error = data as ChatErrorEvent;
-        handlers.onError({ code: error.code ?? 'UPSTREAM_MODEL_ERROR', message: error.message ?? '生成失败' });
-        break;
-      }
-      default:
-        break;
-    }
-  });
+    });
+    fail('STREAM_INCOMPLETE', '回答尚未完成，连接已结束。已保留收到的内容，请重试');
   } catch {
-    if (!signal?.aborted) handlers.onError({ code: 'NETWORK_ERROR', message: '回答连接中断，请重试' });
+    fail('NETWORK_ERROR', '回答连接中断，请重试');
   }
 }

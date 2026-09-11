@@ -1845,8 +1845,17 @@ export interface ChatRequest extends PublicSearchRequest {
   stream?: boolean;
 }
 
-/** Admin-authenticated chat preview body (see ChatRequest doc); app_id comes from the URL path instead. */
-export type ChatPreviewRequest = Omit<ChatRequest, 'app_id'>;
+/** 管理预览使用版本 ID，省略时取最新配置；语料始终为当前活动语料。 */
+export type ChatPreviewRequest = Omit<ChatRequest, 'app_id' | 'app_version'> & {
+  app_version_id?: string;
+};
+
+/** 专用调试目录，仅返回当前账号可预览的应用及版本摘要。 */
+export interface AppPreviewOption {
+  app_id: string;
+  name: string;
+  versions: Pick<AppVersion, 'app_version_id' | 'version' | 'status'>[];
+}
 
 /** Non-streaming POST /api/v1/knowledge/chat response (M4c-CONTRACTS.md section 3). */
 export interface ChatResponse {

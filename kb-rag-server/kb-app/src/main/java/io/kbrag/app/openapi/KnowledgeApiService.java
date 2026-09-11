@@ -269,9 +269,14 @@ public class KnowledgeApiService {
      * @return version to preview
      */
     private AppVersion previewVersion(String appId, String appVersionId) {
-        return appVersionId == null || appVersionId.isBlank()
+        AppVersion version = appVersionId == null || appVersionId.isBlank()
                 ? appVersionService.requireNewest(appId)
                 : appVersionService.require(appVersionId);
+        // 版本守卫限定租户，这里再限定路径应用，防止同租户的其他应用配置被误用于本次预览。
+        if (!appId.equals(version.getAppId())) {
+            throw new BizException(ErrorCode.VERSION_NOT_FOUND, "应用版本不存在");
+        }
+        return version;
     }
 
     /**
