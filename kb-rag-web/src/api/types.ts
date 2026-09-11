@@ -2476,7 +2476,7 @@ export interface ModelUsageRecord {
   provider: string;
   capability: ModelCapability;
   model: string;
-  status: 'RESERVED' | 'SUCCEEDED' | 'FAILED';
+  status: 'RESERVED' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
   reserved_tokens: number;
   input_tokens: number;
   output_tokens: number;
