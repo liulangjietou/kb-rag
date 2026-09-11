@@ -7,13 +7,10 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { getSsoAvailability, getSsoProviders, login } from '../api/auth';
 import type { LoginMode, SsoProviders } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
+import { authReturnLocation } from '../auth/returnLocation';
 import AuthShell from '../components/AuthShell';
 import LoginSliderCaptcha from '../components/LoginSliderCaptcha';
 import { clearLoginMemory, loadLoginMemory, saveLoginMemory, storePasswordCredential } from '../utils/loginMemory';
-
-interface LocationState {
-  from?: { pathname: string };
-}
 
 interface FormValues {
   username: string;
@@ -128,12 +125,12 @@ export default function LoginPage() {
         clearLoginMemory();
       }
       loginSuccess(res.token, res.must_change_password);
+      const returnTo = authReturnLocation(location.state);
       if (res.must_change_password) {
-        navigate('/change-password', { replace: true });
+        navigate('/change-password', { replace: true, state: { from: returnTo } });
         return;
       }
-      const state = location.state as LocationState | null;
-      navigate(state?.from?.pathname ?? '/', { replace: true });
+      navigate(returnTo, { replace: true });
     } catch {
       // 共享请求拦截器已展示后端错误；这里只重置一次性 proof，保留账号和密码。
       resetCaptcha();
