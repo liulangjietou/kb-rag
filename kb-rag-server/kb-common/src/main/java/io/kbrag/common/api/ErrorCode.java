@@ -64,6 +64,9 @@ public enum ErrorCode {
     /** 相同幂等请求标识携带了不同的问题。 */
     CONVERSATION_REQUEST_CONFLICT(409, "request id was already used with different content"),
 
+    /** 其他页面已更新回答反馈，需要先读取最新评价。 */
+    FEEDBACK_VERSION_CONFLICT(409, "answer feedback changed; reload before editing"),
+
     /** 正式问答所需的冻结索引或可见版本集合已经不可用。 */
     KNOWLEDGE_SNAPSHOT_UNAVAILABLE(409, "published knowledge snapshot unavailable"),
 

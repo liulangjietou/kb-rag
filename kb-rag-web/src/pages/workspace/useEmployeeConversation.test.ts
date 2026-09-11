@@ -18,4 +18,11 @@ describe('持久回答合并边界', () => {
   it('同一视图中旧授权响应不能重新显示已撤权内容', () => {
     expect(mergeEmployeeRun({ ...run, answer: '', restricted: true }, run).answer).toBe('');
   });
+  it('撤权投影也清除评价说明，迟到响应不能恢复反馈中的原文', () => {
+    const graded = { ...run, feedback: { verdict: 'BAD' as const, note: '从原答案引用的说明', updated_at: '2026-09-11T10:00:00' } };
+    expect(mergeEmployeeRun(undefined, { ...graded, restricted: true }).feedback).toBeNull();
+    const revoked = mergeEmployeeRun(graded, { ...graded, revision: 2, restricted: true });
+    expect(revoked.feedback).toBeNull();
+    expect(mergeEmployeeRun(revoked, { ...graded, revision: 4 }).feedback).toBeNull();
+  });
 });

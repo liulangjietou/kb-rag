@@ -2,8 +2,9 @@ import { ArrowDownOutlined, BookOutlined, DeleteOutlined, EditOutlined, HistoryO
 import { Alert, Button, Drawer, Input, Modal, Skeleton, Tag } from 'antd';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { employeeWorkspace, isActiveRun, type EmployeeApiError, type EmployeeCitation, type EmployeeRun } from '../../api/employeeWorkspace';
+import { employeeWorkspace, isActiveRun, type EmployeeApiError, type EmployeeCitation, type EmployeeRun, type AnswerFeedbackVerdict } from '../../api/employeeWorkspace';
 import AnswerMarkdown, { CopyTextButton } from './AnswerMarkdown';
+import AnswerFeedbackControls, { AnswerFeedbackDialog } from './AnswerFeedbackControls';
 import { useEmployeeConversation } from './useEmployeeConversation';
 
 const STATUS: Record<EmployeeRun['status'], string> = {
@@ -27,6 +28,7 @@ export default function ConversationView({ appId, conversationId, applicationNam
   const [title, setTitle] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string>();
+  const [feedbackRun, setFeedbackRun] = useState<EmployeeRun>();
   const [hasNewContent, setHasNewContent] = useState(false);
   const input = useRef<TextAreaRef>(null);
   const scroll = useRef<HTMLDivElement>(null);
@@ -81,6 +83,11 @@ export default function ConversationView({ appId, conversationId, applicationNam
   const evidenceRun = state.runs.find((run) => run.run_id === evidenceRunId) ?? state.runs.at(-1);
   const selectedRun = state.runs.find((run) => run.run_id === reference?.runId);
   const selectedReference = !selectedRun?.restricted && reference ? selectedRun?.references[reference.index] : undefined;
+  const currentFeedbackRun = state.runs.find((run) => run.run_id === feedbackRun?.run_id);
+  useEffect(() => {
+    if (state.authorizationError || currentFeedbackRun?.restricted
+      || (!state.loading && !state.loadError && feedbackRun && !currentFeedbackRun)) setFeedbackRun(undefined);
+  }, [state.authorizationError, state.loading, state.loadError, currentFeedbackRun, feedbackRun]);
   const active = Boolean(state.conversation?.active_run_id);
   const blocked = state.loading || !!state.authorizationError || !state.conversation;
 
@@ -159,6 +166,7 @@ export default function ConversationView({ appId, conversationId, applicationNam
           {!state.runs.length && !state.loadError && <div className="conversation-empty"><BookOutlined /><h3>这次想了解什么？</h3>
             <p>描述你的问题，必要时补充背景。回答中的引用可以直接打开核对。</p></div>}
           {state.runs.map((run) => <RunMessage key={run.run_id} run={run} applicationName={applicationName}
+            onFeedback={state.feedback} onEditFeedback={setFeedbackRun}
             onReference={openReference} onRetry={(question) => void send(question, false)} canRetry={!blocked && !active && !state.pending && !state.sending}
             onEvidence={() => { setEvidenceRunId(run.run_id); setEvidenceOpen(true); }} />)}
         </>}
@@ -187,6 +195,14 @@ export default function ConversationView({ appId, conversationId, applicationNam
       </div>
     </section>
     <aside className="workspace-evidence" aria-label="当前回答依据">{evidence}</aside>
+    {feedbackRun && <AnswerFeedbackDialog key={feedbackRun.run_id} initialRun={feedbackRun}
+      currentRun={currentFeedbackRun ?? feedbackRun} onSave={state.feedback}
+      visible={state.visible && !state.loading && !state.loadError && !!currentFeedbackRun && !currentFeedbackRun.restricted && !state.authorizationError}
+      onClose={() => {
+        const triggerId = `answer-feedback-${feedbackRun.run_id}`;
+        setFeedbackRun(undefined);
+        requestAnimationFrame(() => document.getElementById(triggerId)?.focus());
+      }} />}
     <Drawer title="回答依据" open={evidenceOpen} width={360} onClose={() => setEvidenceOpen(false)} destroyOnClose>{evidence}</Drawer>
     <Drawer title={selectedReference?.file_name ?? '引用资料'} open={!!reference} width={520} onClose={() => setReference(undefined)} destroyOnClose>
       {state.loading ? <Skeleton active paragraph={{ rows: 6 }} /> : state.loadError ? <Alert type="error" message="暂时无法核验这条引用，请重试"
@@ -218,9 +234,11 @@ function sourceLocator(source: EmployeeCitation): string {
   return `${location} · 版本 ${source.document_version}`;
 }
 
-const RunMessage = memo(function RunMessage({ run, applicationName, onReference, onRetry, canRetry, onEvidence }: {
+const RunMessage = memo(function RunMessage({ run, applicationName, onReference, onRetry, canRetry, onEvidence, onFeedback, onEditFeedback }: {
   run: EmployeeRun; applicationName: string; onReference: (runId: string, index: number) => void;
   onRetry: (question: string) => void; canRetry: boolean; onEvidence: () => void;
+  onFeedback: (run: EmployeeRun, verdict: AnswerFeedbackVerdict, note?: string) => Promise<boolean>;
+  onEditFeedback: (run: EmployeeRun) => void;
 }) {
   const citation = useCallback((index: number) => onReference(run.run_id, index), [onReference, run.run_id]);
   return <article className="conversation-turn" aria-label={`第 ${run.turn_no} 轮问答`}>
@@ -235,6 +253,7 @@ const RunMessage = memo(function RunMessage({ run, applicationName, onReference,
         message={run.error_message || (run.status === 'INTERRUPTED' ? '执行进程已中断，已保留保存过的内容。可重新发起一次问答。' : '已停止，保存过的内容会继续保留。')} />}
       {run.degraded && <p className="conversation-muted">本次使用了部分可用检索能力，请结合来源核对回答。</p>}
       <footer>{run.answer && !run.restricted && <CopyTextButton text={run.answer} label="复制回答" />}
+        {run.status === 'SUCCEEDED' && !run.restricted && <AnswerFeedbackControls run={run} onSave={onFeedback} onEdit={() => onEditFeedback(run)} />}
         {!!run.references.length && !run.restricted && <button type="button" className="workspace-text-action" onClick={onEvidence}><BookOutlined /> 查看依据</button>}
         {!isActiveRun(run) && <button type="button" className="workspace-text-action" disabled={!canRetry} onClick={() => onRetry(run.question)}>重新生成</button>}
       </footer>

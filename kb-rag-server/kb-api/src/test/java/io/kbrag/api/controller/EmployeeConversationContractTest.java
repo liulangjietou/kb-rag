@@ -137,7 +137,7 @@ class EmployeeConversationContractTest {
         return new RunView("run", "conv", 1, " 原问题 ", "回答",
                 List.of(new EmployeeCitation("doc", "version", "chunk", "kb", "材料", "v1", null, null, null, null, 2, "原文", false)),
                 ConversationRunStatus.RUNNING, ConversationRunStage.GENERATING, "av_original", "v1", true,
-                3, 1, false, null, null, false, LocalDateTime.now(), null);
+                3, 1, false, null, null, false, LocalDateTime.now(), null, null);
     }
 
     private void bind(String permission) {

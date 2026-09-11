@@ -2,6 +2,8 @@ package io.kbrag.app.workspace;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import io.kbrag.domain.entity.EmployeeConversation;
+import io.kbrag.common.exception.BizException;
+import io.kbrag.domain.enums.FeedbackVerdict;
 import io.kbrag.domain.model.EmployeeConversationScope;
 import io.kbrag.domain.model.UserPrincipal;
 import lombok.RequiredArgsConstructor;
@@ -76,6 +78,17 @@ public class EmployeeConversationService {
         EmployeeConversationScope scope = access.scope(principal, appId);
         coordinator.stop(scope, conversationId, runId);
         return history.present(principal, ledger.get(scope, conversationId, runId));
+    }
+
+    /** 当前身份只能评价自己的可读回答；评价不进入模型上下文或重新触发生成。 */
+    public EmployeeConversationHistory.RunView feedback(String appId, String conversationId, String runId,
+                                                        FeedbackVerdict verdict, String note, int expectedRevision) {
+        UserPrincipal principal = access.current();
+        EmployeeConversationScope scope = access.scope(principal, appId);
+        if (history.present(principal, ledger.get(scope, conversationId, runId)).restricted()) {
+            throw BizException.forbidden("资料权限或状态已变化，请重新读取回答后再评价");
+        }
+        return history.present(principal, ledger.feedback(scope, conversationId, runId, verdict, note, expectedRevision));
     }
 
     /** 按轮次分页返回经过当前证据权限过滤的历史。 */

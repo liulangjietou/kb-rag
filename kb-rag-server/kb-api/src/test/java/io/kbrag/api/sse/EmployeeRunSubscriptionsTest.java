@@ -153,7 +153,7 @@ class EmployeeRunSubscriptionsTest {
     private RunView view(boolean restricted, ConversationRunStatus status) {
         return new RunView("run", "conv", 1, "问题", restricted ? "" : "已允许的正文", List.of(),
                 status, ConversationRunStage.GENERATING, "av", "v1", true, 4, 1, false,
-                null, null, restricted, null, null);
+                null, null, restricted, null, null, null);
     }
 
     @RestController

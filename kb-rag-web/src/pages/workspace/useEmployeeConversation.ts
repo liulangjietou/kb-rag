@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react';
 import { employeeWorkspace, EmployeeApiError, isActiveRun, subscribeEmployeeRun,
-  type EmployeeConversation, type EmployeeRun } from '../../api/employeeWorkspace';
+  type EmployeeConversation, type EmployeeRun, type AnswerFeedbackVerdict } from '../../api/employeeWorkspace';
 
 const NEWEST = 2147483647;
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
@@ -8,11 +8,11 @@ const errorMessage = (error: unknown) => error instanceof Error ? error.message 
 
 /** 旧检查点与迟到的活动状态不能覆盖更新结果；撤权信息始终优先清除已有正文。 */
 export function mergeEmployeeRun(previous: EmployeeRun | undefined, incoming: EmployeeRun): EmployeeRun {
-  if (!previous) return incoming.restricted ? { ...incoming, answer: '', references: [] } : incoming;
+  if (!previous) return incoming.restricted ? { ...incoming, answer: '', references: [], feedback: null } : incoming;
   const keepPrevious = previous.revision > incoming.revision || (!isActiveRun(previous) && isActiveRun(incoming));
   const result = keepPrevious ? previous : incoming;
   // 本次页面生命周期内不自动恢复被撤权的内容；重新打开会话会从服务器重新取得授权视图。
-  return previous.restricted || incoming.restricted ? { ...result, restricted: true, answer: '', references: [] } : result;
+  return previous.restricted || incoming.restricted ? { ...result, restricted: true, answer: '', references: [], feedback: null } : result;
 }
 
 /** 会话摘要和回答必须一起更新，已知运行的终态与轮次优先于迟到的摘要。 */
@@ -239,7 +239,24 @@ export function useEmployeeConversation(appId: string, conversationId: string, o
     }
   }, [appId, conversationId, conversation?.active_run_id, merge, onChanged, authorizeFailure, setConversation]);
 
-  return { conversation, runs, loading, loadError, commandError, authorizationError, sending, stopping, pending,
+  const feedback = useCallback(async (run: EmployeeRun, verdict: AnswerFeedbackVerdict, note?: string): Promise<boolean> => {
+    if (authorizationBlocked.current) return false;
+    const epoch = authorizationEpoch.current;
+    try {
+      const saved = await employeeWorkspace.feedback(appId, conversationId, run.run_id, verdict, note, run.revision);
+      if (!alive.current || epoch !== authorizationEpoch.current) return false;
+      merge(saved);
+      return !saved.restricted;
+    } catch (error) {
+      if (alive.current) {
+        authorizeFailure(error);
+        if (error instanceof EmployeeApiError && error.code === 'FEEDBACK_VERSION_CONFLICT') await refresh(true);
+      }
+      throw error;
+    }
+  }, [appId, conversationId, merge, authorizeFailure, refresh]);
+
+  return { conversation, runs, loading, loadError, commandError, authorizationError, sending, stopping, pending, feedback,
     connection, connectionMessage, visible, refresh, submit, stop, setConversation, authorizeFailure,
     reconnect: () => setConnectionEpoch((value) => value + 1),
     earlier: () => { if (runs.length) setCursor(Math.min(...runs.map((run) => run.turn_no))); },

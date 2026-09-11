@@ -209,7 +209,8 @@ class EmployeeRunHttpIntegrationTest {
                     + ";MODE=MySQL;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=5000", "sa", "");
             jdbc = new JdbcTemplate(source);
             String ddl = Files.readString(Path.of("src/main/resources/db/migration/V28__employee_conversations.sql"))
-                    .replaceAll("ENGINE = InnoDB[^;]+", "");
+                    .replaceAll("ENGINE = InnoDB[^;]+", "")
+                    + Files.readString(Path.of("src/main/resources/db/migration/V29__employee_answer_feedback.sql"));
             for (String statement : ddl.split(";")) if (!statement.isBlank()) jdbc.execute(statement);
             var configuration = new MybatisConfiguration();
             configuration.setMapUnderscoreToCamelCase(true);

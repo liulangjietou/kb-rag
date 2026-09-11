@@ -4,8 +4,12 @@ import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import io.kbrag.common.util.JsonUtil;
+import io.kbrag.common.api.ErrorCode;
+import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.enums.ConversationRunStage;
 import io.kbrag.domain.enums.ConversationRunStatus;
+import io.kbrag.domain.enums.FeedbackVerdict;
+import io.kbrag.domain.model.EmployeeAnswerFeedback;
 import io.kbrag.domain.model.EmployeeConversationScope;
 import io.kbrag.domain.model.EmployeeRunTarget;
 import lombok.Getter;
@@ -54,6 +58,29 @@ public class EmployeeConversationRun extends BaseEntity {
     private String errorMessage;
     private LocalDateTime startedAt;
     private LocalDateTime finishedAt;
+    private FeedbackVerdict feedbackVerdict;
+    private String feedbackNote;
+    private LocalDateTime feedbackUpdatedAt;
+
+    /** 只评价已保存的完整回答；相同内容的网络重试幂等，旧版本不能覆盖不同的新评价。 */
+    public boolean giveFeedback(FeedbackVerdict verdict, String note, int expectedRevision, LocalDateTime now) {
+        if (status != ConversationRunStatus.SUCCEEDED) {
+            throw BizException.invalidParam("回答尚未完整保存，暂时不能评价");
+        }
+        if (feedbackVerdict == verdict && Objects.equals(feedbackNote, note)) return false;
+        if (getLockVersion() != expectedRevision) {
+            throw new BizException(ErrorCode.FEEDBACK_VERSION_CONFLICT, "这条反馈已在其他页面更新，请重新读取后再修改");
+        }
+        feedbackVerdict = verdict;
+        feedbackNote = note;
+        feedbackUpdatedAt = now;
+        return true;
+    }
+
+    /** 返回已记录的最新评价，未评价时为空。 */
+    public EmployeeAnswerFeedback feedback() {
+        return feedbackVerdict == null ? null : new EmployeeAnswerFeedback(feedbackVerdict, feedbackNote, feedbackUpdatedAt);
+    }
 
     /** 接受后即可读取原问题及所选配置；只有事务提交后才允许调度。 */
     public static EmployeeConversationRun pending(String id, EmployeeConversation conversation,

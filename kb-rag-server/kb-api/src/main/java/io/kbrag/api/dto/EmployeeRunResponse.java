@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import io.kbrag.app.workspace.EmployeeConversationHistory.RunView;
 import io.kbrag.domain.enums.ConversationRunStage;
 import io.kbrag.domain.enums.ConversationRunStatus;
+import io.kbrag.domain.enums.FeedbackVerdict;
 import io.kbrag.domain.model.EmployeeCitation;
 
 import java.time.LocalDateTime;
@@ -22,15 +23,20 @@ public record EmployeeRunResponse(
         @JsonProperty("error_code") String errorCode,
         @JsonProperty("error_message") String errorMessage, boolean restricted,
         @JsonProperty("created_at") LocalDateTime createdAt,
-        @JsonProperty("finished_at") LocalDateTime finishedAt) {
+        @JsonProperty("finished_at") LocalDateTime finishedAt, FeedbackResponse feedback) {
 
     /** 只能接收历史投影服务的安全视图，禁止直接序列化持久实体。 */
     public static EmployeeRunResponse from(RunView run) {
         return new EmployeeRunResponse(run.runId(), run.conversationId(), run.turnNo(), run.question(), run.answer(),
                 run.references().stream().map(CitationResponse::from).toList(), run.status(), run.stage(),
                 run.appVersionId(), run.appVersion(), run.snapshotBound(), run.revision(), run.checkpointSeq(),
-                run.degraded(), run.errorCode(), run.errorMessage(), run.restricted(), run.createdAt(), run.finishedAt());
+                run.degraded(), run.errorCode(), run.errorMessage(), run.restricted(), run.createdAt(), run.finishedAt(),
+                run.feedback() == null ? null : new FeedbackResponse(run.feedback().verdict(), run.feedback().note(), run.feedback().updatedAt()));
     }
+
+    /** 问题说明与回答一样经过当前证据权限过滤，不返回内部身份。 */
+    public record FeedbackResponse(FeedbackVerdict verdict, String note,
+                                   @JsonProperty("updated_at") LocalDateTime updatedAt) { }
 
     /** 页码仅来自原文件元数据；切片序号与自动生成的切片标题保持独立语义。 */
     public record CitationResponse(
