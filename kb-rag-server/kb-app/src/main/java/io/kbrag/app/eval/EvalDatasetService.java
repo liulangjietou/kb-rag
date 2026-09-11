@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.kbrag.app.kb.KnowledgeBaseService;
+import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.entity.Chunk;
@@ -23,6 +24,7 @@ import io.kbrag.domain.mapper.EvalDatasetMapper;
 import io.kbrag.domain.mapper.EvalResultMapper;
 import io.kbrag.domain.mapper.EvalRunMapper;
 import io.kbrag.domain.model.ChatMessage;
+import io.kbrag.domain.model.EvalCaseInput;
 import io.kbrag.domain.model.EvalEvidence;
 import io.kbrag.domain.service.BizIdGenerator;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +32,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -129,6 +133,21 @@ public class EvalDatasetService {
         return dataset;
     }
 
+    /** 在独立的一致性读取事务中取得集合修订号和输入，事务不会覆盖后续检索或模型调用。 */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ, propagation = Propagation.REQUIRES_NEW)
+    public EvaluationInputs snapshotForRun(String datasetId) {
+        EvalDataset dataset = require(datasetId);
+        List<EvalCaseInput> inputs = evalCaseMapper.selectList(new LambdaQueryWrapper<EvalCase>()
+                        .eq(EvalCase::getDatasetId, datasetId)
+                        .ne(EvalCase::getStatus, CaseStatus.DEPRECATED)
+                        .orderByAsc(EvalCase::getId))
+                .stream().map(EvalCaseInput::capture).toList();
+        return new EvaluationInputs(dataset, inputs);
+    }
+
+    /** 集合元数据只用于建立运行；输入内容使用不可变值对象跨越排队边界。 */
+    public record EvaluationInputs(EvalDataset dataset, List<EvalCaseInput> cases) { }
+
     /**
      * Deletes a data set together with every case, run and result it owns.
      *
@@ -207,7 +226,7 @@ public class EvalDatasetService {
         boolean wasDeprecated = evalCase.getStatus() == CaseStatus.DEPRECATED;
         applyCommand(evalCase, command, evalCase.getSource());
         evalCase.setStatus(CaseStatus.ACTIVE);
-        evalCaseMapper.updateById(evalCase);
+        requireWritten(evalCaseMapper.updateById(evalCase));
         bumpRevision(dataset, wasDeprecated ? 1 : 0);
         log.info("evaluation case updated, caseId={}", caseId);
         return evalCase;
@@ -222,7 +241,9 @@ public class EvalDatasetService {
     public void deleteCase(String caseId) {
         EvalCase evalCase = requireCase(caseId);
         EvalDataset dataset = require(evalCase.getDatasetId());
-        evalCaseMapper.deleteById(evalCase.getId());
+        requireWritten(evalCaseMapper.delete(new LambdaQueryWrapper<EvalCase>()
+                .eq(EvalCase::getId, evalCase.getId())
+                .eq(EvalCase::getLockVersion, evalCase.getLockVersion())));
         bumpRevision(dataset, evalCase.getStatus() == CaseStatus.DEPRECATED ? 0 : -1);
         log.info("evaluation case deleted, caseId={}", caseId);
     }
@@ -249,7 +270,7 @@ public class EvalDatasetService {
             evalCase.setEvidences(JsonUtil.toJson(resolveEvidences(evidences, evalCase.getAnchorType())));
             evalCase.setStatus(CaseStatus.ACTIVE);
         }
-        evalCaseMapper.updateById(evalCase);
+        requireWritten(evalCaseMapper.updateById(evalCase));
         boolean isDeprecated = evalCase.getStatus() == CaseStatus.DEPRECATED;
         int delta = wasDeprecated == isDeprecated ? 0 : (isDeprecated ? -1 : 1);
         bumpRevision(dataset, delta);
@@ -420,22 +441,19 @@ public class EvalDatasetService {
                 .last("limit 1"));
     }
 
-    /**
-     * Bumps {@code dataset_revision} and adjusts {@code case_count} inside the caller's transaction.
-     *
-     * <p>Mutates the already loaded entity and saves it by id rather than issuing a column level
-     * update: every caller here read {@code dataset} moments earlier in the same transaction, so there
-     * is no concurrent write this could clobber, and keeping the whole entity in memory is what lets a
-     * caller inspect the values it just computed without re-reading the row.
-     *
-     * @param dataset        owning data set, read before this call
-     * @param caseCountDelta {@code +1}/{@code -1}/{@code 0} depending on the mutation
-     */
+    /** 集合乐观锁冲突时回滚整笔用例变更，保证内容、修订号和计数始终一起提交。 */
     private void bumpRevision(EvalDataset dataset, int caseCountDelta) {
         dataset.setDatasetRevision((dataset.getDatasetRevision() == null ? 0 : dataset.getDatasetRevision()) + 1);
         dataset.setCaseCount(Math.max(0, (dataset.getCaseCount() == null ? 0 : dataset.getCaseCount())
                 + caseCountDelta));
-        evalDatasetMapper.updateById(dataset);
+        requireWritten(evalDatasetMapper.updateById(dataset));
+    }
+
+    /** MyBatis 乐观锁未命中只返回零；显式抛错才能触发当前事务回滚。 */
+    private void requireWritten(int affectedRows) {
+        if (affectedRows != 1) {
+            throw new BizException(ErrorCode.EVAL_DATASET_CONFLICT, "评测用例已被其他操作修改，请刷新后重新提交");
+        }
     }
 
     /**

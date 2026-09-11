@@ -22,6 +22,7 @@ import io.kbrag.domain.mapper.EvalCaseMapper;
 import io.kbrag.domain.mapper.EvalResultMapper;
 import io.kbrag.domain.mapper.EvalRunMapper;
 import io.kbrag.domain.model.EvalEvidence;
+import io.kbrag.domain.model.EvalCaseInput;
 import io.kbrag.domain.model.EvalRetrievalConfig;
 import io.kbrag.domain.model.AnswerEvaluationConfig;
 import io.kbrag.domain.model.AppConfigSnapshot;
@@ -117,6 +118,8 @@ class EvalRunServiceTest {
         corpusFingerprintFactory = mock(CorpusFingerprintFactory.class);
         bizIdGenerator = mock(BizIdGenerator.class);
         properties = new KbProperties();
+        when(evalDatasetService.snapshotForRun(DATASET_ID)).thenAnswer(invocation ->
+                new EvalDatasetService.EvaluationInputs(dataset(), List.of()));
 
         service = newService(Runnable::run, Runnable::run);
     }
@@ -147,6 +150,55 @@ class EvalRunServiceTest {
     }
 
     @Test
+    void legacyPendingRunWithoutInputsMustFailWithoutCallingRetrieval() {
+        EvalRun run = pendingRun();
+        when(evalRunMapper.selectOne(any())).thenReturn(run);
+        service.execute("evr_run", false);
+        assertEquals(RunStatus.FAILED, run.getStatus());
+        assertTrue(run.getFailReason().contains("用例输入快照"));
+        verify(retrievalService, never()).search(anyString(), any());
+        verify(evalCaseMapper, never()).selectList(any());
+        verify(evalResultMapper, never()).insert(any(EvalResult.class));
+    }
+
+    @Test
+    void queuedRunMustUseTheCaseContentAndRevisionSeenAtSubmission() {
+        AtomicReference<Runnable> queued = new AtomicReference<>();
+        AtomicReference<EvalRun> stored = new AtomicReference<>();
+        AtomicReference<EvalCase> liveCase = new AtomicReference<>(spanCase());
+        liveCase.get().setQuery("提交时的问题");
+        liveCase.get().setMessages("[{\"role\":\"user\",\"content\":\"提交时的上文\"}]");
+        EvalDataset dataset = dataset();
+        when(evalDatasetService.require(DATASET_ID)).thenReturn(dataset);
+        when(corpusFingerprintFactory.fingerprint(KB_ID)).thenReturn("fp_1");
+        when(bizIdGenerator.evalRunId()).thenReturn("evr_queued");
+        when(bizIdGenerator.evalResultId()).thenReturn("evres_queued");
+        when(evalRunMapper.insert(any(EvalRun.class))).thenAnswer(invocation -> {
+            stored.set(invocation.getArgument(0)); return 1;
+        });
+        when(evalRunMapper.selectOne(any())).thenAnswer(invocation -> stored.get());
+        when(evalDatasetService.snapshotForRun(DATASET_ID)).thenAnswer(invocation ->
+                new EvalDatasetService.EvaluationInputs(dataset, List.of(EvalCaseInput.capture(liveCase.get()))));
+        when(retrievalService.search(anyString(), any())).thenReturn(new SearchOutcome(List.of(hitNode()), List.of(), null));
+        var queuedService = newService(queued::set, Runnable::run);
+        queuedService.submit(DATASET_ID, 3, List.of(configOf(EvalMode.BM25_ONLY)), false);
+        EvalCase replacement = spanCase();
+        replacement.setQuery("排队后修改的问题");
+        liveCase.set(replacement);
+        dataset.setDatasetRevision(2);
+        queued.get().run();
+        ArgumentCaptor<RetrievalCommand> command = ArgumentCaptor.forClass(RetrievalCommand.class);
+        verify(retrievalService).search(anyString(), command.capture());
+        assertEquals("提交时的问题", command.getValue().getQuery());
+        assertEquals("提交时的上文", command.getValue().getMessages().get(0).getContent());
+        assertEquals(1, stored.get().getDatasetRevision());
+        assertEquals(RunStatus.SUCCESS, stored.get().getStatus());
+        assertTrue(stored.get().getCaseInputs().contains("提交时的问题"));
+        assertFalse(stored.get().getCaseInputs().contains("排队后修改的问题"));
+        verify(evalCaseMapper, never()).selectList(any());
+    }
+
+    @Test
     void shouldFailFastWhenAVectorDependentModeHasNoEmbeddingProvider() {
         when(evalDatasetService.require(DATASET_ID)).thenReturn(dataset());
         when(corpusFingerprintFactory.fingerprint(KB_ID)).thenReturn("fp_1");
@@ -172,6 +224,7 @@ class EvalRunServiceTest {
         // createOne() inserted moments earlier, topN already resolved from k, so the mock is told to do
         // the same.
         EvalRun stored = runWithState("evr_2", 1, "fp_1");
+        stored.setCaseInputs("[]");
         stored.setStatus(RunStatus.PENDING);
         EvalRetrievalConfig storedConfig = configOf(EvalMode.BM25_ONLY);
         storedConfig.setTopN(5);
@@ -304,7 +357,7 @@ class EvalRunServiceTest {
     void shouldJudgeTheCasesOnTheCaseExecutorRatherThanAPoolCreatedPerRun() {
         EvalRun run = pendingRun();
         when(evalRunMapper.selectOne(any())).thenReturn(run);
-        when(evalCaseMapper.selectList(any())).thenReturn(List.of(spanCase()));
+        run.setCaseInputs(JsonUtil.toJson(List.of(EvalCaseInput.capture(spanCase()))));
         when(bizIdGenerator.evalResultId()).thenReturn("evre_1");
 
         AtomicReference<String> caseThread = new AtomicReference<>();
@@ -340,7 +393,7 @@ class EvalRunServiceTest {
     void shouldSubmitEveryCaseBeforeJoiningAnyOfThem() {
         EvalRun run = pendingRun();
         when(evalRunMapper.selectOne(any())).thenReturn(run);
-        when(evalCaseMapper.selectList(any())).thenReturn(List.of(spanCase("evc_1"), spanCase("evc_2")));
+        run.setCaseInputs(JsonUtil.toJson(List.of(EvalCaseInput.capture(spanCase("evc_1")), EvalCaseInput.capture(spanCase("evc_2")))));
         when(bizIdGenerator.evalResultId()).thenReturn("evre_1", "evre_2");
 
         CountDownLatch bothInFlight = new CountDownLatch(2);
@@ -372,7 +425,7 @@ class EvalRunServiceTest {
         EvalRun run = pendingRun();
         when(evalRunMapper.selectOne(any())).thenReturn(run);
         EvalCase evalCase = spanCase();
-        when(evalCaseMapper.selectList(any())).thenReturn(List.of(evalCase));
+        run.setCaseInputs(JsonUtil.toJson(List.of(EvalCaseInput.capture(evalCase))));
         when(bizIdGenerator.evalResultId()).thenReturn("evre_1");
 
         SearchOutcome degraded = new SearchOutcome(List.of(hitNode()), List.of("rerank_timeout"), null);
@@ -399,7 +452,7 @@ class EvalRunServiceTest {
         properties.getEval().setDegradedRetry(1);
         EvalRun run = pendingRun();
         when(evalRunMapper.selectOne(any())).thenReturn(run);
-        when(evalCaseMapper.selectList(any())).thenReturn(List.of(spanCase()));
+        run.setCaseInputs(JsonUtil.toJson(List.of(EvalCaseInput.capture(spanCase()))));
         when(bizIdGenerator.evalResultId()).thenReturn("evre_1");
 
         SearchOutcome degraded = new SearchOutcome(List.of(hitNode()), List.of("rerank_timeout"), null);
@@ -428,7 +481,7 @@ class EvalRunServiceTest {
         when(evalRunMapper.selectOne(any())).thenReturn(run);
         EvalCase evalCase = spanCase();
         evalCase.setExpectedAnswer("the expected answer");
-        when(evalCaseMapper.selectList(any())).thenReturn(List.of(evalCase));
+        run.setCaseInputs(JsonUtil.toJson(List.of(EvalCaseInput.capture(evalCase))));
         when(bizIdGenerator.evalResultId()).thenReturn("evre_answer");
         when(retrievalService.search(anyString(), any(RetrievalCommand.class)))
                 .thenReturn(new SearchOutcome(List.of(hitNode()), List.of(), null));
@@ -587,6 +640,7 @@ class EvalRunServiceTest {
      */
     private EvalRun storedRun(String runId) {
         EvalRun stored = runWithState(runId, 1, "fp_1");
+        stored.setCaseInputs("[]");
         stored.setStatus(RunStatus.PENDING);
         EvalRetrievalConfig config = configOf(EvalMode.BM25_ONLY);
         config.setTopN(5);
