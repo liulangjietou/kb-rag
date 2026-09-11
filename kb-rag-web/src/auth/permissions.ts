@@ -19,6 +19,7 @@ export const PERMISSIONS = {
   EVAL_WRITE: 'eval:write',
   EVAL_RUN: 'eval:run',
   APP_READ: 'app:read',
+  APP_USE: 'app:use',
   APP_WRITE: 'app:write',
   APP_RELEASE: 'app:release',
   APIKEY_MANAGE: 'apikey:manage',
