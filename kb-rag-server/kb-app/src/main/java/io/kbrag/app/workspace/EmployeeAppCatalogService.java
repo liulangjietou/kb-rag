@@ -29,7 +29,11 @@ public class EmployeeAppCatalogService {
 
     /** 批量返回当前可使用的正式应用，空范围直接返回空集合。 */
     public List<ReleasedApplication> list() {
-        UserPrincipal principal = access.current();
+        return listFor(access.current());
+    }
+
+    /** 同包首页聚合复用已解析的当前授权，目录与私有会话使用同一身份。 */
+    List<ReleasedApplication> listFor(UserPrincipal principal) {
         if (!principal.appScopeAll() && CollectionUtils.isEmpty(principal.appIds())) return List.of();
         List<App> visible = apps.listInTenant(principal.tenantId(),
                 principal.appScopeAll() ? null : List.copyOf(principal.appIds()));

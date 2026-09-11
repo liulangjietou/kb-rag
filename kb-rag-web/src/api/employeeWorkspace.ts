@@ -19,6 +19,11 @@ export interface EmployeeConversation {
   created_at: string;
 }
 
+export interface EmployeeHomeOverview {
+  applications: EmployeeApplication[];
+  recent_conversations: Array<Pick<EmployeeConversation, 'conversation_id' | 'app_id' | 'title' | 'active_run_id' | 'last_activity_at'> & { app_name: string }>;
+}
+
 export interface EmployeeCitation {
   doc_id: string;
   document_version_id: string;
@@ -126,6 +131,7 @@ async function request<T>(path: string, method: string, body?: unknown, signal?:
 }
 
 export const employeeWorkspace = {
+  overview: (signal?: AbortSignal) => request<EmployeeHomeOverview>('/workspace/overview', 'GET', undefined, signal),
   applications: (signal?: AbortSignal) => request<EmployeeApplication[]>('/workspace/apps', 'GET', undefined, signal),
   conversations: (appId: string, keyword = '', page = 1, signal?: AbortSignal) =>
     request<ConversationPage>(`${conversationPath(appId)}?${new URLSearchParams({ keyword, page: String(page), size: '20' })}`, 'GET', undefined, signal),
