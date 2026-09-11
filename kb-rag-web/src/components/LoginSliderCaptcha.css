@@ -164,7 +164,7 @@
 .login-captcha__refresh {
   flex: none;
   padding: 0;
-  color: var(--kb-color-primary);
+  color: var(--kb-color-primary-text);
   background: transparent;
   border: 0;
   font: inherit;

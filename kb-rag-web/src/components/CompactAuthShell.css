@@ -1,0 +1,210 @@
+.auth-shell--compact .auth-shell__stage {
+  padding: clamp(32px, 4vw, 64px);
+}
+
+.auth-shell--compact .auth-shell__message {
+  margin: 48px auto;
+}
+
+.auth-shell--compact .auth-shell__message h1 {
+  max-width: 12em;
+  font-size: clamp(32px, 3.4vw, 48px);
+  letter-spacing: -0.035em;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.auth-shell--compact .auth-shell__message > p {
+  max-width: 30em;
+  margin-bottom: 36px;
+}
+
+.auth-knowledge-path {
+  display: flex;
+  gap: 24px;
+  margin: 0;
+  padding: 24px 0 0;
+  border-top: 1px solid color-mix(in srgb, var(--kb-color-sidebar-muted) 28%, transparent);
+  list-style: none;
+}
+
+.auth-knowledge-path li {
+  flex: 1;
+  min-width: 0;
+}
+
+.auth-knowledge-path span {
+  display: block;
+  margin-bottom: 12px;
+  color: var(--kb-color-sidebar-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.auth-knowledge-path strong {
+  color: var(--kb-color-sidebar-text);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.auth-shell--compact .auth-shell__entry {
+  padding: 56px 24px 20px;
+}
+
+.auth-shell--compact .auth-card {
+  padding: 24px;
+}
+
+.auth-shell--compact .auth-card h2.ant-typography {
+  margin-bottom: 4px;
+  font-size: 26px;
+  line-height: 1.35;
+}
+
+.auth-shell--compact .auth-card p.ant-typography {
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.auth-shell--compact .login-mode-tabs .ant-tabs-nav {
+  margin-bottom: 12px;
+}
+
+.auth-shell--compact .login-mode-tabs .ant-tabs-tab {
+  margin: 0;
+  padding: 6px 0;
+}
+
+.auth-shell--compact .login-form .ant-form-item {
+  margin-bottom: 10px;
+}
+
+.auth-shell--compact .login-form .ant-form-item-label {
+  padding-bottom: 4px;
+}
+
+.auth-shell--compact .login-form .login-form__remember {
+  margin-bottom: 8px;
+}
+
+.auth-shell--compact .login-form .login-form__submit {
+  margin: 0;
+}
+
+.auth-shell--compact .login-captcha {
+  width: min(280px, 100%);
+  margin: 2px auto 8px;
+}
+
+.auth-shell--compact .login-captcha__puzzle {
+  margin-bottom: 8px;
+}
+
+.auth-shell--compact .login-captcha__status {
+  font-size: 12px;
+}
+
+.auth-shell--compact .ant-divider-horizontal {
+  margin: 12px 0;
+  font-size: 12px;
+}
+
+.login-sso-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.login-sso-actions .ant-btn {
+  flex: 1 1 100px;
+  padding-inline: 8px;
+  font-size: 12px;
+}
+
+.auth-shell--compact .registration-login-entry {
+  margin-top: 12px;
+  font-size: 12px;
+}
+
+.auth-shell--compact .auth-security-note {
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 0;
+  border-top: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.auth-shell--compact .auth-security-note .anticon {
+  margin-top: 3px;
+}
+
+.auth-shell--compact .auth-shell__copyright {
+  margin-top: 12px;
+}
+
+.auth-shell--compact .registration-steps {
+  margin-bottom: 20px;
+}
+
+.auth-shell--compact .registration-flow .ant-form-item {
+  margin-bottom: 12px;
+}
+
+.auth-shell--compact .registration-flow .ant-form-item-label {
+  padding-bottom: 4px;
+}
+
+.auth-shell--compact .registration-verified-email {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+}
+
+.auth-shell--compact .registration-note {
+  margin-bottom: 12px;
+}
+
+.auth-shell--compact .registration-login-link {
+  margin: 16px -24px -24px;
+  padding: 12px 20px;
+}
+
+@media (max-width: 880px) {
+  .auth-shell--compact .auth-shell__entry {
+    padding: 64px 20px 24px;
+  }
+
+  .auth-shell--compact .auth-shell__mobile-brand {
+    margin-bottom: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .auth-shell--compact .auth-shell__entry {
+    padding-inline: 16px;
+  }
+
+  .auth-shell--compact .auth-card {
+    padding: 20px;
+  }
+
+  .auth-shell--compact .login-form .ant-input-affix-wrapper,
+  .auth-shell--compact .login-form__submit .ant-btn,
+  .auth-shell--compact .registration-flow .ant-input-affix-wrapper,
+  .auth-shell--compact .registration-flow .ant-btn,
+  .login-sso-actions .ant-btn {
+    min-height: 44px;
+  }
+
+  .auth-shell--compact .registration-login-link {
+    margin-inline: -20px;
+    margin-bottom: -20px;
+  }
+}
+
+@media (max-width: 720px) {
+  .auth-shell--compact .registration-steps {
+    margin-bottom: 42px;
+  }
+}

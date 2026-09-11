@@ -2,26 +2,34 @@ import type { ReactNode } from 'react';
 import BrandMark from './BrandMark';
 import RetrievalPipeline from './RetrievalPipeline';
 import ThemePresetSwitcher from './ThemePresetSwitcher';
+import './CompactAuthShell.css';
 
 interface AuthShellProps {
   children: ReactNode;
-  eyebrow: string;
+  eyebrow?: string;
   headline: string;
   description: string;
   compactCard?: boolean;
+  compactLayout?: boolean;
 }
 
 /** 登录、改密与无权限页共用的公共外壳，业务表单仍由各页面自行管理。 */
-export default function AuthShell({ children, eyebrow, headline, description, compactCard = false }: AuthShellProps) {
+export default function AuthShell({ children, eyebrow, headline, description, compactCard = false, compactLayout = false }: AuthShellProps) {
   return (
-    <div className="auth-shell">
+    <div className={`auth-shell${compactLayout ? ' auth-shell--compact' : ''}`}>
       <section className="auth-shell__stage" aria-label="平台能力概览">
         <BrandMark inverse />
         <div className="auth-shell__message">
           <span className="auth-overline">KNOWLEDGE OPERATIONS</span>
           <h1>{headline}</h1>
           <p>{description}</p>
-          <RetrievalPipeline />
+          {compactLayout ? (
+            <ol className="auth-knowledge-path" aria-label="知识工作流程">
+              <li><span>01</span><strong>知识接入</strong></li>
+              <li><span>02</span><strong>有据可查</strong></li>
+              <li><span>03</span><strong>质量改进</strong></li>
+            </ol>
+          ) : <RetrievalPipeline />}
         </div>
         <footer>
           <span>可追溯检索</span>
@@ -38,7 +46,7 @@ export default function AuthShell({ children, eyebrow, headline, description, co
           <BrandMark />
         </div>
         <section className={`auth-card${compactCard ? ' auth-card--compact' : ''}`}>
-          <span className="auth-overline">{eyebrow}</span>
+          {eyebrow && <span className="auth-overline">{eyebrow}</span>}
           {children}
         </section>
         <small className="auth-shell__copyright">Knowledge Atlas · Apache-2.0</small>
