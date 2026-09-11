@@ -5,11 +5,13 @@ import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.AdminUser;
 import io.kbrag.domain.entity.Role;
 import io.kbrag.domain.entity.RoleKbScope;
+import io.kbrag.domain.entity.RoleAppScope;
 import io.kbrag.domain.entity.RolePermission;
 import io.kbrag.domain.entity.Tenant;
 import io.kbrag.domain.entity.UserRole;
 import io.kbrag.domain.mapper.AdminUserMapper;
 import io.kbrag.domain.mapper.RoleKbScopeMapper;
+import io.kbrag.domain.mapper.RoleAppScopeMapper;
 import io.kbrag.domain.mapper.RoleMapper;
 import io.kbrag.domain.mapper.RolePermissionMapper;
 import io.kbrag.domain.mapper.TenantMapper;
@@ -19,6 +21,8 @@ import io.kbrag.domain.port.PrincipalCache;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -53,6 +57,7 @@ public class PrincipalResolver {
     private final RoleMapper roleMapper;
     private final RolePermissionMapper rolePermissionMapper;
     private final RoleKbScopeMapper roleKbScopeMapper;
+    private final RoleAppScopeMapper roleAppScopeMapper;
     private final TenantMapper tenantMapper;
 
     private final PrincipalCache cache;
@@ -66,12 +71,19 @@ public class PrincipalResolver {
      */
     public UserPrincipal resolve(String username) {
         UserPrincipal cached = cache.get(username);
-        if (cached != null) {
+        // 旧缓存没有 appIds 字段，必须回到数据库装配新增授权，不能等待 24 小时自然过期。
+        if (cached != null && cached.appIds() != null) {
             return cached;
         }
         UserPrincipal principal = load(username);
         cache.put(username, principal);
         return principal;
+    }
+
+    /** 员工内容入口重新读取当前授权，避免权限缓存失效竞争延长被撤销的内容访问权。 */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public UserPrincipal resolveFresh(String username) {
+        return load(username);
     }
 
     /**
@@ -121,7 +133,8 @@ public class PrincipalResolver {
         }
 
         List<Role> roles = roleMapper.selectList(new LambdaQueryWrapper<Role>()
-                .in(Role::getRoleId, roleIds));
+                .in(Role::getRoleId, roleIds)
+                .eq(Role::getTenantId, user.getTenantId()));
         // Roles a delete removed are simply absent here; reading against the surviving ones keeps a
         // half finished cleanup from denying a login outright.
         Set<String> liveRoleIds = roles.stream()
@@ -148,8 +161,18 @@ public class PrincipalResolver {
                     .collect(Collectors.toCollection(LinkedHashSet::new));
         }
 
+        boolean appScopeAll = roles.stream().anyMatch(Role::appScopeAll);
+        Set<String> appIds = Set.of();
+        if (!appScopeAll && !liveRoleIds.isEmpty()) {
+            appIds = roleAppScopeMapper.selectList(new LambdaQueryWrapper<RoleAppScope>()
+                            .in(RoleAppScope::getRoleId, liveRoleIds)).stream()
+                    .map(RoleAppScope::getAppId)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+        }
+
         return new UserPrincipal(user.getUserId(), user.getTenantId(), user.getUsername(),
-                displayName(user), user.getSource(), roleCodes, liveRoleIds, permissions, kbScopeAll, kbIds);
+                displayName(user), user.getSource(), roleCodes, liveRoleIds, permissions, kbScopeAll, kbIds,
+                appScopeAll, appIds);
     }
 
     private String displayName(AdminUser user) {

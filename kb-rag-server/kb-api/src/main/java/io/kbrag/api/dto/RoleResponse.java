@@ -19,6 +19,8 @@ import java.util.List;
  * @param kbScopeAll      {@code true} when the role sees every knowledge base
  * @param kbIds           scoped knowledge bases, empty when {@code kbScopeAll}
  * @param permissionCodes granted permission codes
+ * @param appScopeAll     是否可使用本租户全部应用，仍需 app:use 权限
+ * @param appIds          指定应用范围
  *
  * @author owlzhangfq@gmail.com
  */
@@ -31,7 +33,9 @@ public record RoleResponse(
         boolean builtin,
         @JsonProperty("kb_scope_all") boolean kbScopeAll,
         @JsonProperty("kb_ids") List<String> kbIds,
-        @JsonProperty("permission_codes") List<String> permissionCodes) {
+        @JsonProperty("permission_codes") List<String> permissionCodes,
+        @JsonProperty("app_scope_all") boolean appScopeAll,
+        @JsonProperty("app_ids") List<String> appIds) {
 
     /**
      * Maps one role onto the transport shape.
@@ -39,9 +43,11 @@ public record RoleResponse(
      * @param role            role record
      * @param permissionCodes granted permission codes, may be {@code null}
      * @param kbIds           scoped knowledge base ids, may be {@code null}
+     * @param appIds          指定应用标识，可为空
      * @return role row
      */
-    public static RoleResponse from(Role role, List<String> permissionCodes, List<String> kbIds) {
+    public static RoleResponse from(Role role, List<String> permissionCodes, List<String> kbIds,
+                                    List<String> appIds) {
         return new RoleResponse(
                 role.getRoleId(),
                 role.getTenantId(),
@@ -51,6 +57,8 @@ public record RoleResponse(
                 role.builtin(),
                 role.kbScopeAll(),
                 kbIds == null ? List.of() : kbIds,
-                permissionCodes == null ? List.of() : permissionCodes);
+                permissionCodes == null ? List.of() : permissionCodes,
+                role.appScopeAll(),
+                appIds == null ? List.of() : appIds);
     }
 }

@@ -1229,6 +1229,68 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '403':
           $ref: '#/components/responses/PermissionDenied'
+  /api/v1/roles/app-options:
+    get:
+      tags: [rbac]
+      summary: 角色应用范围候选项（ROLE_MANAGE）
+      description: 目标租户来自已授权角色的归属；新角色使用当前用户租户。仅提供名称和标识，包含尚未发布的应用，实际使用时仍要求正式版本。
+      parameters:
+      - name: role_id
+        in: query
+        required: false
+        schema: {type: string}
+      responses:
+        '200':
+          description: 目标租户中未删除的应用
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+                        required: [app_id, name]
+                        properties:
+                          app_id: {type: string}
+                          name: {type: string}
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/workspace/apps:
+    get:
+      tags: [app]
+      summary: 员工可使用的正式应用（APP_USE）
+      description: 每次从数据库重新读取用户授权，再检查应用范围、本租户正式版本和所有关联知识库范围。无授权应用时返回空数组。不会返回草稿、模型、提示词或检索配置。
+      responses:
+        '200':
+          description: 当前可使用的应用元数据
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+                        required: [app_id, name, released_version_id, released_version]
+                        properties:
+                          app_id: {type: string}
+                          name: {type: string}
+                          description: {type: string, nullable: true}
+                          released_version_id: {type: string}
+                          released_version: {type: string}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
   /api/v1/roles/permissions:
     get:
       tags:
@@ -1269,7 +1331,7 @@ paths:
       tags:
       - rbac
       summary: 修改角色（ROLE_MANAGE）
-      description: 权限集合与库范围都是全量替换；code 只在创建时读取，更新时忽略（配置与建号默认角色都引用它）。
+      description: 权限集合与库范围都是全量替换；应用范围显式提交时在同一事务内替换，旧客户端整体省略时保留。code 只在创建时读取，更新时忽略。并发修改失败时拒绝覆盖授权。
       requestBody:
         required: true
         content:
@@ -7000,6 +7062,13 @@ components:
           type: array
           items:
             type: string
+        app_scope_all:
+          type: boolean
+          description: 是否可使用本租户全部应用，仍需 app:use 功能权限
+        app_ids:
+          type: array
+          items: {type: string}
+          description: 指定应用范围；app_scope_all=true 时为空
     RoleResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
@@ -7047,6 +7116,16 @@ components:
           items:
             type: string
           description: 完整权限集合，不是增量
+        app_scope_all:
+          type: boolean
+          nullable: true
+          description: 与 app_ids 整体省略时，更新保留原范围、创建默认空范围
+        app_ids:
+          type: array
+          nullable: true
+          maxItems: 2000
+          items: {type: string, minLength: 1, maxLength: 64}
+          description: 提供列表必须同时提供 app_scope_all。false 加空数组表示无应用；true 时列表被忽略
     PermissionEntry:
       type: object
       description: 权限目录一行，角色编辑页勾选网格据此渲染

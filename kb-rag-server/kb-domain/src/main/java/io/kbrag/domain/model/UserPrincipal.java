@@ -27,6 +27,8 @@ import java.util.Set;
  * @param permissions union of the permission codes granted by those roles
  * @param kbScopeAll  {@code true} when any role held sees every knowledge base
  * @param kbIds       knowledge bases reachable through the scoped roles, ignored when {@code kbScopeAll}
+ * @param appScopeAll 任一角色授予全部应用范围时为真，仍需校验功能权限和根资源租户
+ * @param appIds      角色应用范围的并集；旧缓存缺失该字段时由解析器重新加载
  *
  * @author owlzhangfq@gmail.com
  */
@@ -40,7 +42,22 @@ public record UserPrincipal(
         Set<String> roleIds,
         Set<String> permissions,
         boolean kbScopeAll,
-        Set<String> kbIds) {
+        Set<String> kbIds,
+        boolean appScopeAll,
+        Set<String> appIds) {
+
+    /** 兼容既有调用方；省略应用范围时默认不授权应用。 */
+    public UserPrincipal(String userId, String tenantId, String username, String displayName,
+                         UserSource source, Set<String> roleCodes, Set<String> roleIds,
+                         Set<String> permissions, boolean kbScopeAll, Set<String> kbIds) {
+        this(userId, tenantId, username, displayName, source, roleCodes, roleIds, permissions,
+                kbScopeAll, kbIds, false, Set.of());
+    }
+
+    /** 只判断应用数据范围；租户根资源与 app:use 权限由调用入口一起校验。 */
+    public boolean canAccessApp(String appId) {
+        return appId != null && (appScopeAll || (appIds != null && appIds.contains(appId)));
+    }
 
     /**
      * Whether the caller carries one permission code.

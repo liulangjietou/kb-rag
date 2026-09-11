@@ -53,6 +53,7 @@ public class RoleService {
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final BizIdGenerator idGenerator;
     private final PrincipalResolver principalResolver;
+    private final RoleAppScopeService appScopeService;
 
     /**
      * Lists every role, built in ones first.
@@ -123,26 +124,32 @@ public class RoleService {
      * @param kbScopeAll      whether the role sees every knowledge base
      * @param kbIds           scoped knowledge bases, ignored when {@code kbScopeAll}
      * @param permissionCodes granted permission codes
+     * @param appScopeAll     是否授予本租户全部应用范围
+     * @param appIds          指定应用列表
      * @return created role
      */
     @Transactional(rollbackFor = Exception.class)
     public Role create(String code, String name, String description, boolean kbScopeAll,
-                       List<String> kbIds, List<String> permissionCodes) {
+                       List<String> kbIds, List<String> permissionCodes,
+                       Boolean appScopeAll, List<String> appIds) {
         String roleCode = normalizeCode(code);
         if (findByCode(roleCode) != null) {
             throw BizException.invalidParam("role code already taken: " + roleCode);
         }
         Role role = new Role();
         role.setRoleId(idGenerator.roleId());
+        role.setTenantId(AccessGuard.currentUser().tenantId());
         role.setCode(roleCode);
         role.setName(name);
         role.setDescription(description);
         role.setBuiltin(0);
         role.setKbScopeAll(kbScopeAll ? 1 : 0);
+        role.setAppScopeAll(Boolean.TRUE.equals(appScopeAll));
         roleMapper.insert(role);
 
         replacePermissions(role, permissionCodes);
         replaceKbScope(role.getRoleId(), kbScopeAll, kbIds);
+        appScopeService.replace(role, appIds);
         principalResolver.evictAll();
         log.info("role created, roleId={}, code={}", role.getRoleId(), roleCode);
         return role;
@@ -160,20 +167,32 @@ public class RoleService {
      * @param kbScopeAll      whether the role sees every knowledge base
      * @param kbIds           scoped knowledge bases, ignored when {@code kbScopeAll}
      * @param permissionCodes complete new set of granted permission codes
+     * @param appScopeAll     应用范围模式；省略时保留原范围
+     * @param appIds          指定应用列表
      */
     @Transactional(rollbackFor = Exception.class)
     public void update(String roleId, String name, String description, boolean kbScopeAll,
-                       List<String> kbIds, List<String> permissionCodes) {
+                       List<String> kbIds, List<String> permissionCodes,
+                       Boolean appScopeAll, List<String> appIds) {
         Role role = requireRole(roleId);
         if (name != null && !name.isBlank()) {
             role.setName(name);
         }
         role.setDescription(description);
         role.setKbScopeAll(kbScopeAll ? 1 : 0);
-        roleMapper.updateById(role);
+        if (appScopeAll != null) {
+            role.setAppScopeAll(appScopeAll);
+        }
+        if (roleMapper.updateById(role) != 1) {
+            throw BizException.invalidParam("role was updated concurrently; refresh and retry");
+        }
 
         replacePermissions(role, permissionCodes);
         replaceKbScope(roleId, kbScopeAll, kbIds);
+        // 旧客户端省略新范围时保留已有授权，避免一次普通角色改名清空应用范围。
+        if (appScopeAll != null) {
+            appScopeService.replace(role, appIds);
+        }
         principalResolver.evictAll();
         log.info("role updated, roleId={}", roleId);
     }
@@ -201,6 +220,7 @@ public class RoleService {
         }
         rolePermissionMapper.deleteByRoleId(roleId);
         roleKbScopeMapper.deleteByRoleId(roleId);
+        appScopeService.deleteRoleScope(roleId);
         // Document grants held through the role go with it, the same argument as the two lines above:
         // a grant naming a role nobody can resolve renders as a corrupted binding, never as an open door.
         docAclMapper.deleteByRoleId(roleId);

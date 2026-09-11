@@ -13,6 +13,7 @@ import io.kbrag.domain.enums.UserSource;
 import io.kbrag.domain.enums.UserStatus;
 import io.kbrag.domain.mapper.AdminUserMapper;
 import io.kbrag.domain.mapper.RoleKbScopeMapper;
+import io.kbrag.domain.mapper.RoleAppScopeMapper;
 import io.kbrag.domain.mapper.RoleMapper;
 import io.kbrag.domain.mapper.RolePermissionMapper;
 import io.kbrag.domain.mapper.TenantMapper;
@@ -61,7 +62,8 @@ class PrincipalResolverTest {
         UserRoleMapper userRoleMapper = mock(UserRoleMapper.class);
         when(userRoleMapper.selectList(any())).thenReturn(List.of());
         resolver = new PrincipalResolver(adminUserMapper, userRoleMapper, mock(RoleMapper.class),
-                mock(RolePermissionMapper.class), mock(RoleKbScopeMapper.class), tenantMapper,
+                mock(RolePermissionMapper.class), mock(RoleKbScopeMapper.class),
+                mock(RoleAppScopeMapper.class), tenantMapper,
                 new FakePrincipalCache());
     }
 

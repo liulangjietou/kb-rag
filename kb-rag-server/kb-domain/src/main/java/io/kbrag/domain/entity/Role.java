@@ -56,6 +56,15 @@ public class Role extends BaseEntity {
     @TableField("kb_scope_all")
     private Integer kbScopeAll;
 
+    /** 是否可使用所属租户全部应用；功能权限仍由 app:use 单独约束。 */
+    @TableField("app_scope_all")
+    private Boolean appScopeAll;
+
+    /** 缺失范围按未授权处理，不从知识库范围或管理权限推断应用使用权。 */
+    public boolean appScopeAll() {
+        return Boolean.TRUE.equals(appScopeAll);
+    }
+
     /**
      * Tells whether the role is shipped with the product.
      *

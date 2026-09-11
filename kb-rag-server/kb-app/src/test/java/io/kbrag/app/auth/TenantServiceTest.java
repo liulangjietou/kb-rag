@@ -194,6 +194,23 @@ class TenantServiceTest {
                 template("role_t5", "AUDITOR", 0));
     }
 
+    @Test
+    void shouldCopyOnlyApplicationScopeModeToNewTenantRoles() {
+        when(tenantMapper.selectOne(any())).thenReturn(null);
+        Role template = template("role_t1", "SUPER_ADMIN", 1);
+        template.setAppScopeAll(true);
+        when(roleMapper.selectList(any())).thenReturn(List.of(template));
+        when(rolePermissionMapper.selectList(any())).thenReturn(List.of(binding("role_t1", "app:use")));
+        service.create("acme", "Acme Corp");
+        ArgumentCaptor<Role> copied = ArgumentCaptor.forClass(Role.class);
+        verify(roleMapper).insert(copied.capture());
+        assertTrue(copied.getValue().appScopeAll());
+        assertEquals(NEW_TENANT_ID, copied.getValue().getTenantId());
+        ArgumentCaptor<List<String>> permissions = ArgumentCaptor.forClass(List.class);
+        verify(roleService).replacePermissions(any(Role.class), permissions.capture());
+        assertEquals(List.of("app:use"), permissions.getValue());
+    }
+
     private Role template(String roleId, String code, int kbScopeAll) {
         Role role = new Role();
         role.setRoleId(roleId);
