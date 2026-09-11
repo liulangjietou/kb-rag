@@ -46,6 +46,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -138,6 +139,86 @@ class EmployeeConversationLedgerTest {
         assertEquals(1, results.stream().filter(EmployeeConversationLedger.AcceptedRun::created).count());
         assertEquals(results.get(0).run().getRunId(), results.get(1).run().getRunId());
         assertEquals(1, jdbc.queryForObject("SELECT last_turn FROM t_kb_conversation", Integer.class));
+    }
+
+    @Test
+    void shouldResolveCurrentReleaseOnlyForTheWinningNewRequest() throws Exception {
+        AtomicInteger resolutions = new AtomicInteger();
+        Callable<EmployeeConversationLedger.AcceptedRun> submit = () -> ledger.acceptCurrent(OWNER, conversationId,
+                "request_same", "问题", () -> {
+                    resolutions.incrementAndGet();
+                    return target("av_original");
+                });
+        var results = concurrent(submit, submit);
+        assertEquals(1, resolutions.get());
+        assertEquals(1, results.stream().filter(EmployeeConversationLedger.AcceptedRun::created).count());
+        var replay = ledger.acceptCurrent(OWNER, conversationId, "request_same", "问题", () -> {
+            throw new AssertionError("重放不应读取当前发布版本");
+        });
+        assertFalse(replay.created());
+        assertEquals(results.get(0).run().getRunId(), replay.run().getRunId());
+    }
+
+    @Test
+    void shouldSearchLiteralTitlesAndQuestionsWithinOwnedPagesWithoutAnswerOracle() {
+        ledger.rename(OWNER, conversationId, "季度 100%_! 说明");
+        String run = generatingRun();
+        ledger.succeed(OWNER, conversationId, run, WORKER, 1, "仅答案包含的机密关键词");
+        ledger.create(OWNER, "另一个标题");
+        ledger.create(new EmployeeConversationScope("tenant_b", "user_a", "app_a"), "季度 100%_! 说明");
+        ledger.create(new EmployeeConversationScope("tenant_a", "user_b", "app_a"), "季度 100%_! 说明");
+        ledger.create(new EmployeeConversationScope("tenant_a", "user_a", "app_b"), "季度 100%_! 说明");
+        for (String keyword : List.of("100%_!", "%", "_", "!", "报销需要")) {
+            var page = ledger.list(OWNER, keyword, 1, 1);
+            assertEquals(1, page.getTotal(), keyword);
+            assertEquals(conversationId, page.getRecords().get(0).getConversationId());
+        }
+        assertEquals(0, ledger.list(OWNER, "机密关键词", 1, 10).getTotal());
+        var first = ledger.list(OWNER, "", 1, 1);
+        var second = ledger.list(OWNER, "", 2, 1);
+        assertEquals(2, first.getTotal());
+        assertEquals(1, first.getRecords().size());
+        assertEquals(1, second.getRecords().size());
+        assertNotEquals(first.getRecords().get(0).getConversationId(), second.getRecords().get(0).getConversationId());
+        ledger.delete(OWNER, conversationId);
+        assertEquals(0, ledger.list(OWNER, "100%_!", 1, 10).getTotal());
+    }
+
+    @Test
+    void shouldRenameWithoutOverwritingActiveRunAndDeleteWithAtomicCancellation() {
+        String run = generatingRun();
+        var renamed = ledger.rename(OWNER, conversationId, "新的标题");
+        assertEquals("新的标题", renamed.getTitle());
+        assertEquals(run, renamed.getActiveRunId());
+        assertEquals(1, renamed.getLastTurn());
+        assertEquals(run, ledger.delete(OWNER, conversationId));
+        assertThrows(BizException.class, () -> ledger.conversation(OWNER, conversationId));
+        assertThrows(BizException.class, () -> get(run));
+        assertEquals("CANCELLED", jdbc.queryForObject("SELECT status FROM t_kb_conversation_run", String.class));
+        assertEquals(1, jdbc.queryForObject("SELECT deleted FROM t_kb_conversation", Integer.class));
+        assertThrows(BizException.class, () -> ledger.succeed(OWNER, conversationId, run, WORKER, 1, "迟到回答"));
+    }
+
+    @Test
+    void shouldRollBackRunCancellationIfDeletingRootFails() {
+        String run = generatingRun();
+        jdbc.execute("ALTER TABLE t_kb_conversation ADD CONSTRAINT fail_delete CHECK(deleted = 0)");
+        assertThrows(RuntimeException.class, () -> ledger.delete(OWNER, conversationId));
+        assertEquals(ConversationRunStatus.RUNNING, get(run).getStatus());
+        assertEquals(run, ledger.conversation(OWNER, conversationId).getActiveRunId());
+    }
+
+    @Test
+    void shouldInterruptOnlyOwnedRunningOrPendingRunsWithoutOverwritingTerminals() {
+        String run = generatingRun();
+        assertFalse(ledger.interruptOwned(OWNER, conversationId, run, "another_worker"));
+        assertTrue(ledger.interruptOwned(OWNER, conversationId, run, WORKER));
+        assertEquals(ConversationRunStatus.INTERRUPTED, get(run).getStatus());
+        assertFalse(ledger.succeed(OWNER, conversationId, run, WORKER, 1, "晚到成功"));
+        String pending = accept("request_retry").run().getRunId();
+        assertTrue(ledger.interruptOwned(OWNER, conversationId, pending, WORKER));
+        assertFalse(ledger.interruptOwned(OWNER, conversationId, pending, WORKER));
+        assertNull(activeRun());
     }
 
     @Test

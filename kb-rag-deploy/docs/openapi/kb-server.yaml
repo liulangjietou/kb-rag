@@ -1291,6 +1291,406 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/PermissionDenied'
+  /api/v1/workspace/apps/{appId}/conversations:
+    parameters:
+    - name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - app
+      operationId: employeeListConversations
+      summary: 搜索自己的会话标题与原问题（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeConversationPage'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          default: 1
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+      - name: keyword
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 120
+    post:
+      tags:
+      - app
+      operationId: employeeCreateConversation
+      summary: 创建空会话（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeConversation'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeConversationTitleRequest'
+  /api/v1/workspace/apps/{appId}/conversations/{conversationId}:
+    parameters:
+    - name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - app
+      operationId: employeeGetConversation
+      summary: 读取会话摘要与活动运行（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeConversation'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - app
+      operationId: employeeRenameConversation
+      summary: 修改自己的会话标题（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeConversation'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeConversationTitleRequest'
+    delete:
+      tags:
+      - app
+      operationId: employeeDeleteConversation
+      summary: 删除自己的会话并取消活动运行（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      nullable: true
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/workspace/apps/{appId}/conversations/{conversationId}/runs:
+    parameters:
+    - name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - app
+      operationId: employeeListRuns
+      summary: 按轮次倒序读取已授权历史（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/EmployeeRun'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      parameters:
+      - name: before_turn
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 2147483647
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+    post:
+      tags:
+      - app
+      operationId: employeeSubmitRun
+      summary: 接受一次问答并在提交后调度（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeRun'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: CONVERSATION_BUSY 或 CONVERSATION_REQUEST_CONFLICT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeRunRequest'
+      description: 相同 request_id 与原问题返回同一运行，不再次调度，也不重新选择后来发布的版本。相同标识换问题返回 CONVERSATION_REQUEST_CONFLICT；另一运行仍活动时返回
+        CONVERSATION_BUSY。用户主动重试需要新的 request_id。
+  /api/v1/workspace/apps/{appId}/conversations/{conversationId}/runs/{runId}:
+    parameters:
+    - name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - app
+      operationId: employeeGetRun
+      summary: 读取同一运行的已提交快照（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeRun'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/workspace/apps/{appId}/conversations/{conversationId}/runs/{runId}/stop:
+    parameters:
+    - name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - app
+      operationId: employeeStopRun
+      summary: 明确停止自己的运行（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeRun'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      description: 先提交 CANCELLED 再取消上游；终态重放保持原状态。
+  /api/v1/workspace/apps/{appId}/conversations/{conversationId}/runs/{runId}/events:
+    parameters:
+    - name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - app
+      operationId: employeeSubscribeRun
+      summary: 只读订阅持久运行（APP_USE）
+      description: satoken 头认证。snapshot 发送完整 EmployeeRun；id 为 run_id:revision。done 仅在读到持久终态后发送，数据包含 run_id/status/revision，终态可能失败或停止。error
+        包含 code/message/retryable/clear_content，禁止因重连重新 POST 问题。每次读取重验身份与证据权限，restricted 可以在 revision 不变时改变。断连只取消订阅；连接每
+        120 秒关闭，客户端对同一运行重连即可。每用户最多 4 个、实例最多 64 个连接。
+      responses:
+        '200':
+          description: 已提交快照、终态或订阅错误事件；空闲时发送 keep-alive 注释
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /api/v1/roles/permissions:
     get:
       tags:
@@ -5967,6 +6367,183 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    EmployeeConversationTitleRequest:
+      type: object
+      required:
+      - title
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: 不能全为空白
+    EmployeeRunRequest:
+      type: object
+      required:
+      - request_id
+      - query
+      properties:
+        request_id:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        query:
+          type: string
+          minLength: 1
+          maxLength: 8000
+          description: 不能全为空白；网络重试须保留原文本
+    EmployeeConversation:
+      type: object
+      required:
+      - conversation_id
+      - app_id
+      - title
+      - last_turn
+      - active_run_id
+      - last_activity_at
+      - created_at
+      properties:
+        conversation_id:
+          type: string
+        app_id:
+          type: string
+        title:
+          type: string
+        last_turn:
+          type: integer
+          minimum: 0
+        active_run_id:
+          type: string
+          nullable: true
+        last_activity_at:
+          type: string
+          description: 服务端本地日期时间，不带时区偏移
+        created_at:
+          type: string
+    EmployeeConversationPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmployeeConversation'
+        page:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    EmployeeCitation:
+      type: object
+      properties:
+        doc_id:
+          type: string
+        document_version_id:
+          type: string
+        chunk_id:
+          type: string
+        kb_id:
+          type: string
+        file_name:
+          type: string
+        document_version:
+          type: string
+        content:
+          type: string
+        document_updated_at:
+          type: string
+          nullable: true
+        version_created_at:
+          type: string
+          nullable: true
+        chunk_title:
+          type: string
+          nullable: true
+        page_no:
+          type: integer
+          nullable: true
+          description: 仅 PDF 实际物理页码，其他来源不伪造页码
+        chunk_ordinal:
+          type: integer
+          nullable: true
+          description: 切片顺序，非原文段落号
+        inherited:
+          type: boolean
+    EmployeeRun:
+      type: object
+      required:
+      - run_id
+      - conversation_id
+      - turn_no
+      - question
+      - answer
+      - references
+      - status
+      - stage
+      - revision
+      - checkpoint_seq
+      - snapshot_bound
+      - degraded
+      - restricted
+      properties:
+        run_id:
+          type: string
+        conversation_id:
+          type: string
+        question:
+          type: string
+        answer:
+          type: string
+        app_version_id:
+          type: string
+        app_version:
+          type: string
+        turn_no:
+          type: integer
+        references:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmployeeCitation'
+        status:
+          type: string
+          enum:
+          - PENDING
+          - RUNNING
+          - SUCCEEDED
+          - FAILED
+          - CANCELLED
+          - INTERRUPTED
+        stage:
+          type: string
+          enum:
+          - QUEUED
+          - RETRIEVING
+          - GENERATING
+          - FINISHED
+        snapshot_bound:
+          type: boolean
+        revision:
+          type: integer
+        checkpoint_seq:
+          type: integer
+          format: int64
+        degraded:
+          type: boolean
+        restricted:
+          type: boolean
+          description: 引用任一依赖已不可读，answer 与 references 被清空，禁止显示旧缓存正文
+        error_code:
+          type: string
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          nullable: true
+        finished_at:
+          type: string
+          nullable: true
     ErrorCode:
       type: string
       description: M1 错误码子集 + M4c 对外开放 API 新增错误码 + M15 FORBIDDEN + 登录验证码请求体上限，HTTP 状态码见各端点响应
@@ -5982,6 +6559,9 @@ components:
       - APP_NOT_FOUND
       - VERSION_NOT_FOUND
       - VERSION_NOT_PUBLISHED
+      - CONVERSATION_BUSY
+      - CONVERSATION_REQUEST_CONFLICT
+      - KNOWLEDGE_SNAPSHOT_UNAVAILABLE
       - RATE_LIMITED
       - MODEL_QUOTA_EXCEEDED
       - PARSE_FAILED

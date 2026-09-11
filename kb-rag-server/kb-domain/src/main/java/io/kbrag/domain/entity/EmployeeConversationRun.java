@@ -150,6 +150,13 @@ public class EmployeeConversationRun extends BaseEntity {
         return true;
     }
 
+    /** 进程正常退出时仅中断本执行者或尚未领取的运行，不覆盖其他执行者的工作。 */
+    public boolean interruptOwned(String owner, LocalDateTime now) {
+        if (status != ConversationRunStatus.PENDING && !ownedBy(owner)) return false;
+        finish(ConversationRunStatus.INTERRUPTED, now);
+        return true;
+    }
+
     /** 判定执行者是否仍拥有运行；终态即撤销所有写入权。 */
     public boolean ownedBy(String owner) {
         return status == ConversationRunStatus.RUNNING && Objects.equals(workerId, owner);

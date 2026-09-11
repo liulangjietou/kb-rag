@@ -1,6 +1,8 @@
 package io.kbrag.app.workspace;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.HashUtil;
@@ -14,10 +16,12 @@ import io.kbrag.domain.service.BizIdGenerator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.apache.commons.lang3.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * 员工问答的持久账本。上层负责当前身份、应用及证据授权，本层固定资源归属并保证事务一致性。
@@ -45,6 +49,18 @@ public class EmployeeConversationLedger {
     @Transactional
     public AcceptedRun accept(EmployeeConversationScope scope, String conversationId, String requestId,
                                String question, EmployeeRunTarget target) {
+        return acceptResolved(scope, conversationId, requestId, question, () -> target);
+    }
+
+    /** 幂等检查成功后才查询当前发布版本；重放原请求不受后续版本变化影响。 */
+    @Transactional
+    public AcceptedRun acceptCurrent(EmployeeConversationScope scope, String conversationId, String requestId,
+                                      String question, Supplier<EmployeeRunTarget> currentTarget) {
+        return acceptResolved(scope, conversationId, requestId, question, currentTarget);
+    }
+
+    private AcceptedRun acceptResolved(EmployeeConversationScope scope, String conversationId, String requestId,
+                                        String question, Supplier<EmployeeRunTarget> currentTarget) {
         EmployeeConversation conversation = lockOwned(scope, conversationId);
         String hash = HashUtil.sha256Hex(question);
         EmployeeConversationRun duplicate = runs.selectOne(runQuery(scope, conversationId)
@@ -56,6 +72,7 @@ public class EmployeeConversationLedger {
             }
             return new AcceptedRun(duplicate, false);
         }
+        EmployeeRunTarget target = currentTarget.get();
         if (!scope.appId().equals(target.appId())) throw BizException.notFound("application not found");
         LocalDateTime now = LocalDateTime.now();
         String runId = ids.conversationRunId();
@@ -64,6 +81,50 @@ public class EmployeeConversationLedger {
         requireWritten(runs.insert(run));
         saveConversation(conversation, now);
         return new AcceptedRun(run, true);
+    }
+
+    /** 会话摘要分页，所有筛选在数据库完成，特殊字符按字面搜索。 */
+    @Transactional(readOnly = true)
+    public IPage<EmployeeConversation> list(EmployeeConversationScope scope, String keyword, long page, long size) {
+        String pattern = StringUtils.isBlank(keyword) ? null
+                : "%" + keyword.trim().replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
+        return conversations.listOwned(new Page<>(page, size), scope, pattern);
+    }
+
+    /** 读取当前归属下的会话元数据，不包含问题或答案。 */
+    @Transactional(readOnly = true)
+    public EmployeeConversation conversation(EmployeeConversationScope scope, String conversationId) {
+        EmployeeConversation conversation = conversations.selectOne(new LambdaQueryWrapper<EmployeeConversation>()
+                .eq(EmployeeConversation::getTenantId, scope.tenantId())
+                .eq(EmployeeConversation::getUserId, scope.userId()).eq(EmployeeConversation::getAppId, scope.appId())
+                .eq(EmployeeConversation::getConversationId, conversationId));
+        if (conversation == null) throw BizException.notFound("conversation not found");
+        return conversation;
+    }
+
+    /** 标题为独立字段更新，不用客户端旧会话对象覆盖活动运行或轮次。 */
+    @Transactional
+    public EmployeeConversation rename(EmployeeConversationScope scope, String conversationId, String title) {
+        EmployeeConversation conversation = lockOwned(scope, conversationId);
+        conversation.setTitle(title);
+        saveConversation(conversation, LocalDateTime.now());
+        return conversation;
+    }
+
+    /** 先终止活动运行再软删除会话，两步在同一事务内完成，返回需取消的上游标识。 */
+    @Transactional
+    public String delete(EmployeeConversationScope scope, String conversationId) {
+        EmployeeConversation conversation = lockOwned(scope, conversationId);
+        String activeRun = conversation.getActiveRunId();
+        if (activeRun != null) {
+            EmployeeConversationRun run = requireRun(scope, conversationId, activeRun);
+            if (run.cancel(LocalDateTime.now())) {
+                run.setUpdatedAt(LocalDateTime.now());
+                requireWritten(runs.updateById(run));
+            }
+        }
+        requireWritten(conversations.deleteById(conversation));
+        return activeRun;
     }
 
     /** 内部读取未脱敏运行；HTTP 返回和模型历史构建必须另经当前证据权限过滤。 */
@@ -146,6 +207,12 @@ public class EmployeeConversationLedger {
                                      LocalDateTime staleBefore) {
         return mutate(scope, conversationId, runId,
                 run -> run.interruptIfStale(staleBefore, LocalDateTime.now()));
+    }
+
+    /** 正常停机中断本实例持有的运行；崩溃后的旧运行由超时补偿处理。 */
+    @Transactional
+    public boolean interruptOwned(EmployeeConversationScope scope, String conversationId, String runId, String workerId) {
+        return mutate(scope, conversationId, runId, run -> run.interruptOwned(workerId, LocalDateTime.now()));
     }
 
     private boolean mutate(EmployeeConversationScope scope, String conversationId, String runId,
