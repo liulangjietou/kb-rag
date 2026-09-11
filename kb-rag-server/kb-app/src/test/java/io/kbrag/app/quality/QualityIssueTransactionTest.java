@@ -77,6 +77,8 @@ class QualityIssueTransactionTest {
     private EvalDatasetService datasets;
     private KnowledgeQualityIssueMapper issues;
     private KnowledgeQualityIssueMapper storedIssues;
+    private EvalDatasetMapper datasetMapper;
+    private EvalDatasetMapper storedDatasets;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -90,13 +92,27 @@ class QualityIssueTransactionTest {
                 : new DriverManagerDataSource(mysqlUrl, System.getenv("KB_QUALITY_TEST_USER"), System.getenv("KB_QUALITY_TEST_PASSWORD"));
         jdbc = new JdbcTemplate(source);
         Path migrations = Path.of("../kb-api/src/main/resources/db/migration");
-        for (String name : List.of("V5__evaluation.sql", "V17__tenant_doc_acl_audit.sql", "V23__final_answer_evaluation.sql", "V31__knowledge_quality_issues.sql")) {
+        for (String name : List.of("V5__evaluation.sql", "V6__app_release_and_open_api.sql", "V17__tenant_doc_acl_audit.sql", "V23__final_answer_evaluation.sql", "V30__evaluation_case_inputs.sql", "V31__knowledge_quality_issues.sql")) {
             String ddl = Files.readString(migrations.resolve(name)).replaceAll("(?m)^\\s*--.*$", "");
             for (String statement : ddl.split(";")) {
-                if (!statement.matches("(?s)\\s*(CREATE TABLE|ALTER TABLE) t_kb_(eval_(dataset|case)|quality_issue(_record)?)\\b.*")) continue;
+                if (!statement.matches("(?s)\\s*(CREATE TABLE|ALTER TABLE) t_kb_(eval_(dataset|case|run|result)|quality_issue(_record)?)\\b.*")) continue;
                 String sql = mysqlUrl == null ? statement.replaceAll("(?s)ENGINE = InnoDB.*", "")
                         .replaceAll("\\bJSON\\b", "LONGTEXT").replaceAll(",\\s*ADD KEY idx_tenant \\(tenant_id\\)", "") : statement;
-                jdbc.execute(sql);
+                if (mysqlUrl == null) {
+                    // H2 的索引名在 schema 内共享；MySQL 允许不同表复用同一名称。
+                    var table = java.util.regex.Pattern.compile("(?s)\\s*CREATE TABLE (\\w+)").matcher(sql);
+                    if (table.find()) sql = sql.replaceAll("\\bKEY (\\w+)", "KEY " + table.group(1) + "_$1");
+                }
+                var alteration = java.util.regex.Pattern.compile("(?s)\\s*ALTER TABLE (\\w+)").matcher(sql);
+                if (mysqlUrl == null && alteration.find()) {
+                    // H2 不支持 MySQL 的连续 ADD COLUMN，按原顺序执行同一表的列增量。
+                    for (String part : sql.split(",\\s*(?=ADD COLUMN)")) {
+                        jdbc.execute(part.stripLeading().startsWith("ALTER TABLE") ? part
+                                : "ALTER TABLE " + alteration.group(1) + " " + part);
+                    }
+                } else {
+                    jdbc.execute(sql);
+                }
             }
         }
         jdbc.execute("CREATE TABLE t_kb_knowledge_base (kb_id VARCHAR(64) PRIMARY KEY, tenant_id VARCHAR(64), deleted INT DEFAULT 0)");
@@ -110,12 +126,13 @@ class QualityIssueTransactionTest {
                 .setMetaObjectHandler(new AuditFieldFiller()));
         configuration.addInterceptor(new MybatisPlusConfig().mybatisPlusInterceptor(new KbTenantLineHandler()));
         for (Class<?> mapper : List.of(KnowledgeQualityIssueMapper.class, QualityIssueRecordMapper.class,
-                KnowledgeBaseMapper.class, EvalDatasetMapper.class, EvalCaseMapper.class)) configuration.addMapper(mapper);
+                KnowledgeBaseMapper.class, EvalDatasetMapper.class, EvalCaseMapper.class, EvalRunMapper.class, EvalResultMapper.class)) configuration.addMapper(mapper);
         var session = new SqlSessionTemplate(new MybatisSqlSessionFactoryBuilder().build(configuration));
         storedIssues = session.getMapper(KnowledgeQualityIssueMapper.class);
         issues = mock(KnowledgeQualityIssueMapper.class, delegatesTo(storedIssues));
         var cases = session.getMapper(EvalCaseMapper.class);
-        var datasetMapper = session.getMapper(EvalDatasetMapper.class);
+        storedDatasets = session.getMapper(EvalDatasetMapper.class);
+        datasetMapper = mock(EvalDatasetMapper.class, delegatesTo(storedDatasets));
         var documents = mock(DocumentMapper.class);
         var chunks = mock(ChunkMapper.class);
         var apps = mock(AppMapper.class);
@@ -135,7 +152,7 @@ class QualityIssueTransactionTest {
         context = new AnnotationConfigApplicationContext(); context.register(TransactionConfig.class);
         context.registerBean(PlatformTransactionManager.class, () -> new DataSourceTransactionManager(source));
         context.registerBean(EvalDatasetService.class, () -> new EvalDatasetService(datasetMapper, cases,
-                mock(EvalRunMapper.class), mock(EvalResultMapper.class), documents, chunks,
+                session.getMapper(EvalRunMapper.class), session.getMapper(EvalResultMapper.class), documents, chunks,
                 mock(KnowledgeBaseService.class), new BizIdGenerator()));
         context.registerBean(KnowledgeQualityIssueService.class, () -> new KnowledgeQualityIssueService(issues,
                 session.getMapper(QualityIssueRecordMapper.class), mock(RetrievalFeedbackMapper.class), insights,
@@ -151,7 +168,7 @@ class QualityIssueTransactionTest {
         UserContextHolder.clear();
         if (context != null) context.close();
         if (jdbc != null) for (String table : List.of("t_kb_quality_issue_record", "t_kb_quality_issue",
-                "t_kb_eval_case", "t_kb_eval_dataset", "t_kb_knowledge_base")) jdbc.execute("DROP TABLE IF EXISTS " + table);
+                "t_kb_eval_result", "t_kb_eval_run", "t_kb_eval_case", "t_kb_eval_dataset", "t_kb_knowledge_base")) jdbc.execute("DROP TABLE IF EXISTS " + table);
     }
 
     @Test
@@ -217,6 +234,86 @@ class QualityIssueTransactionTest {
             assertEquals(1, jdbc.queryForObject("SELECT lock_version FROM t_kb_quality_issue", Integer.class));
             assertNotNull(jdbc.queryForObject("SELECT owner_user_id FROM t_kb_quality_issue", String.class));
         } finally { executor.shutdownNow(); }
+    }
+
+    @Test
+    void referencedCaseRemainsAvailableEvenAfterTheIssueIsResolved() {
+        var issue = createdAndClaimed();
+        var corrected = service.correct("kb_safe", issue.getIssueId(), command(issue.getLockVersion(), null));
+        jdbc.update("UPDATE t_kb_quality_issue SET status='RESOLVED'");
+        BizException failure = assertThrows(BizException.class, () -> datasets.deleteCase(corrected.getCaseId()));
+        assertEquals("EVAL_DATASET_CONFLICT", failure.getErrorCode().name());
+        assertEquals(0, jdbc.queryForObject("SELECT deleted FROM t_kb_eval_case", Integer.class));
+        assertEquals(1, jdbc.queryForObject("SELECT case_count FROM t_kb_eval_dataset", Integer.class));
+        assertEquals(corrected.getCaseId(), service.detail("kb_safe", issue.getIssueId()).currentCase().getCaseId());
+    }
+
+    @Test
+    void referencedDatasetKeepsItsCasesRunsAndResults() {
+        var issue = createdAndClaimed();
+        var corrected = service.correct("kb_safe", issue.getIssueId(), command(issue.getLockVersion(), null));
+        addReport(corrected.getCaseId());
+        BizException failure = assertThrows(BizException.class, () -> datasets.delete("ds_safe"));
+        assertEquals("EVAL_DATASET_CONFLICT", failure.getErrorCode().name());
+        for (String table : List.of("t_kb_eval_dataset", "t_kb_eval_case", "t_kb_eval_run", "t_kb_eval_result")) {
+            assertEquals(0, jdbc.queryForObject("SELECT deleted FROM " + table, Integer.class));
+        }
+        assertEquals(corrected.getCaseId(), service.detail("kb_safe", issue.getIssueId()).currentCase().getCaseId());
+    }
+
+    @Test
+    void unreferencedCasesAndDatasetsStillSupportDeletion() {
+        var first = datasets.createCase("ds_safe", input("未关联的问题"));
+        datasets.deleteCase(first.getCaseId());
+        assertEquals(0, jdbc.queryForObject("SELECT case_count FROM t_kb_eval_dataset", Integer.class));
+        var second = datasets.createCase("ds_safe", input("另一个未关联的问题"));
+        addReport(second.getCaseId());
+        datasets.delete("ds_safe");
+        for (String table : List.of("t_kb_eval_dataset", "t_kb_eval_case", "t_kb_eval_run", "t_kb_eval_result")) {
+            assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM " + table + " WHERE deleted=0", Integer.class));
+        }
+    }
+
+    @Test
+    void aStaleDatasetDeleteCannotEraseAConcurrentCorrectionAndItsReport() throws Exception {
+        var issue = createdAndClaimed();
+        CountDownLatch datasetRead = new CountDownLatch(1);
+        CountDownLatch resumeDelete = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            var value = storedDatasets.selectOne(invocation.getArgument(0));
+            if (Thread.currentThread().getName().equals("stale-dataset-delete")) {
+                datasetRead.countDown();
+                if (!resumeDelete.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("Delete barrier timed out");
+            }
+            return value;
+        }).when(datasetMapper).selectOne(any());
+        var executor = Executors.newSingleThreadExecutor(task -> new Thread(task, "stale-dataset-delete"));
+        try {
+            var deletion = executor.submit(() -> {
+                principal("user_safe");
+                try { datasets.delete("ds_safe"); return "deleted"; }
+                catch (BizException conflict) { return conflict.getErrorCode().name(); }
+                finally { UserContextHolder.clear(); }
+            });
+            assertTrue(datasetRead.await(5, TimeUnit.SECONDS));
+            var corrected = service.correct("kb_safe", issue.getIssueId(), command(issue.getLockVersion(), null));
+            addReport(corrected.getCaseId());
+            resumeDelete.countDown();
+            assertEquals("EVAL_DATASET_CONFLICT", deletion.get(10, TimeUnit.SECONDS));
+            for (String table : List.of("t_kb_eval_dataset", "t_kb_eval_case", "t_kb_eval_run", "t_kb_eval_result")) {
+                assertEquals(0, jdbc.queryForObject("SELECT deleted FROM " + table, Integer.class));
+            }
+            assertEquals(corrected.getCaseId(), service.detail("kb_safe", issue.getIssueId()).currentCase().getCaseId());
+        } finally {
+            resumeDelete.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    private void addReport(String caseId) {
+        jdbc.update("INSERT INTO t_kb_eval_run (run_id,dataset_id,kb_id,dataset_revision,corpus_fingerprint,retrieval_config,status) VALUES (?,?,?,?,?,?,?)",
+                "run_safe", "ds_safe", "kb_safe", 1, "fp_safe", "{}", "SUCCESS");
+        jdbc.update("INSERT INTO t_kb_eval_result (result_id,run_id,case_id) VALUES (?,?,?)", "result_safe", "run_safe", caseId);
     }
 
     private String claim(String issueId, String user) {

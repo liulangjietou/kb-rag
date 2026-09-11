@@ -78,10 +78,10 @@ class EvalDatasetConcurrencyTest {
                 : new DriverManagerDataSource(mysqlUrl, System.getenv("KB_EVAL_TEST_USER"), System.getenv("KB_EVAL_TEST_PASSWORD"));
         jdbc = new JdbcTemplate(source);
         Path migrations = Path.of("../kb-api/src/main/resources/db/migration");
-        for (String name : List.of("V5__evaluation.sql", "V17__tenant_doc_acl_audit.sql", "V23__final_answer_evaluation.sql")) {
+        for (String name : List.of("V5__evaluation.sql", "V17__tenant_doc_acl_audit.sql", "V23__final_answer_evaluation.sql", "V31__knowledge_quality_issues.sql")) {
             String ddl = Files.readString(migrations.resolve(name)).replaceAll("(?m)^\\s*--.*$", "");
             for (String statement : ddl.split(";")) {
-                if (!statement.matches("(?s)\\s*(CREATE TABLE|ALTER TABLE) t_kb_eval_(dataset|case)\\b.*")) continue;
+                if (!statement.matches("(?s)\\s*(CREATE TABLE|ALTER TABLE) t_kb_(eval_(dataset|case)|quality_issue)\\b.*")) continue;
                 // H2 没有 MySQL JSON 的 JDBC 文本语义；MySQL 验证直接执行生产字段定义。
                 String sql = mysqlUrl == null ? statement.replaceAll("(?s)ENGINE = InnoDB.*", "")
                         .replaceAll("\\bJSON\\b", "LONGTEXT").replaceAll(",\\s*ADD KEY idx_tenant \\(tenant_id\\)", "") : statement;
@@ -120,6 +120,7 @@ class EvalDatasetConcurrencyTest {
     void tearDown() {
         if (context != null) context.close();
         if (jdbc != null) {
+            jdbc.execute("DROP TABLE IF EXISTS t_kb_quality_issue");
             jdbc.execute("DROP TABLE IF EXISTS t_kb_eval_case");
             jdbc.execute("DROP TABLE IF EXISTS t_kb_eval_dataset");
         }

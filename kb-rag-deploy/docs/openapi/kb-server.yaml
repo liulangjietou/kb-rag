@@ -4116,8 +4116,7 @@ paths:
       tags:
       - eval
       summary: 删除评测集
-      description: 级联删除该评测集下 case 与 run/result，走软删 + after-commit 清理（M4b-CONTRACTS.md
-        §2）
+      description: 先按当前修订号和质量问题引用关系确认可删除，再在同一事务内软删除集合及其 case、run、result。已被质量问题关联的集合保留，包含已解决问题的历史关联。
       responses:
         '200':
           description: 删除成功
@@ -4127,6 +4126,12 @@ paths:
                 $ref: '#/components/schemas/EmptyResult'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: EVAL_DATASET_CONFLICT，集合被质量问题引用或已被更新，删除及所有级联写入均未执行；请读取最新状态后核对
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/eval-datasets/{datasetId}/cases:
     parameters:
     - $ref: '#/components/parameters/EvalDatasetId'
@@ -4271,7 +4276,7 @@ paths:
       tags:
       - eval
       summary: 删除评测 case
-      description: dataset_revision+1（M4b-CONTRACTS.md §2）
+      description: 成功删除后 dataset_revision+1。已被质量问题关联的用例不可删除，包含已解决问题的历史关联。
       responses:
         '200':
           description: 删除成功
@@ -4282,7 +4287,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: EVAL_DATASET_CONFLICT，用例或集合已被其他操作修改，本次修改已整体回滚，请读取最新内容后重试
+          description: EVAL_DATASET_CONFLICT，用例被质量问题引用或已被更新，删除未执行；请读取最新状态后核对
           content:
             application/json:
               schema:

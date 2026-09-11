@@ -26,7 +26,7 @@ class QualityIssueMigrationTest {
         jdbc.update("INSERT INTO t_kb_eval_run (run_id,dataset_id,kb_id,dataset_revision,corpus_fingerprint,retrieval_config,status,case_inputs) VALUES (?,?,?,?,?,?,?,?)",
                 "run_old", "dataset_old", "kb_old", 3, "corpus-old", "{}", "SUCCESS", "[]");
         var old = jdbc.queryForMap("SELECT run_id,dataset_revision,corpus_fingerprint,status,case_inputs FROM t_kb_eval_run WHERE run_id='run_old'");
-        var current = Flyway.configure().dataSource(source).locations("classpath:db/migration").load();
+        var current = Flyway.configure().dataSource(source).locations("classpath:db/migration").target("31").load();
         assertEquals(1, current.migrate().migrationsExecuted);
         current.validate();
         assertEquals(old, jdbc.queryForMap("SELECT run_id,dataset_revision,corpus_fingerprint,status,case_inputs FROM t_kb_eval_run WHERE run_id='run_old'"));
