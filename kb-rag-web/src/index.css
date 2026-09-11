@@ -518,24 +518,6 @@ main pre,
   line-height: 1.65;
 }
 
-.auth-environment {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 22px;
-  color: var(--kb-color-primary-text);
-  font-size: 11px;
-  font-weight: 720;
-}
-
-.auth-environment i {
-  width: 7px;
-  height: 7px;
-  background: var(--kb-color-success);
-  border-radius: 50%;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--kb-color-success) 13%, transparent);
-}
-
 .login-mode-tabs .ant-tabs-nav-list {
   width: 100%;
 }
@@ -548,18 +530,6 @@ main pre,
 .login-form__submit,
 .password-form__submit {
   margin: 5px 0 0;
-}
-
-.sso-actions {
-  width: 100%;
-}
-
-.auth-hint {
-  margin-top: 17px;
-  color: var(--kb-color-text-secondary);
-  text-align: center;
-  font-size: 11px;
-  line-height: 1.55;
 }
 
 .auth-security-note {
