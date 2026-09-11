@@ -6,6 +6,8 @@ import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.model.ChatMessage;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -23,6 +25,43 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 使用真实本地 HTTP 流，避免把完整回答后的单次回调误认为逐段输出。 */
 class DashScopeChatStreamingTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/gateway?api-version=fixture", "/gateway/?api-version=fixture",
+            "/gateway?api-version=fixture&label=中文"})
+    void shouldPreserveGatewayBasePathAndQueryInBothTransports(String basePath) throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        List<String> queries = new CopyOnWriteArrayList<>();
+        server.createContext("/gateway/chat/completions", exchange -> {
+            queries.add(exchange.getRequestURI().getRawQuery());
+            JsonNode request = JsonUtil.parse(new String(exchange.getRequestBody().readAllBytes(),
+                    StandardCharsets.UTF_8), JsonNode.class);
+            boolean stream = request.path("stream").asBoolean();
+            byte[] body = (stream
+                    ? "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"}}]}\n\ndata: [DONE]\n\n"
+                    : "{\"choices\":[{\"message\":{\"content\":\"answer\"}}]}").getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", stream ? "text/event-stream" : "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        server.start();
+        try {
+            var config = new KbProperties.Chat();
+            config.setApiKey("fixture-key");
+            config.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort() + basePath);
+            var provider = new DashScopeChatProvider(config);
+            assertEquals("answer", provider.complete(null, List.of(ChatMessage.user("question"))));
+            List<String> deltas = new CopyOnWriteArrayList<>();
+            provider.stream(null, List.of(ChatMessage.user("question")), deltas::add);
+            assertEquals(List.of("answer"), deltas);
+            assertEquals(2, queries.size());
+            assertEquals(queries.get(0), queries.get(1));
+            assertTrue(queries.get(0).startsWith("api-version=fixture"));
+        } finally {
+            server.stop(0);
+        }
+    }
 
     @Test
     void shouldDeliverFirstDeltaBeforeTheProviderFinishes() throws Exception {

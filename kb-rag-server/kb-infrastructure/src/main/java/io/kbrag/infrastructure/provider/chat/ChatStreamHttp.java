@@ -9,8 +9,8 @@ import io.kbrag.domain.model.ModelCallSpec;
 import io.kbrag.domain.model.ModelCallTicket;
 import io.kbrag.domain.model.ModelTokenUsage;
 import io.kbrag.domain.port.ModelCallMeter;
+import org.springframework.web.util.DefaultUriBuilderFactory;
 
-import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -42,8 +42,9 @@ final class ChatStreamHttp {
     void stream(Map<String, Object> payload, ModelCallSpec spec,
                 Consumer<String> onDelta, ChatCancellation cancellation) {
         cancellation.throwIfCancelled();
-        String baseUrl = config.getBaseUrl().replaceAll("/+$", "");
-        HttpRequest request = HttpRequest.newBuilder(URI.create(baseUrl + "/chat/completions"))
+        // 与普通 RestClient 请求复用同样的 URL 合并和编码规则，保留网关路径与查询参数。
+        HttpRequest request = HttpRequest.newBuilder(new DefaultUriBuilderFactory(config.getBaseUrl())
+                        .uriString("/chat/completions").build())
                 .header("Authorization", "Bearer " + config.getApiKey())
                 .header("Content-Type", "application/json")
                 .header("Accept", "text/event-stream")
