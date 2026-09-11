@@ -52,6 +52,12 @@ public final class KbConstants {
     /** Business id prefix of an application. */
     public static final String APP_ID_PREFIX = "app";
 
+    /** 员工会话业务标识前缀。 */
+    public static final String CONVERSATION_ID_PREFIX = "conv";
+
+    /** 员工问答运行标识前缀。 */
+    public static final String CONVERSATION_RUN_ID_PREFIX = "run";
+
     /** Business id prefix of an application version. */
     public static final String APP_VERSION_ID_PREFIX = "av";
 

@@ -23,6 +23,7 @@ import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.AppIndexSnapshot;
 import io.kbrag.domain.model.AppRoutingConfig;
 import io.kbrag.domain.model.ChatCancellation;
+import io.kbrag.domain.model.EmployeeRunTarget;
 import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.service.ContentBudgetTrimmer;
@@ -76,6 +77,33 @@ public class KnowledgeApiService {
     private final ApiAuditService apiAuditService;
     private final SearchInsightService searchInsightService;
     private final KbMetrics kbMetrics;
+
+    /**
+     * 员工会话复用检索与生成管线，执行对象由会话接受时捕获，当前授权由员工执行服务负责。
+     * 检索回调必须完成证据持久化和当前权限重验后才返回；本方法不发送 done，由账本提交终态后发送。
+     */
+    public KnowledgeCallResult employeeStream(EmployeeRunTarget captured, KnowledgeCallCommand command,
+                                               java.util.function.Consumer<KnowledgeCallResult> onRetrieved,
+                                               java.util.function.Consumer<String> onDelta,
+                                               ChatCancellation cancellation) {
+        cancellation.throwIfCancelled();
+        AppVersion version = new AppVersion();
+        version.setAppId(captured.appId());
+        version.setAppVersionId(captured.appVersionId());
+        version.setVersion(captured.appVersion());
+        version.setConfig(captured.config());
+        version.setIndexSnapshots(captured.indexSnapshots());
+        version.setVisibleVersionIds(captured.visibleVersionIds());
+        ResolvedTarget target = new ResolvedTarget(version, appVersionService.parseConfig(version),
+                TargetStage.RELEASE, captured.snapshotBound(), captured.snapshotBound());
+        KnowledgeCallResult retrieved = retrieve(target, command);
+        cancellation.throwIfCancelled();
+        onRetrieved.accept(retrieved);
+        cancellation.throwIfCancelled();
+        streamGenerate(target, command, retrieved.getNodes(), onDelta, cancellation);
+        cancellation.throwIfCancelled();
+        return retrieved;
+    }
 
     /**
      * Runs one open search call.
@@ -374,6 +402,7 @@ public class KnowledgeApiService {
         KbRetrievalConfig retrieval = snapshot.retrievalOrDefaults();
         AppRoutingConfig routing = snapshot.routingOrDefaults();
         return RetrievalCommand.builder()
+                .strictSnapshot(target.strictSnapshot())
                 .indexOverride(target.snapshotBound() ? indexOverridesOf(target.version()) : null)
                 .visibleVersionIdsOverride(target.snapshotBound()
                         ? target.version().visibleVersionIdMap() : null)
@@ -626,6 +655,9 @@ public class KnowledgeApiService {
      *                      instead of the live aliases
      */
     private record ResolvedTarget(AppVersion version, AppConfigSnapshot snapshot, TargetStage stage,
-                                  boolean snapshotBound) {
+                                  boolean snapshotBound, boolean strictSnapshot) {
+        private ResolvedTarget(AppVersion version, AppConfigSnapshot snapshot, TargetStage stage, boolean snapshotBound) {
+            this(version, snapshot, stage, snapshotBound, false);
+        }
     }
 }

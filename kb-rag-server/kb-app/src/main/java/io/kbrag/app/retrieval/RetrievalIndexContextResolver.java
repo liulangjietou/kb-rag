@@ -4,6 +4,7 @@ import io.kbrag.app.document.DocumentAclService;
 import io.kbrag.app.index.ActiveVersionResolver;
 import io.kbrag.app.index.IndexAliasManager;
 import io.kbrag.common.api.ErrorCode;
+import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.port.FulltextStore;
 import io.kbrag.domain.port.VectorStore;
 import lombok.RequiredArgsConstructor;
@@ -69,6 +70,15 @@ public class RetrievalIndexContextResolver {
     public IndexContext resolve(String kbId, RetrievalCommand command) {
         RetrievalIndexOverride override = overrideOf(kbId, command);
         List<String> frozenVersionIds = frozenVersionIdsOf(kbId, command);
+        if (command.isStrictSnapshot()) {
+            if (override == null || frozenVersionIds == null || !snapshotPresent(override)) {
+                throw new BizException(ErrorCode.KNOWLEDGE_SNAPSHOT_UNAVAILABLE,
+                        "已发布的知识快照不可用，请联系管理员重新发布");
+            }
+            // 空集合表示该次发布确实没有可见文档，不能变成检索今天新增的内容。
+            return new IndexContext(override.fulltextIndex(), override.vectorIndex(),
+                    documentAclService.trimRestricted(kbId, frozenVersionIds), false, true);
+        }
         if (override == null || CollectionUtils.isEmpty(frozenVersionIds)) {
             return liveContext(kbId, false);
         }
