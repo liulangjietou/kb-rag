@@ -7,12 +7,19 @@ import type {
   KbDocument,
   PageResult,
   ProcessStatus,
+  PublishStatus,
   ReparseDocumentRequest,
   UpdateDocumentVisibilityRequest,
 } from './types';
 
 export interface ListDocumentsParams {
+  keyword?: string;
   process_status?: ProcessStatus;
+  publish_status?: PublishStatus;
+  source?: 'UPLOAD' | 'WEB' | 'EXTERNAL' | 'CHAT';
+  /** 服务端本地时间，ISO 格式，包含起止边界。 */
+  updated_from?: string;
+  updated_to?: string;
   page?: number;
   /** 页大小，缺省由服务端取 DEFAULT_PAGE_SIZE（20）。 */
   size?: number;

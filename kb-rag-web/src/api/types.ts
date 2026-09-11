@@ -439,7 +439,6 @@ export const PUBLISH_STATUS_META: Record<PublishStatus, { color: string; label: 
 /**
  * DocumentResponse (server). The four upload-only fields at the bottom are populated exclusively by
  * POST /kb/{kbId}/documents (UploadOutcome) and are absent from the list/detail responses.
- * No updated_at is exposed.
  */
 export interface KbDocument {
   doc_id: string;
@@ -464,6 +463,8 @@ export interface KbDocument {
   /** M16: content readable only by the granted roles; the row itself always shows in the list. */
   restricted: boolean;
   created_at: string;
+  /** 文档记录最近更新时间；兼容未升级的服务端，缺失时不推断。 */
+  updated_at?: string | null;
   /** Upload only: id of the document version this upload created. */
   version_id?: string;
   /** Upload only: label of that version, e.g. "v2" (M4a-CONTRACTS.md section 1.1's three branches). */
@@ -508,7 +509,7 @@ export interface RebuildRequest {
 /**
  * GET /api/v1/kb/{kbId}/rebuild-status response：整库口径的配置追平状态。
  *
- * 三个计数都是服务端现算的，与文档列表的分页无关——待重建的文档落在第几页不影响它是不是活儿。
+ * 计数由服务端计算，与文档列表的筛选和分页无关。
  */
 export interface RebuildStatus {
   /** 仍需按新配置重建的文档数，归零即全部追平。 */
@@ -517,6 +518,10 @@ export interface RebuildStatus {
   in_progress_count: number;
   /** 其中重建失败、需要人工介入的文档数。 */
   failed_count: number;
+  /** 全库未回收文档数；兼容旧服务端时缺失。 */
+  document_count?: number;
+  /** 全库正在处理的文档数，包括首次上传；不含等待人工确认。 */
+  processing_count?: number;
 }
 
 // ---------------------------------------------------------------------------
