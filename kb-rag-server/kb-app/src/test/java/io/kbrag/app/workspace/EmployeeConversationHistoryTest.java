@@ -78,6 +78,25 @@ class EmployeeConversationHistoryTest {
     }
 
     @Test
+    void shouldPreserveCurrentPromptNumbersBeforeAppendingHistoricalDependencies() {
+        var current = List.of(source("shared"), source("new"));
+        var merged = history.mergeSources(List.of(source("old").asInherited(), source("shared").asInherited()), current);
+        assertEquals(current, merged.subList(0, current.size()), "正文 [1]、[2] 必须对应本轮 prompt 中的资料顺序");
+        assertEquals(List.of("shared", "new", "old"), merged.stream().map(EmployeeCitation::docId).toList());
+        assertTrue(merged.get(2).inherited());
+    }
+
+    @Test
+    void shouldNotCollapseRepeatedCurrentPassagesAndShiftLaterPromptNumbers() {
+        var current = List.of(source("same"), source("same"), source("last"));
+        var merged = history.mergeSources(List.of(source("old"), source("old"), source("same")), current);
+        assertEquals(current, merged.subList(0, current.size()));
+        assertEquals(4, merged.size());
+        assertEquals("last", merged.get(2).docId());
+        assertTrue(merged.get(3).inherited());
+    }
+
+    @Test
     void shouldBoundModelHistoryWithoutTruncatingAPairIntoMisleadingPartialText() {
         when(ledger.history(any(), anyString(), anyInt(), anyInt())).thenReturn(
                 List.of(completed(1, "问", "长".repeat(24_001), List.of(source("large")))));
