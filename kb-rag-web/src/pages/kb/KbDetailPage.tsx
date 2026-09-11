@@ -61,6 +61,9 @@ import TrashTab from './components/TrashTab';
 import VersionDrawer from './components/VersionDrawer';
 import VisibilityDrawer from './components/VisibilityDrawer';
 import WebSourcesTab from './components/WebSourcesTab';
+import QualityIssueDrawer from './quality/QualityIssueDrawer';
+import QualityIssueTab from './quality/QualityIssueTab';
+import './quality/quality-issues.css';
 
 // Document list is polled every 3s while this page stays mounted, per M1-CONTRACTS.md section 7.
 // 同一个轮询顺带拉 GET /kb/{kbId}/rebuild-status（M2-CONTRACTS.md section 4 的追平状态）：重建跑在
@@ -113,7 +116,22 @@ export default function KbDetailPage() {
   // M16 document visibility: the row the drawer is editing.
   const [visibilityDoc, setVisibilityDoc] = useState<KbDocument | null>(null);
   const [governanceSaving, setGovernanceSaving] = useState(false);
+  const [qualitySelection, setQualitySelection] = useState<{ kbId: string; issueId: string }>();
+  const qualityOpener = useRef<HTMLElement | null>(null);
+  const [qualityRefresh, setQualityRefresh] = useState(0);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => { setQualitySelection(undefined); qualityOpener.current = null; }, [kbId]);
+  const openQualityIssue = (issueId: string) => {
+    if (!kbId) return;
+    qualityOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setQualitySelection({ kbId, issueId });
+  };
+  const closeQualityIssue = () => {
+    const opener = qualityOpener.current;
+    setQualitySelection(undefined);
+    setQualityRefresh((value) => value + 1);
+    requestAnimationFrame(() => { if (opener?.isConnected) opener.focus(); });
+  };
 
   const loadKb = useCallback(async () => {
     if (!kbId) return;
@@ -654,10 +672,13 @@ export default function KbDetailPage() {
                       className="workspace-secondary-tabs"
                       items={[
                         ...(canFeedback
-                          ? [{ key: 'feedback', label: '反馈管理', children: <FeedbackTab kbId={kbId} /> }]
+                          ? [{ key: 'issues', label: '质量问题', children: <QualityIssueTab key={kbId} kbId={kbId} refreshKey={qualityRefresh} onOpen={openQualityIssue} /> }]
+                          : []),
+                        ...(canFeedback
+                          ? [{ key: 'feedback', label: '反馈管理', children: <FeedbackTab kbId={kbId} onOpenIssue={openQualityIssue} /> }]
                           : []),
                         ...(canInsight
-                          ? [{ key: 'insight', label: '检索洞察', children: <InsightTab kbId={kbId} /> }]
+                          ? [{ key: 'insight', label: '检索洞察', children: <InsightTab kbId={kbId} onOpenIssue={canFeedback ? openQualityIssue : undefined} /> }]
                           : []),
                       ]}
                     />
@@ -676,6 +697,10 @@ export default function KbDetailPage() {
             : []),
         ]}
       />
+
+      {canFeedback && kbId && qualitySelection?.kbId === kbId && <QualityIssueDrawer key={`${kbId}:${qualitySelection.issueId}`} kbId={kbId} issueId={qualitySelection.issueId}
+        onClose={closeQualityIssue}
+        onChanged={() => setQualityRefresh((value) => value + 1)} />}
 
       {canDocWrite && (
         <Drawer title="添加文档" open={uploadOpen} width={540} onClose={() => setUploadOpen(false)}>

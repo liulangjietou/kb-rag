@@ -1,6 +1,7 @@
 // Author: owlzhangfq@gmail.com
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Select, Tabs } from 'antd';
+import { useSearchParams } from 'react-router-dom';
 import { listEvalDatasets } from '../../api/evalDataset';
 import { listKnowledgeBases } from '../../api/kb';
 import type { EvalDataset, KnowledgeBase } from '../../api/types';
@@ -18,21 +19,35 @@ import EvalRunTab from './components/EvalRunTab';
  * how KbDetailPage owns document state that its drawers read from.
  */
 export default function EvalCenterPage() {
+  const [searchParams] = useSearchParams();
+  const requestedKb = searchParams.get('kb_id');
+  const requestedDataset = searchParams.get('dataset_id');
+  const requestedTab = searchParams.get('tab');
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [kbId, setKbId] = useState<string | null>(null);
   const [datasets, setDatasets] = useState<EvalDataset[]>([]);
   const [datasetsLoading, setDatasetsLoading] = useState(false);
   const [currentDatasetId, setCurrentDatasetId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('dataset');
+  const datasetRequest = useRef(0);
 
   useEffect(() => {
+    let active = true;
     listKnowledgeBases().then((list) => {
+      if (!active) return;
       setKbs(list);
-      setKbId((prev) => prev ?? list[0]?.kb_id ?? null);
+      setKbId((prev) => list.some((kb) => kb.kb_id === requestedKb) ? requestedKb
+        : list.some((kb) => kb.kb_id === prev) ? prev : list[0]?.kb_id ?? null);
     });
-  }, []);
+    return () => { active = false; };
+  }, [requestedKb]);
+
+  useEffect(() => {
+    if (requestedTab && ['dataset', 'cases', 'review', 'run'].includes(requestedTab)) setActiveTab(requestedTab);
+  }, [requestedTab]);
 
   const loadDatasets = useCallback(async () => {
+    const request = ++datasetRequest.current;
     if (!kbId) {
       setDatasets([]);
       return;
@@ -40,15 +55,20 @@ export default function EvalCenterPage() {
     setDatasetsLoading(true);
     try {
       const result = await listEvalDatasets(kbId);
+      if (request !== datasetRequest.current) return;
       setDatasets(result);
+      setCurrentDatasetId((previous) => result.some((dataset) => dataset.dataset_id === previous) ? previous
+        : result.some((dataset) => dataset.dataset_id === requestedDataset) ? requestedDataset : null);
     } finally {
-      setDatasetsLoading(false);
+      if (request === datasetRequest.current) setDatasetsLoading(false);
     }
-  }, [kbId]);
+  }, [kbId, requestedDataset]);
 
   useEffect(() => {
     setCurrentDatasetId(null);
+    setDatasets([]);
     loadDatasets();
+    return () => { datasetRequest.current += 1; };
   }, [kbId, loadDatasets]);
 
   const currentDataset = datasets.find((dataset) => dataset.dataset_id === currentDatasetId) ?? null;

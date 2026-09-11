@@ -4344,6 +4344,487 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/quality-issues:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags:
+      - eval
+      summary: 质量问题列表
+      description: 需要 feedback:manage 和当前租户知识库访问权限。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssuePageResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      parameters:
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/QualityIssueStatus'
+      - name: mine
+        in: query
+        schema:
+          type: boolean
+          default: false
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: size
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+    post:
+      tags:
+      - eval
+      summary: 从真实 BAD 反馈或零命中洞察建立问题
+      description: 需要 feedback:manage 和当前租户知识库访问权限。同一来源重复请求复用已有记录；并发插入冲突返回 409，重试可获取已建立的问题。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueCreateRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - eval
+      summary: 读取问题和当前纠正用例
+      description: 需要 feedback:manage 和当前租户知识库访问权限。已关联用例的内容另需 eval:read、app:read，并通过历史及当前证据的文档权限。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/records:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - eval
+      summary: 读取追加处理记录
+      description: 需要 feedback:manage 和当前租户知识库访问权限。按时间倒序，每页 50 条；历史记录也受历史证据文档的当前权限约束。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueRecordPageResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      parameters:
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/claim:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - eval
+      summary: 领取问题
+      description: 需要 feedback:manage 和当前租户知识库访问权限。仅未分派状态可领取，已有纠正用例时回到待回归。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueRevisionRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/release:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - eval
+      summary: 释放问题
+      description: 需要 feedback:manage 和当前租户知识库访问权限。仅当前负责人操作，保留纠正用例及处理记录。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueRevisionRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/notes:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - eval
+      summary: 追加处理说明
+      description: 需要 feedback:manage 和当前租户知识库访问权限。仅未解决问题的当前负责人操作。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueNoteRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/correction:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - eval
+      summary: 保存人工纠正用例
+      description: 需要 feedback:manage 和当前租户知识库访问权限。同时需要 eval:write、eval:read、app:read，三项为 AND。必须是当前负责人；评测集必须属于当前知识库；已有用例保留原评测集和受影响应用。问题、用例、集合修订号、处理记录在同一事务提交。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueCorrectionRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/resolve:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - eval
+      summary: 确认真实回归并解决问题
+      description: 需要 feedback:manage 和当前租户知识库访问权限。同时需要 eval:read、app:read 和当前负责人身份。重新核验实际完成的答案评测：确认输入、当前用例和冻结输入一致，应用及配置有效、语料指纹一致、证据版本及全部召回文档当前可访问；非降级且五项答案评分各至少
+        4/5、拒答正确，正常回答须完整命中证据。必须提供人工核验说明。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueResolveRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/reopen:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - eval
+      summary: 重新打开已解决问题
+      description: 需要 feedback:manage 和当前租户知识库访问权限。保留历史处理记录并清除上一轮解决标记，等待重新领取。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueNoteRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/regressions/{runId}:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - eval
+      summary: 预览通过核验的当前用例回归结果
+      description: 需要 feedback:manage 和当前租户知识库访问权限。同时需要 eval:read、app:read；与解决操作使用同一核验器，只返回当前用例的实际答案和评分，不返回其他用例。此接口不启动评测。预览通过后，解决提交仍重新核验。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityRegressionResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/kb/{kbId}/retrieval-feedback:
     parameters:
     - $ref: '#/components/parameters/KbId'
@@ -6469,6 +6950,360 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    QualityIssueStatus:
+      type: string
+      enum:
+      - NEW
+      - IN_PROGRESS
+      - WAITING_REGRESSION
+      - RESOLVED
+    QualityIssueSource:
+      type: string
+      enum:
+      - BAD_FEEDBACK
+      - ZERO_HIT
+    QualityIssueReason:
+      type: string
+      enum:
+      - MISSING_KNOWLEDGE
+      - OUTDATED_KNOWLEDGE
+      - RETRIEVAL_MISS
+      - ANSWER_INCORRECT
+      - QUESTION_UNCLEAR
+      - OTHER
+    QualityIssueCreateRequest:
+      type: object
+      required:
+      - source_type
+      - source_id
+      properties:
+        source_type:
+          $ref: '#/components/schemas/QualityIssueSource'
+        source_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: BAD_FEEDBACK 使用 feedback_id；ZERO_HIT 使用随机 insight_id，服务端读取真实来源并按查询哈希去重。
+    QualityIssueRevisionRequest:
+      type: object
+      required:
+      - revision
+      properties:
+        revision:
+          type: integer
+          minimum: 0
+    QualityIssueNoteRequest:
+      type: object
+      required:
+      - revision
+      - note
+      properties:
+        revision:
+          type: integer
+          minimum: 0
+        note:
+          type: string
+          minLength: 1
+          maxLength: 2048
+    QualityIssueResolveRequest:
+      type: object
+      required:
+      - revision
+      - run_id
+      - note
+      properties:
+        revision:
+          type: integer
+          minimum: 0
+        run_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        note:
+          type: string
+          minLength: 1
+          maxLength: 2048
+    QualityCorrectionInput:
+      type: object
+      required:
+      - query
+      - expected_refusal
+      - anchor_type
+      - evidences
+      - note
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        messages:
+          type: array
+          items:
+            type: object
+            required:
+            - role
+            - content
+            properties:
+              role:
+                type: string
+                enum:
+                - user
+                - assistant
+              content:
+                type: string
+                minLength: 1
+                maxLength: 4096
+          maxItems: 20
+          nullable: true
+        expected_answer:
+          type: string
+          maxLength: 8192
+          nullable: true
+          description: 正常回答必须填写非空标准答案。
+        expected_refusal:
+          type: boolean
+        anchor_type:
+          $ref: '#/components/schemas/AnchorType'
+        evidences:
+          type: array
+          items:
+            type: object
+            required:
+            - doc_id
+            properties:
+              doc_id:
+                type: string
+                minLength: 1
+                maxLength: 64
+              span:
+                type: string
+                maxLength: 8192
+                nullable: true
+          maxItems: 20
+          description: 正常回答至少一条；拒答可以为空。所有文档必须属于当前知识库且当前可读，版本由服务端填写。
+        note:
+          type: string
+          minLength: 1
+          maxLength: 1024
+    QualityIssueCorrectionRequest:
+      type: object
+      required:
+      - revision
+      - reason
+      - dataset_id
+      - affected_app_version_id
+      - input
+      properties:
+        revision:
+          type: integer
+          minimum: 0
+        case_revision:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: 已有纠正用例时必填详情返回的当前修订号，避免覆盖评测中心的新修改。
+        reason:
+          $ref: '#/components/schemas/QualityIssueReason'
+        dataset_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        affected_app_version_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        input:
+          $ref: '#/components/schemas/QualityCorrectionInput'
+    QualityIssue:
+      type: object
+      required:
+      - issue_id
+      - kb_id
+      - source_type
+      - status
+      - revision
+      - owned_by_me
+      - content_restricted
+      properties:
+        issue_id:
+          type: string
+        kb_id:
+          type: string
+        source_type:
+          $ref: '#/components/schemas/QualityIssueSource'
+        source_id:
+          type: string
+          nullable: true
+          description: 只有可读 BAD 来源返回 feedback_id；零命中查询哈希永不返回。
+        summary:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/QualityIssueStatus'
+        revision:
+          type: integer
+          minimum: 0
+        owned_by_me:
+          type: boolean
+        content_restricted:
+          type: boolean
+        owner_user_id:
+          type: string
+          nullable: true
+        owner_name:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        dataset_id:
+          type: string
+          nullable: true
+        case_id:
+          type: string
+          nullable: true
+        affected_app_version_id:
+          type: string
+          nullable: true
+        verified_run_id:
+          type: string
+          nullable: true
+        verified_app_version_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        case_revision:
+          type: integer
+          minimum: 0
+          nullable: true
+        correction:
+          allOf:
+          - $ref: '#/components/schemas/EvalCase'
+          nullable: true
+          description: 详情返回当前纠正用例供编辑；列表无正文。写入响应后应重新读取详情取得 case_revision。
+      description: 当前知识库是授权根；受限条目只展示处理状态，不返回摘要、来源 ID、原因、用例或应用关联。
+    QualityIssueRecord:
+      type: object
+      properties:
+        action:
+          type: string
+          enum:
+          - CREATED
+          - CLAIMED
+          - RELEASED
+          - CORRECTED
+          - NOTE_ADDED
+          - RESOLVED
+          - REOPENED
+        actor_name:
+          type: string
+        note:
+          type: string
+          nullable: true
+        case_id:
+          type: string
+          nullable: true
+        run_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+    QualityRegression:
+      type: object
+      required:
+      - app_version_id
+      - minimum_dimension_score
+      - result
+      properties:
+        app_version_id:
+          type: string
+        minimum_dimension_score:
+          type: integer
+          enum:
+          - 4
+        result:
+          $ref: '#/components/schemas/EvalResult'
+    QualityIssuePage:
+      type: object
+      required:
+      - items
+      - page
+      - size
+      - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/QualityIssue'
+        page:
+          type: integer
+          minimum: 1
+        size:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+          format: int64
+    QualityIssueRecordPage:
+      type: object
+      required:
+      - items
+      - page
+      - size
+      - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/QualityIssueRecord'
+        page:
+          type: integer
+          minimum: 1
+        size:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+          format: int64
+    QualityIssueResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/QualityIssue'
+    QualityIssuePageResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/QualityIssuePage'
+    QualityIssueRecordPageResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/QualityIssueRecordPage'
+    QualityRegressionResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/QualityRegression'
     EmployeeHomeOverview:
       type: object
       required: [applications, recent_conversations]
@@ -6705,6 +7540,7 @@ components:
       - CONVERSATION_REQUEST_CONFLICT
       - FEEDBACK_VERSION_CONFLICT
       - EVAL_DATASET_CONFLICT
+      - QUALITY_ISSUE_CONFLICT
       - KNOWLEDGE_SNAPSHOT_UNAVAILABLE
       - RATE_LIMITED
       - MODEL_QUOTA_EXCEEDED
@@ -9875,6 +10711,9 @@ components:
       type: object
       description: 零命中 query 分组（大小写与空白归一化后同组），展示该组最新一条的脱敏摘要
       properties:
+        insight_id:
+          type: string
+          description: 该组最新洞察的随机标识，供建立质量问题；查询哈希不向客户端公开
         query_digest:
           type: string
         count:
@@ -10003,7 +10842,8 @@ components:
           $ref: '#/components/schemas/AnchorType'
         evidences:
           type: array
-          minItems: 1
+          minItems: 0
+          description: expected_refusal=true 可为空；正常回答至少一条正确证据
           items:
             $ref: '#/components/schemas/EvalCaseEvidenceInput'
         note:

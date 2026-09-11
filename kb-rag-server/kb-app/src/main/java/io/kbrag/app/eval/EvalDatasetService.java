@@ -374,10 +374,10 @@ public class EvalDatasetService {
         if (command.getAnchorType() == null) {
             throw BizException.invalidParam("anchor_type is required");
         }
-        if (CollectionUtils.isEmpty(command.getEvidences())) {
+        if (CollectionUtils.isEmpty(command.getEvidences()) && !command.isExpectedRefusal()) {
             throw BizException.invalidParam("at least one evidence is required");
         }
-        if (command.getAnchorType() == AnchorType.SPAN) {
+        if (command.getAnchorType() == AnchorType.SPAN && CollectionUtils.isNotEmpty(command.getEvidences())) {
             for (EvalEvidence evidence : command.getEvidences()) {
                 if (evidence.getSpan() == null || evidence.getSpan().isBlank()) {
                     throw BizException.invalidParam("a span anchored case requires a non blank span");
@@ -393,7 +393,8 @@ public class EvalDatasetService {
         evalCase.setExpectedAnswer(command.getExpectedAnswer());
         evalCase.setExpectedRefusal(command.isExpectedRefusal());
         evalCase.setAnchorType(command.getAnchorType());
-        evalCase.setEvidences(JsonUtil.toJson(resolveEvidences(command.getEvidences(), command.getAnchorType())));
+        evalCase.setEvidences(JsonUtil.toJson(CollectionUtils.isEmpty(command.getEvidences())
+                ? List.of() : resolveEvidences(command.getEvidences(), command.getAnchorType())));
         evalCase.setSource(source);
         evalCase.setNote(command.getNote());
         if (evalCase.getStatus() == null) {

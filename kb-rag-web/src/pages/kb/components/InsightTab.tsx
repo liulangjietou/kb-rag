@@ -5,9 +5,11 @@ import type { Dayjs } from 'dayjs';
 import { getSearchInsightStats, listSearchInsights } from '../../../api/searchInsight';
 import type { SearchInsightEntry, SearchInsightSource, SearchInsightStats, TopZeroHitQuery } from '../../../api/types';
 import { SEARCH_INSIGHT_SOURCE_META, metaOf } from '../../../utils/statusMeta';
+import QualityIssueCreateButton from '../quality/QualityIssueCreateButton';
 
 interface InsightTabProps {
   kbId: string;
+  onOpenIssue?: (issueId: string) => void;
 }
 
 const PAGE_SIZE = 20;
@@ -22,7 +24,7 @@ const TIME_PARAM_FORMAT = 'YYYY-MM-DDTHH:mm:ss';
  * window, plus the paged insight detail listing with a zero-hit filter. Only masked digests are
  * shown -- the raw queries are never stored server-side for this table.
  */
-export default function InsightTab({ kbId }: InsightTabProps) {
+export default function InsightTab({ kbId, onOpenIssue }: InsightTabProps) {
   const [stats, setStats] = useState<SearchInsightStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const [items, setItems] = useState<SearchInsightEntry[]>([]);
@@ -135,7 +137,7 @@ export default function InsightTab({ kbId }: InsightTabProps) {
 
       <Card size="small" title="Top 未命中问题（按归一化后的相同问题分组）" style={{ marginBottom: 16 }}>
         <Table<TopZeroHitQuery>
-          rowKey="query_digest"
+          rowKey={(row) => row.insight_id ?? row.query_digest}
           size="small"
           loading={statsLoading}
           dataSource={stats?.top_zero_hit_queries ?? []}
@@ -145,6 +147,8 @@ export default function InsightTab({ kbId }: InsightTabProps) {
             { title: '问题摘要（已脱敏）', dataIndex: 'query_digest' },
             { title: '未命中次数', dataIndex: 'count', width: 120 },
             { title: '最近发生', dataIndex: 'last_at', width: 200 },
+            ...(onOpenIssue ? [{ title: '操作', key: 'quality', width: 120, render: (_: unknown, row: TopZeroHitQuery) => row.insight_id
+              ? <QualityIssueCreateButton kbId={kbId} sourceType="ZERO_HIT" sourceId={row.insight_id} onOpen={onOpenIssue} /> : null }] : []),
           ]}
         />
       </Card>

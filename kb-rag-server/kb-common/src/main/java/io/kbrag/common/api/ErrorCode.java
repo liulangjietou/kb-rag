@@ -70,6 +70,9 @@ public enum ErrorCode {
     /** 用例或集合乐观锁冲突，整笔修改回滚后由用户重新提交。 */
     EVAL_DATASET_CONFLICT(409, "evaluation dataset changed; reload before editing"),
 
+    /** 质量问题已被其他处理请求更新。 */
+    QUALITY_ISSUE_CONFLICT(409, "knowledge quality issue changed; reload before editing"),
+
     /** 正式问答所需的冻结索引或可见版本集合已经不可用。 */
     KNOWLEDGE_SNAPSHOT_UNAVAILABLE(409, "published knowledge snapshot unavailable"),
 

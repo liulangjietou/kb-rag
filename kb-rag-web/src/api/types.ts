@@ -2212,6 +2212,8 @@ export interface ListSearchInsightParams {
 
 /** One zero-hit query group of the stats report, newest digest of the group + occurrence count. */
 export interface TopZeroHitQuery {
+  /** 最近一条真实洞察的随机标识；查询哈希保留在服务端。 */
+  insight_id?: string | null;
   query_digest: string;
   count: number;
   last_at: string | null;
