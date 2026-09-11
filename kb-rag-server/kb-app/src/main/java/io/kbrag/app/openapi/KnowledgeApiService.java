@@ -22,6 +22,7 @@ import io.kbrag.domain.enums.TargetStage;
 import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.AppIndexSnapshot;
 import io.kbrag.domain.model.AppRoutingConfig;
+import io.kbrag.domain.model.ChatCancellation;
 import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.service.ContentBudgetTrimmer;
@@ -38,6 +39,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 
 /**
  * The open API's search and chat orchestration, requirement section 4.8.
@@ -62,6 +64,8 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class KnowledgeApiService {
+
+    private static final String CHAT_CANCELLED = "CHAT_CANCELLED";
 
     private final AppService appService;
     private final AppVersionService appVersionService;
@@ -132,17 +136,19 @@ public class KnowledgeApiService {
                            ChatStreamListener listener) {
         long startedAt = System.currentTimeMillis();
         try {
+            listener.cancellation().throwIfCancelled();
             ResolvedTarget target = resolve(principal, command);
             KnowledgeCallResult retrieved = retrieve(target, command);
+            listener.cancellation().throwIfCancelled();
             insight(command, retrieved, startedAt);
-            StringBuilder answer = new StringBuilder();
-            streamGenerate(target, command, retrieved.getNodes(), delta -> {
-                answer.append(delta);
-                listener.onDelta(delta);
-            });
+            streamGenerate(target, command, retrieved.getNodes(), listener::onDelta, listener.cancellation());
+            listener.cancellation().throwIfCancelled();
             listener.onReferences(retrieved.getNodes());
             listener.onDone(RequestIdHolder.get(), retrieved.getDegraded(), retrieved.routedKbIds());
             audit(principal, command, target, retrieved, startedAt, ApiAuditService.ENDPOINT_CHAT);
+        } catch (CancellationException e) {
+            auditCancelled(principal, command, startedAt);
+            listener.onError(CHAT_CANCELLED, "生成已停止");
         } catch (BizException e) {
             auditRejection(principal, command, startedAt, e, ApiAuditService.ENDPOINT_CHAT);
             listener.onError(e.getErrorCode().name(), e.getMessage());
@@ -186,6 +192,9 @@ public class KnowledgeApiService {
                                    ChatStreamListener listener) {
         try {
             preview(appId, appVersionId, command, listener);
+        } catch (CancellationException e) {
+            log.info("chat preview cancelled, appId={}", appId);
+            listener.onError(CHAT_CANCELLED, "生成已停止");
         } catch (BizException e) {
             listener.onError(e.getErrorCode().name(), e.getMessage());
         } catch (Exception e) {
@@ -211,6 +220,8 @@ public class KnowledgeApiService {
      */
     public KnowledgeCallResult preview(String appId, String appVersionId, KnowledgeCallCommand command,
                                        ChatStreamListener listener) {
+        ChatCancellation cancellation = listener == null ? ChatCancellation.NONE : listener.cancellation();
+        cancellation.throwIfCancelled();
         appService.require(appId);
         AppVersion version = previewVersion(appId, appVersionId);
         // Deliberately not snapshot bound even when the previewed version is the released one: a preview exists
@@ -224,7 +235,8 @@ public class KnowledgeApiService {
         if (listener == null) {
             return withAnswer(retrieved, generate(target, command, retrieved.getNodes()));
         }
-        streamGenerate(target, command, retrieved.getNodes(), listener::onDelta);
+        streamGenerate(target, command, retrieved.getNodes(), listener::onDelta, cancellation);
+        cancellation.throwIfCancelled();
         listener.onReferences(retrieved.getNodes());
         listener.onDone(RequestIdHolder.get(), retrieved.getDegraded(), retrieved.routedKbIds());
         return retrieved;
@@ -450,8 +462,23 @@ public class KnowledgeApiService {
      * @param onDelta  receiver of the generated pieces
      */
     private void streamGenerate(ResolvedTarget target, KnowledgeCallCommand command,
-                                List<RetrievalNodeView> nodes, java.util.function.Consumer<String> onDelta) {
-        answerGenerationService.stream(target.snapshot(), command.getQuery(), command.getMessages(), nodes, onDelta);
+                                List<RetrievalNodeView> nodes, java.util.function.Consumer<String> onDelta,
+                                ChatCancellation cancellation) {
+        answerGenerationService.stream(target.snapshot(), command.getQuery(), command.getMessages(), nodes,
+                onDelta, cancellation);
+    }
+
+    /** 取消独立记录，避免把用户停止误报为内部错误或成功回答。 */
+    private void auditCancelled(ApiKeyPrincipal principal, KnowledgeCallCommand command, long startedAt) {
+        log.info("open chat cancelled, appId={}", command.getAppId());
+        if (principal == null) {
+            return;
+        }
+        apiAuditService.recordAsync(ApiAuditService.AuditRecord.builder()
+                .keyId(principal.getKeyId()).appId(command.getAppId())
+                .endpoint(ApiAuditService.ENDPOINT_CHAT).query(command.getQuery())
+                .latencyMs((int) (System.currentTimeMillis() - startedAt))
+                .errorCode(CHAT_CANCELLED).requestId(RequestIdHolder.get()).build());
     }
 
     private KnowledgeCallResult withAnswer(KnowledgeCallResult result, String answer) {

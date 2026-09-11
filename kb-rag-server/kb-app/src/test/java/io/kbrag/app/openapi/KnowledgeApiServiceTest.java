@@ -362,7 +362,7 @@ class KnowledgeApiServiceTest {
             consumer.accept("答");
             consumer.accept("案");
             return null;
-        }).when(chatProvider).stream(anyString(), anyList(), any());
+        }).when(chatProvider).stream(anyString(), anyList(), any(), any());
         RecordingListener listener = new RecordingListener();
 
         service.chatStream(principal(List.of()), command(null, null, null), listener);
@@ -381,6 +381,60 @@ class KnowledgeApiServiceTest {
 
         assertEquals(1, listener.events.size());
         assertTrue(listener.events.get(0).startsWith("error:UPSTREAM_MODEL_ERROR"));
+    }
+
+    @Test
+    void shouldSkipAllUpstreamWorkWhenTheConnectionAlreadyClosed() {
+        var cancellation = new io.kbrag.domain.model.ChatCancellation();
+        cancellation.cancel();
+        ChatStreamListener listener = mock(ChatStreamListener.class);
+        when(listener.cancellation()).thenReturn(cancellation);
+
+        service.chatStream(principal(List.of()), command(null, null, null), listener);
+
+        org.mockito.Mockito.verifyNoInteractions(retrievalService, chatProvider);
+        verify(listener).onError("CHAT_CANCELLED", "生成已停止");
+        verify(listener, never()).onDone(any(), any(), any());
+        assertEquals("CHAT_CANCELLED", capturedAudit().getErrorCode());
+    }
+
+    @Test
+    void shouldCarryCancellationToTheProviderAndNeverCompleteAPartialAnswer() {
+        stubVersion(AppVersionStatus.RELEASED);
+        stubSearch(node("doc_1", "第一段"));
+        when(chatProvider.isConfigured()).thenReturn(true);
+        var cancellation = new io.kbrag.domain.model.ChatCancellation();
+        ChatStreamListener listener = mock(ChatStreamListener.class);
+        when(listener.cancellation()).thenReturn(cancellation);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            java.util.function.Consumer<String> consumer = invocation.getArgument(2);
+            consumer.accept("部分答案");
+            cancellation.cancel();
+            ((io.kbrag.domain.model.ChatCancellation) invocation.getArgument(3)).throwIfCancelled();
+            return null;
+        }).when(chatProvider).stream(anyString(), anyList(), any(), eq(cancellation));
+
+        service.chatStream(principal(List.of()), command(null, null, null), listener);
+
+        var order = org.mockito.Mockito.inOrder(listener);
+        order.verify(listener).onDelta("部分答案");
+        order.verify(listener).onError("CHAT_CANCELLED", "生成已停止");
+        verify(listener, never()).onReferences(any());
+        verify(listener, never()).onDone(any(), any(), any());
+        assertEquals("CHAT_CANCELLED", capturedAudit().getErrorCode());
+    }
+
+    @Test
+    void shouldNotStartAQueuedPreviewAfterItsConnectionClosed() {
+        var cancellation = new io.kbrag.domain.model.ChatCancellation();
+        cancellation.cancel();
+        ChatStreamListener listener = mock(ChatStreamListener.class);
+        when(listener.cancellation()).thenReturn(cancellation);
+
+        service.previewStreamAsync(APP_ID, VERSION_ID, command(null, null, null), listener);
+
+        org.mockito.Mockito.verifyNoInteractions(appService, retrievalService, chatProvider);
+        verify(listener).onError("CHAT_CANCELLED", "生成已停止");
     }
 
     @Test

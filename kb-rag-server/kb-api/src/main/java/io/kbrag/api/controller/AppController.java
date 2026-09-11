@@ -10,6 +10,7 @@ import io.kbrag.api.dto.CreateAppRequest;
 import io.kbrag.api.dto.KnowledgeChatResponse;
 import io.kbrag.api.dto.UpdateAppRequest;
 import io.kbrag.api.sse.SseChatStreamListener;
+import io.kbrag.api.sse.SseChatStreamFactory;
 import io.kbrag.app.appcenter.AppService;
 import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.openapi.KnowledgeApiService;
@@ -59,6 +60,7 @@ public class AppController {
     private final AppService appService;
     private final AppVersionService appVersionService;
     private final KnowledgeApiService knowledgeApiService;
+    private final SseChatStreamFactory chatStreamFactory;
 
     /**
      * Creates an application.
@@ -209,8 +211,13 @@ public class AppController {
         // Checked here and not inside the service: the generation runs on an executor that does not carry the
         // authenticated user across, so this is the last thread on which the caller's scope is still known.
         knowledgeApiService.requirePreviewKbAccess(appId, request.getAppVersionId());
-        SseChatStreamListener listener = new SseChatStreamListener();
-        knowledgeApiService.previewStreamAsync(appId, request.getAppVersionId(), request.toCommand(), listener);
+        SseChatStreamListener listener = chatStreamFactory.create();
+        try {
+            knowledgeApiService.previewStreamAsync(appId, request.getAppVersionId(), request.toCommand(), listener);
+        } catch (RuntimeException failure) {
+            listener.close();
+            throw failure;
+        }
         return listener.emitter();
     }
 }

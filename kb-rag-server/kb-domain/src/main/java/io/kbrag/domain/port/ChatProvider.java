@@ -1,6 +1,7 @@
 package io.kbrag.domain.port;
 
 import io.kbrag.domain.model.ChatMessage;
+import io.kbrag.domain.model.ChatCancellation;
 import io.kbrag.domain.model.HealthStatus;
 
 import java.util.List;
@@ -73,6 +74,19 @@ public interface ChatProvider {
     default void stream(String systemPrompt, List<ChatMessage> messages,
                         java.util.function.Consumer<String> onDelta) {
         onDelta.accept(complete(systemPrompt, messages));
+    }
+
+    /**
+     * 带请求取消信号的生成入口；旧适配器保留兼容行为，增量适配器同时取消其上游请求。
+     */
+    default void stream(String systemPrompt, List<ChatMessage> messages,
+                        java.util.function.Consumer<String> onDelta, ChatCancellation cancellation) {
+        cancellation.throwIfCancelled();
+        stream(systemPrompt, messages, delta -> {
+            cancellation.throwIfCancelled();
+            onDelta.accept(delta);
+        });
+        cancellation.throwIfCancelled();
     }
 
     /**

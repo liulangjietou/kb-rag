@@ -1,6 +1,7 @@
 package io.kbrag.app.openapi;
 
 import io.kbrag.app.retrieval.RetrievalNodeView;
+import io.kbrag.domain.model.ChatCancellation;
 
 import java.util.List;
 
@@ -16,6 +17,11 @@ import java.util.List;
  * @author owlzhangfq@gmail.com
  */
 public interface ChatStreamListener {
+
+    /** 当前连接的取消信号；非连接型调用方保持不可取消的兼容行为。 */
+    default ChatCancellation cancellation() {
+        return ChatCancellation.NONE;
+    }
 
     /**
      * One generated piece of the answer.

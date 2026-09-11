@@ -112,7 +112,7 @@ public final class ModelUsageSupport {
     /**
      * Reads both OpenAI-compatible and DashScope-native usage field names.
      */
-    static ModelTokenUsage usageOf(String body) {
+    public static ModelTokenUsage usageOf(String body) {
         try {
             JsonNode root = JsonUtil.parse(body, JsonNode.class);
             JsonNode usage = root == null ? null : root.path("usage");

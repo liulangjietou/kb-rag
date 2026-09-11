@@ -7,6 +7,7 @@ import io.kbrag.common.exception.ProviderException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.model.ChatMessage;
+import io.kbrag.domain.model.ChatCancellation;
 import io.kbrag.domain.model.HealthStatus;
 import io.kbrag.domain.model.ModelCallSpec;
 import io.kbrag.domain.port.ChatProvider;
@@ -21,6 +22,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * DashScope chat provider driven by plain HTTP.
@@ -56,6 +58,7 @@ public class DashScopeChatProvider implements ChatProvider {
     private final KbProperties.Chat config;
     private final RestClient restClient;
     private final ModelCallMeter modelCallMeter;
+    private final ChatStreamHttp streamHttp;
 
     /**
      * Builds a chat provider from one chat configuration.
@@ -75,6 +78,7 @@ public class DashScopeChatProvider implements ChatProvider {
     public DashScopeChatProvider(KbProperties.Chat config, ModelCallMeter modelCallMeter) {
         this.config = config;
         this.modelCallMeter = modelCallMeter;
+        this.streamHttp = new ChatStreamHttp(config, modelCallMeter);
         // Connect keeps the short control-plane budget so network faults fail fast; the read ceiling is
         // the generation budget - answer generation is the only call that legitimately needs it, and the
         // fast paths (routing, rewrite) still cut themselves off earlier at the future level.
@@ -99,6 +103,33 @@ public class DashScopeChatProvider implements ChatProvider {
 
     @Override
     public String complete(String systemPrompt, List<ChatMessage> messages) {
+        Map<String, Object> payload = payload(systemPrompt, messages);
+        return ModelUsageSupport.execute(modelCallMeter, callSpec(systemPrompt, messages),
+                () -> DashScopeHttp.post(restClient, COMPLETIONS_PATH, payload, PROVIDER_NAME, STAGE),
+                this::parseContent);
+    }
+
+    @Override
+    public void stream(String systemPrompt, List<ChatMessage> messages, Consumer<String> onDelta) {
+        stream(systemPrompt, messages, onDelta, ChatCancellation.NONE);
+    }
+
+    @Override
+    public void stream(String systemPrompt, List<ChatMessage> messages,
+                       Consumer<String> onDelta, ChatCancellation cancellation) {
+        Map<String, Object> payload = payload(systemPrompt, messages);
+        payload.put("stream", true);
+        payload.put("stream_options", Map.of("include_usage", true));
+        streamHttp.stream(payload, callSpec(systemPrompt, messages), onDelta, cancellation);
+    }
+
+    private ModelCallSpec callSpec(String systemPrompt, List<ChatMessage> messages) {
+        return new ModelCallSpec(ModelUsageSupport.billingProvider(config.getProvider(), PROVIDER_NAME),
+                ModelCallSpec.CHAT, config.getModel(),
+                ModelUsageSupport.chatUpperBound(systemPrompt, messages, config.getMaxTokens()));
+    }
+
+    private Map<String, Object> payload(String systemPrompt, List<ChatMessage> messages) {
         if (CollectionUtils.isEmpty(messages)) {
             throw new ProviderException(PROVIDER_NAME, ProviderErrorType.UNKNOWN,
                     "chat requires at least one message");
@@ -117,12 +148,7 @@ public class DashScopeChatProvider implements ChatProvider {
         payload.put(FIELD_TEMPERATURE, config.getTemperature());
         payload.put(FIELD_MAX_TOKENS, config.getMaxTokens());
 
-        return ModelUsageSupport.execute(modelCallMeter,
-                new ModelCallSpec(ModelUsageSupport.billingProvider(config.getProvider(), PROVIDER_NAME),
-                        ModelCallSpec.CHAT, config.getModel(),
-                        ModelUsageSupport.chatUpperBound(systemPrompt, messages, config.getMaxTokens())),
-                () -> DashScopeHttp.post(restClient, COMPLETIONS_PATH, payload, PROVIDER_NAME, STAGE),
-                this::parseContent);
+        return payload;
     }
 
     @Override

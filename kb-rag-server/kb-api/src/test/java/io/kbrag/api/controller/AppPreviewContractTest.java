@@ -2,6 +2,7 @@ package io.kbrag.api.controller;
 
 import io.kbrag.api.advice.GlobalExceptionHandler;
 import io.kbrag.api.filter.PermissionInterceptor;
+import io.kbrag.api.sse.SseChatStreamFactory;
 import io.kbrag.app.appcenter.AppPreviewCatalogService;
 import io.kbrag.app.appcenter.AppService;
 import io.kbrag.app.appcenter.AppVersionService;
@@ -47,12 +48,13 @@ class AppPreviewContractTest {
     private final AppService apps = mock(AppService.class);
     private final KnowledgeApiService knowledge = mock(KnowledgeApiService.class);
     private MockMvc mvc;
+    private final SseChatStreamFactory streams = new SseChatStreamFactory();
 
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.standaloneSetup(
                         new AppPreviewCatalogController(catalog),
-                        new AppController(apps, mock(AppVersionService.class), knowledge))
+                        new AppController(apps, mock(AppVersionService.class), knowledge, streams))
                 .addInterceptors(new PermissionInterceptor())
                 .setControllerAdvice(new GlobalExceptionHandler()).build();
         bind(Set.of(PermissionCodes.SEARCH_DEBUG));
@@ -60,6 +62,7 @@ class AppPreviewContractTest {
 
     @AfterEach
     void clearContext() {
+        streams.close();
         UserContextHolder.clear();
     }
 

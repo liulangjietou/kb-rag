@@ -71,6 +71,7 @@ public class ModelChatProviderFactory implements ChatProviderFactory {
         copy.setApiKey(source.getApiKey());
         copy.setBaseUrl(source.getBaseUrl());
         copy.setTimeoutMs(source.getTimeoutMs());
+        copy.setGenerateTimeoutMs(source.getGenerateTimeoutMs());
         copy.setTemperature(source.getTemperature());
         copy.setMaxTokens(source.getAnswerMaxTokens());
         return copy;
