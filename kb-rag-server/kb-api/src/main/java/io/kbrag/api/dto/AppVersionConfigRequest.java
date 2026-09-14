@@ -12,6 +12,7 @@ import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
@@ -89,6 +90,8 @@ public record AppVersionConfigRequest(
      * @param scoreThreshold absolute score threshold, {@code null} disables filtering
      * @param rerankEnabled  rerank switch
      * @param rewriteEnabled query rewrite switch
+     * @param rerankMode     重排模式，未指定时在提交测试阶段冻结知识库或部署默认值
+     * @param rerankWSemantic 混合重排的语义权重，允许显式为 0
      */
     public record RetrievalRequest(
             @JsonProperty("recall_top_k") @Min(value = 1, message = "must be at least 1") Integer recallTopK,
@@ -102,7 +105,12 @@ public record AppVersionConfigRequest(
             @DecimalMin(value = "0.01", message = "must be at least 0.01")
             @DecimalMax(value = "1.0", message = "must be at most 1.0") Double scoreThreshold,
             @JsonProperty("rerank_enabled") Boolean rerankEnabled,
-            @JsonProperty("rewrite_enabled") Boolean rewriteEnabled) {
+            @JsonProperty("rewrite_enabled") Boolean rewriteEnabled,
+            @JsonProperty("rerank_mode")
+            @Pattern(regexp = "semantic|hybrid", message = "must be semantic or hybrid") String rerankMode,
+            @JsonProperty("rerank_w_semantic")
+            @DecimalMin(value = "0.0", message = "must be at least 0")
+            @DecimalMax(value = "1.0", message = "must be at most 1") Double rerankWSemantic) {
     }
 
     /**
@@ -242,6 +250,8 @@ public record AppVersionConfigRequest(
         config.setScoreThreshold(retrieval.scoreThreshold());
         config.setRerankEnabled(retrieval.rerankEnabled());
         config.setRewriteEnabled(retrieval.rewriteEnabled());
+        config.setRerankMode(retrieval.rerankMode());
+        config.setRerankWSemantic(retrieval.rerankWSemantic());
         return config;
     }
 

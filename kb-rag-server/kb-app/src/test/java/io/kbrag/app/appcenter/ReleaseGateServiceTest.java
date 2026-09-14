@@ -298,6 +298,42 @@ class ReleaseGateServiceTest {
     }
 
     @Test
+    void shouldKeepEachVersionFusionAndOrderingParametersInTheGateRuns() throws Exception {
+        AppVersion version = versionOf(AppVersionStatus.GATING, DATASET_ID);
+        AppVersion baseline = baselineVersion();
+        stubDualRun(version, baseline);
+        when(embeddingProvider.isConfigured()).thenReturn(true);
+        when(rerankProvider.isConfigured()).thenReturn(true);
+        AppConfigSnapshot candidateConfig = snapshot();
+        candidateConfig.getRetrieval().setRrfK(87);
+        candidateConfig.getRetrieval().setWVec(0.2d);
+        candidateConfig.getRetrieval().setRerankMode("hybrid");
+        candidateConfig.getRetrieval().setRerankWSemantic(0.0d);
+        AppConfigSnapshot baselineConfig = snapshot();
+        baselineConfig.getRetrieval().setRrfK(31);
+        baselineConfig.getRetrieval().setWVec(0.8d);
+        baselineConfig.getRetrieval().setRerankMode("semantic");
+        baselineConfig.getRetrieval().setRerankWSemantic(1.0d);
+        when(appVersionService.parseConfig(version)).thenReturn(candidateConfig);
+        when(appVersionService.parseConfig(baseline)).thenReturn(baselineConfig);
+
+        service.runGate(VERSION_ID);
+
+        ArgumentCaptor<List<EvalRetrievalConfig>> captured = configCaptor();
+        verify(evalRunService).submit(eq(DATASET_ID), anyInt(), captured.capture(), eq(false));
+        var candidate = JsonUtil.mapper().readTree(JsonUtil.toJson(captured.getValue().get(0)));
+        var previous = JsonUtil.mapper().readTree(JsonUtil.toJson(captured.getValue().get(1)));
+        assertEquals(87, candidate.path("rrf_k").asInt());
+        assertEquals(0.2d, candidate.path("w_vec").asDouble());
+        assertEquals("hybrid", candidate.path("rerank_mode").asText());
+        assertEquals(0.0d, candidate.path("rerank_w_semantic").asDouble(-1));
+        assertEquals(31, previous.path("rrf_k").asInt());
+        assertEquals(0.8d, previous.path("w_vec").asDouble());
+        assertEquals("semantic", previous.path("rerank_mode").asText());
+        assertEquals(1.0d, previous.path("rerank_w_semantic").asDouble());
+    }
+
+    @Test
     void shouldBlockAndNotReleaseWhenTheCandidateRegressesOnTheIntersection() {
         AppVersion version = versionOf(AppVersionStatus.GATING, DATASET_ID);
         stubDualRun(version, baselineVersion());

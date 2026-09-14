@@ -367,6 +367,10 @@ public class ReleaseGateService {
         config.setRecallTopK(retrieval.getRecallTopK());
         config.setTopN(retrieval.getTopN());
         config.setFusion(retrieval.getFusionMode());
+        config.setWVec(retrieval.getWVec());
+        config.setRrfK(retrieval.getRrfK());
+        config.setRerankMode(retrieval.getRerankMode());
+        config.setRerankWSemantic(retrieval.getRerankWSemantic());
         config.setScoreThreshold(retrieval.getScoreThreshold());
         config.setRewriteEnabled(retrieval.getRewriteEnabled());
         return config;

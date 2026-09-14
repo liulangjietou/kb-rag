@@ -128,7 +128,7 @@ function configToFormValues(config: AppVersionConfig): AppConfigFormValues {
   };
 }
 
-function formValuesToConfig(values: AppConfigFormValues): AppVersionConfig {
+function formValuesToConfig(values: AppConfigFormValues, previous?: AppVersionConfig): AppVersionConfig {
   return {
     kb_refs: values.kb_refs,
     routing: {
@@ -144,6 +144,9 @@ function formValuesToConfig(values: AppConfigFormValues): AppVersionConfig {
       rrf_k: values.fusion_mode === 'rrf' ? values.rrf_k : undefined,
       rerank_enabled: values.rerank_enabled,
       rewrite_enabled: values.rewrite_enabled,
+      // 未提供编辑控件的重排设置沿用原版本，避免只修改其他参数时丢失。
+      rerank_mode: previous?.retrieval.rerank_mode,
+      rerank_w_semantic: previous?.retrieval.rerank_w_semantic,
     },
     prompt: {
       system_prompt: values.system_prompt,
@@ -229,7 +232,7 @@ export default function AppConfigTab({ appId, kbs, latestVersion, onVersionCreat
       await form.validateFields();
       // 关闭开关或折叠区后，尚未挂载的字段仍属于版本快照，不能在保存时丢失。
       const values = form.getFieldsValue(true);
-      const config = formValuesToConfig(values);
+      const config = formValuesToConfig(values, latestVersion?.config);
       await createAppVersion(appId, { ...config, changelog: values.changelog });
       message.success('已保存为新的草稿版本');
       form.resetFields(['changelog']);
