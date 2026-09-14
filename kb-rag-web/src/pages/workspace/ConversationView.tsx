@@ -48,7 +48,12 @@ export default function ConversationView({ appId, conversationId, applicationNam
     // 桌面新会话在数据就绪后可直接输入；历史阅读和手机不自动弹出输入焦点。
     if (!state.runs.length && window.matchMedia('(min-width: 768px)').matches) input.current?.focus();
   }, [state.loading, state.conversation, state.authorizationError, state.runs.length]);
-  useEffect(() => { if (state.authorizationError) onAuthorizationError(state.authorizationError); }, [state.authorizationError, onAuthorizationError]);
+  useEffect(() => {
+    if (!state.authorizationError) return;
+    setRenameOpen(false);
+    setDeleteOpen(false);
+    onAuthorizationError(state.authorizationError);
+  }, [state.authorizationError, onAuthorizationError]);
 
   const signature = state.runs.map((run) => `${run.run_id}:${run.answer.length}:${run.status}:${run.restricted}`).join('|');
   const scrollToLatest = useCallback(() => {
@@ -90,6 +95,14 @@ export default function ConversationView({ appId, conversationId, applicationNam
   }, [state.authorizationError, state.loading, state.loadError, currentFeedbackRun, feedbackRun]);
   const active = Boolean(state.conversation?.active_run_id);
   const blocked = state.loading || !!state.authorizationError || !state.conversation;
+  // 权限清理仍由会话状态负责；页面按错误码表达可执行的下一步，不展示后端权限表达式。
+  const authorizationMessage = state.authorizationError
+    ? ['UNAUTHORIZED', '401'].includes(state.authorizationError.code) ? '登录已失效，请重新登录。'
+      : ['NOT_FOUND', '404'].includes(state.authorizationError.code) ? '这段会话已不存在或当前不可访问，请从会话历史中重新选择。'
+        : '当前已无权访问这段会话，回答与引用已隐藏。权限恢复后可重新读取。'
+    : undefined;
+  const conversationTitle = authorizationMessage ? '会话不可访问' : state.conversation?.title
+    ?? (state.loading ? '正在读取会话' : state.loadError ? '会话读取失败' : '会话尚未就绪');
 
   const saveTitle = async () => {
     if (!title.trim() || actionBusy) return;
@@ -121,7 +134,8 @@ export default function ConversationView({ appId, conversationId, applicationNam
   const evidence = <div className="conversation-evidence">
     <div className="conversation-evidence__heading"><BookOutlined /><h2>回答依据</h2></div>
     <p>点击来源，核对本次引用片段。</p>
-    {state.loading ? <Skeleton active paragraph={{ rows: 4 }} /> : state.loadError ? <Alert type="warning" message="暂时无法重新核验引用"
+    {authorizationMessage ? <Alert type="info" message={authorizationMessage} />
+      : state.loading ? <Skeleton active paragraph={{ rows: 4 }} /> : state.loadError ? <Alert type="warning" message="暂时无法重新核验引用"
       action={<Button size="small" onClick={() => void state.refresh()}>重试</Button>} /> : evidenceRun?.restricted
       ? <Alert type="info" message="资料权限或状态已变化，该回答与引用已隐藏" />
       : evidenceRun?.references.length ? evidenceRun.references.map((source, index) => <button
@@ -136,17 +150,17 @@ export default function ConversationView({ appId, conversationId, applicationNam
     <section className="conversation-pane" aria-label="当前会话">
       <header className="conversation-header">
         <Button type="text" className="workspace-mobile-history" icon={<HistoryOutlined />} aria-label="打开会话历史" onClick={onHistory} />
-        <div className="conversation-header__title"><h2>{state.conversation?.title ?? '正在读取会话'}</h2><span>{applicationName}</span></div>
+        <div className="conversation-header__title"><h2>{conversationTitle}</h2><span>{applicationName}</span></div>
         <div className="conversation-header__actions">
           <Button type="text" icon={<EditOutlined />} aria-label="重命名会话" disabled={blocked}
             onClick={() => { setTitle(state.conversation?.title ?? ''); setActionError(undefined); setRenameOpen(true); }} />
           <Button type="text" icon={<DeleteOutlined />} aria-label="删除会话" disabled={blocked}
             onClick={() => { setActionError(undefined); setDeleteOpen(true); }} />
-          <Button type="text" className="workspace-mobile-evidence" icon={<BookOutlined />} aria-label="打开回答依据"
+          <Button type="text" className="workspace-mobile-evidence" icon={<BookOutlined />} aria-label="打开回答依据" disabled={blocked}
             onClick={() => setEvidenceOpen(true)} />
         </div>
       </header>
-      {state.loadError && <Alert className="conversation-banner" type="error" message={state.loadError}
+      {(authorizationMessage || state.loadError) && <Alert className="conversation-banner" type="error" message={authorizationMessage ?? state.loadError}
         action={<Button size="small" onClick={() => void state.refresh()}>重新读取</Button>} />}
       {['retrying', 'paused'].includes(state.connection) && <Alert className="conversation-banner" type="warning" showIcon
         message={state.connection === 'retrying' ? '连接中断，正在恢复同一回答' : '暂时无法连接，后台任务可能仍在继续'}
@@ -171,9 +185,9 @@ export default function ConversationView({ appId, conversationId, applicationNam
             onEvidence={() => { setEvidenceRunId(run.run_id); setEvidenceOpen(true); }} />)}
         </>}
       </div>
-      {hasNewContent && <button type="button" className="conversation-new-content" onClick={scrollToLatest}><ArrowDownOutlined /> 回到最新回答</button>}
+      {hasNewContent && !blocked && <button type="button" className="conversation-new-content" onClick={scrollToLatest}><ArrowDownOutlined /> 回到最新回答</button>}
       <div className="conversation-composer">
-        {state.commandError && <Alert type="error" message={state.commandError} action={state.pending && !state.sending
+        {state.commandError && !authorizationMessage && <Alert type="error" message={state.commandError} action={state.pending && !state.sending
           ? <Button size="small" onClick={async () => { if (await state.submit(state.pending!.query, true)) setDraft(''); }}>确认发送结果</Button> : undefined} />}
         {!state.isNewest ? <Button block onClick={() => { nearBottom.current = true; state.newest(); }}>返回最近问答后继续提问</Button> : <>
           <Input.TextArea ref={input} aria-label="输入知识问题" placeholder="输入问题，或继续追问…" value={draft} maxLength={8000}
@@ -205,7 +219,8 @@ export default function ConversationView({ appId, conversationId, applicationNam
       }} />}
     <Drawer title="回答依据" open={evidenceOpen} width={360} onClose={() => setEvidenceOpen(false)} destroyOnClose>{evidence}</Drawer>
     <Drawer title={selectedReference?.file_name ?? '引用资料'} open={!!reference} width={520} onClose={() => setReference(undefined)} destroyOnClose>
-      {state.loading ? <Skeleton active paragraph={{ rows: 6 }} /> : state.loadError ? <Alert type="error" message="暂时无法核验这条引用，请重试"
+      {authorizationMessage ? <Alert type="info" message={authorizationMessage} />
+        : state.loading ? <Skeleton active paragraph={{ rows: 6 }} /> : state.loadError ? <Alert type="error" message="暂时无法核验这条引用，请重试"
         action={<Button onClick={() => void state.refresh()}>重新核验</Button>} /> : selectedReference ? <div className="reference-reader">
           <Tag>{selectedReference.inherited ? '上下文来源' : `引用 ${reference!.index + 1}`}</Tag><h2>{selectedReference.file_name}</h2>
           <dl><dt>文档版本</dt><dd>{selectedReference.document_version}</dd><dt>定位</dt><dd>{sourceLocator(selectedReference)}</dd>
