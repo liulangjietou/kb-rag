@@ -178,6 +178,8 @@ public class DashScopeChatProvider implements ChatProvider {
             throw new ProviderException(PROVIDER_NAME, ProviderErrorType.UNKNOWN,
                     "chat response carries no choice");
         }
+        ProviderException failure = ChatCompletionOutcome.failureOf(choices.get(0));
+        if (failure != null) throw failure;
         return choices.get(0).path(FIELD_MESSAGE).path(FIELD_CONTENT).asText("");
     }
 }

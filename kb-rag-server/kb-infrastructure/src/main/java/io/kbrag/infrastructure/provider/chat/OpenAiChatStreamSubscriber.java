@@ -36,6 +36,7 @@ final class OpenAiChatStreamSubscriber implements HttpResponse.BodySubscriber<Mo
     private volatile ModelTokenUsage usage = ModelTokenUsage.unknown();
     private boolean afterCarriageReturn;
     private boolean firstLine = true;
+    private ProviderException completionFailure;
 
     OpenAiChatStreamSubscriber(int status, Consumer<String> onDelta) {
         this.status = status;
@@ -96,7 +97,8 @@ final class OpenAiChatStreamSubscriber implements HttpResponse.BodySubscriber<Mo
             reject();
         } else if (!body.isDone()) {
             // EOF 不派发残缺帧，也不把已收到的部分答案当作完成。
-            abort(invalidResponse("chat stream ended before the terminal frame"));
+            abort(completionFailure == null ? invalidResponse("chat stream ended before the terminal frame")
+                    : completionFailure);
         }
     }
 
@@ -162,8 +164,12 @@ final class OpenAiChatStreamSubscriber implements HttpResponse.BodySubscriber<Mo
 
     private void acceptEvent(String event) {
         if (DONE.equals(event)) {
-            body.complete(usage);
-            subscription.cancel();
+            if (completionFailure != null) {
+                abort(completionFailure);
+            } else {
+                body.complete(usage);
+                subscription.cancel();
+            }
             return;
         }
         JsonNode root;
@@ -184,7 +190,7 @@ final class OpenAiChatStreamSubscriber implements HttpResponse.BodySubscriber<Mo
         if (!choices.isArray()) {
             throw invalidResponse("chat stream carries no choice array");
         }
-        if (!choices.isEmpty()) {
+        if (!choices.isEmpty() && completionFailure == null) {
             JsonNode content = choices.get(0).path("delta").path("content");
             if (!content.isMissingNode() && !content.isNull()) {
                 if (!content.isTextual()) {
@@ -194,6 +200,8 @@ final class OpenAiChatStreamSubscriber implements HttpResponse.BodySubscriber<Mo
                     onDelta.accept(content.asText());
                 }
             }
+            // 结束原因通常先于独立 usage 帧到达；继续读取计量，但不再输出后续异常正文。
+            completionFailure = ChatCompletionOutcome.failureOf(choices.get(0));
         }
     }
 

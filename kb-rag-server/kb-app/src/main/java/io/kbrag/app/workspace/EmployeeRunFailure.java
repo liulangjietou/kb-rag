@@ -2,11 +2,17 @@ package io.kbrag.app.workspace;
 
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.common.exception.ProviderErrorType;
+import io.kbrag.common.exception.ProviderException;
 
 /** 对员工返回稳定安全的文案，不把提供商异常或内部配置存进会话。 */
 record EmployeeRunFailure(ErrorCode code, String message) {
 
     static EmployeeRunFailure from(Throwable error) {
+        if (error instanceof ProviderException provider && provider.getErrorType() == ProviderErrorType.OUTPUT_TRUNCATED) {
+            return new EmployeeRunFailure(ErrorCode.UPSTREAM_MODEL_ERROR,
+                    "回答达到生成长度上限，已保留未完成的内容。请缩小问题范围后重新生成");
+        }
         ErrorCode code = error instanceof BizException business ? business.getErrorCode() : ErrorCode.INTERNAL_ERROR;
         String message = switch (code) {
             case FORBIDDEN, UNAUTHORIZED, NOT_FOUND, APP_NOT_FOUND -> "当前权限或资料状态已变化，本次生成已停止";
