@@ -15,6 +15,7 @@ import { kbNameOf, resolveKbRefs } from '../../../utils/kbRefs';
 import { useAuth } from '../../../auth/AuthContext';
 import { PERMISSIONS } from '../../../auth/permissions';
 import GateCompareDrawer from './GateCompareDrawer';
+import AppVersionDiffDrawer from './AppVersionDiffDrawer';
 
 interface AppVersionTabProps {
   appId: string;
@@ -31,7 +32,15 @@ const POLL_INTERVAL_MS = 3000;
  * rollback actions, gate-dataset binding, GATING progress polling, and the GATE_LOG_ONLY
  * force-release confirmation dialog. Double-run comparison results are shown via GateCompareDrawer.
  */
-export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVersionTabProps) {
+export default function AppVersionTab(props: AppVersionTabProps) {
+  const { token, can } = useAuth();
+  if (!can(PERMISSIONS.APP_READ)) return null;
+  const scope = [token, props.appId, can(PERMISSIONS.APP_WRITE), can(PERMISSIONS.APP_RELEASE), can(PERMISSIONS.EVAL_READ)].join(':');
+  return <ScopedAppVersionTab key={scope} {...props} />;
+}
+
+/** 应用、登录身份或操作权限变化时销毁旧版本与确认框。 */
+function ScopedAppVersionTab({ appId, kbs, onVersionsChanged }: AppVersionTabProps) {
   const { can } = useAuth();
   const canWrite = can(PERMISSIONS.APP_WRITE);
   const canRelease = can(PERMISSIONS.APP_RELEASE);
@@ -44,20 +53,36 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
   const [actingVersionId, setActingVersionId] = useState<string | null>(null);
   const [forceModalVersion, setForceModalVersion] = useState<AppVersion | null>(null);
   const [compareVersion, setCompareVersion] = useState<AppVersion | null>(null);
+  const [diffVersionId, setDiffVersionId] = useState<string | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const alive = useRef(true);
+  const loadSequence = useRef(0);
+
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; loadSequence.current += 1; };
+  }, []);
 
   const loadVersions = useCallback(async () => {
+    if (!alive.current) return;
+    const request = ++loadSequence.current;
     setLoading(true);
     try {
       const result = await listAppVersions(appId);
+      if (!alive.current || request !== loadSequence.current) return;
       setLoadError(false);
       setVersions(result);
       onVersionsChanged(result);
       return result;
     } catch {
+      if (!alive.current || request !== loadSequence.current) return;
       setLoadError(true);
+      setVersions([]);
+      setForceModalVersion(null);
+      setCompareVersion(null);
+      setDiffVersionId(null);
     } finally {
-      setLoading(false);
+      if (alive.current && request === loadSequence.current) setLoading(false);
     }
   }, [appId, onVersionsChanged]);
 
@@ -159,6 +184,10 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
 
   return (
     <div className="catalog-data-surface">
+      <Space wrap style={{ marginBottom: 16 }}>
+        <Typography.Text type="secondary">发布前核对配置与资料变化</Typography.Text>
+        <Button onClick={() => void loadVersions()} loading={loading}>刷新版本</Button>
+      </Space>
       {loadError && (
         <Alert
           type="error"
@@ -231,6 +260,7 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
               const hasCompareResult = (record.gate_run_ids?.length ?? 0) > 0;
               return (
                 <Space wrap>
+                  <Button size="small" onClick={() => setDiffVersionId(record.app_version_id)}>版本差异</Button>
                   {canWrite && record.status === 'DRAFT' && (
                     <Button
                       size="small"
@@ -352,8 +382,8 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
                       type="info"
                       showIcon
                       style={{ marginTop: 4 }}
-                      message="无索引快照，调用走实时索引"
-                      description="该版本未发布，或在 M6 索引快照能力上线前发布，检索按当前激活集合与 live 别名实时执行"
+                      message="尚无可用索引快照"
+                      description="该版本可能尚未发布，或历史快照已不可用。员工问答需要完整的发布快照；可先通过版本差异核对资料范围。"
                     />
                   )}
                 </div>
@@ -394,6 +424,7 @@ export default function AppVersionTab({ appId, kbs, onVersionsChanged }: AppVers
       </Modal>
 
       <GateCompareDrawer version={compareVersion} onClose={() => setCompareVersion(null)} />
+      <AppVersionDiffDrawer appId={appId} versionId={diffVersionId} kbs={kbs} onClose={() => setDiffVersionId(null)} />
     </div>
   );
 }

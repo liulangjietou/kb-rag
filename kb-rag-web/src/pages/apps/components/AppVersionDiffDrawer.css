@@ -1,0 +1,27 @@
+.app-version-diff { min-width: 0; color: var(--kb-color-text); }
+.app-version-diff__loading { display: flex; gap: 12px; align-items: center; padding: 24px 0; }
+.app-version-diff__selection, .app-version-diff__values { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.app-version-diff__selection > label, .app-version-diff__selection > div { display: flex; flex-direction: column; gap: 8px; }
+.app-version-diff__selection .ant-select { width: 100%; }
+.app-version-diff__selection .ant-tag { align-self: flex-start; }
+.app-version-diff__note { margin: 18px 0 24px; }
+.app-version-diff__section-title { margin: 0 0 16px; font-size: 16px; font-weight: 600; line-height: 1.5; }
+.app-version-diff__count { margin-left: 8px; font-size: 13px; font-weight: 400; color: var(--kb-color-text-secondary); }
+.app-version-diff__change, .app-version-diff__document { border: 1px solid var(--kb-color-border); border-radius: 10px; margin: 14px 0; overflow: hidden; }
+.app-version-diff__change h3 { margin: 0; padding: 12px 16px; font-size: 14px; border-bottom: 1px solid var(--kb-color-border); }
+.app-version-diff__change .app-version-diff__values { gap: 0; }
+.app-version-diff__values > div { min-width: 0; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.app-version-diff__values span, .app-version-diff__document > span { color: var(--kb-color-text-secondary); font-size: 12px; }
+.app-version-diff__target { background: var(--kb-color-primary-soft); border-left: 1px solid var(--kb-color-border); }
+.app-version-diff__value { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.7; color: var(--kb-color-text); }
+.app-version-diff__corpus { margin-top: 28px; border-top: 1px solid var(--kb-color-border); padding-top: 24px; }
+.app-version-diff__corpus-sources { background: var(--kb-color-surface); border: 1px solid var(--kb-color-border); border-radius: 10px; margin-bottom: 16px; }
+.app-version-diff__document { padding: 14px 16px; overflow-wrap: anywhere; }
+.app-version-diff__document > div:first-child { margin-bottom: 6px; }
+.app-version-diff__document .app-version-diff__values > div { padding: 14px 0 0; }
+.app-version-diff__totals { font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) {
+  .app-version-diff__selection, .app-version-diff__values { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .app-version-diff__target { border-left: 0; border-top: 1px solid var(--kb-color-border); }
+  .app-version-diff__corpus-sources { gap: 0; }
+}
