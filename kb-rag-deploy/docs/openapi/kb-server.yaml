@@ -3463,6 +3463,33 @@ paths:
                 $ref: '#/components/schemas/ExtSourceSyncAcceptedResult'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/ext-sources/{sourceId}/retry-failed:
+    parameters:
+    - name: sourceId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - ext-source
+      summary: 仅重试已失败对象（异步受理）
+      description: >-
+        需要 doc:write 和所属知识库访问权限。只处理已有 FAILED 对象，不接入新对象，
+        不重新写入健康对象。逐项结果从 items 读取，受理不代表执行成功。
+        使用来源现有扫描上限，列表截断时不能将未出现的对象判为已删除。
+        局部重试不更新完整来源同步状态或最近完整成功时间。
+      responses:
+        '200':
+          description: 受理确认
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtSourceSyncAcceptedResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/ext-sources/{sourceId}/items:
     parameters:
     - name: sourceId
@@ -3475,6 +3502,13 @@ paths:
       - ext-source
       summary: 同步明细（逐对象或逐页面结果可见）
       parameters:
+      - name: failed_only
+        in: query
+        required: false
+        description: 仅筛选 FAILED 对象，筛选发生在分页前
+        schema:
+          type: boolean
+          default: false
       - name: page
         in: query
         required: false

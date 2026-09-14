@@ -37,9 +37,12 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * External data source registration and incremental sync, the M14 contract section 2.
@@ -90,6 +93,8 @@ public class ExtSourceService {
     private final BizIdGenerator bizIdGenerator;
     private final KbProperties properties;
     private final KbMetrics kbMetrics;
+    /** 当前部署为单实例，同一来源的完整扫描与失败重试不能同时写入对象结果。 */
+    private final Set<String> syncingSources = ConcurrentHashMap.newKeySet();
 
     /**
      * Registers an external source. The first scan is not run here: the caller hands the fresh
@@ -157,9 +162,15 @@ public class ExtSourceService {
      * @return page of item rows
      */
     public IPage<ExtSourceItem> listItems(String sourceId, long page, long size) {
+        return listItems(sourceId, page, size, false);
+    }
+
+    /** 失败筛选在数据库分页前完成，避免仅过滤当前页而遗漏失败对象。 */
+    public IPage<ExtSourceItem> listItems(String sourceId, long page, long size, boolean failedOnly) {
         require(sourceId);
         return extSourceItemMapper.selectPage(new Page<>(page, size), new LambdaQueryWrapper<ExtSourceItem>()
                 .eq(ExtSourceItem::getSourceId, sourceId)
+                .eq(failedOnly, ExtSourceItem::getLastStatus, ExtSourceItemStatus.FAILED)
                 .orderByDesc(ExtSourceItem::getId));
     }
 
@@ -255,6 +266,23 @@ public class ExtSourceService {
         }
     }
 
+    /** 接受失败对象重试；逐项结果沿用持久对象记录，接受响应不代表执行完成。 */
+    @Async(AsyncConfig.EXT_SOURCE_EXECUTOR)
+    public void retryFailedAsync(String sourceId) {
+        try {
+            retryFailedSource(sourceId);
+        } catch (Exception e) {
+            log.error("ext source retry failed, errorCode={}, sourceId={}",
+                    ErrorCode.INTERNAL_ERROR, sourceId, e);
+        }
+    }
+
+    /** 只处理领取时已失败的对象，成功项、新对象和完整同步健康记录保持原语义。 */
+    public void retryFailedSource(String sourceId) {
+        ExtSource source = require(sourceId);
+        executeSource(source, () -> retryFailedAttributed(source));
+    }
+
     /**
      * Nightly sync pass over every source whose switch is on.
      */
@@ -306,13 +334,83 @@ public class ExtSourceService {
      * @param source source row, mutated in place with the outcome
      */
     public void syncSource(ExtSource source) {
-        KnowledgeBase base = knowledgeBaseService.find(source.getKbId());
-        String tenantId = base == null ? null : base.getTenantId();
-        ModelUsageContext current = ModelUsageContextHolder.get();
-        ModelUsageContext context = current != null && tenantId != null && tenantId.equals(current.tenantId())
-                ? current
-                : new ModelUsageContext(tenantId, ModelUsageContext.SOURCE_SCHEDULED, source.getSourceId());
-        ModelUsageContextHolder.run(context, () -> syncSourceAttributed(source));
+        executeSource(source, () -> syncSourceAttributed(source));
+    }
+
+    /** 互斥与费用归属覆盖两种同步入口，退出或异常后都释放本进程占用。 */
+    private void executeSource(ExtSource source, Runnable action) {
+        if (!syncingSources.add(source.getSourceId())) {
+            log.info("ext source operation already active, sourceId={}", source.getSourceId());
+            return;
+        }
+        try {
+            KnowledgeBase base = knowledgeBaseService.find(source.getKbId());
+            String tenantId = base == null ? null : base.getTenantId();
+            ModelUsageContext current = ModelUsageContextHolder.get();
+            ModelUsageContext context = current != null && tenantId != null && tenantId.equals(current.tenantId())
+                    ? current
+                    : new ModelUsageContext(tenantId, ModelUsageContext.SOURCE_SCHEDULED, source.getSourceId());
+            ModelUsageContextHolder.run(context, action);
+        } finally {
+            syncingSources.remove(source.getSourceId());
+        }
+    }
+
+    /** 复用连接器给出的对象版本与显示名称，但只让已失败的对象进入文档入库链路。 */
+    private void retryFailedAttributed(ExtSource source) {
+        List<ExtSourceItem> failed = extSourceItemMapper.selectList(new LambdaQueryWrapper<ExtSourceItem>()
+                .eq(ExtSourceItem::getSourceId, source.getSourceId())
+                .eq(ExtSourceItem::getLastStatus, ExtSourceItemStatus.FAILED)
+                .orderByAsc(ExtSourceItem::getLastSyncAt, ExtSourceItem::getId)
+                .last("limit " + maxObjectsPerSource()));
+        if (CollectionUtils.isEmpty(failed)) return;
+
+        ExternalConnector connector = connectorRouter.resolve(source.getSourceType());
+        ExtSourceConfig config = configOf(source);
+        List<ExternalConnector.RemoteObject> listed;
+        try {
+            HealthStatus health = connector.testConnection(config);
+            if (!health.isUp()) {
+                failRetryItems(failed, health.getDetail());
+                return;
+            }
+            listed = connector.listObjects(config);
+        } catch (Exception e) {
+            log.error("ext source retry listing failed, errorCode={}, sourceId={}",
+                    ErrorCode.INTERNAL_ERROR, source.getSourceId(), e);
+            failRetryItems(failed, e.getMessage());
+            return;
+        }
+        boolean truncated = listed.size() > config.maxObjects();
+        Map<String, ExternalConnector.RemoteObject> byKey = new HashMap<>();
+        listed.stream().limit(config.maxObjects()).forEach(object -> byKey.put(object.key(), object));
+        for (ExtSourceItem item : failed) {
+            item.setLastSyncAt(LocalDateTime.now());
+            ExternalConnector.RemoteObject object = byKey.get(item.getObjectKey());
+            if (object == null) {
+                recordItem(item, truncated ? ExtSourceItemStatus.FAILED : ExtSourceItemStatus.SKIPPED,
+                        truncated ? "对象清单达到扫描上限，尚未确认此对象；请调整来源范围后重试"
+                                : "对象已不存在，绑定的文档保持不变");
+                continue;
+            }
+            String extension = extensionOf(object.key());
+            if (extension == null || !properties.getUpload().getAllowedExtensions().contains(extension)) {
+                recordItem(item, ExtSourceItemStatus.SKIPPED, "当前不支持此对象类型，未重新入库");
+                continue;
+            }
+            syncObject(source, connector, config, object, extension);
+        }
+        // 局部重试可带来新内容，但没有检查健康对象，不能推进完整同步成功或覆盖其结果。
+        extSourceMapper.advanceHealthTimes(source.getId(), null, source.getLastContentChangeAt());
+        log.info("ext source failed items retried, sourceId={}, selected={}, truncated={}",
+                source.getSourceId(), failed.size(), truncated);
+    }
+
+    private void failRetryItems(List<ExtSourceItem> failed, String error) {
+        for (ExtSourceItem item : failed) {
+            item.setLastSyncAt(LocalDateTime.now());
+            recordItem(item, ExtSourceItemStatus.FAILED, error);
+        }
     }
 
     /** Executes one scan after its tenant cost attribution has been bound. */
@@ -378,7 +476,7 @@ public class ExtSourceService {
         }
         item.setLastSyncAt(LocalDateTime.now());
         try {
-            if (object.etag() != null && object.etag().equals(item.getEtag())) {
+            if (item.matchesSuccessfulVersion(object.etag())) {
                 recordItem(item, ExtSourceItemStatus.UNCHANGED, null);
                 return true;
             }

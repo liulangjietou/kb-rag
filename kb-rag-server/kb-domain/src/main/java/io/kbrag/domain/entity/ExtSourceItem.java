@@ -1,6 +1,7 @@
 package io.kbrag.domain.entity;
 
 import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.TableName;
 import io.kbrag.domain.enums.ExtSourceItemStatus;
 import lombok.Getter;
@@ -50,10 +51,16 @@ public class ExtSourceItem extends BaseEntity {
     private ExtSourceItemStatus lastStatus;
 
     /** Why the last visit failed or was skipped, {@code null} on success. */
-    @TableField("last_error")
+    @TableField(value = "last_error", updateStrategy = FieldStrategy.ALWAYS)
     private String lastError;
 
     /** When this object was last visited by a sync. */
     @TableField("last_sync_at")
     private LocalDateTime lastSyncAt;
+
+    /** 只有已成功接入的状态才能凭相同 ETag 跳过；失败或跳过记录需要重新判断。 */
+    public boolean matchesSuccessfulVersion(String remoteEtag) {
+        return (lastStatus == ExtSourceItemStatus.SUCCESS || lastStatus == ExtSourceItemStatus.UNCHANGED)
+                && remoteEtag != null && remoteEtag.equals(etag);
+    }
 }
