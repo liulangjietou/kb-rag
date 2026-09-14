@@ -11,6 +11,8 @@ import { PERMISSIONS } from '../../auth/permissions';
 import type { AppPreviewOption, ChatMessage, KnowledgeBase, RetrievalNode } from '../../api/types';
 import { kbNameOf } from '../../utils/kbRefs';
 import { APP_VERSION_STATUS_META, describeDegradedReason } from '../../utils/statusMeta';
+import { readChatDiagnostics, type ChatDiagnostics } from '../../api/chatDiagnostics';
+import ChatDiagnosticsPanel, { type BrowserChatTiming } from './ChatDiagnosticsPanel';
 
 interface ChatTurn {
   role: 'user' | 'assistant';
@@ -21,10 +23,18 @@ interface ChatTurn {
   requestId?: string;
   error?: { code: string; message: string };
   stopped?: boolean;
+  diagnostics?: ChatDiagnostics;
+  browserTiming?: BrowserChatTiming;
 }
 
 /** 问答工作台按轮次保存回答与引用，取消或切换应用后旧请求不能继续写入新会话。 */
 export default function ChatDebugPage() {
+  const auth = useAuth();
+  const scope = JSON.stringify([auth.token, auth.permissions, auth.kbScopeAll, auth.kbIds]);
+  return <ChatDebugContent key={scope} />;
+}
+
+function ChatDebugContent() {
   const { can } = useAuth();
   const canReadKb = can(PERMISSIONS.KB_READ);
   const [apps, setApps] = useState<AppPreviewOption[]>([]);
@@ -42,6 +52,7 @@ export default function ChatDebugPage() {
   const listEndRef = useRef<HTMLDivElement>(null);
   const requestRef = useRef<AbortController | null>(null);
   const requestSequence = useRef(0);
+  const requestTiming = useRef<{ startedAt: number; streamed: boolean; firstDeltaMs?: number } | null>(null);
   const [referenceTurn, setReferenceTurn] = useState<number | null>(null);
 
   useEffect(() => {
@@ -86,13 +97,17 @@ export default function ChatDebugPage() {
   );
 
   const stop = () => {
+    const timing = requestTiming.current;
+    const browserTiming = timing ? { streamed: timing.streamed, firstDeltaMs: timing.firstDeltaMs,
+      totalMs: performance.now() - timing.startedAt } : undefined;
     requestSequence.current += 1;
     requestRef.current?.abort();
     requestRef.current = null;
+    requestTiming.current = null;
     setSending(false);
     setTurns((previous) =>
       previous.map((turn, index) =>
-        index === previous.length - 1 && turn.role === 'assistant' ? { ...turn, stopped: true } : turn,
+        index === previous.length - 1 && turn.role === 'assistant' ? { ...turn, stopped: true, browserTiming } : turn,
       ),
     );
   };
@@ -108,6 +123,10 @@ export default function ChatDebugPage() {
     const controller = new AbortController();
     requestRef.current = controller;
     const sequence = ++requestSequence.current;
+    const timing: { startedAt: number; streamed: boolean; firstDeltaMs?: number } = {
+      startedAt: performance.now(), streamed: streamEnabled,
+    };
+    requestTiming.current = timing;
     const query = input.trim();
     const history: ChatMessage[] = turns.map((turn) => ({ role: turn.role, content: turn.content }));
     const assistantIndex = turns.length + 1;
@@ -131,7 +150,12 @@ export default function ChatDebugPage() {
           appId,
           { query, messages: history, app_version_id: appVersion, images: imagesPayload },
           {
-            onDelta: (delta) => updateAnswer((turn) => ({ ...turn, content: turn.content + delta })),
+            onDelta: (delta) => {
+              if (delta && timing.firstDeltaMs === undefined) timing.firstDeltaMs = performance.now() - timing.startedAt;
+              updateAnswer((turn) => ({ ...turn, content: turn.content + delta }));
+            },
+            onDiagnostics: (diagnostics) => updateAnswer((turn) => ({ ...turn, diagnostics,
+              requestId: diagnostics.request_id ?? turn.requestId })),
             onReferences: (references) => updateAnswer((turn) => ({ ...turn, references })),
             onDone: (requestId, degraded, routedKbIds) =>
               updateAnswer((turn) => ({ ...turn, requestId, degraded, routedKbIds })),
@@ -153,6 +177,7 @@ export default function ChatDebugPage() {
           degraded: response.degraded,
           routedKbIds: response.routed_kb_ids,
           requestId: response.request_id,
+          diagnostics: readChatDiagnostics(response.diagnostics),
         }));
       }
     } catch {
@@ -163,7 +188,11 @@ export default function ChatDebugPage() {
         }));
     } finally {
       if (requestSequence.current === sequence) {
+        const browserTiming = { streamed: timing.streamed, firstDeltaMs: timing.firstDeltaMs,
+          totalMs: performance.now() - timing.startedAt };
+        updateAnswer((turn) => ({ ...turn, browserTiming }));
         requestRef.current = null;
+        requestTiming.current = null;
         setSending(false);
       }
     }
@@ -306,6 +335,8 @@ export default function ChatDebugPage() {
                           request_id: {turn.requestId}
                         </Typography.Text>
                       )}
+                      {turn.browserTiming && <ChatDiagnosticsPanel diagnostics={turn.diagnostics}
+                        browser={turn.browserTiming} stopped={turn.stopped} failed={!!turn.error} />}
                     </div>
                   ))}
                   <div ref={listEndRef} />

@@ -1,5 +1,6 @@
 // Author: owlzhangfq@gmail.com
 import { streamChat, type ChatStreamHandlers } from './chatStream';
+import type { ChatDiagnostics } from './chatDiagnostics';
 import { SESSION_HEADER, getToken } from './authStorage';
 import { apiDelete, apiGet, apiPost, apiPut } from './request';
 import type {
@@ -101,8 +102,8 @@ export function bindGateDataset(appVersionId: string, payload: BindGateDatasetRe
  * 管理端问答预览通过会话鉴权，app_version_id 选择配置版本，语料使用当前活动版本。
  * 对外接口的 app_version 是公开版本标签，不能混用。
  */
-export function chatPreview(appId: string, payload: ChatPreviewRequest): Promise<ChatResponse> {
-  return apiPost<ChatResponse>(`/apps/${appId}/chat-preview`, { ...payload, stream: false });
+export function chatPreview(appId: string, payload: ChatPreviewRequest): Promise<ChatResponse & { diagnostics?: ChatDiagnostics }> {
+  return apiPost<ChatResponse & { diagnostics?: ChatDiagnostics }>(`/apps/${appId}/chat-preview`, { ...payload, stream: false });
 }
 
 /**

@@ -5639,8 +5639,9 @@ paths:
       description: '经管理台登录鉴权，需要 app:read 或 search:debug，复用对外 chat 编排；可预览未发布版本
         （app_version_id 缺省取最新版本，不区分是否已发布）。指定 ID 必须属于路径应用和当前租户；
         配置使用所选版本，语料始终为当前活动文档，不读取发布时冻结快照。app_version 不用于选择预览版本。
-        stream=true 必须携带 Accept: text/event-stream。事件契约与对外 /api/v1/knowledge/chat
-        完全一致（M4c-CONTRACTS.md §2/§6 主会话定版）。'
+        stream=true 必须携带 Accept: text/event-stream。正文与终态沿用对外问答协议，预览额外提供可选
+        diagnostics 事件；JSON 成功结果在 diagnostics 字段返回同一测量。未执行阶段为空，
+        服务端时间不包含鉴权、异步排队和网络往返。'
       requestBody:
         required: true
         content:
@@ -5649,9 +5650,9 @@ paths:
               $ref: '#/components/schemas/ChatPreviewRequest'
       responses:
         '200':
-          description: 非流式返回完整应答；stream=true 时改为 text/event-stream，事件序列固定为
-            message_delta*（零或多次）→ references → done，失败以 error 终结（不会同时出现 done 与
-            error）。
+          description: 非流式返回完整应答；stream=true 时改为 text/event-stream，成功序列为
+            message_delta* → diagnostics（可选）→ references → done。失败可先发送 diagnostics 再以
+            error 终结；诊断自身不是终态，不能代替 done/error。鉴权拒绝和客户端断开可能没有诊断。
           content:
             application/json:
               schema:
@@ -5660,12 +5661,14 @@ paths:
               schema:
                 description: 'SSE 帧，event 取值与 data 负载见 M4c-CONTRACTS.md §6：message_delta
                   -> ChatStreamMessageDeltaEvent；references -> ChatStreamReferencesEvent；
-                  done -> ChatStreamDoneEvent；error -> ChatStreamErrorEvent。'
+                  done -> ChatStreamDoneEvent；error -> ChatStreamErrorEvent；预览扩展 diagnostics
+                  -> ChatDiagnosticsResponse。'
                 oneOf:
                 - $ref: '#/components/schemas/ChatStreamMessageDeltaEvent'
                 - $ref: '#/components/schemas/ChatStreamReferencesEvent'
                 - $ref: '#/components/schemas/ChatStreamDoneEvent'
                 - $ref: '#/components/schemas/ChatStreamErrorEvent'
+                - $ref: '#/components/schemas/ChatDiagnosticsResponse'
         '400':
           $ref: '#/components/responses/InvalidParam'
         '404':
@@ -12686,6 +12689,8 @@ components:
           type: string
         target_stage:
           $ref: '#/components/schemas/TargetStage'
+        diagnostics:
+          $ref: '#/components/schemas/ChatDiagnosticsResponse'
     KnowledgeChatResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
@@ -12693,6 +12698,46 @@ components:
         properties:
           data:
             $ref: '#/components/schemas/KnowledgeChatResponse'
+    ChatDiagnosticsResponse:
+      type: object
+      description: 仅控制台预览采集的单调时钟结果，未采集的调用不返回此字段。检索包含现有改写、路由、召回和重排；
+        生成包含模型首段等待及服务端增量写出；first_delta_ms 是从预览开始到首个非空增量的时间，已包含在总时间中。
+        失败阶段记录结束前用时，未执行阶段为 null 或省略；各阶段毫秒取整可能产生舍入差，不能据此推算费用。
+      required: [outcome, total_ms]
+      properties:
+        request_id:
+          type: string
+        outcome:
+          type: string
+          enum: [SUCCEEDED, FAILED, CANCELLED]
+        failed_stage:
+          type: string
+          nullable: true
+          enum: [CONFIGURATION, RETRIEVAL, GENERATION]
+        configuration_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        retrieval_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        generation_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        first_delta_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        total_ms:
+          type: integer
+          format: int64
+          minimum: 0
     ChatStreamMessageDeltaEvent:
       type: object
       description: 'SSE event: message_delta，可出现零到多次'

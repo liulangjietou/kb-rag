@@ -2,6 +2,8 @@ package io.kbrag.api.sse;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.kbrag.api.dto.RetrievalNodeResponse;
+import io.kbrag.api.dto.ChatDiagnosticsResponse;
+import io.kbrag.app.openapi.ChatDiagnostics;
 import io.kbrag.app.openapi.ChatStreamListener;
 import io.kbrag.app.retrieval.RetrievalNodeView;
 import io.kbrag.common.api.ErrorCode;
@@ -43,6 +45,9 @@ public class SseChatStreamListener implements ChatStreamListener {
 
     /** Event name of the failed terminal event. */
     public static final String EVENT_ERROR = "error";
+
+    /** 控制台预览的可选诊断事件，不是回答终态。 */
+    public static final String EVENT_DIAGNOSTICS = "diagnostics";
 
     /** No server side timeout: the generation itself is bounded by the provider timeout. */
     private static final long NO_TIMEOUT = 0L;
@@ -86,6 +91,11 @@ public class SseChatStreamListener implements ChatStreamListener {
     public void onReferences(List<RetrievalNodeView> references) {
         send(EVENT_REFERENCES, new ReferencesEvent(
                 references.stream().map(RetrievalNodeResponse::from).toList()));
+    }
+
+    @Override
+    public void onDiagnostics(ChatDiagnostics diagnostics) {
+        send(EVENT_DIAGNOSTICS, ChatDiagnosticsResponse.from(diagnostics));
     }
 
     @Override

@@ -248,26 +248,45 @@ public class KnowledgeApiService {
      */
     public KnowledgeCallResult preview(String appId, String appVersionId, KnowledgeCallCommand command,
                                        ChatStreamListener listener) {
+        PreviewTiming timing = new PreviewTiming();
         ChatCancellation cancellation = listener == null ? ChatCancellation.NONE : listener.cancellation();
-        cancellation.throwIfCancelled();
-        appService.require(appId);
-        AppVersion version = previewVersion(appId, appVersionId);
-        // Deliberately not snapshot bound even when the previewed version is the released one: a preview exists
-        // to try a configuration against the corpus as it is now, and it is also how an operator proves a
-        // snapshot isolates a release - the same query returns the new content here and does not there
-        // (requirement section 4.4 "the console debug page takes the current active versions").
-        ResolvedTarget target = new ResolvedTarget(version, appVersionService.parseConfig(version),
-                TargetStage.of(version.getStatus()), false);
-        requestOverridePolicy.validate(forbiddenKeysOf(command));
-        KnowledgeCallResult retrieved = retrieve(target, command);
-        if (listener == null) {
-            return withAnswer(retrieved, generate(target, command, retrieved.getNodes()));
+        KnowledgeCallResult result;
+        try {
+            cancellation.throwIfCancelled();
+            appService.require(appId);
+            AppVersion version = previewVersion(appId, appVersionId);
+            // 预览使用所选版本的配置和当前语料，已发布版本也不改为冻结语料。
+            ResolvedTarget target = new ResolvedTarget(version, appVersionService.parseConfig(version),
+                    TargetStage.of(version.getStatus()), false);
+            requestOverridePolicy.validate(forbiddenKeysOf(command));
+            timing.start(ChatDiagnostics.Stage.RETRIEVAL);
+            KnowledgeCallResult retrieved = retrieve(target, command);
+            cancellation.throwIfCancelled();
+            timing.start(ChatDiagnostics.Stage.GENERATION);
+            if (listener == null) {
+                result = withAnswer(retrieved, generate(target, command, retrieved.getNodes()));
+            } else {
+                streamGenerate(target, command, retrieved.getNodes(), delta -> {
+                    timing.onDelta(delta);
+                    listener.onDelta(delta);
+                }, cancellation);
+                cancellation.throwIfCancelled();
+                result = retrieved;
+            }
+        } catch (RuntimeException failure) {
+            if (listener != null) {
+                listener.onDiagnostics(timing.finish(failure instanceof CancellationException
+                        ? ChatDiagnostics.Outcome.CANCELLED : ChatDiagnostics.Outcome.FAILED));
+            }
+            throw failure;
         }
-        streamGenerate(target, command, retrieved.getNodes(), listener::onDelta, cancellation);
-        cancellation.throwIfCancelled();
-        listener.onReferences(retrieved.getNodes());
-        listener.onDone(RequestIdHolder.get(), retrieved.getDegraded(), retrieved.routedKbIds());
-        return retrieved;
+        ChatDiagnostics diagnostics = timing.finish(ChatDiagnostics.Outcome.SUCCEEDED);
+        if (listener != null) {
+            listener.onDiagnostics(diagnostics);
+            listener.onReferences(result.getNodes());
+            listener.onDone(RequestIdHolder.get(), result.getDegraded(), result.routedKbIds());
+        }
+        return result.toBuilder().diagnostics(diagnostics).build();
     }
 
     /**
