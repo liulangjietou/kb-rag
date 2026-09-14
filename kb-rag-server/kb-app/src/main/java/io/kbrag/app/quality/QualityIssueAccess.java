@@ -42,6 +42,7 @@ public class QualityIssueAccess {
     private final AppMapper applications;
     private final KbResourceGuard resourceGuard;
     private final AppVersionService versions;
+    private final EmployeeFeedbackAccess employeeFeedback;
 
     /** 先在 SQL 中确认租户，再判断知识库范围，平台角色也不能绕过当前租户。 */
     public void requireKb(String kbId) {
@@ -55,6 +56,9 @@ public class QualityIssueAccess {
 
     /** 原反馈资料和纠正证据都需要重新校验；失去任一权限后不展示处理说明。 */
     public void requireContent(KnowledgeQualityIssue issue) {
+        if (issue.getSourceType() == io.kbrag.domain.enums.QualityIssueSource.EMPLOYEE_ANSWER) {
+            employeeFeedback.read(issue.getKbId(), issue.getSourceId());
+        }
         if (issue.getExpectedCaseInput() != null) {
             AccessGuard.requirePermission(PermissionCodes.EVAL_READ);
             AccessGuard.requirePermission(PermissionCodes.APP_READ);
@@ -70,6 +74,11 @@ public class QualityIssueAccess {
             EvalCaseInput input = JsonUtil.parse(issue.getExpectedCaseInput(), EvalCaseInput.class);
             requireEvidence(issue.getKbId(), JsonUtil.parse(input.evidences(), new TypeReference<List<EvalEvidence>>() { }));
         }
+    }
+
+    /** 新建员工问答问题时锁定仍为 BAD 的整轮来源，不把某个召回片段当作错误答案。 */
+    public EmployeeFeedbackAccess.Source lockEmployeeQuestion(String kbId, String runId) {
+        return employeeFeedback.lockBad(kbId, runId);
     }
 
     /** 受限条目保留处理状态，列表投影负责隐藏摘要和内容关联。 */

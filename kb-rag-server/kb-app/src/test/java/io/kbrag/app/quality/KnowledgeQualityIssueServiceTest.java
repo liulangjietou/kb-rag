@@ -74,6 +74,20 @@ class KnowledgeQualityIssueServiceTest {
     void clear() { UserContextHolder.clear(); }
 
     @Test
+    void employeeAnswerCreatesOnlyAnIssueAndNeverUsesBadAnswerOrArbitraryChunkAsGold() {
+        when(issues.selectOne(any())).thenReturn(null);
+        var original = new io.kbrag.domain.entity.EmployeeConversationRun(); original.setQuestion("员工 qa@example.com 提交的问题");
+        when(access.lockEmployeeQuestion("kb_safe", "run_bad")).thenReturn(new EmployeeFeedbackAccess.Source(original, "v1", List.of(), "av_safe"));
+        var created = service.create("kb_safe", QualityIssueSource.EMPLOYEE_ANSWER, "run_bad");
+        assertEquals(QualityIssueSource.EMPLOYEE_ANSWER, created.getSourceType());
+        assertEquals("run_bad", created.getSourceId());
+        assertEquals("av_safe", created.getAffectedAppVersionId(), "员工反馈必须保留产生该回答的应用版本，不能改到其他应用验证");
+        assertFalse(created.getSummary().contains("qa@example.com"));
+        assertNull(created.getSourceDocId()); assertNull(created.getCaseId()); assertNull(created.getExpectedCaseInput());
+        verifyNoInteractions(datasets, feedback, insights);
+    }
+
+    @Test
     void duplicateSourceReturnsExistingIssueWithoutAnotherRecord() {
         SearchInsight source = new SearchInsight(); source.setQueryHash("hash_safe");
         when(insights.selectOne(any())).thenReturn(source);

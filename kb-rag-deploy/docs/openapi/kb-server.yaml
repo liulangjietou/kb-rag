@@ -4582,6 +4582,64 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/employee-feedback:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags: [eval]
+      summary: 员工整轮回答的负面反馈
+      description: 需要 feedback:manage、app:read 和当前知识库权限。租户、存活应用与会话、应用范围及运行时知识库绑定在计数和分页前过滤；任一当前或继承引用不可读时仅返回不透明行标识。
+      parameters:
+      - {name: page, in: query, schema: {type: integer, default: 1, minimum: 1}}
+      - {name: size, in: query, schema: {type: integer, default: 20, minimum: 1, maximum: 50}}
+      responses:
+        '200':
+          description: 当前范围中的负面反馈
+          headers:
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      required: [items, page, size, total]
+                      properties:
+                        items: {type: array, items: {$ref: '#/components/schemas/EmployeeFeedbackSummary'}}
+                        page: {type: integer}
+                        size: {type: integer}
+                        total: {type: integer, format: int64}
+        '400': {$ref: '#/components/responses/InvalidParam'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/PermissionDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/kb/{kbId}/employee-feedback/{runId}:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - {name: runId, in: path, required: true, schema: {type: string}}
+    get:
+      tags: [eval]
+      summary: 核对员工反馈的原问题、回答和引用
+      description: 逐次重验应用、全部知识库根及当前和继承引用；仅允许当前 BAD 或此前已建立同源质量问题的回答。评价改为 GOOD 后不再允许新建问题。不会返回员工身份、整个会话、模型配置或预签 URL。
+      responses:
+        '200':
+          description: 已授权的整轮反馈
+          headers:
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data: {$ref: '#/components/schemas/EmployeeFeedbackDetail'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/PermissionDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
   /api/v1/kb/{kbId}/quality-issues:
     parameters:
     - $ref: '#/components/parameters/KbId'
@@ -7202,6 +7260,36 @@ components:
       enum:
       - BAD_FEEDBACK
       - ZERO_HIT
+      - EMPLOYEE_ANSWER
+    EmployeeFeedbackSummary:
+      type: object
+      required: [run_id, content_restricted]
+      properties:
+        run_id: {type: string}
+        question: {type: string, nullable: true}
+        feedback_note: {type: string, nullable: true}
+        feedback_updated_at: {type: string, format: date-time, nullable: true}
+        content_restricted: {type: boolean}
+    EmployeeFeedbackDetail:
+      type: object
+      required: [run_id, question, answer, feedback_verdict, app_version, citations]
+      properties:
+        run_id: {type: string}
+        question: {type: string}
+        answer: {type: string}
+        feedback_verdict: {type: string, enum: [BAD, GOOD]}
+        feedback_note: {type: string, nullable: true}
+        feedback_updated_at: {type: string, format: date-time, nullable: true}
+        app_version: {type: string}
+        citations:
+          type: array
+          items:
+            type: object
+            required: [file_name, content, inherited]
+            properties:
+              file_name: {type: string}
+              content: {type: string}
+              inherited: {type: boolean}
     QualityIssueReason:
       type: string
       enum:

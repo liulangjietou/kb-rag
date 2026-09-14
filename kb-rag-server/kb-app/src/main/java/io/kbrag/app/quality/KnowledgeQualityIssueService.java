@@ -89,6 +89,10 @@ public class KnowledgeQualityIssueService {
             access.requireDocument(kbId, original.getDocId());
             issue = newIssue(kbId, source, sourceId, original.getQuery());
             issue.setSourceDocId(original.getDocId());
+        } else if (source == QualityIssueSource.EMPLOYEE_ANSWER) {
+            var original = access.lockEmployeeQuestion(kbId, sourceId);
+            issue = newIssue(kbId, source, sourceId, original.run().getQuestion());
+            issue.setAffectedAppVersionId(original.appVersionId());
         } else {
             issue = newIssue(kbId, source, deduplicationId, insight.getQueryDigest());
         }

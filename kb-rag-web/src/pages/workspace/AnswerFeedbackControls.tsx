@@ -66,6 +66,7 @@ export function AnswerFeedbackDialog({ initialRun, currentRun, visible, onSave, 
     onOk={() => void save()} confirmLoading={busy} closable={!busy} maskClosable={!busy} keyboard={!busy}
     cancelButtonProps={{ disabled: busy }} okButtonProps={{ disabled: conflict }} destroyOnHidden>
     <p>评价对象：第 {initialRun.turn_no} 轮回答 · 版本 {initialRun.app_version}</p>
+    <p>提交后，有权限的知识库维护人员可核对本轮问题、回答及引用，跟进处理。</p>
     <label className="answer-feedback__label" htmlFor={`feedback-note-${initialRun.run_id}`}>问题说明（可选）</label>
     <Input.TextArea id={`feedback-note-${initialRun.run_id}`} aria-label="问题说明" value={note} onChange={(event) => setNote(event.target.value)}
       maxLength={512} showCount autoSize={{ minRows: 3, maxRows: 7 }} disabled={busy}

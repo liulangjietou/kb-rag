@@ -1,7 +1,7 @@
 import { Alert, Button, Empty, Select, Space, Switch, Table, Tag, Typography } from 'antd';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listQualityIssues, qualityFailure, type QualityIssue, type QualityIssueStatus } from '../../../api/qualityIssue';
-import { QUALITY_REASONS, QUALITY_STATUS } from './qualityMeta';
+import { QUALITY_REASONS, QUALITY_STATUS, QUALITY_SOURCES } from './qualityMeta';
 
 /** 状态筛选和详情打开保持独立，旧分页响应不能覆盖新筛选结果。 */
 export default function QualityIssueTab({ kbId, refreshKey, onOpen }: {
@@ -51,7 +51,7 @@ export default function QualityIssueTab({ kbId, refreshKey, onOpen }: {
         { title: '问题', key: 'summary', width: 320, render: (_, issue) => <>
           {issue.content_restricted ? <span className="quality-muted">资料访问受限，仅显示处理状态</span>
             : <Button type="link" className="quality-summary-link" onClick={() => onOpen(issue.issue_id)}>{issue.summary || '未提供摘要'}</Button>}
-          <div className="quality-muted">{issue.source_type === 'BAD_FEEDBACK' ? '负面反馈' : '零命中报告'}</div>
+          <div className="quality-muted">{QUALITY_SOURCES[issue.source_type]}</div>
         </> },
         { title: '阶段', dataIndex: 'status', width: 110, render: (value: QualityIssueStatus) => <Tag color={QUALITY_STATUS[value].color}>{QUALITY_STATUS[value].label}</Tag> },
         { title: '负责人', dataIndex: 'owner_name', width: 140, render: (value: string | null) => value || '待领取' },

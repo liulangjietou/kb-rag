@@ -144,7 +144,7 @@ class QualityIssueTransactionTest {
         var app = new App(); app.setAppId("app_safe"); app.setTenantId("tenant_safe");
         when(apps.selectOne(any())).thenReturn(app);
         var access = new QualityIssueAccess(session.getMapper(KnowledgeBaseMapper.class), documents, chunks, cases,
-                apps, mock(KbResourceGuard.class), versions);
+                apps, mock(KbResourceGuard.class), versions, mock(EmployeeFeedbackAccess.class));
         var insights = mock(SearchInsightMapper.class);
         var insight = new SearchInsight(); insight.setQueryDigest("脱敏的问题摘要");
         insight.setQueryHash("hash_safe");
