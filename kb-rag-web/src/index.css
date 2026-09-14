@@ -413,6 +413,14 @@ main pre,
   margin: 70px auto 48px;
 }
 
+.auth-shell__product-title {
+  margin-bottom: clamp(36px, 5vw, 64px);
+  color: color-mix(in srgb, var(--kb-color-primary) 30%, #ffffff);
+  font-size: clamp(28px, 3.1vw, 44px);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
 .auth-overline {
   display: block;
   margin-bottom: 8px;
@@ -486,6 +494,12 @@ main pre,
   display: none;
   width: min(440px, 100%);
   margin-bottom: 22px;
+}
+
+.auth-shell__mobile-brand .auth-shell__product-title {
+  margin: 12px 0 0;
+  color: var(--kb-color-primary-text);
+  font-size: 20px;
 }
 
 .auth-card {
