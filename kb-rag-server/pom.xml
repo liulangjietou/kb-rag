@@ -43,6 +43,7 @@
         <minio.version>8.5.17</minio.version>
         <neo4j-java-driver.version>5.28.9</neo4j-java-driver.version>
         <commons-collections4.version>4.4</commons-collections4.version>
+        <commonmark.version>0.30.0</commonmark.version>
         <!-- Spring Boot 3.3.9 manages Angus Mail 2.0.3. Version 2.0.4 contains the upstream
              CVE-2025-7962 SMTP injection fix and remains API-compatible with this Boot line. -->
         <angus-mail.version>2.0.4</angus-mail.version>
@@ -60,6 +61,11 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>org.commonmark</groupId>
+                <artifactId>commonmark</artifactId>
+                <version>${commonmark.version}</version>
+            </dependency>
             <dependency>
                 <groupId>io.kbrag</groupId>
                 <artifactId>kb-common</artifactId>

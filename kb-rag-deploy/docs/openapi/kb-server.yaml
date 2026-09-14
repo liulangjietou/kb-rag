@@ -5999,7 +5999,9 @@ paths:
         防泄漏开关注入对应 prompt。非流式返回 {answer, references, request_id, degraded,
         routed_kb_ids}（routed_kb_ids 为顶层字段，M5）；stream=true 走 SSE：message_delta* ->
         references -> done（含 request_id/degraded/routed_kb_ids）或 error。零 Key/未配置对话
-        模型时返回 502 UPSTREAM_MODEL_ERROR（检索不受影响，M4c-CONTRACTS.md §3）。'
+        模型时返回 502 UPSTREAM_MODEL_ERROR（检索不受影响，M4c-CONTRACTS.md §3）。
+        回答中的正文引用编号必须属于本轮资料；越界时返回 502 ANSWER_CITATION_INVALID。
+        流式已经输出的内容仅供核查，随后以该 error 结束，不发送 done，也不自动重复调用模型。'
       security:
       - ApiKeyBearer: []
       requestBody:
@@ -7717,6 +7719,7 @@ components:
       - MODEL_QUOTA_EXCEEDED
       - PARSE_FAILED
       - UPSTREAM_MODEL_ERROR
+      - ANSWER_CITATION_INVALID
       - INTERNAL_ERROR
     ErrorResponse:
       type: object

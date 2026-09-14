@@ -47,7 +47,10 @@ public class ChatPromptAssembler {
 
     /** Citation instruction; the numbers refer to the passage indexes produced below. */
     private static final String CITATION_PROMPT =
-            "回答中引用资料时，用 [序号] 标注所依据的资料条目，序号与资料清单一致。";
+            "回答中引用资料时，用 [序号] 标注所依据的资料条目，序号与本轮资料清单一致。"
+                    + "只能使用本轮资料条目开头的编号，不得使用原文的章节号、原文参考文献号或历史回答中的编号；"
+                    + "多个依据写作 [1][2]，不得编造或沿用本轮清单中不存在的编号。"
+                    + "只陈述引用片段明确支持的内容，不得把推测或常识补充写成文档结论。";
 
     /** Base role instruction, prepended before any application specific wording. */
     private static final String BASE_ROLE_PROMPT =

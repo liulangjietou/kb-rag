@@ -15,6 +15,11 @@
     <description>Application services: auth, knowledge base, indexing pipeline and retrieval</description>
 
     <dependencies>
+        <!-- 按 Markdown 语法识别回答引用，避免把代码下标和普通链接误判为证据。 -->
+        <dependency>
+            <groupId>org.commonmark</groupId>
+            <artifactId>commonmark</artifactId>
+        </dependency>
         <dependency>
             <groupId>io.kbrag</groupId>
             <artifactId>kb-domain</artifactId>

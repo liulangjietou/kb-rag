@@ -219,6 +219,20 @@ class EmployeeRunCoordinatorTest {
     }
 
     @Test
+    void shouldPersistCitationFailureWithoutReportingSavedSuccess() {
+        doAnswer(call -> {
+            retrieved(call.getArgument(2));
+            call.<Consumer<String>>getArgument(3).accept("错误引用 [10]");
+            throw new BizException(ErrorCode.ANSWER_CITATION_INVALID, "untrusted provider detail");
+        }).when(knowledge).employeeStream(any(), any(), any(), any(), any());
+        coordinator.submit(SCOPE, principal, accepted);
+        jobs.remove().run();
+        verify(ledger).fail(eq(SCOPE), eq("conv"), eq("run"), anyString(), eq("ANSWER_CITATION_INVALID"),
+                eq("回答引用校验未通过，当前内容仅供核查，请重新生成"));
+        verify(ledger, never()).succeed(any(), anyString(), anyString(), anyString(), anyLong(), anyString());
+    }
+
+    @Test
     void shouldPersistFailureEvenWhenPartialCheckpointCannotBeSaved() {
         when(ledger.checkpoint(any(), anyString(), anyString(), anyString(), anyLong(), anyString()))
                 .thenThrow(new IllegalStateException("checkpoint write failed"));

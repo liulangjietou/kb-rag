@@ -88,6 +88,9 @@ public enum ErrorCode {
     /** Upstream model provider rejected or could not serve the request. */
     UPSTREAM_MODEL_ERROR(502, "upstream model error"),
 
+    /** 生成结果引用了本轮不存在的资料，不能作为完整回答交付。 */
+    ANSWER_CITATION_INVALID(502, "answer citation is not in current references"),
+
     /** Unclassified server side failure. */
     INTERNAL_ERROR(500, "internal error");
 
