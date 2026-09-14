@@ -10,19 +10,21 @@ export type DocumentFilters = Omit<ListDocumentsParams, 'page' | 'size'>;
 type FilterValues = Omit<DocumentFilters, 'updated_from' | 'updated_to'> & { updated?: [Dayjs, Dayjs] };
 
 /** 明确提交一次筛选；输入与已应用条件分开，中文组词不触发请求。 */
-export default function DocumentFilterBar({ onApply, onRefresh, refreshing }: {
+export default function DocumentFilterBar({ onApply, onRefresh, refreshing, initialFilters = {} }: {
   onApply: (filters: DocumentFilters) => void;
   onRefresh: () => void;
   refreshing: boolean;
+  initialFilters?: DocumentFilters;
 }) {
   const [form] = Form.useForm<FilterValues>();
   const composing = useRef(false);
   const screens = Grid.useBreakpoint();
-  const [expanded, setExpanded] = useState(false);
-  const [additionalCount, setAdditionalCount] = useState(0);
+  const [expanded, setExpanded] = useState(Object.keys(initialFilters).length > 0);
+  const [additionalCount, setAdditionalCount] = useState(Object.keys(initialFilters).length);
   return (
     <Form<FilterValues>
       form={form}
+      initialValues={initialFilters}
       layout="vertical"
       className="document-filter-form"
       aria-label="文档筛选"
@@ -80,7 +82,12 @@ export default function DocumentFilterBar({ onApply, onRefresh, refreshing }: {
           {expanded ? '收起筛选' : '更多筛选'}{additionalCount > 0 ? `（${additionalCount}）` : ''}
         </Button>}
         <Button type="primary" htmlType="submit" aria-label="筛选文档" icon={<SearchOutlined aria-hidden />}>筛选文档</Button>
-        <Button onClick={() => { form.resetFields(); setAdditionalCount(0); onApply({}); }}>重置筛选</Button>
+        <Button onClick={() => {
+          form.resetFields();
+          form.setFieldsValue({ keyword: undefined, process_status: undefined, publish_status: undefined,
+            source: undefined, updated: undefined });
+          setAdditionalCount(0); onApply({});
+        }}>重置筛选</Button>
         <Button aria-label="刷新文档" icon={<ReloadOutlined aria-hidden />} loading={refreshing} onClick={onRefresh}>刷新文档</Button>
       </Space>
     </Form>

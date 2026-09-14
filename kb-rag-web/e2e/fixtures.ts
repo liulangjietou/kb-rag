@@ -95,6 +95,7 @@ export const test = base.extend<{
         multimodal_configured: false,
       },
       '/system/demo/status': { available: false, installed: false },
+      '/me/knowledge-todos': [],
       '/me/resource-visits': [
         { resource_type: 'KB', resource_id: kb.kb_id, name: kb.name, visited_at: '2026-09-10T10:00:00' },
         { resource_type: 'APP', resource_id: app.app_id, name: app.name, visited_at: '2026-09-09T10:00:00' },

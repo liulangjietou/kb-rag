@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../api/kb', () => ({ listKnowledgeBases: mocks.listKnowledgeBases }));
+vi.mock('../api/knowledgeTodo', () => ({ listKnowledgeTodos: vi.fn().mockResolvedValue([]) }));
 vi.mock('../api/app', () => ({ listApps: mocks.listApps }));
 vi.mock('../api/resourceVisit', () => ({ listResourceVisits: mocks.listResourceVisits, clearResourceVisits: vi.fn() }));
 vi.mock('../api/registration', () => ({ listRegistrationReviews: mocks.listRegistrationReviews }));

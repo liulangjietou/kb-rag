@@ -17,6 +17,8 @@ import java.time.LocalDateTime;
  * @param renderJs        whether this source is fetched through the headless browser, the M17 switch
  * @param lastFetchStatus outcome of the last sync attempt, {@code null} before the first one
  * @param lastFetchAt     ISO instant of the last sync attempt
+ * @param lastSuccessAt   最近完成抓取时间，历史未知时为空
+ * @param lastContentChangeAt 最近实际生成文档或版本时间，历史未知时为空
  * @param lastError       why the last sync failed or was skipped, {@code null} on success
  * @param createdAt       ISO registration timestamp
  *
@@ -32,6 +34,8 @@ public record WebSourceResponse(
         @JsonProperty("render_js") boolean renderJs,
         @JsonProperty("last_fetch_status") String lastFetchStatus,
         @JsonProperty("last_fetch_at") String lastFetchAt,
+        @JsonProperty("last_success_at") String lastSuccessAt,
+        @JsonProperty("last_content_change_at") String lastContentChangeAt,
         @JsonProperty("last_error") String lastError,
         @JsonProperty("created_at") String createdAt) {
 
@@ -55,6 +59,8 @@ public record WebSourceResponse(
                 entity.getRenderJs() != null && entity.getRenderJs() == RENDER_ON,
                 entity.getLastFetchStatus() == null ? null : entity.getLastFetchStatus().name(),
                 iso(entity.getLastFetchAt()),
+                iso(entity.getLastSuccessAt()),
+                iso(entity.getLastContentChangeAt()),
                 entity.getLastError(),
                 iso(entity.getCreatedAt()));
     }

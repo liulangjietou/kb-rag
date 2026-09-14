@@ -5,6 +5,9 @@ import io.kbrag.domain.entity.ExtSource;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
+
+import java.time.LocalDateTime;
 
 /**
  * Data access for t_kb_ext_source.
@@ -13,6 +16,18 @@ import org.apache.ibatis.annotations.Param;
  */
 @Mapper
 public interface ExtSourceMapper extends BaseMapper<ExtSource> {
+
+    /** 时间事实独立于乐观锁状态更新，始终保存已发生的最新成功与内容变更。 */
+    @Update("""
+            UPDATE t_kb_ext_source SET
+              last_success_at = CASE WHEN #{successAt} IS NULL THEN last_success_at
+                ELSE GREATEST(COALESCE(last_success_at, #{successAt}), #{successAt}) END,
+              last_content_change_at = CASE WHEN #{changeAt} IS NULL THEN last_content_change_at
+                ELSE GREATEST(COALESCE(last_content_change_at, #{changeAt}), #{changeAt}) END
+            WHERE id = #{id} AND deleted = 0
+            """)
+    int advanceHealthTimes(@Param("id") Long id, @Param("successAt") LocalDateTime successAt,
+                           @Param("changeAt") LocalDateTime changeAt);
 
     /**
      * Physically removes one source row.

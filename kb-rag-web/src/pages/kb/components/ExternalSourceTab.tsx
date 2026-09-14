@@ -1,8 +1,11 @@
 import { useAuth } from '../../../auth/AuthContext';
 import { PERMISSIONS } from '../../../auth/permissions';
+import SourceHealthTimes from './SourceHealthTimes';
 // Author: owlzhangfq@gmail.com
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
+  Checkbox,
   Button,
   Drawer,
   Form,
@@ -44,6 +47,7 @@ interface ExternalSourceTabProps {
   kbId: string;
   /** Fired after a sync that may have created/updated documents, so the parent refreshes the list. */
   onSynced: () => void;
+  initialAttentionOnly?: boolean;
 }
 
 const PAGE_SIZE = 20;
@@ -106,13 +110,16 @@ interface SourceFormValues {
  * space, watch its per-object/page outcome, trigger a scan, test, edit and remove. A scan runs off
  * the request thread, so sync only acknowledges acceptance and the list is re-read for its outcome.
  */
-export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabProps) {
+export default function ExternalSourceTab({ kbId, onSynced, initialAttentionOnly = false }: ExternalSourceTabProps) {
   const { can } = useAuth();
   const canWrite = can(PERMISSIONS.DOC_WRITE);
   const [items, setItems] = useState<ExtSource[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [attentionOnly, setAttentionOnly] = useState(initialAttentionOnly);
+  const [loadError, setLoadError] = useState(false);
+  const sequence = useRef(0);
   const [saving, setSaving] = useState(false);
   // source_id of the row whose sync/test/toggle/remove request is in flight, to scope the spinners.
   const [actingId, setActingId] = useState<string | null>(null);
@@ -126,19 +133,26 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
   const connectorMeta = CONNECTOR_META[selectedType];
 
   const load = useCallback(async (targetPage: number) => {
+    const current = ++sequence.current;
     setLoading(true);
+    setLoadError(false);
     try {
-      const result = await listExtSources(kbId, targetPage);
+      const result = await listExtSources(kbId, targetPage, PAGE_SIZE, attentionOnly);
+      if (sequence.current !== current) return;
       setItems(result.items);
       setTotal(result.total);
       setPage(targetPage);
+    } catch {
+      if (sequence.current === current) { setItems([]); setLoadError(true); }
     } finally {
-      setLoading(false);
+      if (sequence.current === current) setLoading(false);
     }
-  }, [kbId]);
+  }, [kbId, attentionOnly]);
 
   useEffect(() => {
-    load(1);
+    setItems([]);
+    void load(1);
+    return () => { sequence.current += 1; };
   }, [load]);
 
   const openCreate = () => {
@@ -277,8 +291,14 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
         <Button onClick={() => load(page)}>刷新</Button>
       </Space>
 
-      <Table<ExtSource>
+      <Space wrap style={{ marginBottom: 16 }}>
+        <Checkbox checked={attentionOnly} onChange={(event) => setAttentionOnly(event.target.checked)}>仅看失败或部分成功</Checkbox>
+      </Space>
+      <Typography.Paragraph type="secondary">最近成功仅记录完整同步；部分成功也可能接入新内容。文档可检索状态需另行核对。</Typography.Paragraph>
+      {loadError && <Alert type="error" showIcon message="外部来源加载失败" description="无法确认来源状态，请刷新重试。" />}
+      {!loadError && <Table<ExtSource>
         rowKey="source_id"
+        scroll={{ x: 1240 }}
         loading={loading}
         dataSource={items}
         pagination={{
@@ -351,7 +371,8 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
               return record.last_error ? <Tooltip title={record.last_error}>{tag}</Tooltip> : tag;
             },
           },
-          { title: '最近同步时间', dataIndex: 'last_sync_at', width: 180 },
+          { title: '同步记录', width: 230, render: (_, row) => <SourceHealthTimes
+            attempt={row.last_sync_at} success={row.last_success_at} changed={row.last_content_change_at} /> },
           {
             title: '操作',
             width: 300,
@@ -395,7 +416,7 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
             ),
           },
         ]}
-      />
+      />}
 
       {/* Keep Form mounted: openEdit fills it before opening; unmounted rc-field-form drops assignments. */}
       <Modal

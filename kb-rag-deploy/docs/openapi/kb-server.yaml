@@ -1261,6 +1261,40 @@ paths:
           $ref: '#/components/responses/PermissionDenied'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/me/knowledge-todos:
+    get:
+      tags: [auth]
+      operationId: listKnowledgeTodos
+      summary: 当前授权知识库的管理待办摘要（KB_READ）
+      description: 先按当前租户和知识库根范围授权，再分别聚合解析待确认、文档待审核、网页抓取失败、外部来源失败或部分成功。排除回收站与逻辑删除记录，按数量降序、知识库 ID、事项种类稳定排序。can_process 只描述当前 DOC_WRITE 或 DOC_REVIEW 能力，后续详情操作重新授权。来源同步成功不代表文档已经可检索。
+      responses:
+        '200':
+          description: 当前可见待办；没有待办时为空数组
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+                        required: [kb_id, kb_name, kind, total, can_process]
+                        properties:
+                          kb_id: {type: string}
+                          kb_name: {type: string}
+                          kind: {type: string, enum: [PENDING_CONFIRM, PENDING_REVIEW, WEB_SOURCE_FAILED, EXT_SOURCE_ATTENTION]}
+                          total: {type: integer, format: int64, minimum: 1}
+                          can_process: {type: boolean}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
   /api/v1/me/resource-visits:
     get:
       tags: [auth]
@@ -3091,6 +3125,11 @@ paths:
       description: '只返回调用者所属租户的登记：登记表本身不带租户列，先解析 kbId 归属的知识库，
         其他租户的 kbId 读作不存在 → 404（见 M16-CONTRACTS.md §1.3.2）。'
       parameters:
+      - name: attention_only
+        in: query
+        required: false
+        description: 仅返回最近抓取 FAILED 的来源，先筛选再分页
+        schema: {type: boolean, default: false}
       - name: page
         in: query
         required: false
@@ -3372,6 +3411,11 @@ paths:
       - ext-source
       summary: 外部数据源列表（secret 恒脱敏）
       parameters:
+      - name: attention_only
+        in: query
+        required: false
+        description: 仅返回最近同步 FAILED 或 PARTIAL 的来源，先筛选再分页
+        schema: {type: boolean, default: false}
       - name: page
         in: query
         required: false
@@ -9126,6 +9170,17 @@ components:
           type: string
           format: date-time
           nullable: true
+          description: 最近一次尝试开始时间，失败也更新
+        last_success_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最近 SUCCESS 或 UNCHANGED 的完成时间，历史未知为空；不证明文档已解析或发布
+        last_content_change_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最近实际生成文档或版本的时间，重复内容不推进，历史未知为空
         last_error:
           type: string
           nullable: true
@@ -9284,6 +9339,16 @@ components:
           type: string
           format: date-time
           nullable: true
+        last_success_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最近完整扫描 SUCCESS 的完成时间，PARTIAL 不推进；历史未知为空
+        last_content_change_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最近实际生成文档或版本时间，部分成功可以推进，重复内容不推进
         last_error:
           type: string
           nullable: true

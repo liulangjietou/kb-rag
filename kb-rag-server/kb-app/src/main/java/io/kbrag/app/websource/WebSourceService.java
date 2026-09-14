@@ -153,9 +153,15 @@ public class WebSourceService {
      * @return page of registrations
      */
     public IPage<WebSource> list(String kbId, long page, long size) {
+        return list(kbId, page, size, false);
+    }
+
+    /** 首页失败入口在分页前筛选，避免仅过滤当前页而漏掉待处理来源。 */
+    public IPage<WebSource> list(String kbId, long page, long size, boolean attentionOnly) {
         webSourceGuard.requireBase(kbId);
         return webSourceMapper.selectPage(new Page<>(page, size), new LambdaQueryWrapper<WebSource>()
                 .eq(WebSource::getKbId, kbId)
+                .eq(attentionOnly, WebSource::getLastFetchStatus, WebSourceFetchStatus.FAILED)
                 .orderByDesc(WebSource::getId));
     }
 
@@ -370,6 +376,7 @@ public class WebSourceService {
             source.setDocId(outcome.document().getDocId());
             source.setFileName(fileName);
             source.setLastContentHash(contentHash);
+            if (!outcome.duplicated()) source.contentChanged(LocalDateTime.now());
             record(source, WebSourceFetchStatus.SUCCESS, null);
             log.info("web source synced, sourceId={}, docId={}, version={}, duplicated={}",
                     source.getSourceId(), source.getDocId(), outcome.version(), outcome.duplicated());
@@ -383,9 +390,9 @@ public class WebSourceService {
     }
 
     private void record(WebSource source, WebSourceFetchStatus status, String error) {
-        source.setLastFetchStatus(status);
-        source.setLastError(truncate(error));
+        source.recordOutcome(status, truncate(error), LocalDateTime.now());
         webSourceMapper.updateById(source);
+        webSourceMapper.advanceHealthTimes(source.getId(), source.getLastSuccessAt(), source.getLastContentChangeAt());
         // The one funnel every outcome passes, which is what makes it the M13 sync counter's spot.
         kbMetrics.recordWebSourceSync(status);
     }
