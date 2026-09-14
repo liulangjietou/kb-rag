@@ -177,7 +177,7 @@ export default function ConversationView({ appId, conversationId, applicationNam
             }}>更早记录</Button>}
             {!state.isNewest && <Button type="text" size="small" onClick={() => { nearBottom.current = true; state.newest(); }}>返回最近问答</Button>}
           </div>
-          {!state.runs.length && !state.loadError && <div className="conversation-empty"><BookOutlined /><h3>这次想了解什么？</h3>
+          {!blocked && !state.runs.length && !state.loadError && <div className="conversation-empty"><BookOutlined /><h3>这次想了解什么？</h3>
             <p>描述你的问题，必要时补充背景。回答中的引用可以直接打开核对。</p></div>}
           {state.runs.map((run) => <RunMessage key={run.run_id} run={run} applicationName={applicationName}
             onFeedback={state.feedback} onEditFeedback={setFeedbackRun}

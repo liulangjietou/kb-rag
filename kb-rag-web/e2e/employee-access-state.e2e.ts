@@ -51,6 +51,22 @@ test('首次读取不存在的会话不会停留在加载标题', async ({ page,
   expect(unexpectedRequests).toEqual([]);
 });
 
+test('流式撤权清空内容后不显示新对话引导', async ({ page, unexpectedRequests }) => {
+  const active = { ...employeeRun, status: 'RUNNING' as const, stage: 'GENERATING' as const };
+  const state = await employeeFixture(page, { runs: [active],
+    conversation: { ...employeeConversation, active_run_id: active.run_id } });
+  state.onEvents = route => route.fulfill({ contentType: 'text/event-stream',
+    body: `event: error\ndata: ${JSON.stringify({ code: 'FORBIDDEN', message: '当前会话或内容已不可访问', retryable: false, clear_content: true })}\n\n` });
+  await page.goto(employeeUrl);
+  await expect(page.getByRole('heading', { name: '会话不可访问' })).toBeVisible();
+  await expect(page.getByRole('article')).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: '输入知识问题' })).toBeDisabled();
+  await expect(page.getByRole('heading', { name: '这次想了解什么？' })).toHaveCount(0);
+  expect(state.streams).toBe(1);
+  expect(state.submissions).toEqual([]);
+  expect(unexpectedRequests).toEqual([]);
+});
+
 test('普通读取失败保留重试入口，成功后退出失败状态', async ({ page, unexpectedRequests }) => {
   await employeeFixture(page);
   await page.route(conversationRoute, route => route.fulfill({ status: 503,
