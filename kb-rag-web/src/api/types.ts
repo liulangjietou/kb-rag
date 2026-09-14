@@ -2480,7 +2480,8 @@ export interface ModelUsageSummary {
   used_tokens: number;
   reserved_tokens: number;
   /** Null while quota_tokens is zero (unlimited). */
-  remaining_tokens: number | null;
+  /** 不限额时为空，服务端也可能省略此字段。 */
+  remaining_tokens?: number | null;
   estimated_calls: number;
   unpriced_calls: number;
   costs: ModelCostTotal[];
