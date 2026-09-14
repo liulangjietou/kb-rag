@@ -71,17 +71,22 @@ export default function EmployeeWorkspacePage() {
 
   const create = async () => {
     if (creationLock.current || !appId) return;
+    // 路由转换可能先改变地址再卸载旧页面；不能只依赖 React 的清理时机。
+    const startedAtUrl = window.location.href;
+    const startedAtEntry = window.history.state?.key;
+    const isCurrentRequest = () => mounted.current && currentScope.current === locationScope
+      && window.location.href === startedAtUrl && window.history.state?.key === startedAtEntry;
     creationLock.current = true;
     setCreating(true);
     setCreateError(undefined);
     try {
       const item = await employeeWorkspace.create(appId, '新对话');
-      if (!mounted.current || currentScope.current !== locationScope) return;
+      if (!isCurrentRequest()) return;
       setParams({ app: appId, conversation: item.conversation_id });
       setHistoryOpen(false);
       changed();
     } catch (failure) {
-      if (!mounted.current || currentScope.current !== locationScope) return;
+      if (!isCurrentRequest()) return;
       setCreateError(failure instanceof EmployeeApiError && failure.retryable
         ? '新建结果尚未确认，请刷新会话列表核对后再新建。' : messageFor(failure));
       if (failure instanceof EmployeeApiError) onAuthorizationError(failure);
