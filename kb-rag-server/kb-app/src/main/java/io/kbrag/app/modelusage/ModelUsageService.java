@@ -61,6 +61,7 @@ public class ModelUsageService implements ModelCallMeter {
     static final String STATUS_SUCCEEDED = "SUCCEEDED";
     static final String STATUS_FAILED = "FAILED";
     static final String STATUS_CANCELLED = "CANCELLED";
+    private static final String ERROR_RESERVATION_EXPIRED = "RESERVATION_EXPIRED";
 
     private static final int ENABLED = 1;
     private static final int TRUE = 1;
@@ -227,11 +228,10 @@ public class ModelUsageService implements ModelCallMeter {
     }
 
     /**
-     * Conservatively settles reservations left by a process death. The process may have died after the
-     * provider accepted the request, so releasing would silently undercount real spend; charging the
-     * reservation as estimated keeps quota fail-closed. Ordinary provider failures release synchronously.
-     * Each row is claimed through optimistic locking before the shared counter is touched, so two
-     * instances cannot settle the same reservation twice.
+     * 核对超时未结算的预占。上游可能已接受请求，因此按预占上界保守结算，
+     * 同时保留未正常结束的失败状态，不能把用量结算成功解释为模型调用成功。
+     * 每行通过乐观锁领取，账本与月计数处于同一事务；任一计数更新失败时回滚整批，
+     * 避免账本已完成但配额仍被预占。正常请求的同步结算不受影响。
      */
     @Scheduled(cron = "${kb.model-usage.reconcile-cron:0 5 * * * *}")
     @Transactional(rollbackFor = Exception.class)
@@ -245,11 +245,12 @@ public class ModelUsageService implements ModelCallMeter {
                 .last("limit " + Math.max(1, properties.getModelUsage().getReconcileBatchSize())));
         for (ModelUsage usage : stale) {
             try {
-                succeed(new ModelCallTicket(usage.getUsageId(), usage.getReservedTokens(), true),
-                        ModelTokenUsage.unknown());
-            } catch (Exception e) {
+                settle(new ModelCallTicket(usage.getUsageId(), usage.getReservedTokens(), true),
+                        ModelTokenUsage.unknown(), STATUS_FAILED, ERROR_RESERVATION_EXPIRED);
+            } catch (RuntimeException e) {
                 log.error("stale model reservation not reconciled, errorCode={}, usageId={}",
                         ErrorCode.INTERNAL_ERROR, usage.getUsageId(), e);
+                throw e;
             }
         }
         if (CollectionUtils.isNotEmpty(stale)) {

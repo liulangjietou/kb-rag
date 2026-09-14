@@ -9,6 +9,7 @@ const FAILURE_REASONS: Record<string, string> = {
   MODEL_NOT_FOUND: '提供方未找到所请求的模型，请检查模型名称。',
   INPUT_TOO_LONG: '输入超过模型上下文长度，请缩短历史消息或检索上下文。',
   OUTPUT_TRUNCATED: '模型达到了输出长度上限，返回内容不完整。请缩小问题范围或核对输出预算。',
+  RESERVATION_EXPIRED: '调用未及时完成结算，上游是否已计费无法确认；已按预占上界保守结算，请结合请求标识核对。',
   DIMENSION_MISMATCH: '模型返回的向量维度与索引配置不一致，请核对向量模型与知识库索引。',
   CancellationException: '调用已停止；停止前产生的消耗仍会保留。',
   TimeoutException: '调用超时，请结合请求标识核对上游服务。',
