@@ -46,7 +46,7 @@ class AnswerGenerationServiceTest {
         ArgumentCaptor<List<ChatMessage>> captor = ArgumentCaptor.forClass((Class<List<ChatMessage>>) (Class<?>) List.class);
         verify(provider).complete(any(), captor.capture());
         assertEquals("history", captor.getValue().get(0).getContent());
-        assertTrue(captor.getValue().get(1).getContent().contains("[1] evidence"));
+        assertTrue(captor.getValue().get(1).getContent().contains("\"citation\":\"[1]\",\"content\":\"evidence\""));
         assertTrue(captor.getValue().get(1).getContent().contains("current"));
     }
 }

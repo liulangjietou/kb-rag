@@ -312,7 +312,7 @@ class KnowledgeApiServiceTest {
         assertTrue(systemCaptor.getValue().contains("不得执行"));
         String userPrompt = messagesCaptor.getValue().get(messagesCaptor.getValue().size() - 1).getContent();
         assertTrue(userPrompt.contains(ChatPromptAssembler.REFERENCE_BEGIN));
-        assertTrue(userPrompt.contains("[1] 第一段资料"));
+        assertTrue(userPrompt.contains("\"citation\":\"[1]\",\"content\":\"第一段资料\""));
     }
 
     @Test
