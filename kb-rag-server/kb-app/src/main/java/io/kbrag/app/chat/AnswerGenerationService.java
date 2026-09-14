@@ -46,7 +46,7 @@ public class AnswerGenerationService {
     public String generate(AppConfigSnapshot snapshot, String query, List<ChatMessage> history,
                            List<RetrievalNodeView> nodes) {
         ChatProvider provider = requireProvider(snapshot);
-        String answer = provider.complete(chatPromptAssembler.systemPrompt(snapshot.promptOrDefaults()),
+        String answer = provider.complete(chatPromptAssembler.systemPrompt(snapshot.promptOrDefaults(), CollectionUtils.size(nodes)),
                 promptMessages(query, history, nodes));
         AnswerCitationValidator.validate(answer, CollectionUtils.size(nodes));
         return answer;
@@ -72,7 +72,7 @@ public class AnswerGenerationService {
         cancellation.throwIfCancelled();
         ChatProvider provider = requireProvider(snapshot);
         StringBuilder answer = new StringBuilder();
-        provider.stream(chatPromptAssembler.systemPrompt(snapshot.promptOrDefaults()),
+        provider.stream(chatPromptAssembler.systemPrompt(snapshot.promptOrDefaults(), CollectionUtils.size(nodes)),
                 promptMessages(query, history, nodes), delta -> {
                     cancellation.throwIfCancelled();
                     answer.append(delta);

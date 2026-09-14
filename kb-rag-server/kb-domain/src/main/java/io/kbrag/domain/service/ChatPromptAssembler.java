@@ -91,6 +91,29 @@ public class ChatPromptAssembler {
     }
 
     /**
+     * 把本轮真实资料编号写入系统指令，避免模型将原文章节或历史编号当作当前引用。
+     *
+     * @param config 应用提示配置
+     * @param referenceCount 生成服务实际传入的本轮资料数量，不含仅用于授权检查的历史依赖
+     * @return 附带本轮编号范围的系统指令；应用关闭引用时保持原有行为
+     */
+    public String systemPrompt(AppPromptConfig config, int referenceCount) {
+        String base = systemPrompt(config);
+        if (config != null && !config.isCitationEnabled()) return base;
+        if (referenceCount == 0) {
+            return base + LINE_BREAK + "本轮没有可引用资料，不能生成任何 [数字] 引用标注。";
+        }
+        StringBuilder prompt = new StringBuilder(base).append(LINE_BREAK)
+                .append("本轮仅有 ").append(referenceCount).append(" 条可引用资料，合法引用编号完整列表：");
+        for (int index = 1; index <= referenceCount; index++) {
+            if (index > 1) prompt.append(' ');
+            prompt.append('[').append(index).append(']');
+        }
+        return prompt.append("。列表以外的编号一律无效。历史回答和资料原文章节号不增加可引用条目，")
+                .append("输出前逐一核对引用编号与所引用片段的内容。").toString();
+    }
+
+    /**
      * Builds the user message of one chat call: the wrapped material followed by the question.
      *
      * @param query    user question
