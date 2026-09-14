@@ -11,6 +11,7 @@ import HomePage from './HomePage';
 const mocks = vi.hoisted(() => ({
   listKnowledgeBases: vi.fn(),
   listApps: vi.fn(),
+  listResourceVisits: vi.fn(),
   listRegistrationReviews: vi.fn(),
   useAuth: vi.fn(),
   useModelStatus: vi.fn(),
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../api/kb', () => ({ listKnowledgeBases: mocks.listKnowledgeBases }));
 vi.mock('../api/app', () => ({ listApps: mocks.listApps }));
+vi.mock('../api/resourceVisit', () => ({ listResourceVisits: mocks.listResourceVisits, clearResourceVisits: vi.fn() }));
 vi.mock('../api/registration', () => ({ listRegistrationReviews: mocks.listRegistrationReviews }));
 vi.mock('../auth/AuthContext', () => ({ useAuth: mocks.useAuth }));
 vi.mock('../context/ModelStatusContext', () => ({ useModelStatus: mocks.useModelStatus }));
@@ -35,6 +37,7 @@ function LocationProbe() {
 }
 
 beforeEach(() => {
+  mocks.listResourceVisits.mockResolvedValue([{ resource_type: 'KB', resource_id: 'kb-1', name: '真实知识库', visited_at: '2026-09-10T13:20:00' }]);
   mocks.listKnowledgeBases.mockResolvedValue([{
     kb_id: 'kb-1',
     name: '真实知识库',
@@ -93,7 +96,6 @@ describe('HomePage permission-aware data loading', () => {
     render(<AntApp><MemoryRouter><HomePage /><LocationProbe /></MemoryRouter></AntApp>);
 
     expect(await screen.findByText('真实知识库')).toBeTruthy();
-    expect(screen.getByText('来自接口的描述')).toBeTruthy();
     expect(mocks.listKnowledgeBases).toHaveBeenCalledOnce();
     expect(mocks.listApps).not.toHaveBeenCalled();
     expect(mocks.listRegistrationReviews).not.toHaveBeenCalled();
@@ -104,6 +106,8 @@ describe('HomePage permission-aware data loading', () => {
     const search = screen.getByRole('searchbox', { name: '搜索已授权的知识库或应用' }) as HTMLInputElement;
     fireEvent.change(search, { target: { value: '真实' } });
     const results = await screen.findByRole('list', { name: '匹配的知识资源' });
+    expect(within(results).getByRole('button', { name: /真实知识库/ })).toBeTruthy();
+    fireEvent.change(search, { target: { value: '来自接口的描述' } });
     expect(within(results).getByRole('button', { name: /真实知识库/ })).toBeTruthy();
     fireEvent.keyDown(search, { key: 'Enter' });
     expect(screen.getByLabelText('current path').textContent).toBe('/kb/kb-1');
@@ -138,13 +142,15 @@ describe('HomePage permission-aware data loading', () => {
       }]);
     render(<AntApp><MemoryRouter><HomePage /></MemoryRouter></AntApp>);
 
-    expect(await screen.findByText('资源数据加载失败')).toBeTruthy();
+    expect(await screen.findByText('部分首页数据暂不可用')).toBeTruthy();
     expect(screen.queryByText('当前没有可展示的知识库或应用')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /重试/ }));
 
+    await waitFor(() => expect((screen.getByRole('searchbox') as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '重试' } });
     expect(await screen.findByText('重试恢复知识库')).toBeTruthy();
     await waitFor(() => expect(mocks.listKnowledgeBases).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText('资源数据加载失败')).toBeNull();
+    expect(screen.queryByText('部分首页数据暂不可用')).toBeNull();
   });
 
   it('重试失败时清除上一轮资源，不把陈旧数据继续伪装成实时结果', async () => {
@@ -168,11 +174,14 @@ describe('HomePage permission-aware data loading', () => {
       .mockResolvedValueOnce({ items: [], page: 1, size: 1, total: 0 });
     render(<AntApp><MemoryRouter><HomePage /></MemoryRouter></AntApp>);
 
+    await waitFor(() => expect((screen.getByRole('searchbox') as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '上一轮' } });
     expect(await screen.findByText('上一轮知识库')).toBeTruthy();
     expect(await screen.findByText('部分首页数据暂不可用')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /重试/ }));
 
-    expect(await screen.findByText('资源数据加载失败')).toBeTruthy();
+    await waitFor(() => expect(mocks.listKnowledgeBases).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText('上一轮知识库')).toBeNull());
     expect(screen.queryByText('上一轮知识库')).toBeNull();
     expect(screen.queryByText('该数据不应在失败后保留')).toBeNull();
   });

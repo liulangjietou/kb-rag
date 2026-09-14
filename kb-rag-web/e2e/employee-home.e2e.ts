@@ -85,7 +85,7 @@ test.describe('独立应用使用权限', () => {
       if (new URL(request.url()).pathname.startsWith('/api/v1/workspace/')) employeeRequests.push(request.url());
     });
     await page.goto('/home');
-    await expect(page.getByRole('heading', { name: '继续工作' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '最近访问' })).toBeVisible();
     await expect(page.getByRole('region', { name: '知识问答' })).toHaveCount(0);
     await expect(page.getByText('进入知识问答')).toHaveCount(0);
     expect(employeeRequests).toEqual([]);

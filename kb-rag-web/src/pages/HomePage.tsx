@@ -9,7 +9,7 @@ import {
   ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import { Alert, Button, Empty, Skeleton, Tag } from 'antd';
+import { Alert, Button, Empty } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listApps } from '../api/app';
@@ -20,6 +20,7 @@ import { useAuth } from '../auth/AuthContext';
 import { PERMISSIONS } from '../auth/permissions';
 import { useModelStatus } from '../context/ModelStatusContext';
 import EmployeeHomePanel from './workspace/EmployeeHomePanel';
+import RecentVisitsList from './workspace/RecentVisitsList';
 import '../styles/home.css';
 
 type LoadState = 'idle' | 'loading' | 'success' | 'error';
@@ -31,18 +32,6 @@ interface HomeResource {
   detail: string;
   path: string;
   updatedAt: string;
-}
-
-function dateLabel(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? '时间未知'
-    : new Intl.DateTimeFormat('zh-CN', {
-        month: 'numeric',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }).format(date);
 }
 
 function greeting(): string {
@@ -337,13 +326,14 @@ export default function HomePage() {
           {!employeeOnly && <section className="atlas-panel">
             <header className="atlas-panel__head">
               <div>
-                <h2>继续工作</h2>
-                <p>知识库按创建时间、应用按更新时间排列</p>
+                <h2>最近访问</h2>
+                <p>按实际打开时间排列，只显示当前有权访问的资源</p>
               </div>
               <div className="atlas-command-search">
                 <SearchOutlined aria-hidden="true" />
                 <input
                   value={query}
+                  disabled={resourcesLoading}
                   type="search"
                   placeholder="搜索已授权的知识库或应用…"
                   aria-label="搜索已授权的知识库或应用"
@@ -375,48 +365,7 @@ export default function HomePage() {
                 )}
               </div>
             </header>
-            {resourcesLoading ? (
-              <div className="atlas-panel__loading">
-                <Skeleton active paragraph={{ rows: 4 }} />
-              </div>
-            ) : resources.length === 0 && (kbState === 'error' || appState === 'error') ? (
-              <Alert
-                className="atlas-panel__resource-error"
-                type="error"
-                showIcon
-                message="资源数据加载失败"
-                description="这不是空数据，请使用上方“重试”重新读取。"
-              />
-            ) : resources.length === 0 ? (
-              <Empty
-                className="atlas-panel__empty"
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="当前没有可展示的知识库或应用"
-              />
-            ) : (
-              <ul className="atlas-work-list">
-                {resources.slice(0, 5).map((resource) => (
-                  <li key={resource.key}>
-                    <button type="button" onClick={() => navigate(resource.path)}>
-                      <span className={`atlas-work-list__icon${resource.kind === '应用' ? ' is-app' : ''}`}>
-                        {resource.kind === '应用' ? <AppstoreOutlined /> : <DatabaseOutlined />}
-                      </span>
-                      <span className="atlas-work-list__copy">
-                        <strong>{resource.name}</strong>
-                        <small>{resource.detail}</small>
-                      </span>
-                      <span className="atlas-work-list__meta">
-                        <Tag>{resource.kind}</Tag>
-                        <small>
-                          {resource.kind === '知识库' ? '创建于 ' : '更新于 '}
-                          {dateLabel(resource.updatedAt)}
-                        </small>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <RecentVisitsList />
           </section>}
 
           <section className="home-provenance" aria-label="知识证据路径">

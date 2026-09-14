@@ -8,6 +8,7 @@ import { listKnowledgeBases } from '../../api/kb';
 import type { AppVersion, KbApp, KnowledgeBase } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
+import { useResourceVisit } from '../../hooks/useResourceVisit';
 import PageHeader from '../../components/PageHeader';
 import AppConfigTab from './components/AppConfigTab';
 import AppVersionTab from './components/AppVersionTab';
@@ -26,6 +27,8 @@ export default function AppDetailPage() {
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [versions, setVersions] = useState<AppVersion[]>([]);
   const [loading, setLoading] = useState(true);
+
+  useResourceVisit('APP', appId, Boolean(app?.app_id === appId && !loading));
 
   const loadApp = useCallback(async () => {
     if (!appId) return;
