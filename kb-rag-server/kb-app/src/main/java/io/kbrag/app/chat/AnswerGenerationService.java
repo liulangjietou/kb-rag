@@ -46,8 +46,10 @@ public class AnswerGenerationService {
     public String generate(AppConfigSnapshot snapshot, String query, List<ChatMessage> history,
                            List<RetrievalNodeView> nodes) {
         ChatProvider provider = requireProvider(snapshot);
-        return provider.complete(chatPromptAssembler.systemPrompt(snapshot.promptOrDefaults()),
+        String answer = provider.complete(chatPromptAssembler.systemPrompt(snapshot.promptOrDefaults()),
                 promptMessages(query, history, nodes));
+        AnswerCitationValidator.validate(answer, CollectionUtils.size(nodes));
+        return answer;
     }
 
     /**
@@ -69,8 +71,16 @@ public class AnswerGenerationService {
                        List<RetrievalNodeView> nodes, Consumer<String> onDelta, ChatCancellation cancellation) {
         cancellation.throwIfCancelled();
         ChatProvider provider = requireProvider(snapshot);
+        StringBuilder answer = new StringBuilder();
         provider.stream(chatPromptAssembler.systemPrompt(snapshot.promptOrDefaults()),
-                promptMessages(query, history, nodes), onDelta, cancellation);
+                promptMessages(query, history, nodes), delta -> {
+                    cancellation.throwIfCancelled();
+                    answer.append(delta);
+                    onDelta.accept(delta);
+                }, cancellation);
+        cancellation.throwIfCancelled();
+        // 不阻塞首字输出；结束前统一校验，异常沿已有失败链路落库，禁止发出成功终态。
+        AnswerCitationValidator.validate(answer.toString(), CollectionUtils.size(nodes));
     }
 
     /**

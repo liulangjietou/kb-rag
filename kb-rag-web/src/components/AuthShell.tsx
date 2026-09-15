@@ -20,6 +20,7 @@ export default function AuthShell({ children, eyebrow, headline, description, co
       <section className="auth-shell__stage" aria-label="平台能力概览">
         <BrandMark inverse />
         <div className="auth-shell__message">
+          <div className="auth-shell__product-title">企业级知识库RAG</div>
           <span className="auth-overline">KNOWLEDGE OPERATIONS</span>
           <h1>{headline}</h1>
           <p>{description}</p>
@@ -44,6 +45,7 @@ export default function AuthShell({ children, eyebrow, headline, description, co
         </div>
         <div className="auth-shell__mobile-brand">
           <BrandMark />
+          <div className="auth-shell__product-title">企业级知识库RAG</div>
         </div>
         <section className={`auth-card${compactCard ? ' auth-card--compact' : ''}`}>
           {eyebrow && <span className="auth-overline">{eyebrow}</span>}

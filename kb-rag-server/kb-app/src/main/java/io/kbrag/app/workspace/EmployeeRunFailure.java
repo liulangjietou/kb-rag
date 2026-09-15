@@ -15,6 +15,7 @@ record EmployeeRunFailure(ErrorCode code, String message) {
             case MODEL_QUOTA_EXCEEDED -> "模型用量已达限额，请联系管理员";
             case RATE_LIMITED -> "当前问答繁忙，请稍后重试";
             case UPSTREAM_MODEL_ERROR -> "生成服务暂不可用，请稍后重试";
+            case ANSWER_CITATION_INVALID -> "回答引用校验未通过，当前内容仅供核查，请重新生成";
             default -> "回答未能完整生成或保存，请稍后重试";
         };
         return new EmployeeRunFailure(code, message);
