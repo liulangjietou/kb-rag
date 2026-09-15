@@ -40,6 +40,22 @@ public class EvalRetrievalConfig {
     /** Fusion strategy literal, {@code null} keeps the deployment default. */
     private String fusion;
 
+    /** 发布评测携带原版本的融合权重；历史记录为空时保持既有默认值解析。 */
+    @JsonProperty("w_vec")
+    private Double wVec;
+
+    /** 发布评测携带原版本的 RRF 阻尼，不能在执行时换成当前默认值。 */
+    @JsonProperty("rrf_k")
+    private Integer rrfK;
+
+    /** 发布评测使用的重排排序模式。 */
+    @JsonProperty("rerank_mode")
+    private String rerankMode;
+
+    /** 混合重排的语义分权重，0 和 1 均为有效边界。 */
+    @JsonProperty("rerank_w_semantic")
+    private Double rerankWSemantic;
+
     /** Absolute score threshold, {@code null} disables filtering. */
     @JsonProperty("score_threshold")
     private Double scoreThreshold;

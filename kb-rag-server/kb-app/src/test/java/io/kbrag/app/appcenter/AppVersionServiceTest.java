@@ -150,6 +150,59 @@ class AppVersionServiceTest {
     }
 
     @Test
+    void shouldFreezeHybridOrderingDefaultsFromTheKnowledgeBase() {
+        AppVersion draft = versionOf("V1.0", AppVersionStatus.DRAFT);
+        draft.setConfig(JsonUtil.toJson(snapshotOf(KB_ID)));
+        KnowledgeBase kb = new KnowledgeBase();
+        kb.setRetrievalConfig("{\"rerank_mode\":\"hybrid\",\"rerank_w_semantic\":0.25}");
+        when(appVersionMapper.selectOne(any())).thenReturn(draft);
+        when(knowledgeBaseService.require(KB_ID)).thenReturn(kb);
+
+        AppConfigSnapshot frozen = JsonUtil.parse(service.submitTest(VERSION_ID).getConfig(),
+                AppConfigSnapshot.class);
+
+        assertEquals("hybrid", frozen.getRetrieval().getRerankMode());
+        assertEquals(0.25d, frozen.getRetrieval().getRerankWSemantic());
+    }
+
+    @Test
+    void shouldFreezeDeploymentOrderingDefaultsWithoutAConfiguredKnowledgeBase() {
+        AppVersion draft = versionOf("V1.0", AppVersionStatus.DRAFT);
+        draft.setConfig(JsonUtil.toJson(snapshotOf(KB_ID)));
+        when(appVersionMapper.selectOne(any())).thenReturn(draft);
+        when(knowledgeBaseService.require(KB_ID)).thenReturn(new KnowledgeBase());
+        properties.getRetrieval().setRerankMode("hybrid");
+        properties.getRetrieval().setRerankWSemantic(0.0d);
+
+        AppConfigSnapshot frozen = JsonUtil.parse(service.submitTest(VERSION_ID).getConfig(),
+                AppConfigSnapshot.class);
+
+        assertEquals("hybrid", frozen.getRetrieval().getRerankMode());
+        assertEquals(0.0d, frozen.getRetrieval().getRerankWSemantic());
+    }
+
+    @Test
+    void shouldKeepExplicitOrderingAheadOfKnowledgeBaseAndDeploymentDefaults() {
+        AppVersion draft = versionOf("V1.0", AppVersionStatus.DRAFT);
+        AppConfigSnapshot configured = snapshotOf(KB_ID);
+        configured.getRetrieval().setRerankMode("hybrid");
+        configured.getRetrieval().setRerankWSemantic(0.0d);
+        draft.setConfig(JsonUtil.toJson(configured));
+        KnowledgeBase kb = new KnowledgeBase();
+        kb.setRetrievalConfig("{\"rerank_mode\":\"semantic\",\"rerank_w_semantic\":0.8}");
+        when(appVersionMapper.selectOne(any())).thenReturn(draft);
+        when(knowledgeBaseService.require(KB_ID)).thenReturn(kb);
+        properties.getRetrieval().setRerankMode("semantic");
+        properties.getRetrieval().setRerankWSemantic(1.0d);
+
+        AppConfigSnapshot frozen = JsonUtil.parse(service.submitTest(VERSION_ID).getConfig(),
+                AppConfigSnapshot.class);
+
+        assertEquals("hybrid", frozen.getRetrieval().getRerankMode());
+        assertEquals(0.0d, frozen.getRetrieval().getRerankWSemantic());
+    }
+
+    @Test
     void shouldRefuseToSubmitAVersionWithoutAKnowledgeBase() {
         AppVersion draft = versionOf("V1.0", AppVersionStatus.DRAFT);
         draft.setConfig(JsonUtil.toJson(new AppConfigSnapshot()));

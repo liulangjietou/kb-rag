@@ -438,6 +438,8 @@ public class KnowledgeApiService {
                 .wVec(retrieval.getWVec())
                 .rrfK(retrieval.getRrfK())
                 .rerankEnabled(retrieval.getRerankEnabled())
+                .rerankMode(retrieval.getRerankMode())
+                .rerankWSemantic(retrieval.getRerankWSemantic())
                 .rewriteEnabled(retrieval.getRewriteEnabled())
                 .metadataFilter(command.getMetadataFilter())
                 .build();

@@ -11494,8 +11494,32 @@ components:
           minimum: 1
         fusion:
           allOf:
-          - $ref: '#/components/schemas/FusionConfig'
+          - $ref: '#/components/schemas/FusionMode'
           nullable: true
+        w_vec:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 1
+          description: 加权融合的向量权重；发布门禁沿用对应版本的冻结值
+        rrf_k:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: RRF 融合的阻尼常数
+        rerank_mode:
+          type: string
+          nullable: true
+          enum: [semantic, hybrid]
+          description: 语义或混合重排模式；旧评测记录可缺省
+        rerank_w_semantic:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 1
+          description: 混合重排的语义权重，0 表示排序仅使用归一化 BM25 得分
         score_threshold:
           type: number
           format: float
@@ -11974,8 +11998,8 @@ components:
               $ref: '#/components/schemas/App'
     AppRetrievalConfig:
       type: object
-      description: 版本快照的检索参数块；建版请求中每个字段均可选，null 继承最新版本值，草稿态外经
-        submit-test 补全并冻结（M4c-CONTRACTS.md §1）
+      description: 版本快照的检索参数块；建版时可省略整个配置以继承最新版本。提交测试时补全未指定的
+        重排设置（优先知识库配置，其次部署默认值）并冻结，显式设置的值保持不变。
       properties:
         recall_top_k:
           type: integer
@@ -12008,6 +12032,18 @@ components:
         rerank_enabled:
           type: boolean
           nullable: true
+        rerank_mode:
+          type: string
+          nullable: true
+          enum: [semantic, hybrid]
+          description: 语义或混合重排模式，提交测试后随版本冻结
+        rerank_w_semantic:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 1
+          description: 混合重排的语义权重，允许显式为 0
         rewrite_enabled:
           type: boolean
           nullable: true

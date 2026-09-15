@@ -199,6 +199,21 @@ class KnowledgeApiServiceTest {
     }
 
     @Test
+    void shouldPassTheFrozenHybridOrderingToRetrieval() {
+        AppVersion version = stubVersionWithSnapshot(AppVersionStatus.RELEASED);
+        AppConfigSnapshot configured = snapshot();
+        configured.getRetrieval().setRerankMode("hybrid");
+        configured.getRetrieval().setRerankWSemantic(0.0d);
+        when(appVersionService.parseConfig(version)).thenReturn(configured);
+        stubSearch(node("doc_1", "第一段"));
+
+        service.search(principal(List.of()), command(null, null, null));
+
+        assertEquals("hybrid", capturedRetrieval().getRerankMode());
+        assertEquals(0.0d, capturedRetrieval().getRerankWSemantic());
+    }
+
+    @Test
     void shouldLetTheWhiteListedTopNOverrideTheSnapshotValue() {
         stubVersion(AppVersionStatus.RELEASED);
         stubSearch(node("doc_1", "第一段"));

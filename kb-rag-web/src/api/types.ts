@@ -1601,6 +1601,9 @@ export interface AppRetrievalConfig {
   rrf_k?: number;
   rerank_enabled?: boolean;
   rewrite_enabled?: boolean;
+  /** 重排设置随版本冻结；旧快照中允许缺省。 */
+  rerank_mode?: 'semantic' | 'hybrid' | null;
+  rerank_w_semantic?: number | null;
 }
 
 /**
