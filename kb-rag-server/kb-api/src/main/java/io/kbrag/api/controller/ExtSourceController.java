@@ -108,6 +108,16 @@ public class ExtSourceController {
         return Result.success(ExtSourceSyncAcceptedResponse.of());
     }
 
+    /** 只提交失败对象重试；使用与完整同步相同的写权限和知识库范围校验。 */
+    @PostMapping("/api/v1/ext-sources/{sourceId}/retry-failed")
+    @RequiresPermission(PermissionCodes.DOC_WRITE)
+    public Result<ExtSourceSyncAcceptedResponse> retryFailed(@PathVariable String sourceId) {
+        kbResourceGuard.requireExtSourceAccess(sourceId);
+        extSourceService.ensureExists(sourceId);
+        extSourceService.retryFailedAsync(sourceId);
+        return Result.success(ExtSourceSyncAcceptedResponse.of());
+    }
+
     /**
      * Lists the per object sync outcomes of one source.
      *
@@ -121,10 +131,11 @@ public class ExtSourceController {
     public Result<PageResponse<ExtSourceItemResponse>> items(
             @PathVariable String sourceId,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
-            @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
+            @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size,
+            @RequestParam(name = "failed_only", defaultValue = "false") boolean failedOnly) {
         kbResourceGuard.requireExtSourceAccess(sourceId);
         return Result.success(PageResponse.from(
-                extSourceService.listItems(sourceId, normalizePage(page), normalizeSize(size)),
+                extSourceService.listItems(sourceId, normalizePage(page), normalizeSize(size), failedOnly),
                 ExtSourceItemResponse::from));
     }
 

@@ -35,8 +35,15 @@ export function syncExtSource(sourceId: string): Promise<ExtSourceSyncAccepted> 
 }
 
 /** GET /api/v1/ext-sources/{sourceId}/items (M14 contract section 2.3): per-object sync outcomes. */
-export function listExtSourceItems(sourceId: string, page = 1, size = 20): Promise<PageResult<ExtSourceItem>> {
-  return apiGet<PageResult<ExtSourceItem>>(`/ext-sources/${sourceId}/items`, { page, size });
+export function listExtSourceItems(sourceId: string, page = 1, size = 20, failedOnly = false): Promise<PageResult<ExtSourceItem>> {
+  return apiGet<PageResult<ExtSourceItem>>(`/ext-sources/${sourceId}/items`, {
+    page, size, ...(failedOnly ? { failed_only: true } : {}),
+  });
+}
+
+/** 只提交失败对象重试，逐项结果仍从对象明细读取。 */
+export function retryFailedExtSource(sourceId: string): Promise<ExtSourceSyncAccepted> {
+  return apiPost<ExtSourceSyncAccepted>(`/ext-sources/${sourceId}/retry-failed`);
 }
 
 /**
