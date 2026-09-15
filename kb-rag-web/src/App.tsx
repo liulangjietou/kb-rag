@@ -28,7 +28,7 @@ function ThemedApplication() {
   return (
     <ConfigProvider locale={zhCN} theme={antThemeConfig}>
       <AntApp>
-        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <BrowserRouter>
           <AuthProvider>
             <AppRouter />
           </AuthProvider>
