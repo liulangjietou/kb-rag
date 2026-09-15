@@ -1261,6 +1261,86 @@ paths:
           $ref: '#/components/responses/PermissionDenied'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/me/resource-visits:
+    get:
+      tags: [auth]
+      operationId: recentResourceVisits
+      summary: 本人最近访问的管理资源（KB_READ 或 APP_READ）
+      description: 按当前会话租户和用户隔离，先用现有知识库与应用管理授权过滤，再按访问时间和主键倒序取五项。资源当前名称按授权根查询，不保存正文或路径参数；不返回已删除或已撤权资源。应用管理权限沿用 APP_READ，不与员工 APP_USE 目录混用。
+      responses:
+        '200':
+          description: 本人当前可访问的资源；尚未打开资源时为空数组
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      maxItems: 5
+                      items:
+                        $ref: '#/components/schemas/ResourceVisit'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+    post:
+      tags: [auth]
+      operationId: rememberResourceVisit
+      summary: 记录一次成功打开的资源
+      description: KB 要求 KB_READ 与知识库范围授权；APP 要求 APP_READ 与应用租户授权。资源仍存在且可访问才记录，所有者和时间由服务端确定；重复打开只保留最后一次时间。页面辅助记录失败不阻断详情，不自动重发。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resource_type, resource_id]
+              properties:
+                resource_type: {type: string, enum: [KB, APP]}
+                resource_id: {type: string, minLength: 1, maxLength: 64}
+      responses:
+        '200':
+          description: 已记录；响应不缓存
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultEnvelope'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [auth]
+      operationId: clearResourceVisits
+      summary: 清空本人资源访问记录（KB_READ 或 APP_READ）
+      description: 按当前租户和用户物理清空访问记录，不删除知识库、应用或其他人的历史。清空完成后再次打开资源会产生新记录；与其他页面并发打开时，新访问仍可出现。
+      responses:
+        '200':
+          description: 已清空本人记录；响应不缓存
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
   /api/v1/workspace/overview:
     get:
       tags: [app]
@@ -7384,6 +7464,17 @@ components:
         properties:
           data:
             $ref: '#/components/schemas/QualityRegression'
+    ResourceVisit:
+      type: object
+      required: [resource_type, resource_id, name, visited_at]
+      properties:
+        resource_type: {type: string, enum: [KB, APP]}
+        resource_id: {type: string}
+        name: {type: string}
+        visited_at:
+          type: string
+          description: 服务端本地访问时间，ISO 本地日期时间格式；不是资源创建或更新时间
+          example: '2026-09-11T10:30:00.123456'
     EmployeeHomeOverview:
       type: object
       required: [applications, recent_conversations]

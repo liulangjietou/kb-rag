@@ -43,6 +43,7 @@ import {
 import type { KbDocument, KnowledgeBase, RebuildStatus } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
+import { useResourceVisit } from '../../hooks/useResourceVisit';
 import PageHeader from '../../components/PageHeader';
 import DocumentActions from './components/DocumentActions';
 import DocumentList from './components/DocumentList';
@@ -147,6 +148,8 @@ export default function KbDetailPage() {
   const rebuildSequence = useRef(0);
   const prevStaleCountRef = useRef<number | null>(null);
   const resumePolling = useRef(false);
+
+  useResourceVisit('KB', kbId, Boolean(kb?.kb_id === kbId && !kbError));
 
   const loadKb = useCallback(async () => {
     if (!kbId) return;
