@@ -30,13 +30,15 @@ test.describe('只读文档的历史版本', () => {
   });
 });
 
-test('翻页后晚到的旧页轮询不能覆盖当前页，勾选不会跨页保留', async ({ page, unexpectedRequests }) => {
-  let firstPageRequests = 0;
+test('翻页后晚到的旧页轮询不能覆盖当前页，勾选不会跨页保留', async ({ page, api, unexpectedRequests }) => {
+  api['/kb/kb_fixture/rebuild-status'] = { stale_count: 0, in_progress_count: 0, failed_count: 0, processing_count: 1, document_count: 11 };
+  let holdNextFirstPage = false;
   let pendingPoll: Route | undefined;
   const secondPage = { ...documents[0], doc_id: 'doc_second_page', file_name: '第二页文档.pdf' };
   await page.route('**/api/v1/kb/kb_fixture/documents?*', async (route) => {
     const pageNumber = Number(new URL(route.request().url()).searchParams.get('page'));
-    if (pageNumber === 1 && ++firstPageRequests === 2) {
+    if (pageNumber === 1 && holdNextFirstPage) {
+      holdNextFirstPage = false;
       pendingPoll = route;
       return;
     }
@@ -49,6 +51,7 @@ test('翻页后晚到的旧页轮询不能覆盖当前页，勾选不会跨页�
   });
   await page.goto('/kb/kb_fixture');
   await page.getByRole('checkbox', { name: '选择 产品使用手册.pdf' }).check();
+  holdNextFirstPage = true;
   await expect.poll(() => Boolean(pendingPoll)).toBe(true);
   await page.locator('.ant-pagination-item-2').click();
   await expect(page.getByText('第二页文档.pdf', { exact: true })).toBeVisible();

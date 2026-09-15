@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.kbrag.app.index.IndexPipelineService;
 import io.kbrag.app.kb.KnowledgeBaseService;
 import io.kbrag.common.exception.BizException;
+import io.kbrag.common.constant.KbConstants;
 import io.kbrag.common.util.HashUtil;
 import io.kbrag.domain.entity.Annotation;
 import io.kbrag.domain.entity.Chunk;
@@ -67,6 +68,11 @@ public class DocumentService {
     private static final int DISABLED = 0;
     private static final int NOT_TRASHED = 0;
     private static final int REVIEW_REQUIRED = 1;
+    private static final String WEB_SOURCE_EXISTS = "EXISTS (SELECT 1 FROM t_kb_web_source ws "
+            + "WHERE ws.kb_id = t_kb_document.kb_id AND ws.doc_id = t_kb_document.doc_id)";
+    private static final String EXTERNAL_SOURCE_EXISTS = "EXISTS (SELECT 1 FROM t_kb_ext_source_item si "
+            + "JOIN t_kb_ext_source es ON es.source_id = si.source_id "
+            + "WHERE es.kb_id = t_kb_document.kb_id AND si.doc_id = t_kb_document.doc_id)";
 
     private final DocumentMapper documentMapper;
     private final DocumentVersionMapper documentVersionMapper;
@@ -312,12 +318,12 @@ public class DocumentService {
      * Lists the documents of a knowledge base.
      *
      * @param kbId          knowledge base business id
-     * @param processStatus optional processing state filter
+     * @param filter        入口已校验的文档筛选条件
      * @param page          one based page number
      * @param size          page size
      * @return page of documents
      */
-    public IPage<Document> list(String kbId, ProcessStatus processStatus, long page, long size) {
+    public IPage<Document> list(String kbId, DocumentListFilter filter, long page, long size) {
         // t_kb_document carries no tenant_id, so this listing is only isolated by the fenced read of
         // the base it names - without it, one kbId is enough to page through another tenant's
         // documents, file names and parse states included.
@@ -328,10 +334,39 @@ public class DocumentService {
                 // "deleted" and "present" indistinguishable in the console.
                 .eq(Document::getTrashed, NOT_TRASHED)
                 .orderByDesc(Document::getId);
-        if (processStatus != null) {
-            wrapper.eq(Document::getProcessStatus, processStatus);
+        if (filter.keyword() != null) {
+            // 将用户输入作为字面关键词；百分号、下划线和转义符不能扩大匹配范围。
+            String keyword = filter.keyword().replace("!", "!!").replace("%", "!%").replace("_", "!_");
+            wrapper.apply("file_name LIKE {0} ESCAPE '!'", "%" + keyword + "%");
         }
+        wrapper.eq(filter.processStatus() != null, Document::getProcessStatus, filter.processStatus());
+        if (filter.publishStatus() == PublishStatus.PUBLISHED) {
+            // 历史空值的展示语义也是已发布，筛选口径必须与 DocumentResponse 一致。
+            wrapper.and(query -> query.eq(Document::getPublishStatus, PublishStatus.PUBLISHED)
+                    .or().isNull(Document::getPublishStatus));
+        } else {
+            wrapper.eq(filter.publishStatus() != null, Document::getPublishStatus, filter.publishStatus());
+        }
+        wrapper.ge(filter.updatedFrom() != null, Document::getUpdatedAt, filter.updatedFrom());
+        wrapper.le(filter.updatedTo() != null, Document::getUpdatedAt, filter.updatedTo());
+        applySourceFilter(wrapper, filter.source());
         return documentMapper.selectPage(new Page<>(page, size), wrapper);
+    }
+
+    /** 来源按接入关联识别；已移除接入保留的关联仍能说明来源，不读取连接凭据。 */
+    private void applySourceFilter(LambdaQueryWrapper<Document> wrapper, DocumentListFilter.Source source) {
+        if (source == null) {
+            return;
+        }
+        String chatPrefix = KbConstants.SOURCE_CHANNEL_CHAT + ":%";
+        switch (source) {
+            case WEB -> wrapper.apply(WEB_SOURCE_EXISTS);
+            case EXTERNAL -> wrapper.apply(EXTERNAL_SOURCE_EXISTS);
+            case CHAT -> wrapper.apply("source_key LIKE {0}", chatPrefix);
+            case UPLOAD -> wrapper.apply("(source_key IS NULL OR source_key NOT LIKE {0})", chatPrefix)
+                    .apply("NOT " + WEB_SOURCE_EXISTS)
+                    .apply("NOT " + EXTERNAL_SOURCE_EXISTS);
+        }
     }
 
     /**

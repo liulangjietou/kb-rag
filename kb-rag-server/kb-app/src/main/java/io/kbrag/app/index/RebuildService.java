@@ -39,6 +39,11 @@ import java.util.List;
 public class RebuildService {
 
     private static final int STALE = 1;
+    private static final int NOT_TRASHED = 0;
+
+    /** 全库活跃处理包含首次上传，与只统计配置追平的 IN_PROGRESS 分开。 */
+    private static final Collection<ProcessStatus> PROCESSING = List.of(
+            ProcessStatus.UPLOADED, ProcessStatus.PARSING, ProcessStatus.PARSED, ProcessStatus.INDEXING);
 
     /**
      * 重建过程中文档会经过的状态，与 {@link IndexPipelineService#rebuild(String)} 实际写入的一致：
@@ -75,7 +80,10 @@ public class RebuildService {
         int stale = count(kbId, null);
         int inProgress = count(kbId, IN_PROGRESS);
         int failed = count(kbId, FAILED);
-        return new RebuildStatus(stale, inProgress, failed);
+        int documentCount = Math.toIntExact(documentMapper.selectCount(liveScope(kbId)));
+        int processingCount = Math.toIntExact(documentMapper.selectCount(
+                liveScope(kbId).in(Document::getProcessStatus, PROCESSING)));
+        return new RebuildStatus(stale, inProgress, failed, documentCount, processingCount);
     }
 
     private int count(String kbId, Collection<ProcessStatus> statuses) {
@@ -121,10 +129,15 @@ public class RebuildService {
 
     /** 待追平文档的取数口径，提交与统计共用一处，避免两边口径漂移。 */
     private LambdaQueryWrapper<Document> staleScope(String kbId) {
-        return new LambdaQueryWrapper<Document>()
-                .eq(Document::getKbId, kbId)
+        return liveScope(kbId)
                 .eq(Document::getConfigStale, STALE)
                 .isNotNull(Document::getCurrentVersionId);
+    }
+
+    /** 回收站已下线的文档既不计入可见列表，也不应继续自动重建。 */
+    private LambdaQueryWrapper<Document> liveScope(String kbId) {
+        return new LambdaQueryWrapper<Document>().eq(Document::getKbId, kbId)
+                .eq(Document::getTrashed, NOT_TRASHED);
     }
 
     /**
@@ -133,7 +146,10 @@ public class RebuildService {
      * @param staleCount      仍需按新配置重建的文档数，归零即全部追平
      * @param inProgressCount 其中正在跑重建管线的文档数
      * @param failedCount     其中重建失败、需要人工介入的文档数
+     * @param documentCount   全库未进入回收站的文档数，不受筛选条件影响
+     * @param processingCount 全库正在处理或等待管线的文档数，包括首次上传
      */
-    public record RebuildStatus(int staleCount, int inProgressCount, int failedCount) {
+    public record RebuildStatus(int staleCount, int inProgressCount, int failedCount,
+                                int documentCount, int processingCount) {
     }
 }

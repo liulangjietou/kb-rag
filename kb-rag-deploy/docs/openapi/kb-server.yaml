@@ -1853,7 +1853,33 @@ paths:
       tags:
       - document
       summary: 文档列表
+      description: 需要 kb:read 和知识库访问范围。组合条件在数据库分页前生效，按文档 ID 倒序。关键词按字面匹配文件名，百分号、下划线不作为通配符。
       parameters:
+      - name: keyword
+        in: query
+        schema:
+          type: string
+          maxLength: 200
+      - name: publish_status
+        in: query
+        schema:
+          $ref: '#/components/schemas/PublishStatus'
+      - name: source
+        in: query
+        description: 按同知识库的网页或外部接入关联、聊天来源键识别，保留已软删除关联的历史来源；UPLOAD 表示上传或没有保留关联的历史文档。
+        schema:
+          type: string
+          enum: [UPLOAD, WEB, EXTERNAL, CHAT]
+      - name: updated_from
+        in: query
+        description: 文档更新时间下界（包含），ISO 本地时间，无时区，例如 2026-09-01T00:00:00。
+        schema:
+          type: string
+      - name: updated_to
+        in: query
+        description: 文档更新时间上界（包含），不得早于 updated_from；例如 2026-09-11T23:59:59.999。
+        schema:
+          type: string
       - name: process_status
         in: query
         required: false
@@ -1866,6 +1892,13 @@ paths:
           type: integer
           minimum: 1
           default: 1
+      - name: size
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 20
       responses:
         '200':
           description: OK
@@ -1873,6 +1906,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DocumentListResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/rebuild-status:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags: [knowledge-base]
+      summary: 全库文档处理与配置追平状态
+      description: 需要 kb:read 和知识库范围。所有计数排除回收站与逻辑删除文档；不受文档列表筛选、分页影响。
+      responses:
+        '200':
+          description: 统计成功，零值表示真实没有相关文档；请求失败不能解释为零。
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      required: [stale_count, in_progress_count, failed_count, document_count, processing_count]
+                      properties:
+                        stale_count:
+                          type: integer
+                          description: 具有活跃版本且配置待追平的文档数。
+                        in_progress_count:
+                          type: integer
+                          description: 待追平集合中 PARSING、PARSED、INDEXING 的文档数。
+                        failed_count:
+                          type: integer
+                          description: 待追平集合中 PARSE_FAILED、INDEX_FAILED 的文档数。
+                        document_count:
+                          type: integer
+                          description: 全库未回收文档数。
+                        processing_count:
+                          type: integer
+                          description: 全库 UPLOADED、PARSING、PARSED、INDEXING 文档数，包含首次上传，不含人工确认状态。
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/kb/{kbId}/documents/confirm:
     parameters:
     - $ref: '#/components/parameters/KbId'
@@ -7237,6 +7312,10 @@ components:
         version_id:
           type: string
           description: 仅上传响应返回：本次上传落到的文档版本 id；列表/详情不返回
+        updated_at:
+          type: string
+          nullable: true
+          description: 文档记录真实最近更新时间，ISO 本地时间，无时区。缺失时不以创建时间推断。
         version:
           type: string
           description: 仅上传响应返回：该版本号（如 v2），对应 M4a 重复上传三分支的判定结果
