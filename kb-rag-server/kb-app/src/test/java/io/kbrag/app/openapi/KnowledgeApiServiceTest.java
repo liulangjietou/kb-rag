@@ -41,6 +41,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -94,6 +95,20 @@ class KnowledgeApiServiceTest {
                 new AnswerGenerationService(chatProviderFactory, new ChatPromptAssembler()),
                 new ContentBudgetTrimmer(), new RequestOverridePolicy(),
                 apiAuditService, mock(SearchInsightService.class), new KbMetrics(meterRegistry));
+    }
+
+    @Test
+    void shouldNotExposeInternalRerankMeasurementOnOpenApiSearch() {
+        stubVersion(AppVersionStatus.RELEASED);
+        when(retrievalService.search(anyList(), any())).thenReturn(new SearchOutcome(
+                List.of(node("doc_1", "第一段")), List.of(), null,
+                new io.kbrag.app.retrieval.RerankTiming(io.kbrag.app.retrieval.RerankTiming.Status.APPLIED, 4L)));
+
+        KnowledgeCallResult result = service.search(principal(List.of()), command(null, null, null));
+
+        assertNull(result.getDiagnostics());
+        assertFalse(JsonUtil.toJson(result).contains("rerankTiming"));
+        assertEquals(1, result.getNodes().size());
     }
 
     @Test

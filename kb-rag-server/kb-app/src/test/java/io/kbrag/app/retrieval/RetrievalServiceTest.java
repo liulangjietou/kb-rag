@@ -271,6 +271,70 @@ class RetrievalServiceTest {
     }
 
     @Test
+    void shouldExposeRerankTimingWithoutChangingTheAppliedScores() {
+        givenDualRoute();
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_1", "first chunk", null), chunk("ck_2", "second chunk", null)));
+        when(rerankService.isAvailable()).thenReturn(true);
+        when(rerankService.rerank(anyString(), anyList(), eq(true)))
+                .thenReturn(RerankOutcome.applied(List.of(0.2d, 0.9d)));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().rerankEnabled(true).build());
+
+        var timing = JsonUtil.mapper().valueToTree(outcome).path("rerankTiming");
+        assertEquals("APPLIED", timing.path("status").asText(), "实际重排必须返回可追踪的执行状态");
+        assertTrue(timing.path("elapsedMs").isIntegralNumber(), "实际调用耗时不能用缺失或零占位代替");
+        assertTrue(timing.path("elapsedMs").asLong() >= 0);
+        assertEquals("ck_2", outcome.getNodes().get(0).getChunkId());
+        assertEquals(0.9d, outcome.getNodes().get(0).getScore());
+        verify(rerankService).rerank(anyString(), anyList(), eq(true));
+    }
+
+    @Test
+    void shouldKeepCoarseOrderingAndMeasureDegradedRerank() {
+        givenDualRoute();
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_1", "first chunk", null), chunk("ck_2", "second chunk", null)));
+        when(rerankService.isAvailable()).thenReturn(true);
+        when(rerankService.rerank(anyString(), anyList(), eq(true)))
+                .thenReturn(RerankOutcome.degraded(DegradedReason.RERANK_TIMEOUT.code()));
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().rerankEnabled(true).build());
+
+        assertEquals(RerankTiming.Status.TIMEOUT, outcome.getRerankTiming().status());
+        assertTrue(outcome.getRerankTiming().elapsedMs() >= 0);
+        assertEquals(List.of("ck_1", "ck_2"), outcome.getNodes().stream().map(RetrievalNodeView::getChunkId).toList());
+        assertEquals(List.of(DegradedReason.RERANK_TIMEOUT.code()), outcome.getDegraded());
+        verify(rerankService).rerank(anyString(), anyList(), eq(true));
+    }
+
+    @Test
+    void shouldDistinguishDisabledAndImplicitlyUnavailableRerank() {
+        givenDualRoute();
+        when(chunkMapper.selectList(any())).thenReturn(List.of(
+                chunk("ck_1", "first chunk", null), chunk("ck_2", "second chunk", null)));
+
+        SearchOutcome unavailable = retrievalService.search(KB_ID, command().build());
+        SearchOutcome disabled = retrievalService.search(KB_ID, command().rerankEnabled(false).build());
+
+        assertEquals(new RerankTiming(RerankTiming.Status.UNAVAILABLE, null), unavailable.getRerankTiming());
+        assertEquals(new RerankTiming(RerankTiming.Status.DISABLED, null), disabled.getRerankTiming());
+        assertTrue(unavailable.getDegraded().isEmpty());
+        assertTrue(disabled.getDegraded().isEmpty());
+    }
+
+    @Test
+    void shouldReportNoCandidatesWhenNoVisibleVersionCanBeSearched() {
+        when(documentMapper.selectList(any())).thenReturn(List.of());
+
+        SearchOutcome outcome = retrievalService.search(KB_ID, command().build());
+
+        assertEquals(new RerankTiming(RerankTiming.Status.EMPTY_CANDIDATES, null), outcome.getRerankTiming());
+        assertTrue(outcome.getNodes().isEmpty());
+        verify(rerankService, never()).rerank(anyString(), anyList(), anyBoolean());
+    }
+
+    @Test
     void shouldFuseBothRoutesWhenEmbeddingProviderIsConfigured() {
         givenDualRoute();
         when(chunkMapper.selectList(any())).thenReturn(List.of(

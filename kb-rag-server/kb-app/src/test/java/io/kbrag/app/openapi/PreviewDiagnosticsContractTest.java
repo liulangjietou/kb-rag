@@ -7,11 +7,13 @@ import io.kbrag.app.insight.SearchInsightService;
 import io.kbrag.app.metrics.KbMetrics;
 import io.kbrag.app.retrieval.RetrievalService;
 import io.kbrag.app.retrieval.SearchOutcome;
+import io.kbrag.app.retrieval.RerankTiming;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.entity.AppVersion;
 import io.kbrag.domain.enums.AppVersionStatus;
+import io.kbrag.domain.enums.DegradedReason;
 import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.service.ContentBudgetTrimmer;
@@ -63,6 +65,8 @@ class PreviewDiagnosticsContractTest {
 
     @Test
     void shouldReturnMeasuredStagesWithThePreviewAnswer() {
+        RerankTiming rerank = new RerankTiming(RerankTiming.Status.APPLIED, 0L);
+        when(retrieval.search(anyList(), any())).thenReturn(new SearchOutcome(List.of(), List.of(), null, rerank));
         KnowledgeCallResult result = service.preview("app_preview", "av_preview",
                 KnowledgeCallCommand.builder().query("问题").build(), null);
 
@@ -71,6 +75,7 @@ class PreviewDiagnosticsContractTest {
         ChatDiagnostics timing = result.getDiagnostics();
         assertEquals(ChatDiagnostics.Outcome.SUCCEEDED, timing.outcome());
         assertNull(timing.firstDeltaMs());
+        assertEquals(rerank, timing.rerank());
         assertTrue(timing.totalMs() >= timing.configurationMs() + timing.retrievalMs() + timing.generationMs());
     }
 
@@ -90,12 +95,16 @@ class PreviewDiagnosticsContractTest {
         assertEquals(ChatDiagnostics.Outcome.FAILED, diagnostics.getValue().outcome());
         assertNull(diagnostics.getValue().generationMs());
         assertNull(diagnostics.getValue().firstDeltaMs());
+        assertNull(diagnostics.getValue().rerank());
         verifyNoInteractions(generation);
         verify(listener, never()).onDone(any(), any(), any());
     }
 
     @Test
     void shouldPreservePartialStreamAndReportGenerationFailure() {
+        RerankTiming rerank = new RerankTiming(RerankTiming.Status.TIMEOUT, 12L);
+        when(retrieval.search(anyList(), any())).thenReturn(new SearchOutcome(List.of(),
+                List.of(DegradedReason.RERANK_TIMEOUT.code()), null, rerank));
         doAnswer(invocation -> {
             java.util.function.Consumer<String> delta = invocation.getArgument(4);
             delta.accept("部分回答");
@@ -113,7 +122,31 @@ class PreviewDiagnosticsContractTest {
         order.verify(listener).onError("UPSTREAM_MODEL_ERROR", "生成失败");
         assertEquals(ChatDiagnostics.Stage.GENERATION, diagnostics.getValue().failedStage());
         assertTrue(diagnostics.getValue().firstDeltaMs() >= 0);
+        assertEquals(rerank, diagnostics.getValue().rerank());
         verify(listener, never()).onDone(any(), any(), any());
+    }
+
+    @Test
+    void shouldPreserveRerankMeasurementWhenCancelledAfterRetrieval() {
+        var cancellation = new io.kbrag.domain.model.ChatCancellation();
+        RerankTiming rerank = new RerankTiming(RerankTiming.Status.APPLIED, 3L);
+        when(retrieval.search(anyList(), any())).thenAnswer(invocation -> {
+            cancellation.cancel();
+            return new SearchOutcome(List.of(), List.of(), null, rerank);
+        });
+        ChatStreamListener listener = mock(ChatStreamListener.class);
+        when(listener.cancellation()).thenReturn(cancellation);
+
+        service.previewStreamAsync("app_preview", "av_preview", KnowledgeCallCommand.builder().query("问题").build(), listener);
+
+        ArgumentCaptor<ChatDiagnostics> diagnostics = ArgumentCaptor.forClass(ChatDiagnostics.class);
+        var order = inOrder(listener);
+        order.verify(listener).onDiagnostics(diagnostics.capture());
+        order.verify(listener).onError("CHAT_CANCELLED", "生成已停止");
+        assertEquals(ChatDiagnostics.Outcome.CANCELLED, diagnostics.getValue().outcome());
+        assertEquals(rerank, diagnostics.getValue().rerank());
+        assertNull(diagnostics.getValue().generationMs());
+        verifyNoInteractions(generation);
     }
 
     @Test

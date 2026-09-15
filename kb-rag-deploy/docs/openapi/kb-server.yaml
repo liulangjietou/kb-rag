@@ -12739,6 +12739,7 @@ components:
       description: 仅控制台预览采集的单调时钟结果，未采集的调用不返回此字段。检索包含现有改写、路由、召回和重排；
         生成包含模型首段等待及服务端增量写出；first_delta_ms 是从预览开始到首个非空增量的时间，已包含在总时间中。
         失败阶段记录结束前用时，未执行阶段为 null 或省略；各阶段毫秒取整可能产生舍入差，不能据此推算费用。
+        rerank_ms 为检索内重排同步调用耗时，包含调度、模型等待及结果校验，已包含在 retrieval_ms 中，不能重复相加。
       required: [outcome, total_ms]
       properties:
         request_id:
@@ -12760,6 +12761,17 @@ components:
           format: int64
           minimum: 0
           nullable: true
+        rerank_status:
+          type: string
+          nullable: true
+          enum: [APPLIED, DISABLED, EMPTY_CANDIDATES, UNAVAILABLE, TIMEOUT, FAILED, SKIPPED]
+          description: 重排实际执行状态。TIMEOUT/FAILED 沿用现有粗排序，不等于整轮问答失败；未采集时为空或省略。
+        rerank_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+          description: 仅 APPLIED/TIMEOUT/FAILED 携带实测毫秒，其余状态为空或省略。0 表示不足一毫秒，线程池拒绝也可计为 FAILED；检索未返回结果时不推测子阶段。
         generation_ms:
           type: integer
           format: int64
