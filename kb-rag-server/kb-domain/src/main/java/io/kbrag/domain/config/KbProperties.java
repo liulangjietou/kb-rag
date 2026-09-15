@@ -1338,6 +1338,9 @@ public class KbProperties {
          */
         private String judgeModel = "";
 
+        /** 评分 JSON 的独立输出上限，避免继承仅用于短查询改写的预算。 */
+        private int judgeMaxTokens = 2048;
+
         /**
          * Timeout applied to the rewrite and rerank stages while an evaluation run executes, replacing
          * their online budgets so a slow but successful call is not counted as a degradation the online

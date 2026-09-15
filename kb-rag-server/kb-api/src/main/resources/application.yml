@@ -438,6 +438,8 @@ kb:
   eval:
     # Blank keeps the judge on the generation/rewrite chat model; set to grade with an independent model.
     judge-model: ${EVAL_JUDGE_MODEL:}
+    # 评分需要完整 JSON 和判定理由，独立于查询改写的短输出预算。
+    judge-max-tokens: ${EVAL_JUDGE_MAX_TOKENS:2048}
     offline-timeout-ms: ${EVAL_OFFLINE_TIMEOUT_MS:10000}
     # Cases judged concurrently across EVERY running evaluation, not per run: the cases reach the model
     # providers through the pool the online search shares, so a per run ceiling would multiply into
