@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import LoginPage from './LoginPage';
+import { LOGIN_METHOD_KEY } from '../utils/loginMethodPreference';
 
 const mocks = vi.hoisted(() => ({
   clearLoginMemory: vi.fn(),
@@ -85,6 +86,7 @@ function setNativeValue(input: HTMLInputElement, value: string) {
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
   mocks.getSsoAvailability.mockResolvedValue({ sso_available: false });
   mocks.getSsoProviders.mockResolvedValue({ oidc: false, saml: false, cas: false });
   mocks.loadLoginMemory.mockReturnValue({ remember: false, usernames: {} });
@@ -150,6 +152,7 @@ describe('LoginPage slider integration', () => {
     expect(mocks.clearLoginMemory).toHaveBeenCalled();
     expect(mocks.saveLoginMemory).not.toHaveBeenCalled();
     expect(mocks.storePasswordCredential).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(LOGIN_METHOD_KEY)).toBe('LOCAL');
   });
 
   it('登录失败后刷新 challenge，同时保留用户名和密码', async () => {
@@ -165,6 +168,7 @@ describe('LoginPage slider integration', () => {
     expect(username.value).toBe('richard');
     expect(password.value).toBe('wrong-password');
     expect(mocks.login).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem(LOGIN_METHOD_KEY)).toBeNull();
   });
 
   it('仅在勾选且登录成功后调用浏览器密码管理器', async () => {
@@ -246,5 +250,76 @@ describe('LoginPage slider integration', () => {
       resolveLogin?.({ token: 'token-3', must_change_password: false });
     });
     await screen.findByText('登录成功');
+  });
+});
+
+describe('LoginPage 登录方式恢复', () => {
+  it('勾选记住时保留密码管理器自动填入的值，直到认证成功才保存密码', async () => {
+    renderLoginPage();
+    const username = await screen.findByPlaceholderText('输入邮箱或平台用户名') as HTMLInputElement;
+    const password = screen.getByPlaceholderText('输入平台密码') as HTMLInputElement;
+    await waitFor(() => expect(mocks.getSsoProviders).toHaveBeenCalledOnce());
+    setNativeValue(username, 'autofilled-user');
+    setNativeValue(password, 'browser-secret');
+    fireEvent.click(screen.getByRole('checkbox', { name: '记住用户名和密码' }));
+    expect(username.value).toBe('autofilled-user');
+    expect(password.value).toBe('browser-secret');
+    expect(mocks.storePasswordCredential).not.toHaveBeenCalled();
+  });
+
+  it('上次成功的目录方式在配置允许时恢复，缓存的平台用户名不覆盖它', async () => {
+    window.localStorage.setItem(LOGIN_METHOD_KEY, 'SSO');
+    mocks.getSsoAvailability.mockResolvedValue({ sso_available: true });
+    mocks.loadLoginMemory.mockReturnValue({ remember: true, usernames: { LOCAL: 'local-user', SSO: 'directory-user' } });
+    mocks.login.mockResolvedValue({ token: 'directory-token', must_change_password: false });
+    renderLoginPage();
+    const username = await screen.findByPlaceholderText('输入域账号') as HTMLInputElement;
+    expect(username.value).toBe('directory-user');
+    fireEvent.change(screen.getByPlaceholderText('输入域账号密码'), { target: { value: 'directory-password' } });
+    fireEvent.click(screen.getByRole('button', { name: '完成滑块' }));
+    await screen.findByText('登录成功');
+    expect(mocks.login).toHaveBeenCalledWith(expect.objectContaining({ mode: 'SSO' }));
+    expect(window.localStorage.getItem(LOGIN_METHOD_KEY)).toBe('SSO');
+  });
+
+  it('目录已关闭时回到平台，不沿用目录的用户名或密码', async () => {
+    window.localStorage.setItem(LOGIN_METHOD_KEY, 'SSO');
+    mocks.loadLoginMemory.mockReturnValue({ remember: true, usernames: { SSO: 'directory-user' } });
+    renderLoginPage();
+    const username = await screen.findByPlaceholderText('输入邮箱或平台用户名') as HTMLInputElement;
+    await waitFor(() => expect(mocks.getSsoAvailability).toHaveBeenCalledOnce());
+    expect(username.value).toBe('');
+    expect(screen.queryByRole('tab', { name: '域账号' })).toBeNull();
+  });
+
+  it('目录探测晚于浏览器自动填充时，保留新凭据与当前方式', async () => {
+    window.localStorage.setItem(LOGIN_METHOD_KEY, 'SSO');
+    let resolveAvailability: ((value: { sso_available: boolean }) => void) | undefined;
+    mocks.getSsoAvailability.mockReturnValue(new Promise((resolve) => { resolveAvailability = resolve; }));
+    renderLoginPage();
+    const username = await screen.findByPlaceholderText('输入邮箱或平台用户名') as HTMLInputElement;
+    const password = screen.getByPlaceholderText('输入平台密码') as HTMLInputElement;
+    setNativeValue(username, 'autofilled-user');
+    setNativeValue(password, 'browser-secret');
+    await act(async () => { resolveAvailability?.({ sso_available: true }); });
+    expect(screen.getByPlaceholderText('输入邮箱或平台用户名')).toBe(username);
+    expect(username.value).toBe('autofilled-user');
+    expect(password.value).toBe('browser-secret');
+  });
+
+  it('手动切换方式会清空密码和验证状态，但不会写入成功偏好', async () => {
+    window.localStorage.setItem(LOGIN_METHOD_KEY, 'LOCAL');
+    mocks.getSsoAvailability.mockResolvedValue({ sso_available: true });
+    renderLoginPage();
+    const directoryTab = await screen.findByRole('tab', { name: '域账号' });
+    fireEvent.change(screen.getByPlaceholderText('输入邮箱或平台用户名'), { target: { value: 'local-user' } });
+    fireEvent.change(screen.getByPlaceholderText('输入平台密码'), { target: { value: 'secret' } });
+    fireEvent.click(directoryTab);
+    expect((screen.getByPlaceholderText('输入域账号密码') as HTMLInputElement).value).toBe('');
+    expect(screen.getByTestId('captcha-reset-key').textContent).toBe('1');
+    expect(window.localStorage.getItem(LOGIN_METHOD_KEY)).toBe('LOCAL');
+    fireEvent.click(screen.getByRole('tab', { name: '平台账号' }));
+    expect((screen.getByPlaceholderText('输入邮箱或平台用户名') as HTMLInputElement).value).toBe('local-user');
+    expect(mocks.login).not.toHaveBeenCalled();
   });
 });

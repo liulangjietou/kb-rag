@@ -13,12 +13,14 @@ import io.kbrag.app.auth.KbResourceGuard;
 import io.kbrag.app.document.DocumentAclService;
 import io.kbrag.app.document.DocumentPreviewService;
 import io.kbrag.app.document.DocumentService;
+import io.kbrag.app.document.DocumentListFilter;
 import io.kbrag.app.governance.DocumentGovernanceService;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.constant.PermissionCodes;
 import io.kbrag.domain.enums.DocVisibility;
 import io.kbrag.domain.enums.ProcessStatus;
+import io.kbrag.domain.enums.PublishStatus;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +36,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.Locale;
 import java.util.Map;
 
@@ -94,6 +98,11 @@ public class DocumentController {
      *
      * @param kbId          knowledge base business id
      * @param processStatus optional processing state filter
+     * @param keyword       文件名的字面关键词
+     * @param publishStatus 发布状态筛选
+     * @param source        现有接入关联所记录的来源
+     * @param updatedFrom   最近更新时间下界，包含边界
+     * @param updatedTo     最近更新时间上界，包含边界
      * @param page          one based page number
      * @param size          page size
      * @return paged documents
@@ -103,12 +112,39 @@ public class DocumentController {
     public Result<PageResponse<DocumentResponse>> list(
             @PathVariable String kbId,
             @RequestParam(name = "process_status", required = false) String processStatus,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "publish_status", required = false) String publishStatus,
+            @RequestParam(name = "source", required = false) String source,
+            @RequestParam(name = "updated_from", required = false) String updatedFrom,
+            @RequestParam(name = "updated_to", required = false) String updatedTo,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
             @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
         kbResourceGuard.requireKb(kbId);
+        DocumentListFilter filter = new DocumentListFilter(keyword, parseStatus(processStatus),
+                parseEnum(publishStatus, PublishStatus.class, "publish_status"),
+                parseEnum(source, DocumentListFilter.Source.class, "source"),
+                parseTime(updatedFrom, "updated_from"), parseTime(updatedTo, "updated_to"));
         return Result.success(PageResponse.from(
-                documentService.list(kbId, parseStatus(processStatus), normalizePage(page), normalizeSize(size)),
+                documentService.list(kbId, filter, normalizePage(page), normalizeSize(size)),
                 DocumentResponse::from));
+    }
+
+    private <E extends Enum<E>> E parseEnum(String value, Class<E> type, String field) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return Enum.valueOf(type, value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException exception) {
+            throw BizException.invalidParam(field + " 不支持该筛选值");
+        }
+    }
+
+    private LocalDateTime parseTime(String value, String field) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return LocalDateTime.parse(value);
+        } catch (DateTimeParseException exception) {
+            throw BizException.invalidParam(field + " 格式应为 YYYY-MM-DDTHH:mm:ss");
+        }
     }
 
     /**

@@ -1,6 +1,6 @@
 // Author: owlzhangfq@gmail.com
 import { LockOutlined, SafetyCertificateOutlined, UserOutlined } from '@ant-design/icons';
-import { App as AntApp, Button, Checkbox, Divider, Form, Input, Space, Tabs, Typography } from 'antd';
+import { App as AntApp, Button, Checkbox, Divider, Form, Input, Tabs, Typography } from 'antd';
 import type { FormEvent } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
@@ -11,6 +11,7 @@ import { authReturnLocation } from '../auth/returnLocation';
 import AuthShell from '../components/AuthShell';
 import LoginSliderCaptcha from '../components/LoginSliderCaptcha';
 import { clearLoginMemory, loadLoginMemory, saveLoginMemory, storePasswordCredential } from '../utils/loginMemory';
+import { loadLoginMethod, saveLoginMethod } from '../utils/loginMethodPreference';
 
 interface FormValues {
   username: string;
@@ -28,10 +29,12 @@ function startBrowserSso(protocol: 'oidc' | 'saml' | 'cas') {
 /** 支持目录账号、本地账号和企业 SSO 的统一登录入口。 */
 export default function LoginPage() {
   const [initialLoginMemory] = useState(loadLoginMemory);
+  const [lastLoginMethod] = useState(loadLoginMethod);
   const [submitting, setSubmitting] = useState(false);
   const [ssoAvailable, setSsoAvailable] = useState(false);
   const [ssoProviders, setSsoProviders] = useState<SsoProviders | null>(null);
   const [mode, setMode] = useState<LoginMode>('LOCAL');
+  const modeRef = useRef<LoginMode>('LOCAL');
   const [rememberCredentials, setRememberCredentials] = useState(initialLoginMemory.remember);
   const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const [captchaVerified, setCaptchaVerified] = useState(false);
@@ -53,6 +56,22 @@ export default function LoginPage() {
     setCaptchaVerified(false);
     setCaptchaResetKey((current) => current + 1);
   }, []);
+
+  // 配置探测会触发重绘；先接收密码管理器仅写入 DOM 的值，避免受控输入将它清空。
+  const syncNativeCredentials = useCallback((form = formHostRef.current?.querySelector('form')) => {
+    if (!(form instanceof HTMLFormElement)) return;
+    // 两个配置响应可能同批到达；方式已切换而 DOM 尚未重绘时，不读回旧方式的字段。
+    if (form.dataset.loginMode !== modeRef.current) return;
+    const nativeValues = new FormData(form);
+    const changedValues: Partial<FormValues> = {};
+    for (const field of ['username', 'password'] as const) {
+      const value = nativeValues.get(field);
+      if (typeof value === 'string' && value !== (formInstance.getFieldValue(field) ?? '')) {
+        changedValues[field] = value;
+      }
+    }
+    if (Object.keys(changedValues).length > 0) formInstance.setFieldsValue(changedValues);
+  }, [formInstance]);
 
   // SSO 结果放在 fragment 中，消费后立即清理，避免刷新重放或复制泄漏。
   useEffect(() => {
@@ -76,16 +95,22 @@ export default function LoginPage() {
     getSsoAvailability()
       .then((res) => {
         if (!cancelled) {
+          syncNativeCredentials();
           setSsoAvailable(res.sso_available);
           const currentValues = formInstance.getFieldsValue();
           const nativeForm = formHostRef.current?.querySelector('form');
           const nativeValues = nativeForm instanceof HTMLFormElement ? new FormData(nativeForm) : null;
+          const initialUsername = initialLoginMemory.remember ? initialLoginMemory.usernames.LOCAL ?? '' : '';
+          // 恢复的用户名不是本次输入；密码管理器填入的密码或新用户名则必须保留。
           const hasCredentialInput = formInstance.isFieldsTouched()
             || loginInFlightRef.current
             || submitRequestedRef.current
-            || Boolean(currentValues.username || currentValues.password)
-            || Boolean(nativeValues?.get('username') || nativeValues?.get('password'));
-          if (res.sso_available && !hasCredentialInput) {
+            || Boolean(currentValues.password || nativeValues?.get('password'))
+            || Boolean(currentValues.username && currentValues.username !== initialUsername)
+            || Boolean(nativeValues?.get('username') && nativeValues.get('username') !== initialUsername);
+          const preferDirectory = lastLoginMethod === 'SSO' || (!lastLoginMethod && !initialUsername);
+          if (res.sso_available && preferDirectory && !hasCredentialInput) {
+            modeRef.current = 'SSO';
             setMode('SSO');
             formInstance.setFieldsValue({
               username: initialLoginMemory.remember ? initialLoginMemory.usernames.SSO ?? '' : '',
@@ -99,6 +124,7 @@ export default function LoginPage() {
     getSsoProviders()
       .then((res) => {
         if (!cancelled) {
+          syncNativeCredentials();
           setSsoProviders(res);
         }
       })
@@ -106,7 +132,7 @@ export default function LoginPage() {
     return () => {
       cancelled = true;
     };
-  }, [formInstance, initialLoginMemory, resetCaptcha]);
+  }, [formInstance, initialLoginMemory, lastLoginMethod, resetCaptcha, syncNativeCredentials]);
 
   const handleFinish = async (values: FormValues) => {
     const captchaProof = captchaProofRef.current;
@@ -117,6 +143,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const res = await login({ ...values, mode, captcha_proof: captchaProof });
+      saveLoginMethod(mode);
       if (rememberCredentialsRef.current) {
         usernamesRef.current[mode] = values.username;
         saveLoginMemory({ remember: true, usernames: usernamesRef.current });
@@ -142,21 +169,17 @@ export default function LoginPage() {
 
   // 部分浏览器的密码管理器不会触发 React change；提交捕获阶段以原生 FormData 同步真实值。
   const syncAutofillBeforeSubmit = (event: FormEvent<HTMLFormElement>) => {
-    const formData = new FormData(event.currentTarget);
-    const username = formData.get('username');
-    const password = formData.get('password');
-    formInstance.setFieldsValue({
-      ...(typeof username === 'string' ? { username } : {}),
-      ...(typeof password === 'string' ? { password } : {}),
-    });
+    syncNativeCredentials(event.currentTarget);
   };
 
   const handleModeChange = (nextMode: string) => {
+    syncNativeCredentials();
     const typedUsername = formInstance.getFieldValue('username');
     if (typeof typedUsername === 'string') {
       usernamesRef.current[mode] = typedUsername;
     }
     const selectedMode = nextMode as LoginMode;
+    modeRef.current = selectedMode;
     setMode(selectedMode);
     formInstance.setFieldsValue({
       username: usernamesRef.current[selectedMode] ?? '',
@@ -166,6 +189,7 @@ export default function LoginPage() {
   };
 
   const handleRememberChange = (checked: boolean) => {
+    syncNativeCredentials();
     // 登录请求可能尚未返回，成功回调必须读取用户最新的授权选择。
     rememberCredentialsRef.current = checked;
     setRememberCredentials(checked);
@@ -195,6 +219,7 @@ export default function LoginPage() {
     <div ref={formHostRef}>
       <Form<FormValues>
         className="login-form"
+        data-login-mode={mode}
         form={formInstance}
         name={`login-${mode.toLowerCase()}`}
         initialValues={{
@@ -227,7 +252,7 @@ export default function LoginPage() {
             placeholder={mode === 'SSO' ? '输入域账号密码' : '输入平台密码'}
           />
         </Form.Item>
-        <Form.Item>
+        <Form.Item className="login-form__remember">
           <Checkbox
             checked={rememberCredentials}
             onChange={(event) => handleRememberChange(event.target.checked)}
@@ -257,20 +282,19 @@ export default function LoginPage() {
   );
 
   const hint = mode === 'SSO'
-    ? '使用企业目录账号登录，首次登录将自动开通账号并授予默认角色。'
-    : '使用已审核的邮箱，或管理员创建的平台用户名登录。';
+    ? '使用企业目录账号继续。'
+    : '使用工作邮箱或平台账号继续。';
 
   const hasBrowserSso = Boolean(ssoProviders && (ssoProviders.oidc || ssoProviders.saml || ssoProviders.cas));
 
   return (
     <AuthShell
-      eyebrow="SECURE ACCESS"
-      headline="让每一次回答，都能回到可信证据。"
-      description="统一管理知识、检索、应用与评测，让企业 RAG 从资料接入到质量闭环始终可见、可控、可追溯。"
+      compactLayout
+      headline="答案有出处，知识可持续维护。"
+      description="从导入资料到核对证据，让知识在每一次提问中发挥作用。"
     >
-      <div className="auth-environment"><i aria-hidden="true" /> 管理控制台</div>
-      <Typography.Title level={2}>欢迎回来</Typography.Title>
-      <Typography.Paragraph type="secondary">请选择适合你的身份方式继续。</Typography.Paragraph>
+      <Typography.Title level={2}>登录知识工作台</Typography.Title>
+      <Typography.Paragraph type="secondary">{hint}</Typography.Paragraph>
 
       {ssoAvailable && (
         <Tabs
@@ -278,8 +302,8 @@ export default function LoginPage() {
           activeKey={mode}
           onChange={handleModeChange}
           items={[
-            { key: 'SSO', label: '域账号', disabled: submitting },
             { key: 'LOCAL', label: '平台账号', disabled: submitting },
+            { key: 'SSO', label: '域账号', disabled: submitting },
           ]}
         />
       )}
@@ -288,15 +312,14 @@ export default function LoginPage() {
       {hasBrowserSso && (
         <>
           <Divider plain>或通过企业单点登录</Divider>
-          <Space className="sso-actions" direction="vertical">
-            {ssoProviders?.oidc && <Button block onClick={() => startBrowserSso('oidc')}>OIDC 单点登录</Button>}
-            {ssoProviders?.saml && <Button block onClick={() => startBrowserSso('saml')}>SAML 单点登录</Button>}
-            {ssoProviders?.cas && <Button block onClick={() => startBrowserSso('cas')}>CAS 单点登录</Button>}
-          </Space>
+          <div className="login-sso-actions">
+            {ssoProviders?.oidc && <Button disabled={submitting} onClick={() => startBrowserSso('oidc')}>OIDC 单点登录</Button>}
+            {ssoProviders?.saml && <Button disabled={submitting} onClick={() => startBrowserSso('saml')}>SAML 单点登录</Button>}
+            {ssoProviders?.cas && <Button disabled={submitting} onClick={() => startBrowserSso('cas')}>CAS 单点登录</Button>}
+          </div>
         </>
       )}
 
-      <div className="auth-hint">{hint}</div>
       {mode === 'LOCAL' && (
         <div className="registration-login-entry">
           还没有账号？ <Link to="/register">使用工作邮箱注册</Link>
@@ -304,7 +327,7 @@ export default function LoginPage() {
       )}
       <div className="auth-security-note">
         <SafetyCertificateOutlined />
-        页面只保存用户名；密码由浏览器密码管理器保护，不写入站点存储。
+        密码由浏览器密码管理器保护，不写入站点存储。
       </div>
     </AuthShell>
   );

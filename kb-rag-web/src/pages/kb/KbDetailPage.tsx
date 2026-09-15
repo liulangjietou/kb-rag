@@ -13,7 +13,6 @@ import {
   Alert,
   Button,
   Popconfirm,
-  Progress,
   Space,
   Drawer,
   Descriptions,
@@ -47,6 +46,7 @@ import { PERMISSIONS } from '../../auth/permissions';
 import PageHeader from '../../components/PageHeader';
 import DocumentActions from './components/DocumentActions';
 import DocumentList from './components/DocumentList';
+import DocumentFilterBar, { type DocumentFilters } from './components/DocumentFilterBar';
 import KbSettingsDrawer from './components/KbSettingsDrawer';
 import ChatImportWizard from './components/ChatImportWizard';
 import ChunkDrawer from './components/ChunkDrawer';
@@ -65,11 +65,11 @@ import QualityIssueDrawer from './quality/QualityIssueDrawer';
 import QualityIssueTab from './quality/QualityIssueTab';
 import './quality/quality-issues.css';
 
-// Document list is polled every 3s while this page stays mounted, per M1-CONTRACTS.md section 7.
-// 同一个轮询顺带拉 GET /kb/{kbId}/rebuild-status（M2-CONTRACTS.md section 4 的追平状态）：重建跑在
-// 服务端线程池里，比这个页面活得久，所以"是否在重建、还差多少"只能问服务端。早先版本把它记在组件
-// state 里，操作员一离开详情页进度条就没了、完成提示再也不出现、按钮回到可点击态引来重复提交。
+// 活跃任务每 3 秒同步；空闲降低频率、失败退避，隐藏页面暂停。任务状态仍以服务端为准。
 const POLL_INTERVAL_MS = 3000;
+const IDLE_POLL_INTERVAL_MS = 30000;
+const MAX_POLL_INTERVAL_MS = 60000;
+const PROCESSING_STATES = new Set(['UPLOADED', 'PARSING', 'PARSED', 'INDEXING']);
 
 // 前端始终在 loadDocuments 里显式带上 size，服务端不会回落到自己的默认值，所以这里的默认页大小
 // 可独立于 DocumentController 的 DEFAULT_PAGE_SIZE 设置；取 10 是控制台列表的默认观感，可选
@@ -95,6 +95,15 @@ export default function KbDetailPage() {
   const [docPageSize, setDocPageSize] = useState(DEFAULT_DOC_PAGE_SIZE);
   const [docTotal, setDocTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [docError, setDocError] = useState(false);
+  const [docRefreshing, setDocRefreshing] = useState(false);
+  const [docUpdatedAt, setDocUpdatedAt] = useState<string | null>(null);
+  const [docFiltered, setDocFiltered] = useState(false);
+  const [kbError, setKbError] = useState(false);
+  const [rebuildError, setRebuildError] = useState(false);
+  const [pollReady, setPollReady] = useState(false);
+  const [activeTab, setActiveTab] = useState('documents');
+  const [pageVisible, setPageVisible] = useState(document.visibilityState !== 'hidden');
   const [chunkDoc, setChunkDoc] = useState<KbDocument | null>(null);
   const [previewDoc, setPreviewDoc] = useState<KbDocument | null>(null);
   const [versionDocId, setVersionDocId] = useState<string | null>(null);
@@ -119,7 +128,6 @@ export default function KbDetailPage() {
   const [qualitySelection, setQualitySelection] = useState<{ kbId: string; issueId: string }>();
   const qualityOpener = useRef<HTMLElement | null>(null);
   const [qualityRefresh, setQualityRefresh] = useState(0);
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => { setQualitySelection(undefined); qualityOpener.current = null; }, [kbId]);
   const openQualityIssue = (issueId: string) => {
     if (!kbId) return;
@@ -132,16 +140,46 @@ export default function KbDetailPage() {
     setQualityRefresh((value) => value + 1);
     requestAnimationFrame(() => { if (opener?.isConnected) opener.focus(); });
   };
+  const readInFlight = useRef(0);
+  const docFailures = useRef(0);
+  const rebuildFailures = useRef(0);
+  const kbSequence = useRef(0);
+  const rebuildSequence = useRef(0);
+  const prevStaleCountRef = useRef<number | null>(null);
+  const resumePolling = useRef(false);
 
   const loadKb = useCallback(async () => {
     if (!kbId) return;
-    const detail = await getKnowledgeBase(kbId);
-    setKb(detail);
+    const sequence = ++kbSequence.current;
+    try {
+      const detail = await getKnowledgeBase(kbId);
+      if (sequence !== kbSequence.current) return;
+      setKb(detail);
+      setKbError(false);
+    } catch {
+      if (sequence === kbSequence.current) setKbError(true);
+    }
   }, [kbId]);
 
   const loadRebuildStatus = useCallback(async () => {
     if (!kbId) return;
-    setRebuildStatus(await getRebuildStatus(kbId));
+    const sequence = ++rebuildSequence.current;
+    readInFlight.current += 1;
+    try {
+      const status = await getRebuildStatus(kbId);
+      if (sequence !== rebuildSequence.current) return;
+      setRebuildStatus(status);
+      setRebuildError(false);
+      rebuildFailures.current = 0;
+    } catch {
+      if (sequence === rebuildSequence.current) {
+        setRebuildStatus(null);
+        setRebuildError(true);
+        rebuildFailures.current += 1;
+      }
+    } finally {
+      readInFlight.current -= 1;
+    }
   }, [kbId]);
 
   /**
@@ -152,9 +190,10 @@ export default function KbDetailPage() {
   const docPageRef = useRef(1);
   const docPageSizeRef = useRef(DEFAULT_DOC_PAGE_SIZE);
   const docRequestSequence = useRef(0);
+  const docFiltersRef = useRef<DocumentFilters>({});
 
   const loadDocuments = useCallback(
-    async (page?: number, size?: number) => {
+    async (page?: number, size?: number, background = false) => {
       if (!kbId) return;
       const targetPage = page ?? docPageRef.current;
       const targetSize = size ?? docPageSizeRef.current;
@@ -162,47 +201,115 @@ export default function KbDetailPage() {
       // 翻页意图立即供轮询读取；旧页的慢响应不能覆盖新页或恢复旧页勾选。
       docPageRef.current = targetPage;
       docPageSizeRef.current = targetSize;
-      const result = await listDocuments(kbId, { page: targetPage, size: targetSize });
-      if (sequence !== docRequestSequence.current) return;
-      // 删掉末页最后一条后该页会空掉，此时按 total 直接跳到真正的末页——逐页回退在页码
-      // 远超范围时会递归几十次，而服务端对越界页码只是返回空列表、并不纠正 page
-      const lastPage = Math.max(1, Math.ceil(result.total / targetSize));
-      if (result.items.length === 0 && targetPage > lastPage) {
-        await loadDocuments(lastPage, targetSize);
-        return;
+      setDocRefreshing(true);
+      if (!background) setLoading(true);
+      readInFlight.current += 1;
+      try {
+        const result = await listDocuments(kbId, { ...docFiltersRef.current, page: targetPage, size: targetSize });
+        if (sequence !== docRequestSequence.current) return;
+        // 删掉末页最后一条后该页会空掉，此时按 total 直接跳到真正的末页——逐页回退在页码
+        // 远超范围时会递归几十次，而服务端对越界页码只是返回空列表、并不纠正 page
+        const lastPage = Math.max(1, Math.ceil(result.total / targetSize));
+        if (result.items.length === 0 && targetPage > lastPage) {
+          await loadDocuments(lastPage, targetSize);
+          return;
+        }
+        setDocuments(result.items);
+        setDocTotal(result.total);
+        docPageRef.current = result.page;
+        docPageSizeRef.current = result.size;
+        setDocPage(result.page);
+        setDocPageSize(result.size);
+        setDocError(false);
+        docFailures.current = 0;
+        setDocUpdatedAt(new Date().toLocaleTimeString('zh-CN', { hour12: false }));
+        // 文档可能被其他操作员移出当前筛选结果，勾选范围始终以最新一页为准。
+        setSelectedDocIds((ids) => ids.filter((id) => result.items.some((doc) => doc.doc_id === id)));
+      } catch {
+        if (sequence === docRequestSequence.current) {
+          setDocError(true);
+          docFailures.current += 1;
+          setSelectedDocIds([]);
+        }
+      } finally {
+        readInFlight.current -= 1;
+        if (sequence === docRequestSequence.current) {
+          setLoading(false);
+          setDocRefreshing(false);
+        }
       }
-      setDocuments(result.items);
-      setDocTotal(result.total);
-      docPageRef.current = result.page;
-      docPageSizeRef.current = result.size;
-      setDocPage(result.page);
-      setDocPageSize(result.size);
     },
     [kbId],
   );
 
   useEffect(() => {
     if (!kbId) return;
-    setLoading(true);
-    Promise.all([loadKb(), loadDocuments(), loadRebuildStatus()]).finally(() => setLoading(false));
+    let mounted = true;
+    setPollReady(false);
+    docFiltersRef.current = {};
+    docPageRef.current = 1;
+    docPageSizeRef.current = DEFAULT_DOC_PAGE_SIZE;
+    docFailures.current = 0;
+    rebuildFailures.current = 0;
+    prevStaleCountRef.current = null;
+    setDocFiltered(false);
+    setDocError(false);
+    setDocUpdatedAt(null);
+    setDocuments([]);
+    setSelectedDocIds([]);
+    setKb(null);
+    setRebuildStatus(null);
+    setActiveTab('documents');
+    Promise.all([loadKb(), loadDocuments(), loadRebuildStatus()]).then(() => {
+      if (mounted) setPollReady(true);
+    });
     return () => {
+      mounted = false;
       docRequestSequence.current += 1;
+      kbSequence.current += 1;
+      rebuildSequence.current += 1;
     };
   }, [kbId, loadKb, loadDocuments, loadRebuildStatus]);
 
   useEffect(() => {
-    pollTimerRef.current = setInterval(() => {
-      loadDocuments();
-      loadRebuildStatus();
-    }, POLL_INTERVAL_MS);
-    return () => {
-      if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
-      }
+    const onVisibility = () => {
+      const visible = document.visibilityState !== 'hidden';
+      resumePolling.current = visible;
+      setPageVisible(visible);
     };
-  }, [loadDocuments, loadRebuildStatus]);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
+  const hasProcessing = (rebuildStatus?.processing_count ?? rebuildStatus?.in_progress_count ?? 0) > 0
+    || documents.some((doc) => PROCESSING_STATES.has(doc.process_status));
+  const pollInterval = hasProcessing ? POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
+  useEffect(() => {
+    if (!pollReady || !pageVisible || activeTab !== 'documents') return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = (immediate = false) => {
+      if (stopped) return;
+      const failures = Math.max(docFailures.current, rebuildFailures.current);
+      const delay = Math.min(MAX_POLL_INTERVAL_MS, pollInterval * 2 ** Math.min(failures, 4));
+      timer = setTimeout(async () => {
+        // 上一轮请求完成后再计时；手动刷新在飞时也不叠加自动请求。
+        if (readInFlight.current === 0) {
+          await Promise.all([loadDocuments(undefined, undefined, true), loadRebuildStatus()]);
+        }
+        schedule();
+      }, immediate ? 0 : delay);
+    };
+    schedule(resumePolling.current);
+    resumePolling.current = false;
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [activeTab, pageVisible, pollReady, pollInterval, loadDocuments, loadRebuildStatus]);
 
   const staleCount = rebuildStatus?.stale_count ?? 0;
+  const documentCount = rebuildStatus?.document_count ?? (!docFiltered && !docError ? docTotal : undefined);
   const rebuildInProgress = (rebuildStatus?.in_progress_count ?? 0) > 0;
   const rebuildFailedCount = rebuildStatus?.failed_count ?? 0;
   // 排队中 = 待追平里既没在跑、也没失败的那部分：线程池并发有限，提交一批后大多数文档在这里等着
@@ -227,7 +334,6 @@ export default function KbDetailPage() {
    * 时上一份计数不可知，此时告警条直接消失本身就是完成信号，硬补一句 toast 反而像凭空冒出来。
    * 重建失败的文档仍是 stale，所以计数不会归零，不存在把失败说成成功的路径。
    */
-  const prevStaleCountRef = useRef<number | null>(null);
   useEffect(() => {
     if (!rebuildStatus) return;
     const prev = prevStaleCountRef.current;
@@ -458,14 +564,43 @@ export default function KbDetailPage() {
         }
       />
 
+      {kbError && <Alert type="error" showIcon message="知识库信息加载失败"
+        action={<Button aria-label="重试知识库信息" onClick={() => { void loadKb(); }}>重试</Button>} />}
       <Tabs
         className="kb-detail-tabs"
+        activeKey={activeTab}
+        onChange={(key) => { resumePolling.current = key === 'documents'; setActiveTab(key); }}
         items={[
           {
             key: 'documents',
-            label: `文档${loading ? '' : `（${docTotal}）`}`,
+            label: `文档${loading || documentCount === undefined ? '' : `（${documentCount}）`}`,
             children: (
               <>
+                <DocumentFilterBar
+                  key={kbId}
+                  onApply={(filters) => {
+                    docFiltersRef.current = filters;
+                    setDocFiltered(Object.values(filters).some((value) => value !== undefined));
+                    setSelectedDocIds([]);
+                    void loadDocuments(1);
+                  }}
+                  onRefresh={() => { void loadDocuments(); }}
+                  refreshing={docRefreshing}
+                />
+                {docUpdatedAt && <Typography.Paragraph type="secondary">
+                  文档列表更新于 {docUpdatedAt}
+                  {rebuildStatus?.processing_count !== undefined && ` · 全库 ${rebuildStatus.processing_count} 篇处理中`}
+                </Typography.Paragraph>}
+                {docError && <Alert
+                  type="error" showIcon message="文档加载失败"
+                  description="筛选条件已保留，请重试。"
+                  action={<Button aria-label="重试" onClick={() => { void loadDocuments(); }} loading={docRefreshing}>重试</Button>}
+                  style={{ marginBottom: 16 }}
+                />}
+                {rebuildError && <Alert type="warning" showIcon message="处理进度暂不可用"
+                  description="文档任务仍在服务端运行，恢复连接后会重新同步状态。"
+                  action={<Button aria-label="重试处理进度" onClick={() => { void loadRebuildStatus(); }}>重试</Button>}
+                  style={{ marginBottom: 16 }} />}
                 {staleCount > 0 && (
                   <Alert
                     type="warning"
@@ -479,14 +614,6 @@ export default function KbDetailPage() {
                             {rebuildQueuedCount > 0 ? `，${rebuildQueuedCount} 篇排队中` : ''}
                             {rebuildFailedCount > 0 ? `，${rebuildFailedCount} 篇失败` : ''}
                           </Typography.Text>
-                          {/* 进度是"整库有多少文档已按当前配置建好"，服务端现算，刷新或换人看都一致 */}
-                          {docTotal > 0 && (
-                            <Progress
-                              percent={Math.round(((docTotal - staleCount) / docTotal) * 100)}
-                              size="small"
-                              status="active"
-                            />
-                          )}
                         </>
                       ) : rebuildFailedCount > 0 ? (
                         `${rebuildFailedCount} 篇文档重建失败，可在下方列表查看失败原因后重试；其余待重建文档可再次提交`
@@ -511,7 +638,7 @@ export default function KbDetailPage() {
                   />
                 )}
 
-                {pendingConfirmDocs.length > 0 && (
+                {!docError && pendingConfirmDocs.length > 0 && (
                   <Alert
                     type="info"
                     showIcon
@@ -583,9 +710,10 @@ export default function KbDetailPage() {
                   />
                 )}
 
-                <DocumentList
+                {!docError && <DocumentList
                   documents={documents}
                   loading={loading}
+                  filtered={docFiltered}
                   page={docPage}
                   pageSize={docPageSize}
                   total={docTotal}
@@ -613,7 +741,7 @@ export default function KbDetailPage() {
                       onDelete={() => handleDelete(doc)}
                     />
                   )}
-                />
+                />}
               </>
             ),
           },
