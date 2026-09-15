@@ -1,6 +1,7 @@
 package io.kbrag.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.kbrag.app.openapi.KnowledgeCallResult;
 import io.kbrag.common.context.RequestIdHolder;
 
@@ -33,7 +34,8 @@ public record KnowledgeChatResponse(
         List<String> degraded,
         @JsonProperty("routed_kb_ids") List<String> routedKbIds,
         @JsonProperty("app_version") String appVersion,
-        @JsonProperty("target_stage") String targetStage) {
+        @JsonProperty("target_stage") String targetStage,
+        @JsonInclude(JsonInclude.Include.NON_NULL) ChatDiagnosticsResponse diagnostics) {
 
     /**
      * Maps an application result onto the transport shape.
@@ -49,6 +51,7 @@ public record KnowledgeChatResponse(
                 result.getDegraded(),
                 result.routedKbIds(),
                 result.getAppVersion(),
-                result.getTargetStage() == null ? null : result.getTargetStage().code());
+                result.getTargetStage() == null ? null : result.getTargetStage().code(),
+                result.getDiagnostics() == null ? null : ChatDiagnosticsResponse.from(result.getDiagnostics()));
     }
 }

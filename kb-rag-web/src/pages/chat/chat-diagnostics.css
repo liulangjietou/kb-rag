@@ -1,0 +1,32 @@
+.chat-diagnostics {
+  margin-top: 12px;
+  border: 1px solid var(--kb-color-border);
+  border-radius: 10px;
+  color: var(--kb-color-text);
+  overflow-wrap: anywhere;
+}
+
+.chat-diagnostics summary {
+  cursor: pointer;
+  padding: 12px;
+  color: var(--kb-color-primary-text);
+}
+
+.chat-diagnostics summary:focus-visible {
+  outline: 2px solid var(--kb-color-primary);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.chat-diagnostics__content { padding: 0 12px 12px; }
+.chat-diagnostics__content h2 { margin: 12px 0 8px; font-size: 14px; }
+.chat-diagnostics__content p { margin: 8px 0; }
+.chat-diagnostics__metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+.chat-diagnostics__metrics div { min-width: 0; }
+.chat-diagnostics__metrics dt { color: var(--kb-color-text-secondary); font-size: 12px; }
+.chat-diagnostics__metrics dd { margin: 4px 0 0; font-variant-numeric: tabular-nums; }
+.chat-diagnostics__note { color: var(--kb-color-text-secondary); font-size: 12px; line-height: 1.6; }
+
+@media (max-width: 600px) {
+  .chat-diagnostics__metrics { grid-template-columns: minmax(0, 1fr); }
+}

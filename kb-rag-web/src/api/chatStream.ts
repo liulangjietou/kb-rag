@@ -1,8 +1,10 @@
 // Author: owlzhangfq@gmail.com
 import { consumeSse } from '../utils/sse';
+import { readChatDiagnostics, type ChatDiagnostics } from './chatDiagnostics';
 import type { ChatDeltaEvent, ChatDoneEvent, ChatErrorEvent, ChatPreviewRequest, ChatReferencesEvent, ChatRequest, RetrievalNode } from './types';
 
 export interface ChatStreamHandlers {
+  onDiagnostics?: (diagnostics: ChatDiagnostics) => void;
   onDelta: (delta: string) => void;
   onReferences: (references: RetrievalNode[]) => void;
   onDone: (requestId: string, degraded: string[], routedKbIds: string[]) => void;
@@ -61,6 +63,15 @@ export async function streamChat(
   try {
     await consumeSse(response, (evt) => {
       if (signal?.aborted || terminal) return false;
+      if (evt.event === 'diagnostics') {
+        if (handlers.onDiagnostics) {
+          try {
+            const diagnostics = readChatDiagnostics(JSON.parse(evt.data));
+            if (diagnostics) handlers.onDiagnostics(diagnostics);
+          } catch { /* 扩展诊断缺失不改变正文和终态。 */ }
+        }
+        return;
+      }
       // 心跳及未来扩展事件不属于当前业务协议，不要求它们携带 JSON。
       if (!['message_delta', 'references', 'done', 'error'].includes(evt.event)) return;
       let data: unknown;
