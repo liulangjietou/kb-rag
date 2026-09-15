@@ -357,7 +357,7 @@ export default function RegisterPage() {
     const approved = result.status === 'APPROVED';
     return (
       <AuthShell
-        eyebrow="APPLICATION RECEIVED"
+        compactLayout
         headline="身份先可信，权限再抵达。"
         description="邮箱验证证明你是谁，管理员审核决定你能做什么。身份与权限分开，知识边界才始终清晰。"
       >
@@ -417,7 +417,7 @@ export default function RegisterPage() {
 
   return (
     <AuthShell
-      eyebrow="VERIFIED REGISTRATION"
+      compactLayout
       headline="从可信身份，走进企业知识网络。"
       description="从工作邮箱验证开始，建立可识别、可审核、可追溯的企业知识访问身份。"
     >
