@@ -1,7 +1,7 @@
 // Author: owlzhangfq@gmail.com
 import { useEffect, useMemo, useState } from 'react';
 import { DownloadOutlined } from '@ant-design/icons';
-import { Alert, Drawer, Empty, Radio, Space, Spin, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Drawer, Empty, Radio, Space, Spin, Table, Tag, Typography, message } from 'antd';
 import { listAllEvalCases } from '../../../api/evalCase';
 import { compareEvalRuns, getEvalRun, listAllEvalResults } from '../../../api/evalRun';
 import type { EvalCase, EvalResult, EvalRun, KMetricSet, MetricGroupKey, MetricNumberKey } from '../../../api/types';
@@ -23,7 +23,7 @@ const METRIC_LABELS: Record<MetricNumberKey, string> = {
   ndcg: 'NDCG',
 };
 
-const GROUP_OPTIONS: MetricGroupKey[] = ['all', 'span', 'document', 'single_turn', 'multi_turn'];
+const GROUP_OPTIONS: MetricGroupKey[] = ['overall', 'span', 'document', 'single_turn', 'multi_turn'];
 
 interface DrilldownRow {
   evalCase: EvalCase;
@@ -69,7 +69,7 @@ function formatMetricValue(set: KMetricSet | undefined, key: MetricNumberKey): s
 /** Groups one case into the report's 全体/span级/文档级/单轮/多轮 buckets (a case belongs to 3 of the 5). */
 function caseGroups(evalCase: EvalCase): MetricGroupKey[] {
   return [
-    'all',
+    'overall',
     evalCase.anchor_type === 'DOCUMENT' ? 'document' : 'span',
     evalCase.messages && evalCase.messages.length > 0 ? 'multi_turn' : 'single_turn',
   ];
@@ -89,7 +89,7 @@ export default function EvalReportDrawer({ datasetId, runIds, onClose }: EvalRep
   const [staleCaseCount, setStaleCaseCount] = useState(0);
   const [cases, setCases] = useState<Map<string, EvalCase>>(new Map());
   const [resultsByRun, setResultsByRun] = useState<Map<string, EvalResult[]>>(new Map());
-  const [group, setGroup] = useState<MetricGroupKey>('all');
+  const [group, setGroup] = useState<MetricGroupKey>('overall');
 
   useEffect(() => {
     if (!datasetId || !runIds || runIds.length === 0) {
@@ -97,7 +97,7 @@ export default function EvalReportDrawer({ datasetId, runIds, onClose }: EvalRep
     }
     let cancelled = false;
     setLoading(true);
-    setGroup('all');
+    setGroup('overall');
     (async () => {
       try {
         let loadedRuns: EvalRun[];
@@ -268,12 +268,12 @@ export default function EvalReportDrawer({ datasetId, runIds, onClose }: EvalRep
                 ))}
               </Radio.Group>
               <Space>
-                <a onClick={handleExportMetrics}>
-                  <DownloadOutlined /> 导出指标 CSV
-                </a>
-                <a onClick={handleExportDrilldown}>
-                  <DownloadOutlined /> 导出命中明细 CSV
-                </a>
+                <Button type="link" icon={<DownloadOutlined />} onClick={handleExportMetrics}>
+                  导出指标 CSV
+                </Button>
+                <Button type="link" icon={<DownloadOutlined />} onClick={handleExportDrilldown}>
+                  导出命中明细 CSV
+                </Button>
               </Space>
             </Space>
 

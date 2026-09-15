@@ -267,7 +267,7 @@ export const EVAL_MODE_META: Record<EvalMode, TagMeta> = {
  * JSON.
  */
 export const METRIC_GROUP_META: Record<MetricGroupKey, TagMeta> = {
-  all: { color: 'default', label: '全体' },
+  overall: { color: 'default', label: '全体' },
   span: { color: 'blue', label: 'span 级' },
   document: { color: 'purple', label: '文档级' },
   single_turn: { color: 'default', label: '单轮' },
