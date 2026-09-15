@@ -5,6 +5,7 @@ import {
   AuditOutlined,
   DatabaseOutlined,
   ExperimentOutlined,
+  MessageOutlined,
   ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
@@ -18,6 +19,7 @@ import type { KbApp, KnowledgeBase } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { PERMISSIONS } from '../auth/permissions';
 import { useModelStatus } from '../context/ModelStatusContext';
+import EmployeeHomePanel from './workspace/EmployeeHomePanel';
 import '../styles/home.css';
 
 type LoadState = 'idle' | 'loading' | 'success' | 'error';
@@ -63,6 +65,8 @@ export default function HomePage() {
   } = useModelStatus();
   const canReadKb = can(PERMISSIONS.KB_READ);
   const canReadApps = can(PERMISSIONS.APP_READ);
+  const canUseApps = can(PERMISSIONS.APP_USE);
+  const employeeOnly = canUseApps && !canReadKb && !canReadApps;
   const canReviewRegistrations = can(PERMISSIONS.USER_MANAGE) && can(PERMISSIONS.TENANT_MANAGE);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [apps, setApps] = useState<KbApp[]>([]);
@@ -228,6 +232,9 @@ export default function HomePage() {
     modelError;
   const resourcesLoading = (canReadKb && kbState === 'loading') || (canReadApps && appState === 'loading');
   const quickActions = [
+    canUseApps
+      ? { key: 'workspace', label: '进入知识问答', description: '使用正式应用，继续个人会话', path: '/workspace', icon: <MessageOutlined /> }
+      : null,
     canReadKb
       ? {
           key: 'kb',
@@ -287,7 +294,7 @@ export default function HomePage() {
         <div>
           <h1>工作概览</h1>
           <p>
-            {greeting()}，{displayName ?? '知识工作者'}。继续维护知识，或验证应用的回答。
+            {greeting()}，{displayName ?? '知识工作者'}。{employeeOnly ? '从知识中找到答案，继续自己的工作。' : '继续维护知识，或验证应用的回答。'}
           </p>
         </div>
       </header>
@@ -314,7 +321,7 @@ export default function HomePage() {
         />
       )}
 
-      <section className="home-metrics" aria-label="工作概览指标">
+      {!employeeOnly && <section className="home-metrics" aria-label="工作概览指标">
         {metrics.map((metric) => (
           <div key={metric.label}>
             <span>{metric.label}</span>
@@ -322,11 +329,12 @@ export default function HomePage() {
             <small>{metric.detail}</small>
           </div>
         ))}
-      </section>
+      </section>}
 
       <div className="atlas-home__grid">
         <div className="home-work-column">
-          <section className="atlas-panel">
+          {canUseApps && <EmployeeHomePanel />}
+          {!employeeOnly && <section className="atlas-panel">
             <header className="atlas-panel__head">
               <div>
                 <h2>继续工作</h2>
@@ -409,7 +417,7 @@ export default function HomePage() {
                 ))}
               </ul>
             )}
-          </section>
+          </section>}
 
           <section className="home-provenance" aria-label="知识证据路径">
             <div>

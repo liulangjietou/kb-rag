@@ -1261,6 +1261,31 @@ paths:
           $ref: '#/components/responses/PermissionDenied'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/workspace/overview:
+    get:
+      tags: [app]
+      operationId: employeeHomeOverview
+      summary: 员工首页的可用应用与本人最近会话（APP_USE）
+      description: 使用当前授权裁剪正式应用，再按租户、用户与应用范围查询最近五个未删除会话。按会话活动时间及主键倒序，不返回答案、证据或内部配置，不创建会话和模型运行。
+      responses:
+        '200':
+          description: 当前授权的首页元数据，无可用应用时两个列表均为空
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeHomeOverview'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
   /api/v1/workspace/apps:
     get:
       tags: [app]
@@ -6367,6 +6392,36 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    EmployeeHomeOverview:
+      type: object
+      required: [applications, recent_conversations]
+      properties:
+        applications:
+          type: array
+          items:
+            type: object
+            required: [app_id, name, released_version_id, released_version]
+            properties:
+              app_id: {type: string}
+              name: {type: string}
+              description: {type: string, nullable: true}
+              released_version_id: {type: string}
+              released_version: {type: string}
+        recent_conversations:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [conversation_id, app_id, app_name, title, active_run_id, last_activity_at]
+            properties:
+              conversation_id: {type: string}
+              app_id: {type: string}
+              app_name: {type: string}
+              title: {type: string}
+              active_run_id: {type: string, nullable: true}
+              last_activity_at:
+                type: string
+                description: 服务端本地日期时间，不带时区偏移；表示会话活动时间，不是页面访问时间
     EmployeeConversationTitleRequest:
       type: object
       required:
