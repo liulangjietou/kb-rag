@@ -260,7 +260,7 @@ public class KnowledgeApiService {
                     TargetStage.of(version.getStatus()), false);
             requestOverridePolicy.validate(forbiddenKeysOf(command));
             timing.start(ChatDiagnostics.Stage.RETRIEVAL);
-            KnowledgeCallResult retrieved = retrieve(target, command);
+            KnowledgeCallResult retrieved = retrieve(target, command, timing);
             cancellation.throwIfCancelled();
             timing.start(ChatDiagnostics.Stage.GENERATION);
             if (listener == null) {
@@ -386,6 +386,11 @@ public class KnowledgeApiService {
      * @return result without an answer
      */
     private KnowledgeCallResult retrieve(ResolvedTarget target, KnowledgeCallCommand command) {
+        return retrieve(target, command, null);
+    }
+
+    /** 预览显式接收同次检索的测量，其他调用不向响应或线程上下文添加诊断。 */
+    private KnowledgeCallResult retrieve(ResolvedTarget target, KnowledgeCallCommand command, PreviewTiming timing) {
         AppConfigSnapshot snapshot = target.snapshot();
         List<KbRef> kbRefs = snapshot.getKbRefs();
         if (CollectionUtils.isEmpty(kbRefs)) {
@@ -393,6 +398,9 @@ public class KnowledgeApiService {
                     "应用版本未配置知识库，无法提供检索服务");
         }
         SearchOutcome outcome = retrievalService.search(kbRefs, toRetrievalCommand(snapshot, command, target));
+        if (timing != null) {
+            timing.recordRerank(outcome.getRerankTiming());
+        }
         List<RetrievalNodeView> nodes = trim(outcome.getNodes(), command.getMaxContentLength());
         return KnowledgeCallResult.builder()
                 .nodes(nodes)

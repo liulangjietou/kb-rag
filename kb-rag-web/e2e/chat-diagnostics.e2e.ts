@@ -4,7 +4,8 @@ import AxeBuilder from '@axe-core/playwright';
 import type { Page, Route } from '@playwright/test';
 
 const measured = { request_id: 'req_diagnostics', outcome: 'SUCCEEDED', configuration_ms: 12,
-  retrieval_ms: 240, generation_ms: 1300, first_delta_ms: 602, total_ms: 1552 };
+  retrieval_ms: 240, rerank_status: 'APPLIED', rerank_ms: 95,
+  generation_ms: 1300, first_delta_ms: 602, total_ms: 1552 };
 
 async function answerWith(page: Page, body: string) {
   await page.route('**/api/v1/apps/app_fixture/chat-preview', route => route.fulfill({ contentType: 'text/event-stream', body }));
@@ -54,6 +55,28 @@ test('旧服务缺失诊断时仍可完成回答且不伪造阶段耗时', async
   expect(unexpectedRequests).toEqual([]);
 });
 
+for (const [status, milliseconds, label] of [
+  ['APPLIED', 0, '0 ms · 已应用'],
+  ['TIMEOUT', 25, '25 ms · 超时，沿用粗排序'],
+  ['FAILED', 3, '3 ms · 失败，沿用粗排序'],
+  ['DISABLED', null, '未启用'],
+  ['EMPTY_CANDIDATES', null, '无候选'],
+  ['UNAVAILABLE', null, '模型不可用'],
+] as const) {
+  test(`独立重排诊断区分执行状态 · ${status}`, async ({ page, unexpectedRequests }) => {
+    await answerWith(page, `event: message_delta\ndata: {"delta":"沿用现有检索结果的回答"}\n\nevent: diagnostics\ndata: ${JSON.stringify({
+      ...measured, rerank_status: status, rerank_ms: milliseconds,
+    })}\n\nevent: done\ndata: {"request_id":"req_diagnostics"}\n\n`);
+    await page.getByText('查看耗时诊断', { exact: true }).click();
+    await expect(page.locator('.chat-diagnostics__metrics div').filter({
+      has: page.getByText('重排（检索内）', { exact: true }),
+    })).toHaveText(`重排（检索内）${label}`);
+    await expect(page.getByText('执行完成', { exact: true })).toBeVisible();
+    await expect(page.getByText('沿用现有检索结果的回答', { exact: true })).toBeVisible();
+    expect(unexpectedRequests).toEqual([]);
+  });
+}
+
 test('非流式返回阶段诊断，首段等待明确不适用', async ({ page, unexpectedRequests }) => {
   await page.route('**/api/v1/apps/app_fixture/chat-preview', route => {
     expect(route.request().postDataJSON().stream).toBe(false);
@@ -67,6 +90,7 @@ test('非流式返回阶段诊断，首段等待明确不适用', async ({ page,
   await page.getByText('查看耗时诊断', { exact: true }).click();
   await expect(page.getByText('非流式不适用', { exact: true })).toBeVisible();
   await expect(page.getByText('240 ms', { exact: true })).toBeVisible();
+  await expect(page.getByText('95 ms · 已应用', { exact: true })).toBeVisible();
   expect(unexpectedRequests).toEqual([]);
 });
 
@@ -96,6 +120,7 @@ for (const theme of THEME_IDS) {
       await summary.press('Enter');
       await expect(page.locator('.chat-diagnostics')).toHaveAttribute('open', '');
       await expect(page.getByText('1,300 ms', { exact: true })).toBeVisible();
+      await expect(page.getByText('95 ms · 已应用', { exact: true })).toBeVisible();
       const bounds = await page.locator('.chat-diagnostics').boundingBox();
       expect(bounds).not.toBeNull();
       expect(bounds!.x).toBeGreaterThanOrEqual(0);

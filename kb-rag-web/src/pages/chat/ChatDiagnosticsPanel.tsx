@@ -1,5 +1,5 @@
 import { Alert } from 'antd';
-import type { ChatDiagnostics } from '../../api/chatDiagnostics';
+import type { ChatDiagnostics, RerankStatus } from '../../api/chatDiagnostics';
 import './chat-diagnostics.css';
 
 export interface BrowserChatTiming {
@@ -17,9 +17,19 @@ interface Props {
 
 const stageLabels = { CONFIGURATION: '配置解析', RETRIEVAL: '检索', GENERATION: '生成' };
 const outcomeLabels = { SUCCEEDED: '执行完成', FAILED: '执行失败', CANCELLED: '执行停止' };
+const rerankLabels: Record<RerankStatus, string> = {
+  APPLIED: '已应用', DISABLED: '未启用', EMPTY_CANDIDATES: '无候选', UNAVAILABLE: '模型不可用',
+  TIMEOUT: '超时，沿用粗排序', FAILED: '失败，沿用粗排序', SKIPPED: '已跳过',
+};
 
 function duration(value?: number | null): string {
   return value == null ? '未采集' : `${Math.round(value).toLocaleString('zh-CN')} ms`;
+}
+
+function rerankDuration(diagnostics: ChatDiagnostics): string {
+  if (!diagnostics.rerank_status) return '未采集';
+  const label = rerankLabels[diagnostics.rerank_status];
+  return diagnostics.rerank_ms == null ? label : `${duration(diagnostics.rerank_ms)} · ${label}`;
 }
 
 /** 分开展示服务器执行和浏览器接收，避免将网络等待当成模型生成耗时。 */
@@ -33,11 +43,12 @@ export default function ChatDiagnosticsPanel({ diagnostics, browser, stopped, fa
         <dl className="chat-diagnostics__metrics">
           <div><dt>配置解析</dt><dd>{duration(diagnostics.configuration_ms)}</dd></div>
           <div><dt>检索</dt><dd>{duration(diagnostics.retrieval_ms)}</dd></div>
+          <div><dt>重排（检索内）</dt><dd>{rerankDuration(diagnostics)}</dd></div>
           <div><dt>生成</dt><dd>{duration(diagnostics.generation_ms)}</dd></div>
           <div><dt>服务端首段等待</dt><dd>{duration(diagnostics.first_delta_ms)}</dd></div>
           <div><dt>服务端执行总耗时</dt><dd>{duration(diagnostics.total_ms)}</dd></div>
         </dl>
-        <p className="chat-diagnostics__note">检索含改写、路由、召回和重排；生成含模型首段等待及服务端增量写出。失败阶段显示结束前的实际用时。</p>
+        <p className="chat-diagnostics__note">重排已包含在检索耗时中，不能重复相加；其用时包含调度、模型等待和结果校验。未执行时显示原因。检索另含改写、路由和召回；生成含模型首段等待及服务端增量写出。失败阶段显示结束前的实际用时。</p>
       </> : <Alert type="info" showIcon message="本次未返回服务端诊断，阶段耗时未知" />}
       <h2>浏览器接收</h2>
       <p>{stopped ? '已停止接收' : failed ? '接收未完成' : '接收完成'}</p>

@@ -3,6 +3,7 @@ package io.kbrag.api.sse;
 import io.kbrag.api.dto.KnowledgeChatResponse;
 import io.kbrag.app.openapi.ChatDiagnostics;
 import io.kbrag.app.openapi.KnowledgeCallResult;
+import io.kbrag.app.retrieval.RerankTiming;
 import io.kbrag.common.util.JsonUtil;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -21,7 +22,8 @@ import static org.mockito.Mockito.never;
 class SseChatDiagnosticsTest {
 
     private final ChatDiagnostics diagnostics = new ChatDiagnostics(ChatDiagnostics.Outcome.FAILED,
-            ChatDiagnostics.Stage.RETRIEVAL, 0L, 25L, null, null, 25L);
+            ChatDiagnostics.Stage.RETRIEVAL, 0L, 25L, null, null, 25L,
+            new RerankTiming(RerankTiming.Status.TIMEOUT, 12L));
 
     @Test
     void shouldSendOptionalDiagnosticWithoutClosingAndIgnoreItAfterTerminal() throws Exception {
@@ -40,6 +42,8 @@ class SseChatDiagnosticsTest {
         assertTrue(wire.contains("event:diagnostics"));
         assertTrue(wire.contains("\"retrieval_ms\":25"));
         assertTrue(wire.contains("\"configuration_ms\":0"));
+        assertTrue(wire.contains("\"rerank_status\":\"TIMEOUT\""));
+        assertTrue(wire.contains("\"rerank_ms\":12"));
         assertFalse(wire.contains("\"generation_ms\":0"));
         verify(emitter).complete();
     }
@@ -52,5 +56,7 @@ class SseChatDiagnosticsTest {
         assertTrue(preview.contains("\"diagnostics\""));
         assertTrue(preview.contains("\"failed_stage\":\"RETRIEVAL\""));
         assertTrue(preview.contains("\"total_ms\":25"));
+        assertTrue(preview.contains("\"rerank_status\":\"TIMEOUT\""));
+        assertTrue(preview.contains("\"rerank_ms\":12"));
     }
 }

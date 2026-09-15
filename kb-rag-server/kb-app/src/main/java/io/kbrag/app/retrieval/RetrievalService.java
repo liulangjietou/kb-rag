@@ -200,7 +200,8 @@ public class RetrievalService {
             // Not one selected base holds a visible version, so no route ever ran.
             recordDegradation(!degraded.isEmpty());
             return new SearchOutcome(List.of(), degraded, applied(effectiveQuery,
-                    settings.getFusion().getMode(), ThresholdTarget.NONE.code(), routing.getKbIds()));
+                    settings.getFusion().getMode(), ThresholdTarget.NONE.code(), routing.getKbIds()),
+                    new RerankTiming(RerankTiming.Status.EMPTY_CANDIDATES, null));
         }
         if (!vectorRouteRan && vectorRouteRequested) {
             // A route that was never asked to run is not a degradation - only report the marker when the
@@ -245,7 +246,8 @@ public class RetrievalService {
 
         List<RetrievalCandidate> candidates = selectCandidates(merged, chunkById, parentChildEnabled,
                 settings, graphEvidence);
-        applyRerank(effectiveQuery, candidates, settings, command, primary.retrievalConfig(), degraded);
+        RerankTiming rerankTiming = applyRerank(effectiveQuery, candidates, settings, command,
+                primary.retrievalConfig(), degraded);
         applyHybridOrdering(candidates, settings);
 
         candidates.sort(Comparator.comparingDouble(RetrievalCandidate::orderingScore).reversed()
@@ -277,7 +279,7 @@ public class RetrievalService {
                 candidates.size(), units.size(), nodes.size(), rerankApplied, degraded);
         recordDegradation(!degraded.isEmpty());
         return new SearchOutcome(nodes, degraded,
-                applied(effectiveQuery, orderingMode, decision.appliedOn(), routing.getKbIds()));
+                applied(effectiveQuery, orderingMode, decision.appliedOn(), routing.getKbIds()), rerankTiming);
     }
 
     /**
@@ -663,19 +665,25 @@ public class RetrievalService {
         return candidates;
     }
 
-    private void applyRerank(String query, List<RetrievalCandidate> candidates, RetrievalSettings settings,
-                             RetrievalCommand command, KbRetrievalConfig kbRetrieval, List<String> degraded) {
-        boolean run = shouldRun(settings.isRerankEnabled(), rerankService.isAvailable(),
+    /** 只测量现有重排调用；分数应用、粗排序回退及降级标志沿用原行为。 */
+    private RerankTiming applyRerank(String query, List<RetrievalCandidate> candidates, RetrievalSettings settings,
+                                    RetrievalCommand command, KbRetrievalConfig kbRetrieval, List<String> degraded) {
+        boolean available = rerankService.isAvailable();
+        boolean run = shouldRun(settings.isRerankEnabled(), available,
                 command.getRerankEnabled(), kbRetrieval == null ? null : kbRetrieval.getRerankEnabled());
         List<String> documents = candidates.stream().map(candidate -> candidate.getChunk().getContent()).toList();
+        long startedAt = System.nanoTime();
         RerankOutcome outcome = rerankService.rerank(query, documents, run);
+        RerankTiming timing = RerankTiming.fromOutcome(outcome, settings.isRerankEnabled(), available,
+                candidates.isEmpty(), System.nanoTime() - startedAt);
         addMarker(degraded, outcome.getDegradedReason());
         if (!outcome.isApplied()) {
-            return;
+            return timing;
         }
         for (int i = 0; i < candidates.size(); i++) {
             candidates.get(i).applyRerankScore(outcome.getScores().get(i));
         }
+        return timing;
     }
 
     /**

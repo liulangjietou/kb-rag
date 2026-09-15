@@ -1,5 +1,7 @@
 package io.kbrag.app.openapi;
 
+import io.kbrag.app.retrieval.RerankTiming;
+
 import java.util.EnumMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
@@ -13,6 +15,7 @@ final class PreviewTiming {
     private ChatDiagnostics.Stage stage = ChatDiagnostics.Stage.CONFIGURATION;
     private long stageStartedAt;
     private Long firstDeltaMs;
+    private RerankTiming rerank;
 
     PreviewTiming() {
         this(System::nanoTime);
@@ -37,12 +40,16 @@ final class PreviewTiming {
         }
     }
 
+    void recordRerank(RerankTiming measurement) {
+        rerank = measurement;
+    }
+
     ChatDiagnostics finish(ChatDiagnostics.Outcome outcome) {
         long now = clock.getAsLong();
         elapsed.put(stage, milliseconds(now - stageStartedAt));
         return new ChatDiagnostics(outcome, outcome == ChatDiagnostics.Outcome.SUCCEEDED ? null : stage,
                 elapsed.get(ChatDiagnostics.Stage.CONFIGURATION), elapsed.get(ChatDiagnostics.Stage.RETRIEVAL),
-                elapsed.get(ChatDiagnostics.Stage.GENERATION), firstDeltaMs, milliseconds(now - startedAt));
+                elapsed.get(ChatDiagnostics.Stage.GENERATION), firstDeltaMs, milliseconds(now - startedAt), rerank);
     }
 
     private long milliseconds(long nanos) {

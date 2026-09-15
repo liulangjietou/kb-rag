@@ -2,6 +2,34 @@ import { expect, it, vi } from 'vitest';
 import { readChatDiagnostics } from './chatDiagnostics';
 import { streamChat } from './chatStream';
 
+it('保留独立重排执行状态和实测零值', () => {
+  expect(readChatDiagnostics({ outcome: 'SUCCEEDED', total_ms: 30, retrieval_ms: 12,
+    rerank_status: 'APPLIED', rerank_ms: 0 })).toEqual(expect.objectContaining({
+    rerank_status: 'APPLIED', rerank_ms: 0,
+  }));
+});
+
+it.each(['DISABLED', 'EMPTY_CANDIDATES', 'UNAVAILABLE', 'SKIPPED'])('未执行重排保留原因且不生成零值：%s', rerank_status => {
+  expect(readChatDiagnostics({ outcome: 'SUCCEEDED', total_ms: 30, rerank_status, rerank_ms: null }))
+    .toEqual(expect.objectContaining({ rerank_status, rerank_ms: null }));
+});
+
+it.each([
+  { rerank_status: 'APPLIED' },
+  { rerank_status: 'DISABLED', rerank_ms: 0 },
+  { rerank_ms: 12 },
+  { rerank_status: 'unknown', rerank_ms: 12 },
+  { rerank_status: 'TIMEOUT', rerank_ms: -1 },
+  { rerank_status: 'FAILED', rerank_ms: 1.5 },
+])('拒绝含糊或非法的重排状态和耗时组合：%j', fields => {
+  expect(readChatDiagnostics({ outcome: 'SUCCEEDED', total_ms: 30, ...fields })).toBeUndefined();
+});
+
+it.each(['TIMEOUT', 'FAILED'])('重排降级保留实测等待且不改变整轮结果：%s', rerank_status => {
+  expect(readChatDiagnostics({ outcome: 'SUCCEEDED', total_ms: 30, rerank_status, rerank_ms: 12 }))
+    .toEqual(expect.objectContaining({ outcome: 'SUCCEEDED', rerank_status, rerank_ms: 12 }));
+});
+
 it('保留实测零值，缺失阶段不转换为零', () => {
   expect(readChatDiagnostics({ outcome: 'FAILED', failed_stage: 'RETRIEVAL', configuration_ms: 0, total_ms: 12 }))
     .toEqual(expect.objectContaining({ configuration_ms: 0, retrieval_ms: undefined, generation_ms: undefined, total_ms: 12 }));
