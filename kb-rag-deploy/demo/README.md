@@ -10,7 +10,7 @@
 ```
 demo/
 ├── manifest.json      # 文档清单：文件名、标题、说明、建议 query 列表
-├── eval-cases.json     # 示例评测集（本期只分发，导入功能见下方说明）
+├── eval-cases.json     # 示例评测集（评测中心支持导入）
 ├── docs/                # 实际文档文件（demo/import 按 manifest.json 逐个导入）
 │   ├── 01-rag-intro.md
 │   ├── 02-document-parsing-and-chunking.docx
@@ -21,11 +21,15 @@ demo/
     └── requirements.txt
 ```
 
-`DEMO_DATA_DIR` 环境变量（见 `.env.example`）指向本目录（容器内默认
-`/opt/kb-rag/demo`，从 `kb-rag-server` 目录本地启动时默认使用相对路径
-`../kb-rag-deploy/demo`）；`demo/import`
-读取 `${DEMO_DATA_DIR}/manifest.json`，按 `documents[].file_name`（相对本目录的
-路径，如 `docs/01-rag-intro.md`）逐个上传进新建的"Demo 知识库"。
+`DEMO_DATA_DIR` 环境变量（见 `.env.example`）留空时，从启动目录向上定位当前仓库的
+`kb-rag-deploy/demo`，支持从仓库根目录、`kb-rag-server` 或 `kb-api` 模块启动。
+显式配置优先：相对路径以进程启动目录为基准，绝对路径直接使用；指定目录缺少文件时会报错，
+不会自动改读其他素材。容器或独立 JAR 部署需挂载 Demo 目录，并将该变量设置为实际路径
+（例如 `/opt/kb-rag/demo`）。
+
+文档导入读取该目录的 `manifest.json`，按 `documents[].file_name`（例如
+`docs/01-rag-intro.md`）逐个上传进新建的“Demo 知识库”；评测集导入读取同目录的
+`eval-cases.json`。修改环境变量后需要重启后端。
 
 ## 文档内容
 
@@ -55,11 +59,10 @@ demo/
 同样按最终文件字节流计算）；比对时按需求文档 §4.6 的口径做空白归一化（pdf 分行渲染会在文本
 抽取时插入换行，属正常现象，不影响归一化后的匹配）。
 
-**⚠️ 本期（M3）只分发，不提供导入入口**：`eval-cases.json` 随 kb-rag-deploy 分发，
-但"示例评测集导入"功能排期在 **M4b**（评测能力就绪后落地，见需求文档 §10-M4b、
-`docs/M3-CONTRACTS.md` §0 第 2 点）。导入时按 `doc_ref.file_name` +
-`doc_ref.content_hash_sha256` 关联 `manifest.json` 中的文档，映射为导入后实际生成
-的 `doc_id`（需求文档 §5"开箱即用素材"实现机制）。
+评测中心的“导入 Demo 评测集”调用 `POST /api/v1/kb/{kbId}/eval-datasets/import-demo`。
+请先将 Demo 文档导入目标知识库。导入时按 `doc_ref.file_name` 与
+`doc_ref.content_hash_sha256` 匹配该知识库中实际文档，未匹配的条目会跳过并返回原因。
+已存在“Demo 评测集”时直接返回现有评测集，不重复创建。
 
 ## 重新生成 docx / pdf / xlsx
 

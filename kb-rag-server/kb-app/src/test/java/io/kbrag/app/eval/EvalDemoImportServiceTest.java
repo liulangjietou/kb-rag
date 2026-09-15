@@ -1,6 +1,7 @@
 package io.kbrag.app.eval;
 
 import io.kbrag.app.kb.KnowledgeBaseService;
+import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.entity.DocumentVersion;
@@ -12,6 +13,10 @@ import io.kbrag.domain.mapper.EvalDatasetMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.beans.factory.config.YamlPropertiesFactoryBean;
+import org.springframework.core.env.PropertySourcesPropertyResolver;
+import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.io.FileSystemResource;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,6 +25,8 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -140,6 +147,30 @@ class EvalDemoImportServiceTest {
         assertTrue(result.alreadyExisted());
         assertEquals(0, result.importedCaseCount());
         assertTrue(result.skipped().isEmpty());
+    }
+
+    @Test
+    void shouldReadBundledCasesWithTheApplicationDefaultFromAModuleDirectory() {
+        // 加载真实配置的默认值，避免临时绝对路径掩盖启动目录差异。
+        YamlPropertiesFactoryBean yaml = new YamlPropertiesFactoryBean();
+        yaml.setResources(new FileSystemResource("../kb-api/src/main/resources/application.yml"));
+        String configured = yaml.getObject().getProperty("kb.demo.data-dir");
+        var resolver = new PropertySourcesPropertyResolver(new MutablePropertySources());
+        properties.getDemo().setDataDir(resolver.resolveRequiredPlaceholders(configured));
+
+        EvalDemoImportService.ImportResult result = service.importDemo(KB_ID);
+
+        // 没有匹配文档时允许跳过，但必须实际读到随仓库分发的评测条目。
+        assertTrue(result.importedCaseCount() + result.skipped().size() > 0);
+    }
+
+    @Test
+    void shouldFailBeforeCreatingADatasetWhenTheConfiguredManifestIsMissing() {
+        BizException failure = assertThrows(BizException.class, () -> service.importDemo(KB_ID));
+
+        assertTrue(failure.getMessage().contains(demoDir.toString()));
+        assertTrue(failure.getMessage().contains("DEMO_DATA_DIR"));
+        verifyNoInteractions(evalDatasetService);
     }
 
     private void writeManifest(String json) throws Exception {

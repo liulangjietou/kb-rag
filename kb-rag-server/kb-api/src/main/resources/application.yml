@@ -265,8 +265,8 @@ kb:
     evaluation-interval-ms: ${ALERT_EVALUATION_INTERVAL_MS:60000}
     webhook-timeout-ms: ${ALERT_WEBHOOK_TIMEOUT_MS:3000}
   demo:
-    # Local development points at the deployment repository; a container mounts the set and overrides this.
-    data-dir: ${DEMO_DATA_DIR:../kb-rag-deploy/demo}
+    # 留空时从启动目录向上定位当前仓库的 kb-rag-deploy/demo；容器应配置素材挂载路径。
+    data-dir: ${DEMO_DATA_DIR:}
     knowledge-base-name: ${DEMO_KB_NAME:Demo 知识库}
   sync:
     compensation-enabled: ${SYNC_COMPENSATION_ENABLED:true}

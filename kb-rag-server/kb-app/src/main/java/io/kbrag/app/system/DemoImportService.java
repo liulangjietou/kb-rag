@@ -124,7 +124,7 @@ public class DemoImportService {
      * @return readable files listed by the manifest, in declaration order
      */
     private List<Path> manifestFiles() {
-        Path root = Path.of(properties.getDemo().getDataDir());
+        Path root = DemoDataDirectory.resolve(properties.getDemo().getDataDir());
         Path manifest = root.resolve(MANIFEST_FILE_NAME);
         if (!Files.isReadable(manifest)) {
             return List.of();

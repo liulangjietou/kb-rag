@@ -3,6 +3,7 @@ package io.kbrag.app.eval;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.kbrag.app.kb.KnowledgeBaseService;
+import io.kbrag.app.system.DemoDataDirectory;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.entity.Document;
@@ -99,10 +100,12 @@ public class EvalDemoImportService {
     }
 
     private DemoEvalManifest readManifest() {
-        Path file = Path.of(properties.getDemo().getDataDir()).resolve(EVAL_CASES_FILE_NAME);
+        Path root = DemoDataDirectory.resolve(properties.getDemo().getDataDir());
+        Path file = root.resolve(EVAL_CASES_FILE_NAME);
         if (!Files.isReadable(file)) {
             throw BizException.invalidParam("demo evaluation case set not found under "
-                    + properties.getDemo().getDataDir() + ", expected " + EVAL_CASES_FILE_NAME);
+                    + root + ", expected " + EVAL_CASES_FILE_NAME
+                    + "; set DEMO_DATA_DIR to the demo directory");
         }
         try {
             DemoEvalManifest manifest = JsonUtil.parse(Files.readString(file), DemoEvalManifest.class);
