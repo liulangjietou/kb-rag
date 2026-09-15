@@ -22,7 +22,7 @@ docker-compose 一键拉起中间件。
 
 ## 作品演示
 
-[![作品演示](https://github.com/user-attachments/assets/e983030c-ed85-4304-8468-b3d1f3443055)](https://www.bilibili.com/video/BV1LwtJ6DEk9/?vd_source=03686e8b5675ab4a5314432c9c02feeb)
+[![作品演示](https://github.com/user-attachments/assets/e983030c-ed85-4304-8468-b3d1f3443055)]([https://www.bilibili.com/video/BV1LwtJ6DEk9/?vd_source=03686e8b5675ab4a5314432c9c02feeb](https://www.bilibili.com/video/BV1ECe76iEBz/?spm_id_from=333.1368.list.card_archive.click&vd_source=03686e8b5675ab4a5314432c9c02feeb))
 
 > 界面截图尚未补齐（`docs/assets/` 目前只放了公众号二维码），完整交互先看上面的演示视频。
 
