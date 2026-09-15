@@ -4153,6 +4153,12 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: EVAL_DATASET_CONFLICT，用例或集合已被其他操作修改，本次修改已整体回滚，请读取最新内容后重试
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     get:
       tags:
       - eval
@@ -4206,6 +4212,12 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: EVAL_DATASET_CONFLICT，用例或集合已被其他操作修改，本次修改已整体回滚，请读取最新内容后重试
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/eval-datasets/{datasetId}/stale-cases:
     parameters:
     - $ref: '#/components/parameters/EvalDatasetId'
@@ -4249,6 +4261,12 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: EVAL_DATASET_CONFLICT，用例或集合已被其他操作修改，本次修改已整体回滚，请读取最新内容后重试
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       tags:
       - eval
@@ -4263,6 +4281,12 @@ paths:
                 $ref: '#/components/schemas/EmptyResult'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: EVAL_DATASET_CONFLICT，用例或集合已被其他操作修改，本次修改已整体回滚，请读取最新内容后重试
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/eval-cases/{caseId}/recheck:
     parameters:
     - $ref: '#/components/parameters/EvalCaseId'
@@ -4289,6 +4313,12 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: EVAL_DATASET_CONFLICT，用例或集合已被其他操作修改，本次修改已整体回滚，请读取最新内容后重试
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/retrieval-feedback:
     post:
       tags:
@@ -6674,6 +6704,7 @@ components:
       - CONVERSATION_BUSY
       - CONVERSATION_REQUEST_CONFLICT
       - FEEDBACK_VERSION_CONFLICT
+      - EVAL_DATASET_CONFLICT
       - KNOWLEDGE_SNAPSHOT_UNAVAILABLE
       - RATE_LIMITED
       - MODEL_QUOTA_EXCEEDED

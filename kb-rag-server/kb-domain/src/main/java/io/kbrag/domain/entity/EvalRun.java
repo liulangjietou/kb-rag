@@ -44,6 +44,10 @@ public class EvalRun extends BaseEntity {
     @TableField("dataset_revision")
     private Integer datasetRevision;
 
+    /** 提交时冻结的用例输入 JSON；旧运行为空，不能据此证明某条纠正用例已回归。 */
+    @TableField("case_inputs")
+    private String caseInputs;
+
     /** Hash of the active version set plus the embedding version plus the dictionary version. */
     @TableField("corpus_fingerprint")
     private String corpusFingerprint;
