@@ -4,7 +4,6 @@ import {
   ArrowLeftOutlined,
   CheckOutlined,
   DeleteOutlined,
-  InboxOutlined,
   PlusOutlined,
   ReloadOutlined,
   SettingOutlined,
@@ -18,10 +17,8 @@ import {
   Descriptions,
   Tabs,
   Typography,
-  Upload,
   message,
 } from 'antd';
-import type { UploadProps } from 'antd';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { knowledgeTodoTarget } from './knowledgeTodoTarget';
 import {
@@ -30,7 +27,6 @@ import {
   listDocuments,
   reindexDocument,
   submitDocumentReview,
-  uploadDocument,
 } from '../../api/document';
 import {
   batchDeleteDocuments,
@@ -48,6 +44,7 @@ import { useResourceVisit } from '../../hooks/useResourceVisit';
 import PageHeader from '../../components/PageHeader';
 import DocumentActions from './components/DocumentActions';
 import DocumentList from './components/DocumentList';
+import DocumentUploadDrawer from './components/DocumentUploadDrawer';
 import DocumentFilterBar, { type DocumentFilters } from './components/DocumentFilterBar';
 import KbSettingsDrawer from './components/KbSettingsDrawer';
 import ChatImportWizard from './components/ChatImportWizard';
@@ -512,32 +509,6 @@ export default function KbDetailPage() {
     }
   };
 
-  const uploadProps: UploadProps = {
-    multiple: true,
-    showUploadList: false,
-    customRequest: async (options) => {
-      const { file, onSuccess, onError } = options;
-      try {
-        const doc = await uploadDocument(kbId!, file as File);
-        onSuccess?.(doc);
-        // The upload response carries what M4a's three-branch dedup actually decided
-        // (duplicated / new version / brand new document); reporting a flat "上传成功" hid the
-        // case where nothing was re-parsed because the content hash already existed.
-        const name = (file as File).name;
-        if (doc.duplicated) {
-          message.info(`${name} 内容与已有版本${doc.version ? ` ${doc.version}` : ''}一致，未重复建版`);
-        } else if (doc.version) {
-          message.success(`${name} 上传成功，已生成版本 ${doc.version}，正在处理`);
-        } else {
-          message.success(`${name} 上传成功，正在处理`);
-        }
-        loadDocuments();
-      } catch (err) {
-        onError?.(err as Error);
-      }
-    },
-  };
-
   return (
     <div className="knowledge-workbench-page kb-detail-page">
       <PageHeader
@@ -839,22 +810,8 @@ export default function KbDetailPage() {
         onClose={closeQualityIssue}
         onChanged={() => setQualityRefresh((value) => value + 1)} />}
 
-      {canDocWrite && (
-        <Drawer title="添加文档" open={uploadOpen} width={540} onClose={() => setUploadOpen(false)}>
-          <Typography.Paragraph type="secondary">
-            文件上传后会自动解析。处理进度与审核状态可在文档列表查看。
-          </Typography.Paragraph>
-          <Upload.Dragger {...uploadProps} className="document-upload-zone">
-            <p className="ant-upload-drag-icon">
-              <InboxOutlined />
-            </p>
-            <p className="ant-upload-text">点击或拖拽文件到此处上传</p>
-            <p className="ant-upload-hint">
-              支持 pdf / docx / txt / md / sql / xlsx / csv / html，单文件不超过 100MB，可批量上传
-            </p>
-          </Upload.Dragger>
-        </Drawer>
-      )}
+      {canDocWrite && kbId && <DocumentUploadDrawer kbId={kbId} open={uploadOpen}
+        onClose={() => setUploadOpen(false)} onAccepted={loadDocuments} />}
       {canKbWrite && settingsOpen && kb && (
         <KbSettingsDrawer
           kb={kb}

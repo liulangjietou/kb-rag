@@ -1,0 +1,11 @@
+.document-upload-zone .ant-upload.ant-upload-drag { height: auto; }
+.document-upload-results { margin-top: 24px; }
+.document-upload-results header { margin-bottom: 12px; }
+.document-upload-results h2 { margin: 0 0 8px; font-size: 16px; }
+.document-upload-results header span { color: var(--kb-color-text-secondary); font-size: 12px; }
+.document-upload-list { list-style: none; margin: 16px 0 0; padding: 0; }
+.document-upload-list li { padding: 14px 0; border-top: 1px solid var(--kb-color-border); }
+.document-upload-row { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.document-upload-row strong { min-width: 0; overflow-wrap: anywhere; }
+.document-upload-row .ant-tag { flex: 0 0 auto; margin: 0; }
+.document-upload-list p { margin: 8px 0; color: var(--kb-color-text-secondary); overflow-wrap: anywhere; }
