@@ -89,7 +89,7 @@ export default function EvalCaseFormModal({
 
   const handleSubmit = async () => {
     const values = await form.validateFields();
-    if (!values.evidences || values.evidences.length === 0) {
+    if (!values.expected_refusal && (!values.evidences || values.evidences.length === 0)) {
       message.warning('请至少添加一条证据');
       return;
     }
@@ -99,7 +99,7 @@ export default function EvalCaseFormModal({
       expected_answer: values.expected_answer || undefined,
       expected_refusal: values.expected_refusal,
       anchor_type: values.anchor_type,
-      evidences: values.evidences.map((evidence) => ({
+      evidences: (values.evidences ?? []).map((evidence) => ({
         doc_id: evidence.doc_id,
         span: values.anchor_type === 'SPAN' ? evidence.span : undefined,
       })),

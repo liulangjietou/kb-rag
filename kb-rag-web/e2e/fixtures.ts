@@ -110,6 +110,7 @@ export const test = base.extend<{
       '/memory-libraries/mem_fixture': memory,
       '/memory-libraries/mem_fixture/fragment-rules': [],
       '/kb/kb_fixture/eval-datasets': [],
+      '/kb/kb_fixture/quality-issues': pageData([]),
       '/registration-reviews': pageData([]),
       '/users': pageData([]),
       '/roles': [],

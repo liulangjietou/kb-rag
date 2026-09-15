@@ -48,13 +48,14 @@ public record SearchInsightStatsResponse(
     public record TopZeroHitQueryResponse(
             @JsonProperty("query_digest") String queryDigest,
             long count,
-            @JsonProperty("last_at") String lastAt) {
+            @JsonProperty("last_at") String lastAt,
+            @JsonProperty("insight_id") String insightId) {
 
         private static TopZeroHitQueryResponse from(SearchInsightService.TopZeroHitQuery group) {
             return new TopZeroHitQueryResponse(
                     group.queryDigest(),
                     group.count(),
-                    group.lastAt() == null ? null : group.lastAt().toString());
+                    group.lastAt() == null ? null : group.lastAt().toString(), group.insightId());
         }
     }
 }

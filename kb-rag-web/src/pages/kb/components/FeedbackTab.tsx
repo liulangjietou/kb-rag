@@ -9,9 +9,11 @@ import {
 } from '../../../api/retrievalFeedback';
 import type { EvalDataset, FeedbackChannel, FeedbackStatus, FeedbackVerdict, RetrievalFeedbackEntry } from '../../../api/types';
 import { FEEDBACK_STATUS_META, FEEDBACK_VERDICT_META, metaOf } from '../../../utils/statusMeta';
+import QualityIssueCreateButton from '../quality/QualityIssueCreateButton';
 
 interface FeedbackTabProps {
   kbId: string;
+  onOpenIssue?: (issueId: string) => void;
 }
 
 type TargetMode = 'existing' | 'new';
@@ -36,7 +38,7 @@ const FEEDBACK_CHANNEL_META: Record<FeedbackChannel, { label: string; color: str
  * picker modelled on the debug page's CollectToEvalModal) and a dismiss action. Both actions are
  * terminal server-side, so the buttons only render while a row is still NEW.
  */
-export default function FeedbackTab({ kbId }: FeedbackTabProps) {
+export default function FeedbackTab({ kbId, onOpenIssue }: FeedbackTabProps) {
   const [items, setItems] = useState<RetrievalFeedbackEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -240,6 +242,8 @@ export default function FeedbackTab({ kbId }: FeedbackTabProps) {
                       转入评测集
                     </Button>
                   )}
+                  {record.verdict === 'BAD' && record.doc_id && onOpenIssue && <QualityIssueCreateButton kbId={kbId}
+                    sourceType="BAD_FEEDBACK" sourceId={record.feedback_id} onOpen={onOpenIssue} />}
                   <Popconfirm
                     title="忽略该反馈？"
                     description="忽略后不可恢复，该反馈将不再出现在待处理列表"
