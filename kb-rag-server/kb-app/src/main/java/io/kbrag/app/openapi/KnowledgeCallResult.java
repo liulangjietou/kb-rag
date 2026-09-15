@@ -20,7 +20,7 @@ import java.util.List;
  * @author owlzhangfq@gmail.com
  */
 @Getter
-@Builder
+@Builder(toBuilder = true)
 @ToString(exclude = "answer")
 public class KnowledgeCallResult {
 
@@ -44,6 +44,9 @@ public class KnowledgeCallResult {
 
     /** Stage the serving version is in. */
     private final TargetStage targetStage;
+
+    /** 控制台预览的阶段实测结果；未采集诊断的调用保持为空。 */
+    private final ChatDiagnostics diagnostics;
 
     /**
      * Knowledge bases this call searched, requirement section 4.9.

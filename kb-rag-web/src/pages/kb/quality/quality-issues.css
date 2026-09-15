@@ -1,0 +1,32 @@
+.quality-issue-list, .quality-issue-drawer { color: var(--kb-color-text); }
+.quality-muted { color: var(--kb-color-text-secondary); overflow-wrap: anywhere; }
+.quality-list-intro p { margin: 0 0 20px; line-height: 1.7; }
+.quality-list-filters { margin-bottom: 20px; }
+.quality-mine-filter { display: inline-flex; align-items: center; gap: 10px; }
+.quality-summary-link.ant-btn { max-width: 100%; height: auto; padding: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.quality-detail-toolbar { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+.quality-issue-heading { margin: 20px 0; }
+.quality-issue-heading h3 { margin-top: 14px; overflow-wrap: anywhere; line-height: 1.5; }
+.quality-detail-actions { margin: 20px 0; }
+.quality-correction, .quality-regression, .quality-processing-note, .quality-processing-history { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--kb-color-border); }
+.quality-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+.quality-evidence-editor { margin-bottom: 24px; }
+.quality-evidence-row { border: 1px solid var(--kb-color-border); border-radius: 10px; padding: 16px; margin: 12px 0; background: var(--kb-color-surface); }
+.quality-history-editor { margin: 24px 0; }
+.quality-history-editor summary { cursor: pointer; padding: 10px 0; }
+.quality-field-label { display: block; margin: 18px 0 8px; font-weight: 600; }
+.quality-full-width { width: 100%; }
+.quality-regression-links, .quality-run-pagination { margin: 12px 0; }
+.quality-regression-proof { margin: 20px 0; }
+.quality-regression-proof .ant-descriptions { margin-top: 16px; }
+.quality-answer, .quality-record-note { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+.quality-answer { border-left: 3px solid var(--kb-color-primary); padding: 4px 16px; }
+.quality-resolve-button, .quality-processing-note > .ant-btn { margin-top: 20px; }
+.quality-issue-drawer .ant-alert { margin-bottom: 16px; }
+.quality-processing-history .ant-timeline { margin-top: 24px; }
+@media (max-width: 600px) {
+  .quality-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .quality-issue-drawer .ant-drawer-body { padding: 18px 16px; }
+  .quality-evidence-row { padding: 12px; }
+  .quality-detail-actions .ant-btn { min-height: 40px; }
+}

@@ -1,5 +1,6 @@
 // Author: owlzhangfq@gmail.com
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { PERMISSIONS } from '../auth/permissions';
 import { RequireAuth, RequirePasswordChanged, RequirePermission } from '../auth/RouteGuards';
@@ -27,6 +28,8 @@ import RoleManagePage from '../pages/settings/RoleManagePage';
 import SettingsPage from '../pages/settings/SettingsPage';
 import TenantManagePage from '../pages/settings/TenantManagePage';
 import UserManagePage from '../pages/settings/UserManagePage';
+
+const EmployeeWorkspacePage = lazy(() => import('../pages/workspace/EmployeeWorkspacePage'));
 
 /** Wraps the authenticated app shell with the model-status fetch (needs a valid token). */
 function AuthenticatedShell() {
@@ -57,6 +60,11 @@ export default function AppRouter() {
 
           <Route element={<AuthenticatedShell />}>
             <Route path="/home" element={<HomePage />} />
+            <Route element={<RequirePermission anyOf={[PERMISSIONS.APP_USE]} />}>
+              <Route path="/workspace" element={<Suspense fallback={<div role="status">正在打开知识问答…</div>}>
+                <EmployeeWorkspacePage />
+              </Suspense>} />
+            </Route>
             <Route element={<RequirePermission anyOf={[PERMISSIONS.KB_READ]} />}>
               <Route path="/kb" element={<KbListPage />} />
               <Route path="/kb/:kbId" element={<KbDetailPage />} />

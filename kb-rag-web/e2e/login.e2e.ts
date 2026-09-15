@@ -1,3 +1,4 @@
+import { DARK_THEME_IDS, THEME_IDS } from './theme-fixture';
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from './fixtures';
 
@@ -16,7 +17,7 @@ test('1280×720 同时开启目录和单点登录时，账号、验证码与提�
   expect(unexpectedRequests).toEqual([]);
 });
 
-for (const theme of ['atlas', 'ocean', 'violet', 'cinder', 'moss', 'rose', 'graphite', 'night']) {
+for (const theme of THEME_IDS) {
   for (const width of [390, 768, 1280, 1440, 1920]) {
     test(`登录 · ${theme} · ${width}px，主题、触控与布局`, async ({ page, api, unexpectedRequests }, testInfo) => {
       api['/auth/sso-available'] = { sso_available: true };
@@ -41,7 +42,7 @@ for (const theme of ['atlas', 'ocean', 'violet', 'cinder', 'moss', 'rose', 'grap
           expect(box?.height).toBeGreaterThanOrEqual(44);
         }
       }
-      if (width === 1280 || (theme === 'night' && width === 390)) {
+      if (width === 1280 || (DARK_THEME_IDS.includes(theme) && width === 390)) {
         const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
         expect(result.violations.map(({ id, nodes }) => ({ id, nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })) }))).toEqual([]);
       }

@@ -1,0 +1,14 @@
+.model-usage-toolbar { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+.model-usage-month { display: grid; gap: 7px; }
+.model-usage-month .ant-input { width: 160px; }
+.model-usage-note { color: var(--kb-color-text-secondary); line-height: 1.7; overflow-wrap: anywhere; }
+.model-usage-summary { margin-bottom: 20px; }
+.model-usage-call-details { min-width: 0; padding: 12px; }
+.model-usage-call-details .ant-alert { margin-bottom: 16px; }
+.model-usage-call-details .ant-descriptions-item-content { overflow-wrap: anywhere; min-width: 0; }
+.model-usage-table-scroll { overflow-x: auto; }
+.model-usage-drawer .ant-drawer-body { min-width: 0; }
+@media (max-width: 600px) {
+  .model-usage-drawer .ant-drawer-body { padding: 18px 16px; }
+  .model-usage-toolbar .ant-btn { min-height: 40px; }
+}

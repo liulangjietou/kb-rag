@@ -5,10 +5,11 @@ import {
   AuditOutlined,
   DatabaseOutlined,
   ExperimentOutlined,
+  MessageOutlined,
   ReloadOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
-import { Alert, Button, Empty, Skeleton, Tag } from 'antd';
+import { Alert, Button, Empty } from 'antd';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { listApps } from '../api/app';
@@ -18,6 +19,9 @@ import type { KbApp, KnowledgeBase } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { PERMISSIONS } from '../auth/permissions';
 import { useModelStatus } from '../context/ModelStatusContext';
+import EmployeeHomePanel from './workspace/EmployeeHomePanel';
+import RecentVisitsList from './workspace/RecentVisitsList';
+import KnowledgeTodos from './workspace/KnowledgeTodos';
 import '../styles/home.css';
 
 type LoadState = 'idle' | 'loading' | 'success' | 'error';
@@ -29,18 +33,6 @@ interface HomeResource {
   detail: string;
   path: string;
   updatedAt: string;
-}
-
-function dateLabel(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? '时间未知'
-    : new Intl.DateTimeFormat('zh-CN', {
-        month: 'numeric',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }).format(date);
 }
 
 function greeting(): string {
@@ -63,6 +55,8 @@ export default function HomePage() {
   } = useModelStatus();
   const canReadKb = can(PERMISSIONS.KB_READ);
   const canReadApps = can(PERMISSIONS.APP_READ);
+  const canUseApps = can(PERMISSIONS.APP_USE);
+  const employeeOnly = canUseApps && !canReadKb && !canReadApps;
   const canReviewRegistrations = can(PERMISSIONS.USER_MANAGE) && can(PERMISSIONS.TENANT_MANAGE);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [apps, setApps] = useState<KbApp[]>([]);
@@ -228,6 +222,9 @@ export default function HomePage() {
     modelError;
   const resourcesLoading = (canReadKb && kbState === 'loading') || (canReadApps && appState === 'loading');
   const quickActions = [
+    canUseApps
+      ? { key: 'workspace', label: '进入知识问答', description: '使用正式应用，继续个人会话', path: '/workspace', icon: <MessageOutlined /> }
+      : null,
     canReadKb
       ? {
           key: 'kb',
@@ -287,7 +284,7 @@ export default function HomePage() {
         <div>
           <h1>工作概览</h1>
           <p>
-            {greeting()}，{displayName ?? '知识工作者'}。继续维护知识，或验证应用的回答。
+            {greeting()}，{displayName ?? '知识工作者'}。{employeeOnly ? '从知识中找到答案，继续自己的工作。' : '继续维护知识，或验证应用的回答。'}
           </p>
         </div>
       </header>
@@ -314,7 +311,7 @@ export default function HomePage() {
         />
       )}
 
-      <section className="home-metrics" aria-label="工作概览指标">
+      {!employeeOnly && <section className="home-metrics" aria-label="工作概览指标">
         {metrics.map((metric) => (
           <div key={metric.label}>
             <span>{metric.label}</span>
@@ -322,20 +319,22 @@ export default function HomePage() {
             <small>{metric.detail}</small>
           </div>
         ))}
-      </section>
+      </section>}
 
       <div className="atlas-home__grid">
         <div className="home-work-column">
-          <section className="atlas-panel">
+          {canUseApps && <EmployeeHomePanel />}
+          {!employeeOnly && <section className="atlas-panel">
             <header className="atlas-panel__head">
               <div>
-                <h2>继续工作</h2>
-                <p>知识库按创建时间、应用按更新时间排列</p>
+                <h2>最近访问</h2>
+                <p>按实际打开时间排列，只显示当前有权访问的资源</p>
               </div>
               <div className="atlas-command-search">
                 <SearchOutlined aria-hidden="true" />
                 <input
                   value={query}
+                  disabled={resourcesLoading}
                   type="search"
                   placeholder="搜索已授权的知识库或应用…"
                   aria-label="搜索已授权的知识库或应用"
@@ -367,49 +366,8 @@ export default function HomePage() {
                 )}
               </div>
             </header>
-            {resourcesLoading ? (
-              <div className="atlas-panel__loading">
-                <Skeleton active paragraph={{ rows: 4 }} />
-              </div>
-            ) : resources.length === 0 && (kbState === 'error' || appState === 'error') ? (
-              <Alert
-                className="atlas-panel__resource-error"
-                type="error"
-                showIcon
-                message="资源数据加载失败"
-                description="这不是空数据，请使用上方“重试”重新读取。"
-              />
-            ) : resources.length === 0 ? (
-              <Empty
-                className="atlas-panel__empty"
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description="当前没有可展示的知识库或应用"
-              />
-            ) : (
-              <ul className="atlas-work-list">
-                {resources.slice(0, 5).map((resource) => (
-                  <li key={resource.key}>
-                    <button type="button" onClick={() => navigate(resource.path)}>
-                      <span className={`atlas-work-list__icon${resource.kind === '应用' ? ' is-app' : ''}`}>
-                        {resource.kind === '应用' ? <AppstoreOutlined /> : <DatabaseOutlined />}
-                      </span>
-                      <span className="atlas-work-list__copy">
-                        <strong>{resource.name}</strong>
-                        <small>{resource.detail}</small>
-                      </span>
-                      <span className="atlas-work-list__meta">
-                        <Tag>{resource.kind}</Tag>
-                        <small>
-                          {resource.kind === '知识库' ? '创建于 ' : '更新于 '}
-                          {dateLabel(resource.updatedAt)}
-                        </small>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+            <RecentVisitsList />
+          </section>}
 
           <section className="home-provenance" aria-label="知识证据路径">
             <div>
@@ -430,6 +388,7 @@ export default function HomePage() {
           </section>
         </div>
         <aside className="home-side-column">
+          <KnowledgeTodos />
           {(canReviewRegistrations || can(PERMISSIONS.EVAL_READ)) && (
             <section className="atlas-panel home-attention">
               <header className="atlas-panel__head">

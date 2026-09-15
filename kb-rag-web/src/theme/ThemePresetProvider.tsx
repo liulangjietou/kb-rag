@@ -6,8 +6,8 @@ import {
   createAntThemeConfig,
   getNextThemePresetId,
   getThemePreset,
-  type ThemePresetId,
 } from './presets';
+import { resolvePreferencePalette, SYSTEM_COLOR_SCHEME_QUERY, type ThemePreference } from './themePreference';
 import { ThemePresetContext, type ThemePresetContextValue } from './ThemePresetContext';
 import {
   getBrowserThemeStorage,
@@ -20,14 +20,15 @@ interface ThemePresetProviderProps {
   children: ReactNode;
 }
 
-function initialThemePresetId(): ThemePresetId {
+function initialThemePresetId(): ThemePreference {
   return readStoredThemePreset(getBrowserThemeStorage());
 }
 
 export function ThemePresetProvider({ children }: ThemePresetProviderProps) {
   const [reducedMotion, setReducedMotion] = useState(() => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  const [presetId, setPresetId] = useState<ThemePresetId>(initialThemePresetId);
-  const preset = useMemo(() => getThemePreset(presetId), [presetId]);
+  const [presetId, setPresetId] = useState<ThemePreference>(initialThemePresetId);
+  const [systemDark, setSystemDark] = useState(() => typeof window !== 'undefined' && window.matchMedia(SYSTEM_COLOR_SCHEME_QUERY).matches);
+  const preset = useMemo(() => getThemePreset(resolvePreferencePalette(presetId, systemDark)), [presetId, systemDark]);
   const antThemeConfig = useMemo(() => {
     const config = createAntThemeConfig(preset);
     return { ...config, token: { ...config.token, motion: !reducedMotion } };
@@ -40,18 +41,28 @@ export function ThemePresetProvider({ children }: ThemePresetProviderProps) {
     return () => media.removeEventListener('change', updateMotion);
   }, []);
 
-  const selectPreset = useCallback((id: ThemePresetId) => {
+  useEffect(() => {
+    const media = window.matchMedia(SYSTEM_COLOR_SCHEME_QUERY);
+    const updateScheme = () => setSystemDark(media.matches);
+    // 订阅后立即重读，覆盖首次渲染与 effect 之间的系统模式变更。
+    media.addEventListener('change', updateScheme);
+    updateScheme();
+    return () => media.removeEventListener('change', updateScheme);
+  }, []);
+
+  const selectPreset = useCallback((id: ThemePreference) => {
     setPresetId(id);
   }, []);
 
   const cyclePreset = useCallback(() => {
-    setPresetId((current) => getNextThemePresetId(current));
+    setPresetId((current) => current === 'system' ? 'atlas' : getNextThemePresetId(current));
   }, []);
 
   useLayoutEffect(() => {
-    applyThemePresetToDocument(presetId);
+    applyThemePresetToDocument(preset.id);
+    document.documentElement.dataset.themePreference = presetId;
     writeStoredThemePreset(getBrowserThemeStorage(), presetId);
-  }, [presetId]);
+  }, [presetId, preset.id]);
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {

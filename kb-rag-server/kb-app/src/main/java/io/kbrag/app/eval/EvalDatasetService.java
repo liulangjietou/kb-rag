@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.kbrag.app.kb.KnowledgeBaseService;
+import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.entity.Chunk;
@@ -23,6 +24,7 @@ import io.kbrag.domain.mapper.EvalDatasetMapper;
 import io.kbrag.domain.mapper.EvalResultMapper;
 import io.kbrag.domain.mapper.EvalRunMapper;
 import io.kbrag.domain.model.ChatMessage;
+import io.kbrag.domain.model.EvalCaseInput;
 import io.kbrag.domain.model.EvalEvidence;
 import io.kbrag.domain.service.BizIdGenerator;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +32,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -52,6 +56,12 @@ import java.util.Map;
 @Service
 @RequiredArgsConstructor
 public class EvalDatasetService {
+
+    /** 已解决问题也需要保留其回归依据，不能只保护未处理问题。 */
+    private static final String CASE_QUALITY_REFERENCE = "SELECT 1 FROM t_kb_quality_issue qi "
+            + "WHERE qi.case_id = t_kb_eval_case.case_id AND qi.deleted = 0";
+    private static final String DATASET_QUALITY_REFERENCE = "SELECT 1 FROM t_kb_quality_issue qi "
+            + "WHERE qi.dataset_id = t_kb_eval_dataset.dataset_id AND qi.deleted = 0";
 
     private final EvalDatasetMapper evalDatasetMapper;
     private final EvalCaseMapper evalCaseMapper;
@@ -129,6 +139,21 @@ public class EvalDatasetService {
         return dataset;
     }
 
+    /** 在独立的一致性读取事务中取得集合修订号和输入，事务不会覆盖后续检索或模型调用。 */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ, propagation = Propagation.REQUIRES_NEW)
+    public EvaluationInputs snapshotForRun(String datasetId) {
+        EvalDataset dataset = require(datasetId);
+        List<EvalCaseInput> inputs = evalCaseMapper.selectList(new LambdaQueryWrapper<EvalCase>()
+                        .eq(EvalCase::getDatasetId, datasetId)
+                        .ne(EvalCase::getStatus, CaseStatus.DEPRECATED)
+                        .orderByAsc(EvalCase::getId))
+                .stream().map(EvalCaseInput::capture).toList();
+        return new EvaluationInputs(dataset, inputs);
+    }
+
+    /** 集合元数据只用于建立运行；输入内容使用不可变值对象跨越排队边界。 */
+    public record EvaluationInputs(EvalDataset dataset, List<EvalCaseInput> cases) { }
+
     /**
      * Deletes a data set together with every case, run and result it owns.
      *
@@ -140,6 +165,11 @@ public class EvalDatasetService {
     @Transactional(rollbackFor = Exception.class)
     public void delete(String datasetId) {
         EvalDataset dataset = require(datasetId);
+        // 先按修订号和引用关系取得删除资格；后续级联写入失败时整个事务回滚。
+        requireDeleted(evalDatasetMapper.delete(new LambdaQueryWrapper<EvalDataset>()
+                .eq(EvalDataset::getId, dataset.getId())
+                .eq(EvalDataset::getLockVersion, dataset.getLockVersion())
+                .notExists(DATASET_QUALITY_REFERENCE)));
         List<EvalRun> runs = evalRunMapper.selectList(new LambdaQueryWrapper<EvalRun>()
                 .eq(EvalRun::getDatasetId, datasetId));
         for (EvalRun run : runs) {
@@ -147,7 +177,6 @@ public class EvalDatasetService {
         }
         evalRunMapper.delete(new LambdaQueryWrapper<EvalRun>().eq(EvalRun::getDatasetId, datasetId));
         evalCaseMapper.delete(new LambdaQueryWrapper<EvalCase>().eq(EvalCase::getDatasetId, datasetId));
-        evalDatasetMapper.deleteById(dataset.getId());
         log.info("evaluation data set deleted, datasetId={}, cascadedRuns={}", datasetId, runs.size());
     }
 
@@ -207,7 +236,7 @@ public class EvalDatasetService {
         boolean wasDeprecated = evalCase.getStatus() == CaseStatus.DEPRECATED;
         applyCommand(evalCase, command, evalCase.getSource());
         evalCase.setStatus(CaseStatus.ACTIVE);
-        evalCaseMapper.updateById(evalCase);
+        requireWritten(evalCaseMapper.updateById(evalCase));
         bumpRevision(dataset, wasDeprecated ? 1 : 0);
         log.info("evaluation case updated, caseId={}", caseId);
         return evalCase;
@@ -222,7 +251,10 @@ public class EvalDatasetService {
     public void deleteCase(String caseId) {
         EvalCase evalCase = requireCase(caseId);
         EvalDataset dataset = require(evalCase.getDatasetId());
-        evalCaseMapper.deleteById(evalCase.getId());
+        requireDeleted(evalCaseMapper.delete(new LambdaQueryWrapper<EvalCase>()
+                .eq(EvalCase::getId, evalCase.getId())
+                .eq(EvalCase::getLockVersion, evalCase.getLockVersion())
+                .notExists(CASE_QUALITY_REFERENCE)));
         bumpRevision(dataset, evalCase.getStatus() == CaseStatus.DEPRECATED ? 0 : -1);
         log.info("evaluation case deleted, caseId={}", caseId);
     }
@@ -249,7 +281,7 @@ public class EvalDatasetService {
             evalCase.setEvidences(JsonUtil.toJson(resolveEvidences(evidences, evalCase.getAnchorType())));
             evalCase.setStatus(CaseStatus.ACTIVE);
         }
-        evalCaseMapper.updateById(evalCase);
+        requireWritten(evalCaseMapper.updateById(evalCase));
         boolean isDeprecated = evalCase.getStatus() == CaseStatus.DEPRECATED;
         int delta = wasDeprecated == isDeprecated ? 0 : (isDeprecated ? -1 : 1);
         bumpRevision(dataset, delta);
@@ -346,6 +378,13 @@ public class EvalDatasetService {
         return evalCase;
     }
 
+    private void requireDeleted(int written) {
+        if (written != 1) {
+            throw new BizException(ErrorCode.EVAL_DATASET_CONFLICT,
+                    "该评测数据被质量问题引用或已被更新，删除未执行。请刷新后核对。");
+        }
+    }
+
     private void validate(EvalCaseCommand command) {
         if (command.getQuery() == null || command.getQuery().isBlank()) {
             throw BizException.invalidParam("query must not be blank");
@@ -353,10 +392,10 @@ public class EvalDatasetService {
         if (command.getAnchorType() == null) {
             throw BizException.invalidParam("anchor_type is required");
         }
-        if (CollectionUtils.isEmpty(command.getEvidences())) {
+        if (CollectionUtils.isEmpty(command.getEvidences()) && !command.isExpectedRefusal()) {
             throw BizException.invalidParam("at least one evidence is required");
         }
-        if (command.getAnchorType() == AnchorType.SPAN) {
+        if (command.getAnchorType() == AnchorType.SPAN && CollectionUtils.isNotEmpty(command.getEvidences())) {
             for (EvalEvidence evidence : command.getEvidences()) {
                 if (evidence.getSpan() == null || evidence.getSpan().isBlank()) {
                     throw BizException.invalidParam("a span anchored case requires a non blank span");
@@ -372,7 +411,8 @@ public class EvalDatasetService {
         evalCase.setExpectedAnswer(command.getExpectedAnswer());
         evalCase.setExpectedRefusal(command.isExpectedRefusal());
         evalCase.setAnchorType(command.getAnchorType());
-        evalCase.setEvidences(JsonUtil.toJson(resolveEvidences(command.getEvidences(), command.getAnchorType())));
+        evalCase.setEvidences(JsonUtil.toJson(CollectionUtils.isEmpty(command.getEvidences())
+                ? List.of() : resolveEvidences(command.getEvidences(), command.getAnchorType())));
         evalCase.setSource(source);
         evalCase.setNote(command.getNote());
         if (evalCase.getStatus() == null) {
@@ -420,22 +460,19 @@ public class EvalDatasetService {
                 .last("limit 1"));
     }
 
-    /**
-     * Bumps {@code dataset_revision} and adjusts {@code case_count} inside the caller's transaction.
-     *
-     * <p>Mutates the already loaded entity and saves it by id rather than issuing a column level
-     * update: every caller here read {@code dataset} moments earlier in the same transaction, so there
-     * is no concurrent write this could clobber, and keeping the whole entity in memory is what lets a
-     * caller inspect the values it just computed without re-reading the row.
-     *
-     * @param dataset        owning data set, read before this call
-     * @param caseCountDelta {@code +1}/{@code -1}/{@code 0} depending on the mutation
-     */
+    /** 集合乐观锁冲突时回滚整笔用例变更，保证内容、修订号和计数始终一起提交。 */
     private void bumpRevision(EvalDataset dataset, int caseCountDelta) {
         dataset.setDatasetRevision((dataset.getDatasetRevision() == null ? 0 : dataset.getDatasetRevision()) + 1);
         dataset.setCaseCount(Math.max(0, (dataset.getCaseCount() == null ? 0 : dataset.getCaseCount())
                 + caseCountDelta));
-        evalDatasetMapper.updateById(dataset);
+        requireWritten(evalDatasetMapper.updateById(dataset));
+    }
+
+    /** MyBatis 乐观锁未命中只返回零；显式抛错才能触发当前事务回滚。 */
+    private void requireWritten(int affectedRows) {
+        if (affectedRows != 1) {
+            throw new BizException(ErrorCode.EVAL_DATASET_CONFLICT, "评测用例已被其他操作修改，请刷新后重新提交");
+        }
     }
 
     /**

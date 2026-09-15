@@ -3,6 +3,7 @@ package io.kbrag.app.eval;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.kbrag.app.config.AsyncConfig;
 import io.kbrag.app.appcenter.AppVersionService;
 import io.kbrag.app.chat.AnswerGenerationService;
@@ -28,6 +29,7 @@ import io.kbrag.domain.mapper.EvalCaseMapper;
 import io.kbrag.domain.mapper.EvalResultMapper;
 import io.kbrag.domain.mapper.EvalRunMapper;
 import io.kbrag.domain.model.CaseJudgment;
+import io.kbrag.domain.model.EvalCaseInput;
 import io.kbrag.domain.model.AnswerEvaluationConfig;
 import io.kbrag.domain.model.EvalMetricsAtK;
 import io.kbrag.domain.model.EvalRetrievalConfig;
@@ -159,11 +161,13 @@ public class EvalRunService {
      */
     public List<EvalRun> submit(String datasetId, int k, List<EvalRetrievalConfig> configs, boolean judgeEnabled) {
         validateSubmission(k, configs);
-        EvalDataset dataset = evalDatasetService.require(datasetId);
+        var inputs = evalDatasetService.snapshotForRun(datasetId);
+        EvalDataset dataset = inputs.dataset();
+        String caseInputs = JsonUtil.toJson(inputs.cases());
         String corpusFingerprint = corpusFingerprintFactory.fingerprint(dataset.getKbId());
         List<EvalRun> created = new ArrayList<>(configs.size());
         for (EvalRetrievalConfig config : configs) {
-            created.add(createOne(dataset, corpusFingerprint, k, config, judgeEnabled, null));
+            created.add(createOne(dataset, corpusFingerprint, k, config, judgeEnabled, null, caseInputs));
         }
         return created;
     }
@@ -185,7 +189,9 @@ public class EvalRunService {
         }
         List<EvalRetrievalConfig> configs = specs.stream().map(AnswerRunSpec::retrievalConfig).toList();
         validateSubmission(k, configs);
-        EvalDataset dataset = evalDatasetService.require(datasetId);
+        var inputs = evalDatasetService.snapshotForRun(datasetId);
+        EvalDataset dataset = inputs.dataset();
+        String caseInputs = JsonUtil.toJson(inputs.cases());
         // 先完成整批校验，再创建任何 run，避免第二组配置非法时留下已经执行的半批任务。
         for (AnswerRunSpec spec : specs) {
             requireAnswerConfig(dataset, spec.answerConfig());
@@ -194,7 +200,7 @@ public class EvalRunService {
         List<EvalRun> created = new ArrayList<>(specs.size());
         for (AnswerRunSpec spec : specs) {
             created.add(createOne(dataset, corpusFingerprint, k, spec.retrievalConfig(), judgeEnabled,
-                    spec.answerConfig()));
+                    spec.answerConfig(), caseInputs));
         }
         return created;
     }
@@ -427,7 +433,7 @@ public class EvalRunService {
     }
 
     private EvalRun createOne(EvalDataset dataset, String corpusFingerprint, int k, EvalRetrievalConfig config,
-                              boolean judgeEnabled, AnswerEvaluationConfig answerConfig) {
+                              boolean judgeEnabled, AnswerEvaluationConfig answerConfig, String caseInputs) {
         config.setTopN(config.getTopN() != null ? config.getTopN() : k);
         EvalMode mode = config.getMode();
 
@@ -436,6 +442,7 @@ public class EvalRunService {
         run.setDatasetId(dataset.getDatasetId());
         run.setKbId(dataset.getKbId());
         run.setDatasetRevision(dataset.getDatasetRevision());
+        run.setCaseInputs(caseInputs);
         run.setCorpusFingerprint(corpusFingerprint);
         run.setRetrievalConfig(JsonUtil.toJson(config));
         if (judgeEnabled) {
@@ -537,9 +544,11 @@ public class EvalRunService {
         run.setStartedAt(LocalDateTime.now());
         evalRunMapper.updateById(run);
         try {
-            List<EvalCase> allCases = evalCaseMapper.selectList(new LambdaQueryWrapper<EvalCase>()
-                    .eq(EvalCase::getDatasetId, run.getDatasetId())
-                    .ne(EvalCase::getStatus, CaseStatus.DEPRECATED));
+            if (run.getCaseInputs() == null) {
+                throw BizException.invalidParam("此运行缺少提交时的用例输入快照，请重新提交评测");
+            }
+            List<EvalCase> allCases = JsonUtil.parse(run.getCaseInputs(), new TypeReference<List<EvalCaseInput>>() { })
+                    .stream().map(EvalCaseInput::toCase).toList();
             List<EvalCase> effective = allCases.stream()
                     .filter(c -> c.getStatus() == CaseStatus.ACTIVE)
                     .toList();

@@ -62,7 +62,7 @@ class RoleServicePlatformPermissionTest {
         service = new RoleService(mock(RoleMapper.class), permissionMapper, rolePermissionMapper,
                 mock(RoleKbScopeMapper.class), mock(UserRoleMapper.class), mock(DocAclMapper.class),
                 mock(KnowledgeBaseMapper.class), mock(BizIdGenerator.class),
-                mock(PrincipalResolver.class));
+                mock(PrincipalResolver.class), mock(RoleAppScopeService.class));
     }
 
     @Test

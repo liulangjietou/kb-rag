@@ -74,9 +74,10 @@ public class WebSourceController {
     public Result<PageResponse<WebSourceResponse>> list(
             @PathVariable String kbId,
             @RequestParam(name = "page", defaultValue = "" + DEFAULT_PAGE) long page,
-            @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size) {
+            @RequestParam(name = "size", defaultValue = "" + DEFAULT_PAGE_SIZE) long size,
+            @RequestParam(name = "attention_only", defaultValue = "false") boolean attentionOnly) {
         return Result.success(PageResponse.from(
-                webSourceService.list(kbId, normalizePage(page), normalizeSize(size)),
+                webSourceService.list(kbId, normalizePage(page), normalizeSize(size), attentionOnly),
                 WebSourceResponse::from));
     }
 

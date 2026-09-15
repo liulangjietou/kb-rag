@@ -1,0 +1,57 @@
+-- 员工会话与模型连接分离。轮次接受、活动位置和终态在短事务内一同保存。
+CREATE TABLE t_kb_conversation
+(
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    conversation_id VARCHAR(64) NOT NULL,
+    tenant_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    app_id VARCHAR(64) NOT NULL,
+    title VARCHAR(120) NOT NULL,
+    last_turn INT NOT NULL DEFAULT 0,
+    active_run_id VARCHAR(64) NULL,
+    last_activity_at DATETIME(6) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    lock_version INT NOT NULL DEFAULT 0,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_conversation (conversation_id),
+    KEY idx_owner_activity (tenant_id, user_id, app_id, deleted, last_activity_at, id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '员工私有会话';
+
+CREATE TABLE t_kb_conversation_run
+(
+    id BIGINT NOT NULL AUTO_INCREMENT,
+    run_id VARCHAR(64) NOT NULL,
+    conversation_id VARCHAR(64) NOT NULL,
+    tenant_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(64) NOT NULL,
+    app_id VARCHAR(64) NOT NULL,
+    client_request_id VARCHAR(128) NOT NULL,
+    payload_hash CHAR(64) NOT NULL,
+    turn_no INT NOT NULL,
+    question LONGTEXT NOT NULL,
+    answer LONGTEXT NOT NULL,
+    references_json LONGTEXT NOT NULL COMMENT '经权限裁剪的引用，不保存预签 URL',
+    read_semantics_json LONGTEXT NOT NULL COMMENT '实际读取语义与降级信息',
+    target_json LONGTEXT NOT NULL COMMENT '服务端接受时捕获的配置，禁止直接返回客户端',
+    status VARCHAR(20) NOT NULL,
+    stage VARCHAR(20) NOT NULL,
+    worker_id VARCHAR(64) NULL,
+    checkpoint_seq BIGINT NOT NULL DEFAULT 0,
+    degraded TINYINT NOT NULL DEFAULT 0,
+    error_code VARCHAR(64) NULL,
+    error_message VARCHAR(255) NULL,
+    started_at DATETIME(6) NULL,
+    finished_at DATETIME(6) NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    lock_version INT NOT NULL DEFAULT 0,
+    deleted TINYINT NOT NULL DEFAULT 0,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_run (run_id),
+    UNIQUE KEY uk_request (conversation_id, client_request_id),
+    UNIQUE KEY uk_turn (conversation_id, turn_no),
+    KEY idx_stale (status, updated_at),
+    KEY idx_owner (tenant_id, user_id, app_id, conversation_id, deleted, turn_no)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_bin COMMENT = '员工问答运行与持久消息';

@@ -84,7 +84,7 @@ afterEach(() => {
 
 describe('RegistrationReviewPage', () => {
   it('切换租户会清空角色，且必须重新选择该租户至少一个角色才能通过', async () => {
-    render(<AntApp><MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><RegistrationReviewPage /></MemoryRouter></AntApp>);
+    render(<AntApp><MemoryRouter><RegistrationReviewPage /></MemoryRouter></AntApp>);
     expect(await screen.findByText('林澈')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '审核' }));
 
@@ -115,7 +115,7 @@ describe('RegistrationReviewPage', () => {
 
   it('开通失败保留租户和角色，重试仍提交同一份授权', async () => {
     mocks.approveRegistration.mockRejectedValueOnce(new Error('temporary failure'));
-    render(<AntApp><MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><RegistrationReviewPage /></MemoryRouter></AntApp>);
+    render(<AntApp><MemoryRouter><RegistrationReviewPage /></MemoryRouter></AntApp>);
     fireEvent.click(await screen.findByRole('button', { name: '审核' }));
     const drawer = within(await screen.findByRole('dialog', { name: '审核与角色开通' }));
     fireEvent.mouseDown(drawer.getByLabelText('所属租户'));
@@ -135,7 +135,7 @@ describe('RegistrationReviewPage', () => {
 
   it('驳回失败时保留弹窗和已填写原因', async () => {
     mocks.rejectRegistration.mockRejectedValueOnce(new Error('temporary failure'));
-    render(<AntApp><MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><RegistrationReviewPage /></MemoryRouter></AntApp>);
+    render(<AntApp><MemoryRouter><RegistrationReviewPage /></MemoryRouter></AntApp>);
     expect(await screen.findByText('林澈')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '审核' }));
     fireEvent.click(await screen.findByRole('button', { name: '驳回申请' }));
@@ -153,7 +153,7 @@ describe('RegistrationReviewPage', () => {
     mocks.listRegistrationReviews
       .mockResolvedValueOnce({ items: [pendingApplication], page: 1, size: 10, total: 1 })
       .mockRejectedValueOnce(new Error('refresh failed'));
-    render(<AntApp><MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><RegistrationReviewPage /></MemoryRouter></AntApp>);
+    render(<AntApp><MemoryRouter><RegistrationReviewPage /></MemoryRouter></AntApp>);
     expect(await screen.findByText('林澈')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '审核' }));
     fireEvent.click(await screen.findByRole('button', { name: '驳回申请' }));
@@ -181,7 +181,7 @@ describe('RegistrationReviewPage', () => {
       size: 10,
       total: 1,
     });
-    render(<AntApp><MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}><RegistrationReviewPage /></MemoryRouter></AntApp>);
+    render(<AntApp><MemoryRouter><RegistrationReviewPage /></MemoryRouter></AntApp>);
     fireEvent.click(await screen.findByRole('button', { name: '查看' }));
 
     expect(await screen.findByText('租户乙（B）')).toBeTruthy();

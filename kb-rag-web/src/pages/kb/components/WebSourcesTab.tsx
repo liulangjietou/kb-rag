@@ -1,8 +1,8 @@
 import { useAuth } from '../../../auth/AuthContext';
 import { PERMISSIONS } from '../../../auth/permissions';
 // Author: owlzhangfq@gmail.com
-import { useCallback, useEffect, useState } from 'react';
-import { Button, Form, Input, Popconfirm, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Button, Checkbox, Form, Input, Popconfirm, Space, Switch, Table, Tag, Tooltip, Typography, message } from 'antd';
 import {
   listWebSources,
   registerWebSource,
@@ -12,11 +12,13 @@ import {
 } from '../../../api/webSource';
 import type { WebSourceEntry, WebSourceFetchStatus } from '../../../api/types';
 import { WEB_SOURCE_STATUS_META, metaOf } from '../../../utils/statusMeta';
+import SourceHealthTimes from './SourceHealthTimes';
 
 interface WebSourcesTabProps {
   kbId: string;
   /** Fired after a sync that may have created/updated a document, so the parent refreshes the list. */
   onSynced: () => void;
+  initialAttentionOnly?: boolean;
 }
 
 const PAGE_SIZE = 20;
@@ -47,32 +49,42 @@ function reportOutcome(entry: WebSourceEntry) {
  * registration. The fetch outcome never surfaces as a request error -- register and manual sync
  * always resolve and carry the outcome on the row, which is why every action re-reads the list.
  */
-export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
+export default function WebSourcesTab({ kbId, onSynced, initialAttentionOnly = false }: WebSourcesTabProps) {
   const { can } = useAuth();
   const canWrite = can(PERMISSIONS.DOC_WRITE);
   const [items, setItems] = useState<WebSourceEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [attentionOnly, setAttentionOnly] = useState(initialAttentionOnly);
+  const [loadError, setLoadError] = useState(false);
+  const sequence = useRef(0);
   const [registering, setRegistering] = useState(false);
   // source_id of the row whose sync/toggle/remove request is in flight, to scope the spinners.
   const [actingId, setActingId] = useState<string | null>(null);
   const [form] = Form.useForm<{ url: string; render_js?: boolean }>();
 
   const load = useCallback(async (targetPage: number) => {
+    const current = ++sequence.current;
     setLoading(true);
+    setLoadError(false);
     try {
-      const result = await listWebSources(kbId, targetPage);
+      const result = await listWebSources(kbId, targetPage, PAGE_SIZE, attentionOnly);
+      if (sequence.current !== current) return;
       setItems(result.items);
       setTotal(result.total);
       setPage(targetPage);
+    } catch {
+      if (sequence.current === current) { setItems([]); setLoadError(true); }
     } finally {
-      setLoading(false);
+      if (sequence.current === current) setLoading(false);
     }
-  }, [kbId]);
+  }, [kbId, attentionOnly]);
 
   useEffect(() => {
-    load(1);
+    setItems([]);
+    void load(1);
+    return () => { sequence.current += 1; };
   }, [load]);
 
   const handleRegister = async (values: { url: string; render_js?: boolean }) => {
@@ -175,8 +187,15 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
         </Form.Item>
       </Form>
 
-      <Table<WebSourceEntry>
+      <Space wrap style={{ marginBottom: 16 }}>
+        <Checkbox checked={attentionOnly} onChange={(event) => setAttentionOnly(event.target.checked)}>仅看抓取失败</Checkbox>
+        <Button disabled={loading} onClick={() => void load(page)}>刷新来源</Button>
+      </Space>
+      <Typography.Paragraph type="secondary">成功抓取表示内容已同步；文档是否可检索请查看处理与审核状态。</Typography.Paragraph>
+      {loadError && <Alert type="error" showIcon message="网页来源加载失败" description="无法确认来源状态，请刷新重试。" />}
+      {!loadError && <Table<WebSourceEntry>
         rowKey="source_id"
+        scroll={{ x: 1200 }}
         loading={loading}
         dataSource={items}
         pagination={{
@@ -191,6 +210,7 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
           {
             title: '网页地址',
             dataIndex: 'url',
+            width: 260,
             ellipsis: { showTitle: false },
             render: (url: string) => (
               <Tooltip title={url} placement="topLeft">
@@ -256,7 +276,8 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
               return record.last_error ? <Tooltip title={record.last_error}>{tag}</Tooltip> : tag;
             },
           },
-          { title: '最近抓取时间', dataIndex: 'last_fetch_at', width: 180 },
+          { title: '同步记录', width: 230, render: (_, row) => <SourceHealthTimes
+            attempt={row.last_fetch_at} success={row.last_success_at} changed={row.last_content_change_at} /> },
           {
             title: '操作',
             width: 180,
@@ -286,7 +307,7 @@ export default function WebSourcesTab({ kbId, onSynced }: WebSourcesTabProps) {
             ) : null,
           },
         ]}
-      />
+      />}
     </>
   );
 }

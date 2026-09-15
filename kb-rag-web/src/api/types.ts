@@ -176,6 +176,8 @@ export interface RoleSummary {
   kb_scope_all: boolean;
   kb_ids: string[];
   permission_codes: string[];
+  app_scope_all: boolean;
+  app_ids: string[];
 }
 
 export interface SaveRoleRequest {
@@ -186,6 +188,14 @@ export interface SaveRoleRequest {
   kb_scope_all: boolean;
   kb_ids: string[];
   permission_codes: string[];
+  app_scope_all?: boolean;
+  app_ids?: string[];
+}
+
+/** 角色所属租户的应用候选项，不提供应用配置。 */
+export interface RoleAppOption {
+  app_id: string;
+  name: string;
 }
 
 /** One entry of GET /roles/permissions, the catalogue the role editor renders grouped by module. */
@@ -439,7 +449,6 @@ export const PUBLISH_STATUS_META: Record<PublishStatus, { color: string; label: 
 /**
  * DocumentResponse (server). The four upload-only fields at the bottom are populated exclusively by
  * POST /kb/{kbId}/documents (UploadOutcome) and are absent from the list/detail responses.
- * No updated_at is exposed.
  */
 export interface KbDocument {
   doc_id: string;
@@ -464,6 +473,8 @@ export interface KbDocument {
   /** M16: content readable only by the granted roles; the row itself always shows in the list. */
   restricted: boolean;
   created_at: string;
+  /** 文档记录最近更新时间；兼容未升级的服务端，缺失时不推断。 */
+  updated_at?: string | null;
   /** Upload only: id of the document version this upload created. */
   version_id?: string;
   /** Upload only: label of that version, e.g. "v2" (M4a-CONTRACTS.md section 1.1's three branches). */
@@ -508,7 +519,7 @@ export interface RebuildRequest {
 /**
  * GET /api/v1/kb/{kbId}/rebuild-status response：整库口径的配置追平状态。
  *
- * 三个计数都是服务端现算的，与文档列表的分页无关——待重建的文档落在第几页不影响它是不是活儿。
+ * 计数由服务端计算，与文档列表的筛选和分页无关。
  */
 export interface RebuildStatus {
   /** 仍需按新配置重建的文档数，归零即全部追平。 */
@@ -517,6 +528,10 @@ export interface RebuildStatus {
   in_progress_count: number;
   /** 其中重建失败、需要人工介入的文档数。 */
   failed_count: number;
+  /** 全库未回收文档数；兼容旧服务端时缺失。 */
+  document_count?: number;
+  /** 全库正在处理的文档数，包括首次上传；不含等待人工确认。 */
+  processing_count?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -1236,7 +1251,7 @@ export type RunStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
 export type EvalMode = 'BM25_ONLY' | 'VECTOR_ONLY' | 'HYBRID' | 'HYBRID_RERANK';
 
 /** Report grouping key (M4b-CONTRACTS.md section 3.3: "分组输出：全体/span级/文档级/单轮/多轮"). */
-export type MetricGroupKey = 'all' | 'span' | 'document' | 'single_turn' | 'multi_turn';
+export type MetricGroupKey = 'overall' | 'span' | 'document' | 'single_turn' | 'multi_turn';
 
 /**
  * t_kb_eval_case.evidences[] element (M4b-CONTRACTS.md section 1): `span` is null/empty when
@@ -1586,6 +1601,9 @@ export interface AppRetrievalConfig {
   rrf_k?: number;
   rerank_enabled?: boolean;
   rewrite_enabled?: boolean;
+  /** 重排设置随版本冻结；旧快照中允许缺省。 */
+  rerank_mode?: 'semantic' | 'hybrid' | null;
+  rerank_w_semantic?: number | null;
 }
 
 /**
@@ -2202,6 +2220,8 @@ export interface ListSearchInsightParams {
 
 /** One zero-hit query group of the stats report, newest digest of the group + occurrence count. */
 export interface TopZeroHitQuery {
+  /** 最近一条真实洞察的随机标识；查询哈希保留在服务端。 */
+  insight_id?: string | null;
   query_digest: string;
   count: number;
   last_at: string | null;
@@ -2245,6 +2265,8 @@ export interface WebSourceEntry {
   render_js: boolean;
   last_fetch_status: WebSourceFetchStatus | null;
   last_fetch_at: string | null;
+  last_success_at?: string | null;
+  last_content_change_at?: string | null;
   last_error: string | null;
   created_at: string;
 }
@@ -2348,6 +2370,8 @@ export interface ExtSource {
   sync_enabled: boolean;
   last_sync_status: ExtSourceSyncStatus | null;
   last_sync_at: string | null;
+  last_success_at?: string | null;
+  last_content_change_at?: string | null;
   last_error: string | null;
   created_at: string;
 }
@@ -2459,7 +2483,8 @@ export interface ModelUsageSummary {
   used_tokens: number;
   reserved_tokens: number;
   /** Null while quota_tokens is zero (unlimited). */
-  remaining_tokens: number | null;
+  /** 不限额时为空，服务端也可能省略此字段。 */
+  remaining_tokens?: number | null;
   estimated_calls: number;
   unpriced_calls: number;
   costs: ModelCostTotal[];
@@ -2476,7 +2501,7 @@ export interface ModelUsageRecord {
   provider: string;
   capability: ModelCapability;
   model: string;
-  status: 'RESERVED' | 'SUCCEEDED' | 'FAILED';
+  status: 'RESERVED' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
   reserved_tokens: number;
   input_tokens: number;
   output_tokens: number;

@@ -53,7 +53,7 @@ public class KbTenantLineHandler implements TenantLineHandler {
     private static final Set<String> FENCED_TABLES = Set.of(
             "t_kb_admin_user", "t_kb_role", "t_kb_knowledge_base",
             "t_kb_api_key", "t_kb_eval_dataset", "t_kb_app", "t_kb_memory_library",
-            "t_kb_web_credential");
+            "t_kb_web_credential", "t_kb_conversation", "t_kb_conversation_run");
 
     /** Tables the platform operator may query across tenants, see the class comment. */
     private static final Set<String> OPERATOR_UNFENCED_TABLES = Set.of("t_kb_admin_user", "t_kb_role");

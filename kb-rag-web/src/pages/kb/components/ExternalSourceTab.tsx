@@ -1,10 +1,13 @@
 import { useAuth } from '../../../auth/AuthContext';
 import { PERMISSIONS } from '../../../auth/permissions';
+import SourceHealthTimes from './SourceHealthTimes';
+import ExtSourceItemsDrawer from './ExtSourceItemsDrawer';
 // Author: owlzhangfq@gmail.com
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
+  Checkbox,
   Button,
-  Drawer,
   Form,
   Input,
   Modal,
@@ -19,7 +22,6 @@ import {
   message,
 } from 'antd';
 import {
-  listExtSourceItems,
   listExtSources,
   registerExtSource,
   removeExtSource,
@@ -29,13 +31,10 @@ import {
 } from '../../../api/extSource';
 import type {
   ExtSource,
-  ExtSourceItem,
-  ExtSourceItemStatus,
   ExtSourceSyncStatus,
   RegisterExtSourceRequest,
 } from '../../../api/types';
 import {
-  EXT_SOURCE_ITEM_STATUS_META,
   EXT_SOURCE_SYNC_STATUS_META,
   metaOf,
 } from '../../../utils/statusMeta';
@@ -44,6 +43,7 @@ interface ExternalSourceTabProps {
   kbId: string;
   /** Fired after a sync that may have created/updated documents, so the parent refreshes the list. */
   onSynced: () => void;
+  initialAttentionOnly?: boolean;
 }
 
 const PAGE_SIZE = 20;
@@ -106,13 +106,16 @@ interface SourceFormValues {
  * space, watch its per-object/page outcome, trigger a scan, test, edit and remove. A scan runs off
  * the request thread, so sync only acknowledges acceptance and the list is re-read for its outcome.
  */
-export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabProps) {
+export default function ExternalSourceTab({ kbId, onSynced, initialAttentionOnly = false }: ExternalSourceTabProps) {
   const { can } = useAuth();
   const canWrite = can(PERMISSIONS.DOC_WRITE);
   const [items, setItems] = useState<ExtSource[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [attentionOnly, setAttentionOnly] = useState(initialAttentionOnly);
+  const [loadError, setLoadError] = useState(false);
+  const sequence = useRef(0);
   const [saving, setSaving] = useState(false);
   // source_id of the row whose sync/test/toggle/remove request is in flight, to scope the spinners.
   const [actingId, setActingId] = useState<string | null>(null);
@@ -121,24 +124,32 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
   const [modalOpen, setModalOpen] = useState(false);
   // The source whose per-object item rows the drawer is showing, null while it is closed.
   const [itemsSource, setItemsSource] = useState<ExtSource | null>(null);
+  useEffect(() => { setItemsSource(null); }, [kbId]);
   const [form] = Form.useForm<SourceFormValues>();
   const selectedType = Form.useWatch('source_type', form) ?? SOURCE_TYPE_S3;
   const connectorMeta = CONNECTOR_META[selectedType];
 
   const load = useCallback(async (targetPage: number) => {
+    const current = ++sequence.current;
     setLoading(true);
+    setLoadError(false);
     try {
-      const result = await listExtSources(kbId, targetPage);
+      const result = await listExtSources(kbId, targetPage, PAGE_SIZE, attentionOnly);
+      if (sequence.current !== current) return;
       setItems(result.items);
       setTotal(result.total);
       setPage(targetPage);
+    } catch {
+      if (sequence.current === current) { setItems([]); setLoadError(true); }
     } finally {
-      setLoading(false);
+      if (sequence.current === current) setLoading(false);
     }
-  }, [kbId]);
+  }, [kbId, attentionOnly]);
 
   useEffect(() => {
-    load(1);
+    setItems([]);
+    void load(1);
+    return () => { sequence.current += 1; };
   }, [load]);
 
   const openCreate = () => {
@@ -277,8 +288,14 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
         <Button onClick={() => load(page)}>刷新</Button>
       </Space>
 
-      <Table<ExtSource>
+      <Space wrap style={{ marginBottom: 16 }}>
+        <Checkbox checked={attentionOnly} onChange={(event) => setAttentionOnly(event.target.checked)}>仅看失败或部分成功</Checkbox>
+      </Space>
+      <Typography.Paragraph type="secondary">最近成功仅记录完整同步；部分成功也可能接入新内容。文档可检索状态需另行核对。</Typography.Paragraph>
+      {loadError && <Alert type="error" showIcon message="外部来源加载失败" description="无法确认来源状态，请刷新重试。" />}
+      {!loadError && <Table<ExtSource>
         rowKey="source_id"
+        scroll={{ x: 1240 }}
         loading={loading}
         dataSource={items}
         pagination={{
@@ -351,7 +368,8 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
               return record.last_error ? <Tooltip title={record.last_error}>{tag}</Tooltip> : tag;
             },
           },
-          { title: '最近同步时间', dataIndex: 'last_sync_at', width: 180 },
+          { title: '同步记录', width: 230, render: (_, row) => <SourceHealthTimes
+            attempt={row.last_sync_at} success={row.last_success_at} changed={row.last_content_change_at} /> },
           {
             title: '操作',
             width: 300,
@@ -395,7 +413,7 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
             ),
           },
         ]}
-      />
+      />}
 
       {/* Keep Form mounted: openEdit fills it before opening; unmounted rc-field-form drops assignments. */}
       <Modal
@@ -475,88 +493,6 @@ export default function ExternalSourceTab({ kbId, onSynced }: ExternalSourceTabP
 
       <ExtSourceItemsDrawer source={itemsSource} onClose={() => setItemsSource(null)} />
     </>
-  );
-}
-
-interface ExtSourceItemsDrawerProps {
-  /** The source whose object rows to show; null keeps the drawer closed. */
-  source: ExtSource | null;
-  onClose: () => void;
-}
-
-/** Per-object/page sync outcome drawer of one external source (M14/M23). */
-function ExtSourceItemsDrawer({ source, onClose }: ExtSourceItemsDrawerProps) {
-  const [items, setItems] = useState<ExtSourceItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
-
-  const load = useCallback(async (sourceId: string, targetPage: number) => {
-    setLoading(true);
-    try {
-      const result = await listExtSourceItems(sourceId, targetPage);
-      setItems(result.items);
-      setTotal(result.total);
-      setPage(targetPage);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (source) {
-      load(source.source_id, 1);
-    }
-  }, [source, load]);
-
-  return (
-    <Drawer
-      title={source ? `同步明细 · ${source.name}` : '同步明细'}
-      width={720}
-      open={Boolean(source)}
-      onClose={onClose}
-      destroyOnHidden
-    >
-      <Table<ExtSourceItem>
-        rowKey="object_key"
-        loading={loading}
-        dataSource={items}
-        pagination={{
-          current: page,
-          pageSize: PAGE_SIZE,
-          total,
-          showSizeChanger: false,
-          showTotal: (t) => `共 ${t} 条`,
-          onChange: (nextPage) => source && load(source.source_id, nextPage),
-        }}
-        columns={[
-          {
-            title: source && sourceTypeOf(source.source_type) === SOURCE_TYPE_CONFLUENCE ? '页面 Key' : '对象 Key',
-            dataIndex: 'object_key',
-            ellipsis: { showTitle: false },
-            render: (key: string) => (
-              <Tooltip title={key} placement="topLeft">
-                {key}
-              </Tooltip>
-            ),
-          },
-          {
-            title: '状态',
-            dataIndex: 'last_status',
-            width: 100,
-            render: (status: ExtSourceItemStatus | null, record) => {
-              if (!status) {
-                return <Tag>未同步</Tag>;
-              }
-              const meta = metaOf(EXT_SOURCE_ITEM_STATUS_META, status);
-              const tag = <Tag color={meta.color}>{meta.label}</Tag>;
-              return record.last_error ? <Tooltip title={record.last_error}>{tag}</Tooltip> : tag;
-            },
-          },
-          { title: '最近同步时间', dataIndex: 'last_sync_at', width: 180 },
-        ]}
-      />
-    </Drawer>
   );
 }
 

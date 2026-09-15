@@ -10,6 +10,7 @@ import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Pattern;
 
 import java.util.List;
 
@@ -78,6 +79,10 @@ public record EvalRunSubmitRequest(
      * @param fusion         fusion strategy literal, {@code null} keeps the deployment default
      * @param scoreThreshold absolute score threshold, {@code null} disables filtering
      * @param rewriteEnabled query rewrite switch, {@code null} keeps the deployment default
+     * @param wVec           加权融合的向量权重
+     * @param rrfK           RRF 融合的阻尼常数
+     * @param rerankMode     语义或混合重排模式
+     * @param rerankWSemantic 混合重排的语义权重，允许显式为 0
      */
     public record ConfigRequest(
             @NotBlank(message = "must not be blank") String label,
@@ -88,7 +93,16 @@ public record EvalRunSubmitRequest(
             @JsonProperty("score_threshold")
             @DecimalMin(value = "0.01", message = "must be at least 0.01")
             @DecimalMax(value = "1.0", message = "must be at most 1.0") Double scoreThreshold,
-            @JsonProperty("rewrite_enabled") Boolean rewriteEnabled) {
+            @JsonProperty("rewrite_enabled") Boolean rewriteEnabled,
+            @JsonProperty("w_vec")
+            @DecimalMin(value = "0.0", message = "must be at least 0")
+            @DecimalMax(value = "1.0", message = "must be at most 1") Double wVec,
+            @JsonProperty("rrf_k") @Min(value = 1, message = "must be at least 1") Integer rrfK,
+            @JsonProperty("rerank_mode")
+            @Pattern(regexp = "semantic|hybrid", message = "must be semantic or hybrid") String rerankMode,
+            @JsonProperty("rerank_w_semantic")
+            @DecimalMin(value = "0.0", message = "must be at least 0")
+            @DecimalMax(value = "1.0", message = "must be at most 1") Double rerankWSemantic) {
 
         private EvalRetrievalConfig toConfig() {
             EvalMode parsedMode;
@@ -106,6 +120,10 @@ public record EvalRunSubmitRequest(
             config.setFusion(fusion);
             config.setScoreThreshold(scoreThreshold);
             config.setRewriteEnabled(rewriteEnabled);
+            config.setWVec(wVec);
+            config.setRrfK(rrfK);
+            config.setRerankMode(rerankMode);
+            config.setRerankWSemantic(rerankWSemantic);
             return config;
         }
     }

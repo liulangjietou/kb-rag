@@ -312,7 +312,7 @@ public class SearchInsightService {
      * @param count       zero hit rows in the group
      * @param lastAt      time of the newest row of the group
      */
-    public record TopZeroHitQuery(String queryDigest, long count, LocalDateTime lastAt) {
+    public record TopZeroHitQuery(String queryDigest, long count, LocalDateTime lastAt, String insightId) {
     }
 
     /**
@@ -325,15 +325,17 @@ public class SearchInsightService {
         private String queryDigest;
         private long count;
         private LocalDateTime lastAt;
+        private String insightId;
 
         private void absorb(SearchInsight row) {
             queryDigest = row.getQueryDigest();
             lastAt = row.getCreatedAt();
+            insightId = row.getInsightId();
             count++;
         }
 
         private TopZeroHitQuery toView() {
-            return new TopZeroHitQuery(queryDigest, count, lastAt);
+            return new TopZeroHitQuery(queryDigest, count, lastAt, insightId);
         }
     }
 }

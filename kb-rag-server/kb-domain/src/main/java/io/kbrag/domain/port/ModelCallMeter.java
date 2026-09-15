@@ -39,6 +39,14 @@ public interface ModelCallMeter {
     /** Settles a successful request using provider counters or the conservative reservation. */
     void succeed(ModelCallTicket ticket, ModelTokenUsage usage);
 
+    /**
+     * 上游可能已经计费但流未正常结束：有计数按计数结算，否则保守结算预约，不能直接释放。
+     * 默认实现兼容已有计量器；持久化实现同时记录失败或取消状态。
+     */
+    default void incomplete(ModelCallTicket ticket, ModelTokenUsage usage, Throwable cause) {
+        succeed(ticket, usage);
+    }
+
     /** Releases an ordinary failed request and marks its ledger row failed. */
     void fail(ModelCallTicket ticket, Throwable cause);
 }

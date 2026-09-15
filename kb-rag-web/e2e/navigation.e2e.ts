@@ -38,11 +38,7 @@ test('手机主导航限制焦点、Esc 关闭并恢复触发按钮', async ({ p
   expect(unexpectedRequests).toEqual([]);
 });
 
-test('八个主题可选，刷新和另一个标签页均同步', async ({ page, context, unexpectedRequests }) => {
-  await page.goto('/home');
-  const second = await context.newPage();
-  await second.goto('/home');
-  for (const [id, name] of [
+for (const [id, name] of [
     ['ocean', 'Ocean 深海'],
     ['violet', 'Violet 智紫'],
     ['cinder', 'Cinder 灰烬'],
@@ -51,15 +47,27 @@ test('八个主题可选，刷新和另一个标签页均同步', async ({ page,
     ['graphite', 'Graphite 墨岩'],
     ['night', 'Night 夜航'],
     ['atlas', 'Atlas 翡翠'],
-  ]) {
+]) {
+  test(`主题 ${name} 切换、刷新和另一个标签页均同步`, async ({ page, context, unexpectedRequests }) => {
+    await page.goto('/home');
+    const second = await context.newPage();
+    await second.goto('/home');
+    await page.bringToFront();
+    if (id === 'atlas') {
+      await page.getByRole('button', { name: '选择界面主题' }).click();
+      await page.getByRole('menuitem', { name: /Ocean 深海/ }).click();
+      await expect(second.locator('html')).toHaveAttribute('data-theme', 'ocean');
+    }
     await page.getByRole('button', { name: '选择界面主题' }).click();
-    await page.getByRole('menuitem', { name: new RegExp(name) }).click();
+    await page.getByRole('menu').getByText(name, { exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', id);
+    await second.bringToFront();
     await expect(second.locator('html')).toHaveAttribute('data-theme', id);
+    await page.bringToFront();
     expect(await page.evaluate(() => localStorage.getItem('kb-rag-web:theme-preset'))).toBe(id);
     await page.reload();
     await expect(page.locator('html')).toHaveAttribute('data-theme', id);
-  }
-  await second.close();
-  expect(unexpectedRequests).toEqual([]);
-});
+    await second.close();
+    expect(unexpectedRequests).toEqual([]);
+  });
+}

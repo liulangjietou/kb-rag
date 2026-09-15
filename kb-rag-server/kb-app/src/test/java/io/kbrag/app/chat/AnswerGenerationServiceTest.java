@@ -6,6 +6,7 @@ import io.kbrag.domain.model.ChatMessage;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ChatProviderFactory;
 import io.kbrag.domain.service.ChatPromptAssembler;
+import io.kbrag.domain.mapper.DocumentMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -37,7 +38,7 @@ class AnswerGenerationServiceTest {
         AppConfigSnapshot snapshot = new AppConfigSnapshot();
         snapshot.setChatModel("qwen-plus");
         RetrievalNodeView node = RetrievalNodeView.builder().content("evidence").metadata(Map.of()).build();
-        AnswerGenerationService service = new AnswerGenerationService(factory, new ChatPromptAssembler());
+        AnswerGenerationService service = new AnswerGenerationService(factory, new ChatPromptAssembler(), mock(DocumentMapper.class));
 
         String answer = service.generate(snapshot, "current", List.of(ChatMessage.user("history")),
                 List.of(node));
@@ -46,7 +47,7 @@ class AnswerGenerationServiceTest {
         ArgumentCaptor<List<ChatMessage>> captor = ArgumentCaptor.forClass((Class<List<ChatMessage>>) (Class<?>) List.class);
         verify(provider).complete(any(), captor.capture());
         assertEquals("history", captor.getValue().get(0).getContent());
-        assertTrue(captor.getValue().get(1).getContent().contains("[1] evidence"));
+        assertTrue(captor.getValue().get(1).getContent().contains("\"citation\":\"[1]\",\"content\":\"evidence\""));
         assertTrue(captor.getValue().get(1).getContent().contains("current"));
     }
 }

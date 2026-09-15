@@ -11,9 +11,11 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
@@ -116,6 +118,18 @@ public class GlobalExceptionHandler {
         log.info("request rejected, errorCode={}, reason={}", ErrorCode.INVALID_PARAM, message);
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Result.failure(ErrorCode.INVALID_PARAM, message));
+    }
+
+    /** JSON 语法、字段类型和空请求体错误统一返回 400，不记录可能含用户正文的解析异常。 */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Result<Void>> handleUnreadableBody(HttpServletRequest request, HttpServletResponse response) {
+        return handleBiz(BizException.invalidParam("请求内容格式无效，请检查字段类型和必填内容"), request, response);
+    }
+
+    /** 查询或路径参数类型错误属于客户端输入错误，不回显原始值或记录转换堆栈。 */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Result<Void>> handleInvalidParameterType(HttpServletRequest request, HttpServletResponse response) {
+        return handleBiz(BizException.invalidParam("请求参数类型或取值不正确，请检查筛选条件和分页参数"), request, response);
     }
 
     /**

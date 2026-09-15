@@ -1,9 +1,10 @@
 import { LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { App as AntApp, Button, Form, Input, Typography } from 'antd';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { changePassword } from '../api/auth';
 import { useAuth } from '../auth/AuthContext';
+import { authReturnLocation } from '../auth/returnLocation';
 import AuthShell from '../components/AuthShell';
 
 interface ChangePasswordFormValues {
@@ -18,6 +19,7 @@ export default function ChangePasswordPage() {
   const { message } = AntApp.useApp();
   const { passwordChanged, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleFinish = async (values: ChangePasswordFormValues) => {
     setSubmitting(true);
@@ -25,7 +27,7 @@ export default function ChangePasswordPage() {
       await changePassword({ old_password: values.old_password, new_password: values.new_password });
       message.success('密码修改成功');
       passwordChanged();
-      navigate('/kb', { replace: true });
+      navigate(authReturnLocation(location.state), { replace: true });
     } finally {
       setSubmitting(false);
     }

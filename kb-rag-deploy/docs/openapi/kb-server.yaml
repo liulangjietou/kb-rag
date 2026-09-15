@@ -1229,6 +1229,654 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '403':
           $ref: '#/components/responses/PermissionDenied'
+  /api/v1/roles/app-options:
+    get:
+      tags: [rbac]
+      summary: 角色应用范围候选项（ROLE_MANAGE）
+      description: 目标租户来自已授权角色的归属；新角色使用当前用户租户。仅提供名称和标识，包含尚未发布的应用，实际使用时仍要求正式版本。
+      parameters:
+      - name: role_id
+        in: query
+        required: false
+        schema: {type: string}
+      responses:
+        '200':
+          description: 目标租户中未删除的应用
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+                        required: [app_id, name]
+                        properties:
+                          app_id: {type: string}
+                          name: {type: string}
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/me/knowledge-todos:
+    get:
+      tags: [auth]
+      operationId: listKnowledgeTodos
+      summary: 当前授权知识库的管理待办摘要（KB_READ）
+      description: 先按当前租户和知识库根范围授权，再分别聚合解析待确认、文档待审核、网页抓取失败、外部来源失败或部分成功。排除回收站与逻辑删除记录，按数量降序、知识库 ID、事项种类稳定排序。can_process 只描述当前 DOC_WRITE 或 DOC_REVIEW 能力，后续详情操作重新授权。来源同步成功不代表文档已经可检索。
+      responses:
+        '200':
+          description: 当前可见待办；没有待办时为空数组
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+                        required: [kb_id, kb_name, kind, total, can_process]
+                        properties:
+                          kb_id: {type: string}
+                          kb_name: {type: string}
+                          kind: {type: string, enum: [PENDING_CONFIRM, PENDING_REVIEW, WEB_SOURCE_FAILED, EXT_SOURCE_ATTENTION]}
+                          total: {type: integer, format: int64, minimum: 1}
+                          can_process: {type: boolean}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/me/resource-visits:
+    get:
+      tags: [auth]
+      operationId: recentResourceVisits
+      summary: 本人最近访问的管理资源（KB_READ 或 APP_READ）
+      description: 按当前会话租户和用户隔离，先用现有知识库与应用管理授权过滤，再按访问时间和主键倒序取五项。资源当前名称按授权根查询，不保存正文或路径参数；不返回已删除或已撤权资源。应用管理权限沿用 APP_READ，不与员工 APP_USE 目录混用。
+      responses:
+        '200':
+          description: 本人当前可访问的资源；尚未打开资源时为空数组
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      maxItems: 5
+                      items:
+                        $ref: '#/components/schemas/ResourceVisit'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+    post:
+      tags: [auth]
+      operationId: rememberResourceVisit
+      summary: 记录一次成功打开的资源
+      description: KB 要求 KB_READ 与知识库范围授权；APP 要求 APP_READ 与应用租户授权。资源仍存在且可访问才记录，所有者和时间由服务端确定；重复打开只保留最后一次时间。页面辅助记录失败不阻断详情，不自动重发。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resource_type, resource_id]
+              properties:
+                resource_type: {type: string, enum: [KB, APP]}
+                resource_id: {type: string, minLength: 1, maxLength: 64}
+      responses:
+        '200':
+          description: 已记录；响应不缓存
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultEnvelope'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [auth]
+      operationId: clearResourceVisits
+      summary: 清空本人资源访问记录（KB_READ 或 APP_READ）
+      description: 按当前租户和用户物理清空访问记录，不删除知识库、应用或其他人的历史。清空完成后再次打开资源会产生新记录；与其他页面并发打开时，新访问仍可出现。
+      responses:
+        '200':
+          description: 已清空本人记录；响应不缓存
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResultEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/workspace/overview:
+    get:
+      tags: [app]
+      operationId: employeeHomeOverview
+      summary: 员工首页的可用应用与本人最近会话（APP_USE）
+      description: 使用当前授权裁剪正式应用，再按租户、用户与应用范围查询最近五个未删除会话。按会话活动时间及主键倒序，不返回答案、证据或内部配置，不创建会话和模型运行。
+      responses:
+        '200':
+          description: 当前授权的首页元数据，无可用应用时两个列表均为空
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeHomeOverview'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/workspace/apps:
+    get:
+      tags: [app]
+      summary: 员工可使用的正式应用（APP_USE）
+      description: 每次从数据库重新读取用户授权，再检查应用范围、本租户正式版本和所有关联知识库范围。无授权应用时返回空数组。不会返回草稿、模型、提示词或检索配置。
+      responses:
+        '200':
+          description: 当前可使用的应用元数据
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+                        required: [app_id, name, released_version_id, released_version]
+                        properties:
+                          app_id: {type: string}
+                          name: {type: string}
+                          description: {type: string, nullable: true}
+                          released_version_id: {type: string}
+                          released_version: {type: string}
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+  /api/v1/workspace/apps/{appId}/conversations:
+    parameters:
+    - name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - app
+      operationId: employeeListConversations
+      summary: 搜索自己的会话标题与原问题（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeConversationPage'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          default: 1
+      - name: size
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+      - name: keyword
+        in: query
+        required: false
+        schema:
+          type: string
+          maxLength: 120
+    post:
+      tags:
+      - app
+      operationId: employeeCreateConversation
+      summary: 创建空会话（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeConversation'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeConversationTitleRequest'
+  /api/v1/workspace/apps/{appId}/conversations/{conversationId}:
+    parameters:
+    - name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - app
+      operationId: employeeGetConversation
+      summary: 读取会话摘要与活动运行（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeConversation'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags:
+      - app
+      operationId: employeeRenameConversation
+      summary: 修改自己的会话标题（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeConversation'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeConversationTitleRequest'
+    delete:
+      tags:
+      - app
+      operationId: employeeDeleteConversation
+      summary: 删除自己的会话并取消活动运行（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      nullable: true
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/workspace/apps/{appId}/conversations/{conversationId}/runs:
+    parameters:
+    - name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - app
+      operationId: employeeListRuns
+      summary: 按轮次倒序读取已授权历史（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        $ref: '#/components/schemas/EmployeeRun'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      parameters:
+      - name: before_turn
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 2147483647
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+    post:
+      tags:
+      - app
+      operationId: employeeSubmitRun
+      summary: 接受一次问答并在提交后调度（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeRun'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: CONVERSATION_BUSY 或 CONVERSATION_REQUEST_CONFLICT
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmployeeRunRequest'
+      description: 相同 request_id 与原问题返回同一运行，不再次调度，也不重新选择后来发布的版本。相同标识换问题返回 CONVERSATION_REQUEST_CONFLICT；另一运行仍活动时返回
+        CONVERSATION_BUSY。用户主动重试需要新的 request_id。
+  /api/v1/workspace/apps/{appId}/conversations/{conversationId}/runs/{runId}:
+    parameters:
+    - name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - app
+      operationId: employeeGetRun
+      summary: 读取同一运行的已提交快照（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeRun'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/workspace/apps/{appId}/conversations/{conversationId}/runs/{runId}/feedback:
+    parameters:
+    - {name: appId, in: path, required: true, schema: {type: string}}
+    - {name: conversationId, in: path, required: true, schema: {type: string}}
+    - {name: runId, in: path, required: true, schema: {type: string}}
+    put:
+      tags: [app]
+      operationId: employeeAnswerFeedback
+      summary: 保存本人完整回答的最新评价（APP_USE）
+      description: 仅 SUCCEEDED 且当前证据仍可读的本人运行允许评价。相同评价及说明的重试不重复写入；不同评价必须使用最新修订号。反馈不会重新调用模型，不改变会话活动时间，不自动创建评测用例。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verdict, expected_revision]
+              properties:
+                verdict: {type: string, enum: [GOOD, BAD]}
+                note: {type: string, nullable: true, maxLength: 512, description: 用户主动填写的问题说明，首尾空白会清除}
+                expected_revision: {type: integer, minimum: 0, description: 页面所见运行修订号}
+      responses:
+        '200':
+          description: 当前已授权的运行快照，包含已保存评价，Cache-Control 为 no-store
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeRun'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: FEEDBACK_VERSION_CONFLICT，先读取并核对最新评价再修改
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/workspace/apps/{appId}/conversations/{conversationId}/runs/{runId}/stop:
+    parameters:
+    - name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - app
+      operationId: employeeStopRun
+      summary: 明确停止自己的运行（APP_USE）
+      responses:
+        '200':
+          description: 当前已授权的持久状态
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeRun'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      description: 先提交 CANCELLED 再取消上游；终态重放保持原状态。
+  /api/v1/workspace/apps/{appId}/conversations/{conversationId}/runs/{runId}/events:
+    parameters:
+    - name: appId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - app
+      operationId: employeeSubscribeRun
+      summary: 只读订阅持久运行（APP_USE）
+      description: satoken 头认证。snapshot 发送完整 EmployeeRun；id 为 run_id:revision。done 仅在读到持久终态后发送，数据包含 run_id/status/revision，终态可能失败或停止。error
+        包含 code/message/retryable/clear_content，禁止因重连重新 POST 问题。每次读取重验身份与证据权限，restricted 可以在 revision 不变时改变。断连只取消订阅；连接每
+        120 秒关闭，客户端对同一运行重连即可。每用户最多 4 个、实例最多 64 个连接。
+      responses:
+        '200':
+          description: 已提交快照、终态或订阅错误事件；空闲时发送 keep-alive 注释
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
   /api/v1/roles/permissions:
     get:
       tags:
@@ -1269,7 +1917,7 @@ paths:
       tags:
       - rbac
       summary: 修改角色（ROLE_MANAGE）
-      description: 权限集合与库范围都是全量替换；code 只在创建时读取，更新时忽略（配置与建号默认角色都引用它）。
+      description: 权限集合与库范围都是全量替换；应用范围显式提交时在同一事务内替换，旧客户端整体省略时保留。code 只在创建时读取，更新时忽略。并发修改失败时拒绝覆盖授权。
       requestBody:
         required: true
         content:
@@ -1853,7 +2501,33 @@ paths:
       tags:
       - document
       summary: 文档列表
+      description: 需要 kb:read 和知识库访问范围。组合条件在数据库分页前生效，按文档 ID 倒序。关键词按字面匹配文件名，百分号、下划线不作为通配符。
       parameters:
+      - name: keyword
+        in: query
+        schema:
+          type: string
+          maxLength: 200
+      - name: publish_status
+        in: query
+        schema:
+          $ref: '#/components/schemas/PublishStatus'
+      - name: source
+        in: query
+        description: 按同知识库的网页或外部接入关联、聊天来源键识别，保留已软删除关联的历史来源；UPLOAD 表示上传或没有保留关联的历史文档。
+        schema:
+          type: string
+          enum: [UPLOAD, WEB, EXTERNAL, CHAT]
+      - name: updated_from
+        in: query
+        description: 文档更新时间下界（包含），ISO 本地时间，无时区，例如 2026-09-01T00:00:00。
+        schema:
+          type: string
+      - name: updated_to
+        in: query
+        description: 文档更新时间上界（包含），不得早于 updated_from；例如 2026-09-11T23:59:59.999。
+        schema:
+          type: string
       - name: process_status
         in: query
         required: false
@@ -1866,6 +2540,13 @@ paths:
           type: integer
           minimum: 1
           default: 1
+      - name: size
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 20
       responses:
         '200':
           description: OK
@@ -1873,6 +2554,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DocumentListResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/rebuild-status:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags: [knowledge-base]
+      summary: 全库文档处理与配置追平状态
+      description: 需要 kb:read 和知识库范围。所有计数排除回收站与逻辑删除文档；不受文档列表筛选、分页影响。
+      responses:
+        '200':
+          description: 统计成功，零值表示真实没有相关文档；请求失败不能解释为零。
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      required: [stale_count, in_progress_count, failed_count, document_count, processing_count]
+                      properties:
+                        stale_count:
+                          type: integer
+                          description: 具有活跃版本且配置待追平的文档数。
+                        in_progress_count:
+                          type: integer
+                          description: 待追平集合中 PARSING、PARSED、INDEXING 的文档数。
+                        failed_count:
+                          type: integer
+                          description: 待追平集合中 PARSE_FAILED、INDEX_FAILED 的文档数。
+                        document_count:
+                          type: integer
+                          description: 全库未回收文档数。
+                        processing_count:
+                          type: integer
+                          description: 全库 UPLOADED、PARSING、PARSED、INDEXING 文档数，包含首次上传，不含人工确认状态。
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/kb/{kbId}/documents/confirm:
     parameters:
     - $ref: '#/components/parameters/KbId'
@@ -2402,6 +3125,11 @@ paths:
       description: '只返回调用者所属租户的登记：登记表本身不带租户列，先解析 kbId 归属的知识库，
         其他租户的 kbId 读作不存在 → 404（见 M16-CONTRACTS.md §1.3.2）。'
       parameters:
+      - name: attention_only
+        in: query
+        required: false
+        description: 仅返回最近抓取 FAILED 的来源，先筛选再分页
+        schema: {type: boolean, default: false}
       - name: page
         in: query
         required: false
@@ -2683,6 +3411,11 @@ paths:
       - ext-source
       summary: 外部数据源列表（secret 恒脱敏）
       parameters:
+      - name: attention_only
+        in: query
+        required: false
+        description: 仅返回最近同步 FAILED 或 PARTIAL 的来源，先筛选再分页
+        schema: {type: boolean, default: false}
       - name: page
         in: query
         required: false
@@ -2730,6 +3463,33 @@ paths:
                 $ref: '#/components/schemas/ExtSourceSyncAcceptedResult'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/ext-sources/{sourceId}/retry-failed:
+    parameters:
+    - name: sourceId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - ext-source
+      summary: 仅重试已失败对象（异步受理）
+      description: >-
+        需要 doc:write 和所属知识库访问权限。只处理已有 FAILED 对象，不接入新对象，
+        不重新写入健康对象。逐项结果从 items 读取，受理不代表执行成功。
+        使用来源现有扫描上限，列表截断时不能将未出现的对象判为已删除。
+        局部重试不更新完整来源同步状态或最近完整成功时间。
+      responses:
+        '200':
+          description: 受理确认
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtSourceSyncAcceptedResult'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/ext-sources/{sourceId}/items:
     parameters:
     - name: sourceId
@@ -2742,6 +3502,13 @@ paths:
       - ext-source
       summary: 同步明细（逐对象或逐页面结果可见）
       parameters:
+      - name: failed_only
+        in: query
+        required: false
+        description: 仅筛选 FAILED 对象，筛选发生在分页前
+        schema:
+          type: boolean
+          default: false
       - name: page
         in: query
         required: false
@@ -3582,8 +4349,7 @@ paths:
       tags:
       - eval
       summary: 删除评测集
-      description: 级联删除该评测集下 case 与 run/result，走软删 + after-commit 清理（M4b-CONTRACTS.md
-        §2）
+      description: 先按当前修订号和质量问题引用关系确认可删除，再在同一事务内软删除集合及其 case、run、result。已被质量问题关联的集合保留，包含已解决问题的历史关联。
       responses:
         '200':
           description: 删除成功
@@ -3593,6 +4359,12 @@ paths:
                 $ref: '#/components/schemas/EmptyResult'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: EVAL_DATASET_CONFLICT，集合被质量问题引用或已被更新，删除及所有级联写入均未执行；请读取最新状态后核对
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/eval-datasets/{datasetId}/cases:
     parameters:
     - $ref: '#/components/parameters/EvalDatasetId'
@@ -3619,6 +4391,12 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: EVAL_DATASET_CONFLICT，用例或集合已被其他操作修改，本次修改已整体回滚，请读取最新内容后重试
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     get:
       tags:
       - eval
@@ -3672,6 +4450,12 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: EVAL_DATASET_CONFLICT，用例或集合已被其他操作修改，本次修改已整体回滚，请读取最新内容后重试
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/eval-datasets/{datasetId}/stale-cases:
     parameters:
     - $ref: '#/components/parameters/EvalDatasetId'
@@ -3715,11 +4499,17 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: EVAL_DATASET_CONFLICT，用例或集合已被其他操作修改，本次修改已整体回滚，请读取最新内容后重试
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       tags:
       - eval
       summary: 删除评测 case
-      description: dataset_revision+1（M4b-CONTRACTS.md §2）
+      description: 成功删除后 dataset_revision+1。已被质量问题关联的用例不可删除，包含已解决问题的历史关联。
       responses:
         '200':
           description: 删除成功
@@ -3729,6 +4519,12 @@ paths:
                 $ref: '#/components/schemas/EmptyResult'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: EVAL_DATASET_CONFLICT，用例被质量问题引用或已被更新，删除未执行；请读取最新状态后核对
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/eval-cases/{caseId}/recheck:
     parameters:
     - $ref: '#/components/parameters/EvalCaseId'
@@ -3755,6 +4551,12 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: EVAL_DATASET_CONFLICT，用例或集合已被其他操作修改，本次修改已整体回滚，请读取最新内容后重试
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/retrieval-feedback:
     post:
       tags:
@@ -3778,6 +4580,545 @@ paths:
                 $ref: '#/components/schemas/RetrievalFeedbackResult'
         '400':
           $ref: '#/components/responses/InvalidParam'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/employee-feedback:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags: [eval]
+      summary: 员工整轮回答的负面反馈
+      description: 需要 feedback:manage、app:read 和当前知识库权限。租户、存活应用与会话、应用范围及运行时知识库绑定在计数和分页前过滤；任一当前或继承引用不可读时仅返回不透明行标识。
+      parameters:
+      - {name: page, in: query, schema: {type: integer, default: 1, minimum: 1}}
+      - {name: size, in: query, schema: {type: integer, default: 20, minimum: 1, maximum: 50}}
+      responses:
+        '200':
+          description: 当前范围中的负面反馈
+          headers:
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      required: [items, page, size, total]
+                      properties:
+                        items: {type: array, items: {$ref: '#/components/schemas/EmployeeFeedbackSummary'}}
+                        page: {type: integer}
+                        size: {type: integer}
+                        total: {type: integer, format: int64}
+        '400': {$ref: '#/components/responses/InvalidParam'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/PermissionDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/kb/{kbId}/employee-feedback/{runId}:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - {name: runId, in: path, required: true, schema: {type: string}}
+    get:
+      tags: [eval]
+      summary: 核对员工反馈的原问题、回答和引用
+      description: 逐次重验应用、全部知识库根及当前和继承引用；仅允许当前 BAD 或此前已建立同源质量问题的回答。评价改为 GOOD 后不再允许新建问题。不会返回员工身份、整个会话、模型配置或预签 URL。
+      responses:
+        '200':
+          description: 已授权的整轮反馈
+          headers:
+            Cache-Control: {schema: {type: string, enum: [no-store]}}
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data: {$ref: '#/components/schemas/EmployeeFeedbackDetail'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/PermissionDenied'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /api/v1/kb/{kbId}/quality-issues:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    get:
+      tags:
+      - eval
+      summary: 质量问题列表
+      description: 需要 feedback:manage 和当前租户知识库访问权限。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssuePageResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      parameters:
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/QualityIssueStatus'
+      - name: mine
+        in: query
+        schema:
+          type: boolean
+          default: false
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: size
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+    post:
+      tags:
+      - eval
+      summary: 从真实 BAD 反馈或零命中洞察建立问题
+      description: 需要 feedback:manage 和当前租户知识库访问权限。同一来源重复请求复用已有记录；并发插入冲突返回 409，重试可获取已建立的问题。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueCreateRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - eval
+      summary: 读取问题和当前纠正用例
+      description: 需要 feedback:manage 和当前租户知识库访问权限。已关联用例的内容另需 eval:read、app:read，并通过历史及当前证据的文档权限。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/records:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - eval
+      summary: 读取追加处理记录
+      description: 需要 feedback:manage 和当前租户知识库访问权限。按时间倒序，每页 50 条；历史记录也受历史证据文档的当前权限约束。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueRecordPageResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      parameters:
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/claim:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - eval
+      summary: 领取问题
+      description: 需要 feedback:manage 和当前租户知识库访问权限。仅未分派状态可领取，已有纠正用例时回到待回归。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueRevisionRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/release:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - eval
+      summary: 释放问题
+      description: 需要 feedback:manage 和当前租户知识库访问权限。仅当前负责人操作，保留纠正用例及处理记录。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueRevisionRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/notes:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - eval
+      summary: 追加处理说明
+      description: 需要 feedback:manage 和当前租户知识库访问权限。仅未解决问题的当前负责人操作。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueNoteRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/correction:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - eval
+      summary: 保存人工纠正用例
+      description: 需要 feedback:manage 和当前租户知识库访问权限。同时需要 eval:write、eval:read、app:read，三项为 AND。必须是当前负责人；评测集必须属于当前知识库；已有用例保留原评测集和受影响应用。问题、用例、集合修订号、处理记录在同一事务提交。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueCorrectionRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/resolve:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - eval
+      summary: 确认真实回归并解决问题
+      description: 需要 feedback:manage 和当前租户知识库访问权限。同时需要 eval:read、app:read 和当前负责人身份。重新核验实际完成的答案评测：确认输入、当前用例和冻结输入一致，应用及配置有效、语料指纹一致、证据版本及全部召回文档当前可访问；非降级且五项答案评分各至少
+        4/5、拒答正确，正常回答须完整命中证据。必须提供人工核验说明。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueResolveRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/reopen:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    post:
+      tags:
+      - eval
+      summary: 重新打开已解决问题
+      description: 需要 feedback:manage 和当前租户知识库访问权限。保留历史处理记录并清除上一轮解决标记，等待重新领取。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityIssueResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: QUALITY_ISSUE_CONFLICT 或 EVAL_DATASET_CONFLICT；本次事务整体回滚，必须读取最新状态后人工重试。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityIssueNoteRequest'
+  /api/v1/kb/{kbId}/quality-issues/{issueId}/regressions/{runId}:
+    parameters:
+    - $ref: '#/components/parameters/KbId'
+    - name: issueId
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+    get:
+      tags:
+      - eval
+      summary: 预览通过核验的当前用例回归结果
+      description: 需要 feedback:manage 和当前租户知识库访问权限。同时需要 eval:read、app:read；与解决操作使用同一核验器，只返回当前用例的实际答案和评分，不返回其他用例。此接口不启动评测。预览通过后，解决提交仍重新核验。
+      responses:
+        '200':
+          description: 成功；内容及证据按当前权限校验。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                enum:
+                - no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityRegressionResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/kb/{kbId}/retrieval-feedback:
@@ -4298,8 +5639,9 @@ paths:
       description: '经管理台登录鉴权，需要 app:read 或 search:debug，复用对外 chat 编排；可预览未发布版本
         （app_version_id 缺省取最新版本，不区分是否已发布）。指定 ID 必须属于路径应用和当前租户；
         配置使用所选版本，语料始终为当前活动文档，不读取发布时冻结快照。app_version 不用于选择预览版本。
-        stream=true 必须携带 Accept: text/event-stream。事件契约与对外 /api/v1/knowledge/chat
-        完全一致（M4c-CONTRACTS.md §2/§6 主会话定版）。'
+        stream=true 必须携带 Accept: text/event-stream。正文与终态沿用对外问答协议，预览额外提供可选
+        diagnostics 事件；JSON 成功结果在 diagnostics 字段返回同一测量。未执行阶段为空，
+        服务端时间不包含鉴权、异步排队和网络往返。'
       requestBody:
         required: true
         content:
@@ -4308,9 +5650,9 @@ paths:
               $ref: '#/components/schemas/ChatPreviewRequest'
       responses:
         '200':
-          description: 非流式返回完整应答；stream=true 时改为 text/event-stream，事件序列固定为
-            message_delta*（零或多次）→ references → done，失败以 error 终结（不会同时出现 done 与
-            error）。
+          description: 非流式返回完整应答；stream=true 时改为 text/event-stream，成功序列为
+            message_delta* → diagnostics（可选）→ references → done。失败可先发送 diagnostics 再以
+            error 终结；诊断自身不是终态，不能代替 done/error。鉴权拒绝和客户端断开可能没有诊断。
           content:
             application/json:
               schema:
@@ -4319,12 +5661,14 @@ paths:
               schema:
                 description: 'SSE 帧，event 取值与 data 负载见 M4c-CONTRACTS.md §6：message_delta
                   -> ChatStreamMessageDeltaEvent；references -> ChatStreamReferencesEvent；
-                  done -> ChatStreamDoneEvent；error -> ChatStreamErrorEvent。'
+                  done -> ChatStreamDoneEvent；error -> ChatStreamErrorEvent；预览扩展 diagnostics
+                  -> ChatDiagnosticsResponse。'
                 oneOf:
                 - $ref: '#/components/schemas/ChatStreamMessageDeltaEvent'
                 - $ref: '#/components/schemas/ChatStreamReferencesEvent'
                 - $ref: '#/components/schemas/ChatStreamDoneEvent'
                 - $ref: '#/components/schemas/ChatStreamErrorEvent'
+                - $ref: '#/components/schemas/ChatDiagnosticsResponse'
         '400':
           $ref: '#/components/responses/InvalidParam'
         '404':
@@ -4347,6 +5691,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AppVersionResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/app-versions/{appVersionId}/corpus-diff:
+    parameters:
+    - $ref: '#/components/parameters/AppVersionId'
+    get:
+      tags: [app-center]
+      summary: 比较同应用版本的授权资料差异
+      description: >-
+        只读。需要 app:read、kb:read、当前应用数据范围和两侧全部知识库范围。
+        先解析版本的租户根与同应用归属，再按当前文档 ACL 裁剪，最后比较、计数和分页。
+        发布版本使用保存的冻结集合，未发布版本使用当前活动集合；历史快照或文档版本缺失时
+        comparable=false，不返回差异条目或推断零差异。省略 baseline_id 表示明确的空基线。
+        文件名使用当前元数据；不检查物理索引健康，不代表整个发布门禁通过。
+      parameters:
+      - name: baseline_id
+        in: query
+        schema: {type: string, minLength: 1}
+      - name: page
+        in: query
+        schema: {type: integer, minimum: 1, default: 1}
+      - name: page_size
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: 当前授权范围内的资料差异
+          headers:
+            Cache-Control:
+              schema: {type: string, example: no-store}
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AppCorpusComparison'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/app-versions/{appVersionId}/gate-dataset:
@@ -4794,7 +6181,9 @@ paths:
         防泄漏开关注入对应 prompt。非流式返回 {answer, references, request_id, degraded,
         routed_kb_ids}（routed_kb_ids 为顶层字段，M5）；stream=true 走 SSE：message_delta* ->
         references -> done（含 request_id/degraded/routed_kb_ids）或 error。零 Key/未配置对话
-        模型时返回 502 UPSTREAM_MODEL_ERROR（检索不受影响，M4c-CONTRACTS.md §3）。'
+        模型时返回 502 UPSTREAM_MODEL_ERROR（检索不受影响，M4c-CONTRACTS.md §3）。
+        回答中的正文引用编号必须属于本轮资料；越界时返回 502 ANSWER_CITATION_INVALID。
+        流式已经输出的内容仅供核查，随后以该 error 结束，不发送 done，也不自动重复调用模型。'
       security:
       - ApiKeyBearer: []
       requestBody:
@@ -5905,6 +7294,618 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    QualityIssueStatus:
+      type: string
+      enum:
+      - NEW
+      - IN_PROGRESS
+      - WAITING_REGRESSION
+      - RESOLVED
+    QualityIssueSource:
+      type: string
+      enum:
+      - BAD_FEEDBACK
+      - ZERO_HIT
+      - EMPLOYEE_ANSWER
+    EmployeeFeedbackSummary:
+      type: object
+      required: [run_id, content_restricted]
+      properties:
+        run_id: {type: string}
+        question: {type: string, nullable: true}
+        feedback_note: {type: string, nullable: true}
+        feedback_updated_at: {type: string, format: date-time, nullable: true}
+        content_restricted: {type: boolean}
+    EmployeeFeedbackDetail:
+      type: object
+      required: [run_id, question, answer, feedback_verdict, app_version, citations]
+      properties:
+        run_id: {type: string}
+        question: {type: string}
+        answer: {type: string}
+        feedback_verdict: {type: string, enum: [BAD, GOOD]}
+        feedback_note: {type: string, nullable: true}
+        feedback_updated_at: {type: string, format: date-time, nullable: true}
+        app_version: {type: string}
+        citations:
+          type: array
+          items:
+            type: object
+            required: [file_name, content, inherited]
+            properties:
+              file_name: {type: string}
+              content: {type: string}
+              inherited: {type: boolean}
+    QualityIssueReason:
+      type: string
+      enum:
+      - MISSING_KNOWLEDGE
+      - OUTDATED_KNOWLEDGE
+      - RETRIEVAL_MISS
+      - ANSWER_INCORRECT
+      - QUESTION_UNCLEAR
+      - OTHER
+    QualityIssueCreateRequest:
+      type: object
+      required:
+      - source_type
+      - source_id
+      properties:
+        source_type:
+          $ref: '#/components/schemas/QualityIssueSource'
+        source_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: BAD_FEEDBACK 使用 feedback_id；ZERO_HIT 使用随机 insight_id，服务端读取真实来源并按查询哈希去重。
+    QualityIssueRevisionRequest:
+      type: object
+      required:
+      - revision
+      properties:
+        revision:
+          type: integer
+          minimum: 0
+    QualityIssueNoteRequest:
+      type: object
+      required:
+      - revision
+      - note
+      properties:
+        revision:
+          type: integer
+          minimum: 0
+        note:
+          type: string
+          minLength: 1
+          maxLength: 2048
+    QualityIssueResolveRequest:
+      type: object
+      required:
+      - revision
+      - run_id
+      - note
+      properties:
+        revision:
+          type: integer
+          minimum: 0
+        run_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        note:
+          type: string
+          minLength: 1
+          maxLength: 2048
+    QualityCorrectionInput:
+      type: object
+      required:
+      - query
+      - expected_refusal
+      - anchor_type
+      - evidences
+      - note
+      properties:
+        query:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        messages:
+          type: array
+          items:
+            type: object
+            required:
+            - role
+            - content
+            properties:
+              role:
+                type: string
+                enum:
+                - user
+                - assistant
+              content:
+                type: string
+                minLength: 1
+                maxLength: 4096
+          maxItems: 20
+          nullable: true
+        expected_answer:
+          type: string
+          maxLength: 8192
+          nullable: true
+          description: 正常回答必须填写非空标准答案。
+        expected_refusal:
+          type: boolean
+        anchor_type:
+          $ref: '#/components/schemas/AnchorType'
+        evidences:
+          type: array
+          items:
+            type: object
+            required:
+            - doc_id
+            properties:
+              doc_id:
+                type: string
+                minLength: 1
+                maxLength: 64
+              span:
+                type: string
+                maxLength: 8192
+                nullable: true
+          maxItems: 20
+          description: 正常回答至少一条；拒答可以为空。所有文档必须属于当前知识库且当前可读，版本由服务端填写。
+        note:
+          type: string
+          minLength: 1
+          maxLength: 1024
+    QualityIssueCorrectionRequest:
+      type: object
+      required:
+      - revision
+      - reason
+      - dataset_id
+      - affected_app_version_id
+      - input
+      properties:
+        revision:
+          type: integer
+          minimum: 0
+        case_revision:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: 已有纠正用例时必填详情返回的当前修订号，避免覆盖评测中心的新修改。
+        reason:
+          $ref: '#/components/schemas/QualityIssueReason'
+        dataset_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        affected_app_version_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        input:
+          $ref: '#/components/schemas/QualityCorrectionInput'
+    QualityIssue:
+      type: object
+      required:
+      - issue_id
+      - kb_id
+      - source_type
+      - status
+      - revision
+      - owned_by_me
+      - content_restricted
+      properties:
+        issue_id:
+          type: string
+        kb_id:
+          type: string
+        source_type:
+          $ref: '#/components/schemas/QualityIssueSource'
+        source_id:
+          type: string
+          nullable: true
+          description: 只有可读 BAD 来源返回 feedback_id；零命中查询哈希永不返回。
+        summary:
+          type: string
+          nullable: true
+        status:
+          $ref: '#/components/schemas/QualityIssueStatus'
+        revision:
+          type: integer
+          minimum: 0
+        owned_by_me:
+          type: boolean
+        content_restricted:
+          type: boolean
+        owner_user_id:
+          type: string
+          nullable: true
+        owner_name:
+          type: string
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        dataset_id:
+          type: string
+          nullable: true
+        case_id:
+          type: string
+          nullable: true
+        affected_app_version_id:
+          type: string
+          nullable: true
+        verified_run_id:
+          type: string
+          nullable: true
+        verified_app_version_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        case_revision:
+          type: integer
+          minimum: 0
+          nullable: true
+        correction:
+          allOf:
+          - $ref: '#/components/schemas/EvalCase'
+          nullable: true
+          description: 详情返回当前纠正用例供编辑；列表无正文。写入响应后应重新读取详情取得 case_revision。
+      description: 当前知识库是授权根；受限条目只展示处理状态，不返回摘要、来源 ID、原因、用例或应用关联。
+    QualityIssueRecord:
+      type: object
+      properties:
+        action:
+          type: string
+          enum:
+          - CREATED
+          - CLAIMED
+          - RELEASED
+          - CORRECTED
+          - NOTE_ADDED
+          - RESOLVED
+          - REOPENED
+        actor_name:
+          type: string
+        note:
+          type: string
+          nullable: true
+        case_id:
+          type: string
+          nullable: true
+        run_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+    QualityRegression:
+      type: object
+      required:
+      - app_version_id
+      - minimum_dimension_score
+      - result
+      properties:
+        app_version_id:
+          type: string
+        minimum_dimension_score:
+          type: integer
+          enum:
+          - 4
+        result:
+          $ref: '#/components/schemas/EvalResult'
+    QualityIssuePage:
+      type: object
+      required:
+      - items
+      - page
+      - size
+      - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/QualityIssue'
+        page:
+          type: integer
+          minimum: 1
+        size:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+          format: int64
+    QualityIssueRecordPage:
+      type: object
+      required:
+      - items
+      - page
+      - size
+      - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/QualityIssueRecord'
+        page:
+          type: integer
+          minimum: 1
+        size:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+          format: int64
+    QualityIssueResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/QualityIssue'
+    QualityIssuePageResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/QualityIssuePage'
+    QualityIssueRecordPageResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/QualityIssueRecordPage'
+    QualityRegressionResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/QualityRegression'
+    ResourceVisit:
+      type: object
+      required: [resource_type, resource_id, name, visited_at]
+      properties:
+        resource_type: {type: string, enum: [KB, APP]}
+        resource_id: {type: string}
+        name: {type: string}
+        visited_at:
+          type: string
+          description: 服务端本地访问时间，ISO 本地日期时间格式；不是资源创建或更新时间
+          example: '2026-09-11T10:30:00.123456'
+    EmployeeHomeOverview:
+      type: object
+      required: [applications, recent_conversations]
+      properties:
+        applications:
+          type: array
+          items:
+            type: object
+            required: [app_id, name, released_version_id, released_version]
+            properties:
+              app_id: {type: string}
+              name: {type: string}
+              description: {type: string, nullable: true}
+              released_version_id: {type: string}
+              released_version: {type: string}
+        recent_conversations:
+          type: array
+          maxItems: 5
+          items:
+            type: object
+            required: [conversation_id, app_id, app_name, title, active_run_id, last_activity_at]
+            properties:
+              conversation_id: {type: string}
+              app_id: {type: string}
+              app_name: {type: string}
+              title: {type: string}
+              active_run_id: {type: string, nullable: true}
+              last_activity_at:
+                type: string
+                description: 服务端本地日期时间，不带时区偏移；表示会话活动时间，不是页面访问时间
+    EmployeeConversationTitleRequest:
+      type: object
+      required:
+      - title
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+          description: 不能全为空白
+    EmployeeRunRequest:
+      type: object
+      required:
+      - request_id
+      - query
+      properties:
+        request_id:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        query:
+          type: string
+          minLength: 1
+          maxLength: 8000
+          description: 不能全为空白；网络重试须保留原文本
+    EmployeeConversation:
+      type: object
+      required:
+      - conversation_id
+      - app_id
+      - title
+      - last_turn
+      - active_run_id
+      - last_activity_at
+      - created_at
+      properties:
+        conversation_id:
+          type: string
+        app_id:
+          type: string
+        title:
+          type: string
+        last_turn:
+          type: integer
+          minimum: 0
+        active_run_id:
+          type: string
+          nullable: true
+        last_activity_at:
+          type: string
+          description: 服务端本地日期时间，不带时区偏移
+        created_at:
+          type: string
+    EmployeeConversationPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmployeeConversation'
+        page:
+          type: integer
+        size:
+          type: integer
+        total:
+          type: integer
+          format: int64
+    EmployeeCitation:
+      type: object
+      properties:
+        doc_id:
+          type: string
+        document_version_id:
+          type: string
+        chunk_id:
+          type: string
+        kb_id:
+          type: string
+        file_name:
+          type: string
+        document_version:
+          type: string
+        content:
+          type: string
+        document_updated_at:
+          type: string
+          nullable: true
+        version_created_at:
+          type: string
+          nullable: true
+        chunk_title:
+          type: string
+          nullable: true
+        page_no:
+          type: integer
+          nullable: true
+          description: 仅 PDF 实际物理页码，其他来源不伪造页码
+        chunk_ordinal:
+          type: integer
+          nullable: true
+          description: 切片顺序，非原文段落号
+        inherited:
+          type: boolean
+    EmployeeAnswerFeedback:
+      type: object
+      nullable: true
+      required: [verdict, updated_at]
+      properties:
+        verdict: {type: string, enum: [GOOD, BAD]}
+        note: {type: string, nullable: true, maxLength: 512}
+        updated_at: {type: string, description: 服务端本地日期时间，毫秒精度}
+    EmployeeRun:
+      type: object
+      required:
+      - run_id
+      - conversation_id
+      - turn_no
+      - question
+      - answer
+      - references
+      - status
+      - stage
+      - revision
+      - checkpoint_seq
+      - snapshot_bound
+      - degraded
+      - restricted
+      properties:
+        run_id:
+          type: string
+        conversation_id:
+          type: string
+        question:
+          type: string
+        answer:
+          type: string
+        app_version_id:
+          type: string
+        app_version:
+          type: string
+        turn_no:
+          type: integer
+        references:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmployeeCitation'
+        status:
+          type: string
+          enum:
+          - PENDING
+          - RUNNING
+          - SUCCEEDED
+          - FAILED
+          - CANCELLED
+          - INTERRUPTED
+        stage:
+          type: string
+          enum:
+          - QUEUED
+          - RETRIEVING
+          - GENERATING
+          - FINISHED
+        snapshot_bound:
+          type: boolean
+        revision:
+          type: integer
+        checkpoint_seq:
+          type: integer
+          format: int64
+        degraded:
+          type: boolean
+        restricted:
+          type: boolean
+          description: 引用任一依赖已不可读，answer、references 和 feedback 被清空，禁止显示旧缓存内容
+        feedback:
+          $ref: '#/components/schemas/EmployeeAnswerFeedback'
+        error_code:
+          type: string
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          nullable: true
+        finished_at:
+          type: string
+          nullable: true
     ErrorCode:
       type: string
       description: M1 错误码子集 + M4c 对外开放 API 新增错误码 + M15 FORBIDDEN + 登录验证码请求体上限，HTTP 状态码见各端点响应
@@ -5920,10 +7921,17 @@ components:
       - APP_NOT_FOUND
       - VERSION_NOT_FOUND
       - VERSION_NOT_PUBLISHED
+      - CONVERSATION_BUSY
+      - CONVERSATION_REQUEST_CONFLICT
+      - FEEDBACK_VERSION_CONFLICT
+      - EVAL_DATASET_CONFLICT
+      - QUALITY_ISSUE_CONFLICT
+      - KNOWLEDGE_SNAPSHOT_UNAVAILABLE
       - RATE_LIMITED
       - MODEL_QUOTA_EXCEEDED
       - PARSE_FAILED
       - UPSTREAM_MODEL_ERROR
+      - ANSWER_CITATION_INVALID
       - INTERNAL_ERROR
     ErrorResponse:
       type: object
@@ -6784,7 +8792,7 @@ components:
         provider: {type: string}
         capability: {$ref: '#/components/schemas/ModelCapability'}
         model: {type: string}
-        status: {type: string, enum: [RESERVED, SUCCEEDED, FAILED]}
+        status: {type: string, enum: [RESERVED, SUCCEEDED, FAILED, CANCELLED]}
         reserved_tokens: {type: integer, format: int64}
         input_tokens: {type: integer, format: int64}
         output_tokens: {type: integer, format: int64}
@@ -7000,6 +9008,13 @@ components:
           type: array
           items:
             type: string
+        app_scope_all:
+          type: boolean
+          description: 是否可使用本租户全部应用，仍需 app:use 功能权限
+        app_ids:
+          type: array
+          items: {type: string}
+          description: 指定应用范围；app_scope_all=true 时为空
     RoleResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
@@ -7047,6 +9062,16 @@ components:
           items:
             type: string
           description: 完整权限集合，不是增量
+        app_scope_all:
+          type: boolean
+          nullable: true
+          description: 与 app_ids 整体省略时，更新保留原范围、创建默认空范围
+        app_ids:
+          type: array
+          nullable: true
+          maxItems: 2000
+          items: {type: string, minLength: 1, maxLength: 64}
+          description: 提供列表必须同时提供 app_scope_all。false 加空数组表示无应用；true 时列表被忽略
     PermissionEntry:
       type: object
       description: 权限目录一行，角色编辑页勾选网格据此渲染
@@ -7237,6 +9262,10 @@ components:
         version_id:
           type: string
           description: 仅上传响应返回：本次上传落到的文档版本 id；列表/详情不返回
+        updated_at:
+          type: string
+          nullable: true
+          description: 文档记录真实最近更新时间，ISO 本地时间，无时区。缺失时不以创建时间推断。
         version:
           type: string
           description: 仅上传响应返回：该版本号（如 v2），对应 M4a 重复上传三分支的判定结果
@@ -7309,6 +9338,17 @@ components:
           type: string
           format: date-time
           nullable: true
+          description: 最近一次尝试开始时间，失败也更新
+        last_success_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最近 SUCCESS 或 UNCHANGED 的完成时间，历史未知为空；不证明文档已解析或发布
+        last_content_change_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最近实际生成文档或版本的时间，重复内容不推进，历史未知为空
         last_error:
           type: string
           nullable: true
@@ -7467,6 +9507,16 @@ components:
           type: string
           format: date-time
           nullable: true
+        last_success_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最近完整扫描 SUCCESS 的完成时间，PARTIAL 不推进；历史未知为空
+        last_content_change_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最近实际生成文档或版本时间，部分成功可以推进，重复内容不推进
         last_error:
           type: string
           nullable: true
@@ -9072,6 +11122,9 @@ components:
       type: object
       description: 零命中 query 分组（大小写与空白归一化后同组），展示该组最新一条的脱敏摘要
       properties:
+        insight_id:
+          type: string
+          description: 该组最新洞察的随机标识，供建立质量问题；查询哈希不向客户端公开
         query_digest:
           type: string
         count:
@@ -9200,7 +11253,8 @@ components:
           $ref: '#/components/schemas/AnchorType'
         evidences:
           type: array
-          minItems: 1
+          minItems: 0
+          description: expected_refusal=true 可为空；正常回答至少一条正确证据
           items:
             $ref: '#/components/schemas/EvalCaseEvidenceInput'
         note:
@@ -9440,8 +11494,32 @@ components:
           minimum: 1
         fusion:
           allOf:
-          - $ref: '#/components/schemas/FusionConfig'
+          - $ref: '#/components/schemas/FusionMode'
           nullable: true
+        w_vec:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 1
+          description: 加权融合的向量权重；发布门禁沿用对应版本的冻结值
+        rrf_k:
+          type: integer
+          nullable: true
+          minimum: 1
+          description: RRF 融合的阻尼常数
+        rerank_mode:
+          type: string
+          nullable: true
+          enum: [semantic, hybrid]
+          description: 语义或混合重排模式；旧评测记录可缺省
+        rerank_w_semantic:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 1
+          description: 混合重排的语义权重，0 表示排序仅使用归一化 BM25 得分
         score_threshold:
           type: number
           format: float
@@ -9920,8 +11998,8 @@ components:
               $ref: '#/components/schemas/App'
     AppRetrievalConfig:
       type: object
-      description: 版本快照的检索参数块；建版请求中每个字段均可选，null 继承最新版本值，草稿态外经
-        submit-test 补全并冻结（M4c-CONTRACTS.md §1）
+      description: 版本快照的检索参数块；建版时可省略整个配置以继承最新版本。提交测试时补全未指定的
+        重排设置（优先知识库配置，其次部署默认值）并冻结，显式设置的值保持不变。
       properties:
         recall_top_k:
           type: integer
@@ -9954,6 +12032,18 @@ components:
         rerank_enabled:
           type: boolean
           nullable: true
+        rerank_mode:
+          type: string
+          nullable: true
+          enum: [semantic, hybrid]
+          description: 语义或混合重排模式，提交测试后随版本冻结
+        rerank_w_semantic:
+          type: number
+          format: float
+          nullable: true
+          minimum: 0
+          maximum: 1
+          description: 混合重排的语义权重，允许显式为 0
         rewrite_enabled:
           type: boolean
           nullable: true
@@ -10406,6 +12496,58 @@ components:
           type: string
         version_count:
           type: integer
+    AppCorpusSummary:
+      type: object
+      required: [source, complete]
+      properties:
+        source:
+          type: string
+          enum: [EMPTY, FROZEN, CURRENT, UNAVAILABLE]
+        complete:
+          type: boolean
+        document_count:
+          type: integer
+          nullable: true
+          description: 当前授权范围内的资料数量，信息不完整时为空或省略
+    AppCorpusVersion:
+      type: object
+      required: [version_id, version]
+      properties:
+        version_id: {type: string}
+        version: {type: string}
+    AppCorpusComparison:
+      type: object
+      required: [baseline, candidate, comparable, page, page_size, items]
+      properties:
+        baseline:
+          $ref: '#/components/schemas/AppCorpusSummary'
+        candidate:
+          $ref: '#/components/schemas/AppCorpusSummary'
+        comparable: {type: boolean}
+        total: {type: integer, format: int64, nullable: true}
+        added: {type: integer, format: int64, nullable: true}
+        removed: {type: integer, format: int64, nullable: true}
+        updated: {type: integer, format: int64, nullable: true}
+        page: {type: integer}
+        page_size: {type: integer}
+        items:
+          type: array
+          items:
+            type: object
+            required: [kb_id, doc_id, file_name, change]
+            properties:
+              kb_id: {type: string}
+              doc_id: {type: string}
+              file_name: {type: string}
+              change: {type: string, enum: [ADDED, REMOVED, UPDATED]}
+              baseline:
+                allOf:
+                - $ref: '#/components/schemas/AppCorpusVersion'
+                nullable: true
+              candidate:
+                allOf:
+                - $ref: '#/components/schemas/AppCorpusVersion'
+                nullable: true
     AppVersionResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
@@ -10583,6 +12725,8 @@ components:
           type: string
         target_stage:
           $ref: '#/components/schemas/TargetStage'
+        diagnostics:
+          $ref: '#/components/schemas/ChatDiagnosticsResponse'
     KnowledgeChatResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
@@ -10590,6 +12734,58 @@ components:
         properties:
           data:
             $ref: '#/components/schemas/KnowledgeChatResponse'
+    ChatDiagnosticsResponse:
+      type: object
+      description: 仅控制台预览采集的单调时钟结果，未采集的调用不返回此字段。检索包含现有改写、路由、召回和重排；
+        生成包含模型首段等待及服务端增量写出；first_delta_ms 是从预览开始到首个非空增量的时间，已包含在总时间中。
+        失败阶段记录结束前用时，未执行阶段为 null 或省略；各阶段毫秒取整可能产生舍入差，不能据此推算费用。
+        rerank_ms 为检索内重排同步调用耗时，包含调度、模型等待及结果校验，已包含在 retrieval_ms 中，不能重复相加。
+      required: [outcome, total_ms]
+      properties:
+        request_id:
+          type: string
+        outcome:
+          type: string
+          enum: [SUCCEEDED, FAILED, CANCELLED]
+        failed_stage:
+          type: string
+          nullable: true
+          enum: [CONFIGURATION, RETRIEVAL, GENERATION]
+        configuration_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        retrieval_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        rerank_status:
+          type: string
+          nullable: true
+          enum: [APPLIED, DISABLED, EMPTY_CANDIDATES, UNAVAILABLE, TIMEOUT, FAILED, SKIPPED]
+          description: 重排实际执行状态。TIMEOUT/FAILED 沿用现有粗排序，不等于整轮问答失败；未采集时为空或省略。
+        rerank_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+          description: 仅 APPLIED/TIMEOUT/FAILED 携带实测毫秒，其余状态为空或省略。0 表示不足一毫秒，线程池拒绝也可计为 FAILED；检索未返回结果时不推测子阶段。
+        generation_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        first_delta_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        total_ms:
+          type: integer
+          format: int64
+          minimum: 0
     ChatStreamMessageDeltaEvent:
       type: object
       description: 'SSE event: message_delta，可出现零到多次'

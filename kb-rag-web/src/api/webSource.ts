@@ -17,8 +17,8 @@ export function registerWebSource(kbId: string, payload: RegisterWebSourceReques
 }
 
 /** GET /api/v1/kb/{kbId}/web-sources (M12-CONTRACTS.md section 3.4), most recently registered first. */
-export function listWebSources(kbId: string, page = 1, size = 20): Promise<PageResult<WebSourceEntry>> {
-  return apiGet<PageResult<WebSourceEntry>>(`/kb/${kbId}/web-sources`, { page, size });
+export function listWebSources(kbId: string, page = 1, size = 20, attentionOnly = false): Promise<PageResult<WebSourceEntry>> {
+  return apiGet<PageResult<WebSourceEntry>>(`/kb/${kbId}/web-sources`, { page, size, ...(attentionOnly ? { attention_only: true } : {}) });
 }
 
 /**

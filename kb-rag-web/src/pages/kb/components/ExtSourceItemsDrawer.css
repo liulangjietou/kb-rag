@@ -1,0 +1,6 @@
+.ext-source-results { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.ext-source-results .ant-typography { margin-bottom: 0; }
+.ext-source-results__key { display: block; overflow-wrap: anywhere; color: var(--kb-color-text); }
+.ext-source-results__outcome { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; overflow-wrap: anywhere; }
+.ext-source-results__reason { color: var(--kb-color-text-secondary); }
+.ext-source-results .ant-table-row:focus-visible { outline: 2px solid var(--kb-color-primary); outline-offset: -2px; }

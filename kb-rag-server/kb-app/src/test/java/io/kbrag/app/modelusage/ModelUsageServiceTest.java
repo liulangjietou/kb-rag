@@ -24,6 +24,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -178,7 +179,8 @@ class ModelUsageServiceTest {
 
         service.reconcileStaleReservations();
 
-        assertEquals(ModelUsageService.STATUS_SUCCEEDED, reserved.getStatus());
+        assertEquals(ModelUsageService.STATUS_FAILED, reserved.getStatus());
+        assertEquals("RESERVATION_EXPIRED", reserved.getErrorType());
         assertEquals(1, reserved.getEstimated());
         verify(monthlyMapper).settle(anyString(), anyString(), anyLong(), anyLong());
         verify(monthlyMapper, never()).release(anyString(), anyString(), anyLong());
@@ -205,6 +207,53 @@ class ModelUsageServiceTest {
         price.setOutputPriceMicros(output);
         price.setEnabled(1);
         return price;
+    }
+
+    @Test
+    void shouldConservativelySettleCancelledCallsWithoutCallingThemSuccessful() {
+        ModelUsage reserved = reservedUsage(100L, 2_000_000L, 4_000_000L);
+        when(usageMapper.selectOne(any())).thenReturn(reserved);
+        when(usageMapper.updateById(any(ModelUsage.class))).thenReturn(1);
+
+        service.incomplete(new ModelCallTicket(USAGE_ID, 100L, true), ModelTokenUsage.unknown(),
+                new CancellationException("cancelled"));
+
+        assertEquals("CANCELLED", reserved.getStatus());
+        assertEquals(100L, reserved.getTotalTokens());
+        assertEquals(1, reserved.getEstimated());
+        assertEquals(400L, reserved.getCostMicros());
+        verify(monthlyMapper).settle(anyString(), anyString(), org.mockito.ArgumentMatchers.eq(100L),
+                org.mockito.ArgumentMatchers.eq(100L));
+        verify(monthlyMapper, never()).release(anyString(), anyString(), anyLong());
+    }
+
+    @Test
+    void shouldKeepKnownUsageWhenTheStreamFailsAfterUsageWasReported() {
+        ModelUsage reserved = reservedUsage(100L, 2_000_000L, 4_000_000L);
+        when(usageMapper.selectOne(any())).thenReturn(reserved);
+        when(usageMapper.updateById(any(ModelUsage.class))).thenReturn(1);
+
+        service.incomplete(new ModelCallTicket(USAGE_ID, 100L, true),
+                new ModelTokenUsage(10L, 5L, 15L, true), new IllegalStateException("incomplete frame"));
+
+        assertEquals("FAILED", reserved.getStatus());
+        assertEquals(15L, reserved.getTotalTokens());
+        assertEquals(0, reserved.getEstimated());
+        assertEquals(40L, reserved.getCostMicros());
+        verify(monthlyMapper, never()).release(anyString(), anyString(), anyLong());
+    }
+
+    @Test
+    void shouldReleaseCancellationBeforeDispatchWithoutMarkingItAsAnUpstreamFailure() {
+        ModelUsage reserved = reservedUsage(100L, 2_000_000L, 4_000_000L);
+        when(usageMapper.selectOne(any())).thenReturn(reserved);
+        when(usageMapper.updateById(any(ModelUsage.class))).thenReturn(1);
+
+        service.fail(new ModelCallTicket(USAGE_ID, 100L, true), new CancellationException("not sent"));
+
+        assertEquals("CANCELLED", reserved.getStatus());
+        verify(monthlyMapper).release(anyString(), anyString(), org.mockito.ArgumentMatchers.eq(100L));
+        verify(monthlyMapper, never()).settle(anyString(), anyString(), anyLong(), anyLong());
     }
 
     private ModelUsage reservedUsage(long reservation, long inputPrice, long outputPrice) {

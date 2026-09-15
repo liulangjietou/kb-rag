@@ -24,7 +24,8 @@ public interface ModelUsageMapper extends BaseMapper<ModelUsage> {
             WHERE tenant_id = #{tenantId}
               AND created_at >= #{monthStart}
               AND created_at < #{nextMonthStart}
-              AND status = 'SUCCEEDED'
+              AND status IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+              AND total_tokens > 0
               AND priced = 1
               AND deleted = 0
             GROUP BY currency
@@ -34,14 +35,15 @@ public interface ModelUsageMapper extends BaseMapper<ModelUsage> {
                                            @Param("monthStart") java.time.LocalDateTime monthStart,
                                            @Param("nextMonthStart") java.time.LocalDateTime nextMonthStart);
 
-    /** Counts successful calls whose provider response had no token counters. */
+    /** 统计已结算但缺少上游 Token 计数的调用，包括中断后保守结算。 */
     @Select("""
             SELECT COUNT(*)
             FROM t_kb_model_usage
             WHERE tenant_id = #{tenantId}
               AND created_at >= #{monthStart}
               AND created_at < #{nextMonthStart}
-              AND status = 'SUCCEEDED'
+              AND status IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+              AND total_tokens > 0
               AND estimated = 1
               AND deleted = 0
             """)
@@ -49,14 +51,15 @@ public interface ModelUsageMapper extends BaseMapper<ModelUsage> {
                         @Param("monthStart") java.time.LocalDateTime monthStart,
                         @Param("nextMonthStart") java.time.LocalDateTime nextMonthStart);
 
-    /** Counts successful calls that had no active price snapshot. */
+    /** 统计有消耗但缺少定价快照的调用，不把未产生费用的拒绝计算在内。 */
     @Select("""
             SELECT COUNT(*)
             FROM t_kb_model_usage
             WHERE tenant_id = #{tenantId}
               AND created_at >= #{monthStart}
               AND created_at < #{nextMonthStart}
-              AND status = 'SUCCEEDED'
+              AND status IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+              AND total_tokens > 0
               AND priced = 0
               AND deleted = 0
             """)

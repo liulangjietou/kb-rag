@@ -3,7 +3,8 @@ import { Dropdown } from 'antd';
 import type { ButtonProps, MenuProps } from 'antd';
 import { cloneElement, useId, useState } from 'react';
 import type { CSSProperties, ReactElement, ReactNode } from 'react';
-import { isThemePresetId } from '../theme/presets';
+import { isThemePreference } from '../theme/themePreference';
+import { getThemePreset } from '../theme/presets';
 import { useThemePreset } from '../theme/ThemePresetContext';
 
 export interface ThemePresetSwitcherProps {
@@ -19,8 +20,13 @@ export default function ThemePresetSwitcher({ compact = false }: ThemePresetSwit
   const [open, setOpen] = useState(false);
   const menuId = `theme-preset-menu-${useId()}`;
   const nextPreset = presets[(presets.findIndex((item) => item.id === presetId) + 1) % presets.length];
+  const selectedName = presetId === 'system' ? 'System 随行' : preset.name;
 
-  const items: MenuProps['items'] = presets.map((item) => ({
+  const options = [
+    { id: 'system', name: 'System 随行', description: '跟随系统明暗，自动切换清爽与低眩光界面', mode: 'auto', palette: getThemePreset('ocean').palette },
+    ...presets,
+  ];
+  const items: MenuProps['items'] = options.map((item) => ({
     key: item.id,
     label: (
       <span className="theme-preset-option">
@@ -33,19 +39,20 @@ export default function ThemePresetSwitcher({ compact = false }: ThemePresetSwit
           <span className="theme-preset-option__name">{item.name}</span>
           <span className="theme-preset-option__description">{item.description}</span>
         </span>
+        <span className="theme-preset-option__mode">{item.mode.toUpperCase()}</span>
       </span>
     ),
   }));
 
   const handleSelect: MenuProps['onClick'] = ({ key }) => {
-    if (!isThemePresetId(key)) {
+    if (!isThemePreference(key)) {
       return;
     }
     selectPreset(key);
     setOpen(false);
   };
 
-  const cycleLabel = `当前为 ${preset.name}，切换到 ${nextPreset.name}`;
+  const cycleLabel = `当前为 ${selectedName}，切换到 ${nextPreset.name}`;
 
   return (
     <span className="theme-preset-switcher">
@@ -85,11 +92,11 @@ export default function ThemePresetSwitcher({ compact = false }: ThemePresetSwit
             style={{ backgroundColor: preset.palette.primary } as CSSProperties}
             aria-hidden="true"
           />
-          {!compact && <span>{preset.name}</span>}
+          {!compact && <span>{selectedName}</span>}
         </span>
       </Dropdown.Button>
       <span className="theme-preset-switcher__status" role="status" aria-live="polite">
-        当前界面主题：{preset.name}
+        当前界面主题：{selectedName}{presetId === 'system' ? `，当前${preset.mode === 'dark' ? '深色' : '浅色'}` : ''}
       </span>
     </span>
   );

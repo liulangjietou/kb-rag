@@ -28,6 +28,7 @@ import java.time.LocalDateTime;
  * @param restricted       {@code true} when the content is readable only by the granted roles; the row
  *                         itself always shows (M16 - hiding rows would make the list lie about counts)
  * @param createdAt        ISO creation timestamp
+ * @param updatedAt        文档记录的真实最近更新时间
  * @param versionId        version the upload produced, only present on the upload response
  * @param version          version number of that version, only present on the upload response
  * @param duplicated       {@code true} when the upload created no version, only on the upload response
@@ -52,6 +53,7 @@ public record DocumentResponse(
         @JsonProperty("trashed_at") String trashedAt,
         boolean restricted,
         @JsonProperty("created_at") String createdAt,
+        @JsonProperty("updated_at") String updatedAt,
         @JsonProperty("version_id") String versionId,
         String version,
         Boolean duplicated,
@@ -104,6 +106,7 @@ public record DocumentResponse(
                 iso(entity.getTrashedAt()),
                 entity.getVisibility() == DocVisibility.RESTRICTED,
                 entity.getCreatedAt() == null ? null : entity.getCreatedAt().toString(),
+                iso(entity.getUpdatedAt()),
                 versionId,
                 version,
                 duplicated,

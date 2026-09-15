@@ -22,6 +22,8 @@ import io.kbrag.domain.enums.TargetStage;
 import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.AppIndexSnapshot;
 import io.kbrag.domain.model.AppRoutingConfig;
+import io.kbrag.domain.model.ChatCancellation;
+import io.kbrag.domain.model.EmployeeRunTarget;
 import io.kbrag.domain.model.KbRef;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.service.ContentBudgetTrimmer;
@@ -38,6 +40,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 
 /**
  * The open API's search and chat orchestration, requirement section 4.8.
@@ -63,6 +66,8 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class KnowledgeApiService {
 
+    private static final String CHAT_CANCELLED = "CHAT_CANCELLED";
+
     private final AppService appService;
     private final AppVersionService appVersionService;
     private final RetrievalService retrievalService;
@@ -72,6 +77,33 @@ public class KnowledgeApiService {
     private final ApiAuditService apiAuditService;
     private final SearchInsightService searchInsightService;
     private final KbMetrics kbMetrics;
+
+    /**
+     * 员工会话复用检索与生成管线，执行对象由会话接受时捕获，当前授权由员工执行服务负责。
+     * 检索回调必须完成证据持久化和当前权限重验后才返回；本方法不发送 done，由账本提交终态后发送。
+     */
+    public KnowledgeCallResult employeeStream(EmployeeRunTarget captured, KnowledgeCallCommand command,
+                                               java.util.function.Consumer<KnowledgeCallResult> onRetrieved,
+                                               java.util.function.Consumer<String> onDelta,
+                                               ChatCancellation cancellation) {
+        cancellation.throwIfCancelled();
+        AppVersion version = new AppVersion();
+        version.setAppId(captured.appId());
+        version.setAppVersionId(captured.appVersionId());
+        version.setVersion(captured.appVersion());
+        version.setConfig(captured.config());
+        version.setIndexSnapshots(captured.indexSnapshots());
+        version.setVisibleVersionIds(captured.visibleVersionIds());
+        ResolvedTarget target = new ResolvedTarget(version, appVersionService.parseConfig(version),
+                TargetStage.RELEASE, captured.snapshotBound(), captured.snapshotBound());
+        KnowledgeCallResult retrieved = retrieve(target, command);
+        cancellation.throwIfCancelled();
+        onRetrieved.accept(retrieved);
+        cancellation.throwIfCancelled();
+        streamGenerate(target, command, retrieved.getNodes(), onDelta, cancellation);
+        cancellation.throwIfCancelled();
+        return retrieved;
+    }
 
     /**
      * Runs one open search call.
@@ -132,17 +164,19 @@ public class KnowledgeApiService {
                            ChatStreamListener listener) {
         long startedAt = System.currentTimeMillis();
         try {
+            listener.cancellation().throwIfCancelled();
             ResolvedTarget target = resolve(principal, command);
             KnowledgeCallResult retrieved = retrieve(target, command);
+            listener.cancellation().throwIfCancelled();
             insight(command, retrieved, startedAt);
-            StringBuilder answer = new StringBuilder();
-            streamGenerate(target, command, retrieved.getNodes(), delta -> {
-                answer.append(delta);
-                listener.onDelta(delta);
-            });
+            streamGenerate(target, command, retrieved.getNodes(), listener::onDelta, listener.cancellation());
+            listener.cancellation().throwIfCancelled();
             listener.onReferences(retrieved.getNodes());
             listener.onDone(RequestIdHolder.get(), retrieved.getDegraded(), retrieved.routedKbIds());
             audit(principal, command, target, retrieved, startedAt, ApiAuditService.ENDPOINT_CHAT);
+        } catch (CancellationException e) {
+            auditCancelled(principal, command, startedAt);
+            listener.onError(CHAT_CANCELLED, "生成已停止");
         } catch (BizException e) {
             auditRejection(principal, command, startedAt, e, ApiAuditService.ENDPOINT_CHAT);
             listener.onError(e.getErrorCode().name(), e.getMessage());
@@ -186,6 +220,9 @@ public class KnowledgeApiService {
                                    ChatStreamListener listener) {
         try {
             preview(appId, appVersionId, command, listener);
+        } catch (CancellationException e) {
+            log.info("chat preview cancelled, appId={}", appId);
+            listener.onError(CHAT_CANCELLED, "生成已停止");
         } catch (BizException e) {
             listener.onError(e.getErrorCode().name(), e.getMessage());
         } catch (Exception e) {
@@ -211,23 +248,45 @@ public class KnowledgeApiService {
      */
     public KnowledgeCallResult preview(String appId, String appVersionId, KnowledgeCallCommand command,
                                        ChatStreamListener listener) {
-        appService.require(appId);
-        AppVersion version = previewVersion(appId, appVersionId);
-        // Deliberately not snapshot bound even when the previewed version is the released one: a preview exists
-        // to try a configuration against the corpus as it is now, and it is also how an operator proves a
-        // snapshot isolates a release - the same query returns the new content here and does not there
-        // (requirement section 4.4 "the console debug page takes the current active versions").
-        ResolvedTarget target = new ResolvedTarget(version, appVersionService.parseConfig(version),
-                TargetStage.of(version.getStatus()), false);
-        requestOverridePolicy.validate(forbiddenKeysOf(command));
-        KnowledgeCallResult retrieved = retrieve(target, command);
-        if (listener == null) {
-            return withAnswer(retrieved, generate(target, command, retrieved.getNodes()));
+        PreviewTiming timing = new PreviewTiming();
+        ChatCancellation cancellation = listener == null ? ChatCancellation.NONE : listener.cancellation();
+        KnowledgeCallResult result;
+        try {
+            cancellation.throwIfCancelled();
+            appService.require(appId);
+            AppVersion version = previewVersion(appId, appVersionId);
+            // 预览使用所选版本的配置和当前语料，已发布版本也不改为冻结语料。
+            ResolvedTarget target = new ResolvedTarget(version, appVersionService.parseConfig(version),
+                    TargetStage.of(version.getStatus()), false);
+            requestOverridePolicy.validate(forbiddenKeysOf(command));
+            timing.start(ChatDiagnostics.Stage.RETRIEVAL);
+            KnowledgeCallResult retrieved = retrieve(target, command, timing);
+            cancellation.throwIfCancelled();
+            timing.start(ChatDiagnostics.Stage.GENERATION);
+            if (listener == null) {
+                result = withAnswer(retrieved, generate(target, command, retrieved.getNodes()));
+            } else {
+                streamGenerate(target, command, retrieved.getNodes(), delta -> {
+                    timing.onDelta(delta);
+                    listener.onDelta(delta);
+                }, cancellation);
+                cancellation.throwIfCancelled();
+                result = retrieved;
+            }
+        } catch (RuntimeException failure) {
+            if (listener != null) {
+                listener.onDiagnostics(timing.finish(failure instanceof CancellationException
+                        ? ChatDiagnostics.Outcome.CANCELLED : ChatDiagnostics.Outcome.FAILED));
+            }
+            throw failure;
         }
-        streamGenerate(target, command, retrieved.getNodes(), listener::onDelta);
-        listener.onReferences(retrieved.getNodes());
-        listener.onDone(RequestIdHolder.get(), retrieved.getDegraded(), retrieved.routedKbIds());
-        return retrieved;
+        ChatDiagnostics diagnostics = timing.finish(ChatDiagnostics.Outcome.SUCCEEDED);
+        if (listener != null) {
+            listener.onDiagnostics(diagnostics);
+            listener.onReferences(result.getNodes());
+            listener.onDone(RequestIdHolder.get(), result.getDegraded(), result.routedKbIds());
+        }
+        return result.toBuilder().diagnostics(diagnostics).build();
     }
 
     /**
@@ -327,6 +386,11 @@ public class KnowledgeApiService {
      * @return result without an answer
      */
     private KnowledgeCallResult retrieve(ResolvedTarget target, KnowledgeCallCommand command) {
+        return retrieve(target, command, null);
+    }
+
+    /** 预览显式接收同次检索的测量，其他调用不向响应或线程上下文添加诊断。 */
+    private KnowledgeCallResult retrieve(ResolvedTarget target, KnowledgeCallCommand command, PreviewTiming timing) {
         AppConfigSnapshot snapshot = target.snapshot();
         List<KbRef> kbRefs = snapshot.getKbRefs();
         if (CollectionUtils.isEmpty(kbRefs)) {
@@ -334,6 +398,9 @@ public class KnowledgeApiService {
                     "应用版本未配置知识库，无法提供检索服务");
         }
         SearchOutcome outcome = retrievalService.search(kbRefs, toRetrievalCommand(snapshot, command, target));
+        if (timing != null) {
+            timing.recordRerank(outcome.getRerankTiming());
+        }
         List<RetrievalNodeView> nodes = trim(outcome.getNodes(), command.getMaxContentLength());
         return KnowledgeCallResult.builder()
                 .nodes(nodes)
@@ -362,6 +429,7 @@ public class KnowledgeApiService {
         KbRetrievalConfig retrieval = snapshot.retrievalOrDefaults();
         AppRoutingConfig routing = snapshot.routingOrDefaults();
         return RetrievalCommand.builder()
+                .strictSnapshot(target.strictSnapshot())
                 .indexOverride(target.snapshotBound() ? indexOverridesOf(target.version()) : null)
                 .visibleVersionIdsOverride(target.snapshotBound()
                         ? target.version().visibleVersionIdMap() : null)
@@ -378,6 +446,8 @@ public class KnowledgeApiService {
                 .wVec(retrieval.getWVec())
                 .rrfK(retrieval.getRrfK())
                 .rerankEnabled(retrieval.getRerankEnabled())
+                .rerankMode(retrieval.getRerankMode())
+                .rerankWSemantic(retrieval.getRerankWSemantic())
                 .rewriteEnabled(retrieval.getRewriteEnabled())
                 .metadataFilter(command.getMetadataFilter())
                 .build();
@@ -450,8 +520,23 @@ public class KnowledgeApiService {
      * @param onDelta  receiver of the generated pieces
      */
     private void streamGenerate(ResolvedTarget target, KnowledgeCallCommand command,
-                                List<RetrievalNodeView> nodes, java.util.function.Consumer<String> onDelta) {
-        answerGenerationService.stream(target.snapshot(), command.getQuery(), command.getMessages(), nodes, onDelta);
+                                List<RetrievalNodeView> nodes, java.util.function.Consumer<String> onDelta,
+                                ChatCancellation cancellation) {
+        answerGenerationService.stream(target.snapshot(), command.getQuery(), command.getMessages(), nodes,
+                onDelta, cancellation);
+    }
+
+    /** 取消独立记录，避免把用户停止误报为内部错误或成功回答。 */
+    private void auditCancelled(ApiKeyPrincipal principal, KnowledgeCallCommand command, long startedAt) {
+        log.info("open chat cancelled, appId={}", command.getAppId());
+        if (principal == null) {
+            return;
+        }
+        apiAuditService.recordAsync(ApiAuditService.AuditRecord.builder()
+                .keyId(principal.getKeyId()).appId(command.getAppId())
+                .endpoint(ApiAuditService.ENDPOINT_CHAT).query(command.getQuery())
+                .latencyMs((int) (System.currentTimeMillis() - startedAt))
+                .errorCode(CHAT_CANCELLED).requestId(RequestIdHolder.get()).build());
     }
 
     private KnowledgeCallResult withAnswer(KnowledgeCallResult result, String answer) {
@@ -599,6 +684,9 @@ public class KnowledgeApiService {
      *                      instead of the live aliases
      */
     private record ResolvedTarget(AppVersion version, AppConfigSnapshot snapshot, TargetStage stage,
-                                  boolean snapshotBound) {
+                                  boolean snapshotBound, boolean strictSnapshot) {
+        private ResolvedTarget(AppVersion version, AppConfigSnapshot snapshot, TargetStage stage, boolean snapshotBound) {
+            this(version, snapshot, stage, snapshotBound, false);
+        }
     }
 }

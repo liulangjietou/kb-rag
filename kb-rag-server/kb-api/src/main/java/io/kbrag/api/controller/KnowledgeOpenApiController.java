@@ -7,6 +7,7 @@ import io.kbrag.api.dto.KnowledgeFeedbackResponse;
 import io.kbrag.api.dto.KnowledgeSearchResponse;
 import io.kbrag.api.filter.ApiKeyAuthFilter;
 import io.kbrag.api.sse.SseChatStreamListener;
+import io.kbrag.api.sse.SseChatStreamFactory;
 import io.kbrag.app.feedback.RetrievalFeedbackService;
 import io.kbrag.app.openapi.ApiKeyPrincipal;
 import io.kbrag.app.openapi.KnowledgeApiService;
@@ -49,6 +50,7 @@ public class KnowledgeOpenApiController {
 
     private final KnowledgeApiService knowledgeApiService;
     private final RetrievalFeedbackService retrievalFeedbackService;
+    private final SseChatStreamFactory chatStreamFactory;
 
     /**
      * Retrieval only call.
@@ -103,8 +105,13 @@ public class KnowledgeOpenApiController {
                                  HttpServletRequest httpRequest) {
         requireAppId(request);
         ApiKeyPrincipal principal = principalOf(httpRequest);
-        SseChatStreamListener listener = new SseChatStreamListener();
-        knowledgeApiService.chatStreamAsync(principal, request.toCommand(), listener);
+        SseChatStreamListener listener = chatStreamFactory.create();
+        try {
+            knowledgeApiService.chatStreamAsync(principal, request.toCommand(), listener);
+        } catch (RuntimeException failure) {
+            listener.close();
+            throw failure;
+        }
         return listener.emitter();
     }
 

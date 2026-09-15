@@ -69,14 +69,14 @@ function contrastRatio(first: string, second: string): number {
 }
 
 describe('theme presets', () => {
-  const presetIds = ['atlas', 'ocean', 'violet', 'cinder', 'moss', 'rose', 'graphite', 'night'] as const;
+  const presetIds = ['atlas', 'ocean', 'violet', 'ember', 'dawn', 'night', 'aurora', 'graphite-dark', 'cinder', 'moss', 'rose', 'graphite'] as const;
 
-  it('provides eight distinct presets with Atlas as the default', () => {
+  it('provides twelve distinct palettes with Atlas as the unchanged default', () => {
     expect(THEME_PRESETS.map((preset) => preset.id)).toEqual(presetIds);
     expect(new Set(THEME_PRESETS.map((preset) => preset.id)).size).toBe(THEME_PRESETS.length);
     expect(DEFAULT_THEME_PRESET_ID).toBe('atlas');
     expect(THEME_PRESETS.find((preset) => preset.id === 'night')?.mode).toBe('dark');
-    expect(THEME_PRESETS.filter((preset) => preset.mode === 'light')).toHaveLength(7);
+    expect(THEME_PRESETS.filter((preset) => preset.mode === 'light')).toHaveLength(9);
   });
 
   it('falls back to Atlas for missing or invalid persisted values', () => {

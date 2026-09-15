@@ -15,6 +15,7 @@ interface DocumentListProps {
   onSelect: (ids: string[]) => void;
   onPageChange: (page: number, size: number) => void;
   actions: (doc: KbDocument) => ReactNode;
+  filtered?: boolean;
 }
 
 function ProcessingState({ doc }: { doc: KbDocument }) {
@@ -50,6 +51,7 @@ function ValidityState({ doc }: { doc: KbDocument }) {
 export default function DocumentList(props: DocumentListProps) {
   const { documents, selectedIds, canSelect, onSelect } = props;
   const screens = Grid.useBreakpoint();
+  const emptyText = props.filtered ? '没有符合条件的文档，请调整或重置筛选' : '暂无文档';
   const pagination = {
     current: props.page,
     pageSize: props.pageSize,
@@ -94,6 +96,7 @@ export default function DocumentList(props: DocumentListProps) {
                 {doc.file_ext?.toUpperCase()} · {formatFileSize(doc.file_size)}
                 {doc.restricted && ' · 受限文档'}
               </small>
+              <small>更新：{doc.updated_at ? doc.updated_at.replace('T', ' ').slice(0, 16) : '暂未提供'}</small>
               <Space wrap size={[4, 6]}>
                 <ProcessingState doc={doc} />
                 <PublishingState doc={doc} />
@@ -105,7 +108,7 @@ export default function DocumentList(props: DocumentListProps) {
               </footer>
             </article>
           ))}
-          {!props.loading && documents.length === 0 && <Empty description="暂无文档" />}
+          {!props.loading && documents.length === 0 && <Empty description={emptyText} />}
         </div>
         <Pagination {...pagination} size="small" className="document-mobile-pagination" />
       </Spin>
@@ -115,6 +118,7 @@ export default function DocumentList(props: DocumentListProps) {
       className="document-management-table"
       rowKey="doc_id"
       loading={props.loading}
+      locale={{ emptyText: props.loading ? '正在加载文档…' : <Empty description={emptyText} /> }}
       dataSource={documents}
       scroll={{ x: 760 }}
       pagination={pagination}
@@ -139,6 +143,7 @@ export default function DocumentList(props: DocumentListProps) {
                 {doc.file_ext?.toUpperCase()} · {formatFileSize(doc.file_size)}
                 {doc.restricted && ' · 受限文档'}
               </small>
+              <small>更新：{doc.updated_at ? doc.updated_at.replace('T', ' ').slice(0, 16) : '暂未提供'}</small>
             </div>
           ),
         },

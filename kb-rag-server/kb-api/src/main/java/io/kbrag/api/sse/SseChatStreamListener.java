@@ -2,9 +2,12 @@ package io.kbrag.api.sse;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.kbrag.api.dto.RetrievalNodeResponse;
+import io.kbrag.api.dto.ChatDiagnosticsResponse;
+import io.kbrag.app.openapi.ChatDiagnostics;
 import io.kbrag.app.openapi.ChatStreamListener;
 import io.kbrag.app.retrieval.RetrievalNodeView;
 import io.kbrag.common.api.ErrorCode;
+import io.kbrag.domain.model.ChatCancellation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -43,12 +46,32 @@ public class SseChatStreamListener implements ChatStreamListener {
     /** Event name of the failed terminal event. */
     public static final String EVENT_ERROR = "error";
 
+    /** 控制台预览的可选诊断事件，不是回答终态。 */
+    public static final String EVENT_DIAGNOSTICS = "diagnostics";
+
     /** No server side timeout: the generation itself is bounded by the provider timeout. */
     private static final long NO_TIMEOUT = 0L;
 
-    private final SseEmitter emitter = new SseEmitter(NO_TIMEOUT);
+    private final SseEmitter emitter;
+    private final ChatCancellation cancellation = new ChatCancellation();
+    private boolean closed;
 
-    private volatile boolean closed;
+    /** 构造连接；生产入口由工厂统一管理心跳和关闭。 */
+    public SseChatStreamListener() {
+        this(new SseEmitter(NO_TIMEOUT));
+    }
+
+    SseChatStreamListener(SseEmitter emitter) {
+        this.emitter = emitter;
+        emitter.onCompletion(this::close);
+        emitter.onTimeout(this::close);
+        emitter.onError(failure -> close());
+    }
+
+    @Override
+    public ChatCancellation cancellation() {
+        return cancellation;
+    }
 
     /**
      * The emitter the controller returns.
@@ -71,41 +94,61 @@ public class SseChatStreamListener implements ChatStreamListener {
     }
 
     @Override
-    public void onDone(String requestId, List<String> degraded, List<String> routedKbIds) {
+    public void onDiagnostics(ChatDiagnostics diagnostics) {
+        send(EVENT_DIAGNOSTICS, ChatDiagnosticsResponse.from(diagnostics));
+    }
+
+    @Override
+    public synchronized void onDone(String requestId, List<String> degraded, List<String> routedKbIds) {
         send(EVENT_DONE, new DoneEvent(requestId, degraded, routedKbIds));
         complete();
     }
 
     @Override
-    public void onError(String code, String message) {
+    public synchronized void onError(String code, String message) {
         send(EVENT_ERROR, new ErrorEvent(code, message));
         complete();
     }
 
-    private void send(String event, Object payload) {
+    private synchronized void send(String event, Object payload) {
+        send(SseEmitter.event().name(event).data(payload));
+    }
+
+    /** 静默生成期间发送注释，既保活也使断开的客户端能被及时识别。 */
+    synchronized void heartbeat() {
+        send(SseEmitter.event().comment("keep-alive"));
+    }
+
+    private synchronized void send(SseEmitter.SseEventBuilder event) {
         if (closed) {
             return;
         }
         try {
-            emitter.send(SseEmitter.event().name(event).data(payload));
+            emitter.send(event);
         } catch (IOException | IllegalStateException e) {
             // A disconnected client is the expected end of a stream, not a fault worth an error code.
-            log.info("chat stream closed by the client, event={}, reason={}", event, e.getMessage());
-            closed = true;
-            emitter.complete();
+            log.info("chat stream closed by the client");
+            complete();
         } catch (Exception e) {
-            log.error("chat stream event could not be written, errorCode={}, event={}",
-                    ErrorCode.INTERNAL_ERROR, event, e);
+            log.error("chat stream event could not be written, errorCode={}", ErrorCode.INTERNAL_ERROR, e);
             closed = true;
+            cancellation.cancel();
             emitter.completeWithError(e);
         }
     }
 
-    private void complete() {
+    private synchronized void complete() {
         if (!closed) {
             closed = true;
+            cancellation.cancel();
             emitter.complete();
         }
+    }
+
+    /** 连接或异步提交失败时先终止上游，再释放传输资源。 */
+    public void close() {
+        cancellation.cancel();
+        complete();
     }
 
     /**

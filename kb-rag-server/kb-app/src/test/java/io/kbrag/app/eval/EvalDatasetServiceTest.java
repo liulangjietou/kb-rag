@@ -13,6 +13,7 @@ import io.kbrag.domain.mapper.EvalResultMapper;
 import io.kbrag.domain.mapper.EvalRunMapper;
 import io.kbrag.domain.model.EvalEvidence;
 import io.kbrag.domain.service.BizIdGenerator;
+import io.kbrag.common.exception.BizException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -20,6 +21,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -61,6 +63,39 @@ class EvalDatasetServiceTest {
         when(bizIdGenerator.evalCaseId()).thenReturn("evc_new");
         when(documentMapper.selectOne(any())).thenReturn(document());
         when(evalDatasetMapper.selectOne(any())).thenReturn(dataset(0, 0));
+        when(evalDatasetMapper.updateById(any(EvalDataset.class))).thenReturn(1);
+        when(evalCaseMapper.updateById(any(EvalCase.class))).thenReturn(1);
+        when(evalCaseMapper.deleteById(any(java.io.Serializable.class))).thenReturn(1);
+        when(evalCaseMapper.delete(any())).thenReturn(1);
+    }
+
+    @Test
+    void shouldRejectAConflictingCaseUpdateBeforeAdvancingTheDatasetRevision() {
+        when(evalCaseMapper.selectOne(any())).thenReturn(existingCase(CaseStatus.ACTIVE));
+        when(evalCaseMapper.updateById(any(EvalCase.class))).thenReturn(0);
+        BizException failure = assertThrows(BizException.class, () -> service.updateCase("evc_1", command()));
+        assertEquals("EVAL_DATASET_CONFLICT", failure.getErrorCode().name());
+        org.mockito.Mockito.verify(evalDatasetMapper, org.mockito.Mockito.never()).updateById(any(EvalDataset.class));
+    }
+
+    @Test
+    void shouldRejectAConflictingCaseRecheckBeforeAdvancingTheDatasetRevision() {
+        when(evalCaseMapper.selectOne(any())).thenReturn(existingCase(CaseStatus.ACTIVE));
+        when(evalCaseMapper.updateById(any(EvalCase.class))).thenReturn(0);
+        BizException failure = assertThrows(BizException.class,
+                () -> service.recheck("evc_1", EvalRecheckAction.DEPRECATE, List.of()));
+        assertEquals("EVAL_DATASET_CONFLICT", failure.getErrorCode().name());
+        org.mockito.Mockito.verify(evalDatasetMapper, org.mockito.Mockito.never()).updateById(any(EvalDataset.class));
+    }
+
+    @Test
+    void shouldRejectAConflictingCaseDeleteBeforeAdvancingTheDatasetRevision() {
+        when(evalCaseMapper.selectOne(any())).thenReturn(existingCase(CaseStatus.ACTIVE));
+        when(evalCaseMapper.deleteById(any(java.io.Serializable.class))).thenReturn(0);
+        when(evalCaseMapper.delete(any())).thenReturn(0);
+        BizException failure = assertThrows(BizException.class, () -> service.deleteCase("evc_1"));
+        assertEquals("EVAL_DATASET_CONFLICT", failure.getErrorCode().name());
+        org.mockito.Mockito.verify(evalDatasetMapper, org.mockito.Mockito.never()).updateById(any(EvalDataset.class));
     }
 
     @Test

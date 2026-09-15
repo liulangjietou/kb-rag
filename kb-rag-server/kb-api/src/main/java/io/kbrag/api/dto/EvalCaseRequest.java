@@ -8,7 +8,6 @@ import io.kbrag.domain.model.ChatMessage;
 import io.kbrag.domain.model.EvalEvidence;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import org.apache.commons.collections4.CollectionUtils;
 
@@ -23,7 +22,7 @@ import java.util.List;
  * @param expectedAnswer reference answer, optional
  * @param expectedRefusal whether the correct final answer should refuse
  * @param anchorType     {@code SPAN} or {@code DOCUMENT}, case insensitive
- * @param evidences      evidence anchors, at least one required
+ * @param evidences      正常回答至少一条证据；无依据拒答允许空列表
  * @param note           free text operator note
  *
  * @author owlzhangfq@gmail.com
@@ -34,7 +33,7 @@ public record EvalCaseRequest(
         @JsonProperty("expected_answer") String expectedAnswer,
         @JsonProperty("expected_refusal") boolean expectedRefusal,
         @JsonProperty("anchor_type") @NotBlank(message = "must not be blank") String anchorType,
-        @NotEmpty(message = "at least one evidence is required") @Valid List<EvalEvidenceRequest> evidences,
+        @NotNull(message = "evidences is required") @Valid List<EvalEvidenceRequest> evidences,
         String note) {
 
     /**

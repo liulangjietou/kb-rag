@@ -465,6 +465,11 @@ public class AppVersionService {
                 kbRetrieval == null ? null : kbRetrieval.getRrfK(), defaults.getRrfK()));
         target.setRerankEnabled(firstNonNull(target.getRerankEnabled(),
                 kbRetrieval == null ? null : kbRetrieval.getRerankEnabled(), defaults.isRerankEnabled()));
+        // 排序模式与权重一起冻结，避免发布后随知识库或部署默认值变化。
+        target.setRerankMode(firstNonNull(target.getRerankMode(),
+                kbRetrieval == null ? null : kbRetrieval.getRerankMode(), defaults.getRerankMode()));
+        target.setRerankWSemantic(firstNonNull(target.getRerankWSemantic(),
+                kbRetrieval == null ? null : kbRetrieval.getRerankWSemantic(), defaults.getRerankWSemantic()));
         target.setRewriteEnabled(firstNonNull(target.getRewriteEnabled(),
                 kbRetrieval == null ? null : kbRetrieval.getRewriteEnabled(), defaults.isRewriteEnabled()));
         // score_threshold stays nullable on purpose: null is not "unset", it means no absolute filtering,

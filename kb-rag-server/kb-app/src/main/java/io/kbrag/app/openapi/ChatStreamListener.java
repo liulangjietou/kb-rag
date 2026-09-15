@@ -1,6 +1,7 @@
 package io.kbrag.app.openapi;
 
 import io.kbrag.app.retrieval.RetrievalNodeView;
+import io.kbrag.domain.model.ChatCancellation;
 
 import java.util.List;
 
@@ -16,6 +17,16 @@ import java.util.List;
  * @author owlzhangfq@gmail.com
  */
 public interface ChatStreamListener {
+
+    /** 可选的控制台预览诊断，发送于业务终态之前；旧接收器可直接忽略。 */
+    default void onDiagnostics(ChatDiagnostics diagnostics) {
+        // 兼容不展示诊断的公开 API 与现有接收器。
+    }
+
+    /** 当前连接的取消信号；非连接型调用方保持不可取消的兼容行为。 */
+    default ChatCancellation cancellation() {
+        return ChatCancellation.NONE;
+    }
 
     /**
      * One generated piece of the answer.

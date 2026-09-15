@@ -100,8 +100,8 @@ class ChatPromptAssemblerTest {
         String prompt = assembler.userPrompt("保险条款怎么算", List.of("第一段资料", "第二段资料"));
 
         assertTrue(prompt.startsWith(ChatPromptAssembler.REFERENCE_BEGIN));
-        assertTrue(prompt.contains("[1] 第一段资料"));
-        assertTrue(prompt.contains("[2] 第二段资料"));
+        assertTrue(prompt.contains("\"citation\":\"[1]\",\"content\":\"第一段资料\""));
+        assertTrue(prompt.contains("\"citation\":\"[2]\",\"content\":\"第二段资料\""));
         assertTrue(prompt.contains(ChatPromptAssembler.REFERENCE_END));
         // The question comes after the closing delimiter, never inside the untrusted block.
         assertTrue(prompt.indexOf(ChatPromptAssembler.REFERENCE_END) < prompt.indexOf("保险条款怎么算"));

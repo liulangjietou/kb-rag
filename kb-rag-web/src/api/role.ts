@@ -1,7 +1,12 @@
 // Author: owlzhangfq@gmail.com
 // Role administration client: permission grants plus knowledge base data scope.
 import { apiDelete, apiGet, apiPost, apiPut } from './request';
-import type { PermissionCatalogueItem, RoleSummary, SaveRoleRequest } from './types';
+import type { PermissionCatalogueItem, RoleAppOption, RoleSummary, SaveRoleRequest } from './types';
+
+/** 目标租户由服务端依据角色归属决定，新建角色则使用当前租户。 */
+export function listRoleAppOptions(roleId?: string): Promise<RoleAppOption[]> {
+  return apiGet<RoleAppOption[]>('/roles/app-options', roleId ? { role_id: roleId } : undefined);
+}
 
 /**
  * GET /roles. Readable with role:manage or user:manage -- granting a role means picking one from a

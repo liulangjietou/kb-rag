@@ -1,6 +1,7 @@
 package io.kbrag.domain.entity;
 
 import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.TableName;
 import io.kbrag.domain.enums.ExtSourceSyncStatus;
 import lombok.Getter;
@@ -75,6 +76,14 @@ public class ExtSource extends BaseEntity {
     @TableField("last_sync_at")
     private LocalDateTime lastSyncAt;
 
+    /** 只有完整 SUCCESS 推进；PARTIAL 不能冒充最近成功。 */
+    @TableField(value = "last_success_at", updateStrategy = FieldStrategy.NEVER)
+    private LocalDateTime lastSuccessAt;
+
+    /** 部分成功也可能已接入新内容，独立于整源同步状态记录。 */
+    @TableField(value = "last_content_change_at", updateStrategy = FieldStrategy.NEVER)
+    private LocalDateTime lastContentChangeAt;
+
     /** Outcome of the last sync pass. */
     @TableField("last_sync_status")
     private ExtSourceSyncStatus lastSyncStatus;
@@ -82,4 +91,17 @@ public class ExtSource extends BaseEntity {
     /** Why the last sync failed or was partial, {@code null} on success. */
     @TableField("last_error")
     private String lastError;
+
+    /** 只认完整扫描成功，不从最近尝试或部分成功推定新鲜度。 */
+    public void recordOutcome(ExtSourceSyncStatus status, String error, LocalDateTime completedAt) {
+        lastSyncStatus = status;
+        lastError = error;
+        if (status == ExtSourceSyncStatus.SUCCESS
+                && (lastSuccessAt == null || completedAt.isAfter(lastSuccessAt))) lastSuccessAt = completedAt;
+    }
+
+    /** 某个对象实际接入新内容即记录，其他对象失败不会抹掉此事实。 */
+    public void contentChanged(LocalDateTime changedAt) {
+        if (lastContentChangeAt == null || changedAt.isAfter(lastContentChangeAt)) lastContentChangeAt = changedAt;
+    }
 }

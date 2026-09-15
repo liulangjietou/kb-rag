@@ -58,6 +58,24 @@ public enum ErrorCode {
      */
     VERSION_NOT_PUBLISHED(409, "application version not published"),
 
+    /** 同一会话已有运行，用户应等待完成或明确停止。 */
+    CONVERSATION_BUSY(409, "conversation already has an active run"),
+
+    /** 相同幂等请求标识携带了不同的问题。 */
+    CONVERSATION_REQUEST_CONFLICT(409, "request id was already used with different content"),
+
+    /** 其他页面已更新回答反馈，需要先读取最新评价。 */
+    FEEDBACK_VERSION_CONFLICT(409, "answer feedback changed; reload before editing"),
+
+    /** 用例或集合乐观锁冲突，整笔修改回滚后由用户重新提交。 */
+    EVAL_DATASET_CONFLICT(409, "evaluation dataset changed; reload before editing"),
+
+    /** 质量问题已被其他处理请求更新。 */
+    QUALITY_ISSUE_CONFLICT(409, "knowledge quality issue changed; reload before editing"),
+
+    /** 正式问答所需的冻结索引或可见版本集合已经不可用。 */
+    KNOWLEDGE_SNAPSHOT_UNAVAILABLE(409, "published knowledge snapshot unavailable"),
+
     /** Per key token bucket exhausted; the response carries a {@code Retry-After} header. */
     RATE_LIMITED(429, "rate limit exceeded"),
 
@@ -69,6 +87,9 @@ public enum ErrorCode {
 
     /** Upstream model provider rejected or could not serve the request. */
     UPSTREAM_MODEL_ERROR(502, "upstream model error"),
+
+    /** 生成结果引用了本轮不存在的资料，不能作为完整回答交付。 */
+    ANSWER_CITATION_INVALID(502, "answer citation is not in current references"),
 
     /** Unclassified server side failure. */
     INTERNAL_ERROR(500, "internal error");

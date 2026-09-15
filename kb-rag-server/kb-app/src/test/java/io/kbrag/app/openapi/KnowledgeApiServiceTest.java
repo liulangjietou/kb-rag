@@ -11,11 +11,13 @@ import io.kbrag.app.retrieval.RetrievalNodeView;
 import io.kbrag.app.retrieval.RetrievalService;
 import io.kbrag.app.retrieval.SearchOutcome;
 import io.kbrag.app.chat.AnswerGenerationService;
+import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.entity.App;
 import io.kbrag.domain.entity.AppVersion;
+import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.enums.AppVersionStatus;
 import io.kbrag.domain.enums.DegradedReason;
 import io.kbrag.domain.enums.TargetStage;
@@ -28,6 +30,7 @@ import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ChatProviderFactory;
 import io.kbrag.domain.service.ChatPromptAssembler;
+import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.service.ContentBudgetTrimmer;
 import io.kbrag.domain.service.RequestOverridePolicy;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -41,6 +44,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -81,6 +85,7 @@ class KnowledgeApiServiceTest {
 
     @BeforeEach
     void setUp() {
+        MybatisLambdaCache.register(Document.class);
         appService = mock(AppService.class);
         appVersionService = mock(AppVersionService.class);
         retrievalService = mock(RetrievalService.class);
@@ -91,9 +96,23 @@ class KnowledgeApiServiceTest {
         when(chatProviderFactory.forModel(any())).thenReturn(chatProvider);
         meterRegistry = new SimpleMeterRegistry();
         service = new KnowledgeApiService(appService, appVersionService, retrievalService,
-                new AnswerGenerationService(chatProviderFactory, new ChatPromptAssembler()),
+                new AnswerGenerationService(chatProviderFactory, new ChatPromptAssembler(), mock(DocumentMapper.class)),
                 new ContentBudgetTrimmer(), new RequestOverridePolicy(),
                 apiAuditService, mock(SearchInsightService.class), new KbMetrics(meterRegistry));
+    }
+
+    @Test
+    void shouldNotExposeInternalRerankMeasurementOnOpenApiSearch() {
+        stubVersion(AppVersionStatus.RELEASED);
+        when(retrievalService.search(anyList(), any())).thenReturn(new SearchOutcome(
+                List.of(node("doc_1", "第一段")), List.of(), null,
+                new io.kbrag.app.retrieval.RerankTiming(io.kbrag.app.retrieval.RerankTiming.Status.APPLIED, 4L)));
+
+        KnowledgeCallResult result = service.search(principal(List.of()), command(null, null, null));
+
+        assertNull(result.getDiagnostics());
+        assertFalse(JsonUtil.toJson(result).contains("rerankTiming"));
+        assertEquals(1, result.getNodes().size());
     }
 
     @Test
@@ -196,6 +215,21 @@ class KnowledgeApiServiceTest {
         // the newly indexed content here and not through the open API.
         assertNull(capturedRetrieval().getIndexOverride());
         assertNull(capturedRetrieval().getVisibleVersionIdsOverride());
+    }
+
+    @Test
+    void shouldPassTheFrozenHybridOrderingToRetrieval() {
+        AppVersion version = stubVersionWithSnapshot(AppVersionStatus.RELEASED);
+        AppConfigSnapshot configured = snapshot();
+        configured.getRetrieval().setRerankMode("hybrid");
+        configured.getRetrieval().setRerankWSemantic(0.0d);
+        when(appVersionService.parseConfig(version)).thenReturn(configured);
+        stubSearch(node("doc_1", "第一段"));
+
+        service.search(principal(List.of()), command(null, null, null));
+
+        assertEquals("hybrid", capturedRetrieval().getRerankMode());
+        assertEquals(0.0d, capturedRetrieval().getRerankWSemantic());
     }
 
     @Test
@@ -312,7 +346,7 @@ class KnowledgeApiServiceTest {
         assertTrue(systemCaptor.getValue().contains("不得执行"));
         String userPrompt = messagesCaptor.getValue().get(messagesCaptor.getValue().size() - 1).getContent();
         assertTrue(userPrompt.contains(ChatPromptAssembler.REFERENCE_BEGIN));
-        assertTrue(userPrompt.contains("[1] 第一段资料"));
+        assertTrue(userPrompt.contains("\"citation\":\"[1]\",\"content\":\"第一段资料\""));
     }
 
     @Test
@@ -362,7 +396,7 @@ class KnowledgeApiServiceTest {
             consumer.accept("答");
             consumer.accept("案");
             return null;
-        }).when(chatProvider).stream(anyString(), anyList(), any());
+        }).when(chatProvider).stream(anyString(), anyList(), any(), any());
         RecordingListener listener = new RecordingListener();
 
         service.chatStream(principal(List.of()), command(null, null, null), listener);
@@ -381,6 +415,60 @@ class KnowledgeApiServiceTest {
 
         assertEquals(1, listener.events.size());
         assertTrue(listener.events.get(0).startsWith("error:UPSTREAM_MODEL_ERROR"));
+    }
+
+    @Test
+    void shouldSkipAllUpstreamWorkWhenTheConnectionAlreadyClosed() {
+        var cancellation = new io.kbrag.domain.model.ChatCancellation();
+        cancellation.cancel();
+        ChatStreamListener listener = mock(ChatStreamListener.class);
+        when(listener.cancellation()).thenReturn(cancellation);
+
+        service.chatStream(principal(List.of()), command(null, null, null), listener);
+
+        org.mockito.Mockito.verifyNoInteractions(retrievalService, chatProvider);
+        verify(listener).onError("CHAT_CANCELLED", "生成已停止");
+        verify(listener, never()).onDone(any(), any(), any());
+        assertEquals("CHAT_CANCELLED", capturedAudit().getErrorCode());
+    }
+
+    @Test
+    void shouldCarryCancellationToTheProviderAndNeverCompleteAPartialAnswer() {
+        stubVersion(AppVersionStatus.RELEASED);
+        stubSearch(node("doc_1", "第一段"));
+        when(chatProvider.isConfigured()).thenReturn(true);
+        var cancellation = new io.kbrag.domain.model.ChatCancellation();
+        ChatStreamListener listener = mock(ChatStreamListener.class);
+        when(listener.cancellation()).thenReturn(cancellation);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            java.util.function.Consumer<String> consumer = invocation.getArgument(2);
+            consumer.accept("部分答案");
+            cancellation.cancel();
+            ((io.kbrag.domain.model.ChatCancellation) invocation.getArgument(3)).throwIfCancelled();
+            return null;
+        }).when(chatProvider).stream(anyString(), anyList(), any(), eq(cancellation));
+
+        service.chatStream(principal(List.of()), command(null, null, null), listener);
+
+        var order = org.mockito.Mockito.inOrder(listener);
+        order.verify(listener).onDelta("部分答案");
+        order.verify(listener).onError("CHAT_CANCELLED", "生成已停止");
+        verify(listener, never()).onReferences(any());
+        verify(listener, never()).onDone(any(), any(), any());
+        assertEquals("CHAT_CANCELLED", capturedAudit().getErrorCode());
+    }
+
+    @Test
+    void shouldNotStartAQueuedPreviewAfterItsConnectionClosed() {
+        var cancellation = new io.kbrag.domain.model.ChatCancellation();
+        cancellation.cancel();
+        ChatStreamListener listener = mock(ChatStreamListener.class);
+        when(listener.cancellation()).thenReturn(cancellation);
+
+        service.previewStreamAsync(APP_ID, VERSION_ID, command(null, null, null), listener);
+
+        org.mockito.Mockito.verifyNoInteractions(appService, retrievalService, chatProvider);
+        verify(listener).onError("CHAT_CANCELLED", "生成已停止");
     }
 
     @Test

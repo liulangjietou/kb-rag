@@ -95,11 +95,17 @@ export const test = base.extend<{
         multimodal_configured: false,
       },
       '/system/demo/status': { available: false, installed: false },
+      '/me/knowledge-todos': [],
+      '/me/resource-visits': [
+        { resource_type: 'KB', resource_id: kb.kb_id, name: kb.name, visited_at: '2026-09-10T10:00:00' },
+        { resource_type: 'APP', resource_id: app.app_id, name: app.name, visited_at: '2026-09-09T10:00:00' },
+      ],
       '/kb': [kb],
       '/kb/kb_fixture': kb,
       '/kb/kb_fixture/documents': pageData(documents),
       '/kb/kb_fixture/rebuild-status': { stale_count: 1, in_progress_count: 0, failed_count: 0 },
       '/apps': [app],
+      '/workspace/overview': { applications: [app], recent_conversations: [] },
       '/app-previews': [{ app_id: app.app_id, name: app.name, versions: [
         { app_version_id: 'v13', version: 'v1.3', status: 'RELEASED' },
       ] }],
@@ -109,6 +115,7 @@ export const test = base.extend<{
       '/memory-libraries/mem_fixture': memory,
       '/memory-libraries/mem_fixture/fragment-rules': [],
       '/kb/kb_fixture/eval-datasets': [],
+      '/kb/kb_fixture/quality-issues': pageData([]),
       '/registration-reviews': pageData([]),
       '/users': pageData([]),
       '/roles': [],
@@ -143,6 +150,23 @@ export const test = base.extend<{
             },
           },
         });
+      }
+      if (path === '/me/resource-visits' && request.method() === 'DELETE') {
+        api[path] = [];
+        return route.fulfill({ json: { code: 'OK', data: null } });
+      }
+      if (path === '/me/resource-visits' && request.method() === 'POST') {
+        const payload = request.postDataJSON();
+        const prefix = payload.resource_type === 'KB' ? '/kb/' : payload.resource_type === 'APP' ? '/apps/' : null;
+        const resource = prefix && typeof payload.resource_id === 'string'
+          ? api[`${prefix}${payload.resource_id}`] as { kb_id?: string; app_id?: string; name: string } | undefined : undefined;
+        const expectedId = payload.resource_type === 'KB' ? resource?.kb_id : resource?.app_id;
+        if (resource && expectedId === payload.resource_id && Object.keys(payload).sort().join(',') === 'resource_id,resource_type') {
+          const previous = api[path] as { resource_type: string; resource_id: string }[];
+          api[path] = [{ ...payload, name: resource.name, visited_at: new Date().toISOString() },
+            ...previous.filter((item) => item.resource_type !== payload.resource_type || item.resource_id !== payload.resource_id)].slice(0, 5);
+          return route.fulfill({ json: { code: 'OK', data: null } });
+        }
       }
       if (request.method() !== 'GET' || !Object.hasOwn(api, path)) {
         unexpected.push(`${request.method()} ${path}`);

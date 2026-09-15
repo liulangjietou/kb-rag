@@ -19,6 +19,16 @@ public class BizIdGenerator {
     /** Hexadecimal characters kept from the random part. */
     private static final int RANDOM_LENGTH = 16;
 
+    /** 生成员工会话标识。 */
+    public String conversationId() {
+        return generate(KbConstants.CONVERSATION_ID_PREFIX);
+    }
+
+    /** 生成员工问答运行标识。 */
+    public String conversationRunId() {
+        return generate(KbConstants.CONVERSATION_RUN_ID_PREFIX);
+    }
+
     /**
      * Generates a knowledge base id.
      *
