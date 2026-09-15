@@ -196,6 +196,13 @@ class DemoImportServiceTest {
         assertFalse(status.imported());
     }
 
+    @Test
+    void shouldFindBundledDocumentsWithDefaultConfiguration() {
+        properties.getDemo().setDataDir(new KbProperties().getDemo().getDataDir());
+
+        assertTrue(service.available());
+    }
+
     private void givenManifest(String... relativePaths) throws IOException {
         StringBuilder entries = new StringBuilder();
         for (String path : relativePaths) {

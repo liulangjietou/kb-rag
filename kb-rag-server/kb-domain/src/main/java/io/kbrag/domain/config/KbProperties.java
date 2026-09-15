@@ -698,12 +698,9 @@ public class KbProperties {
     public static class Demo {
 
         /**
-         * Directory holding the demo documents and their manifest.
-         *
-         * <p>The default points at the deployment repository so a local checkout works without any
-         * environment variable; a container overrides it with the mounted path.
+         * Demo 素材目录；留空时由应用层定位当前仓库的 kb-rag-deploy/demo，容器需显式配置挂载路径。
          */
-        private String dataDir = "/Users/zhangfuqiang/AI/kb-rag/kb-rag-deploy/demo";
+        private String dataDir = "";
 
         /** Display name of the knowledge base the demo import creates. */
         private String knowledgeBaseName = "Demo 知识库";
