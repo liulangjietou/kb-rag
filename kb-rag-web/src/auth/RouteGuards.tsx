@@ -23,8 +23,9 @@ export function RequireAuth() {
 /** Forces a first-login admin straight to the change-password page (D: must_change_password). */
 export function RequirePasswordChanged() {
   const { mustChangePassword } = useAuth();
+  const location = useLocation();
   if (mustChangePassword) {
-    return <Navigate to="/change-password" replace />;
+    return <Navigate to="/change-password" replace state={{ from: location }} />;
   }
   return <Outlet />;
 }
