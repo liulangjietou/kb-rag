@@ -57,6 +57,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class EvalDatasetService {
 
+    /** 已解决问题也需要保留其回归依据，不能只保护未处理问题。 */
+    private static final String CASE_QUALITY_REFERENCE = "SELECT 1 FROM t_kb_quality_issue qi "
+            + "WHERE qi.case_id = t_kb_eval_case.case_id AND qi.deleted = 0";
+    private static final String DATASET_QUALITY_REFERENCE = "SELECT 1 FROM t_kb_quality_issue qi "
+            + "WHERE qi.dataset_id = t_kb_eval_dataset.dataset_id AND qi.deleted = 0";
+
     private final EvalDatasetMapper evalDatasetMapper;
     private final EvalCaseMapper evalCaseMapper;
     private final EvalRunMapper evalRunMapper;
@@ -159,6 +165,11 @@ public class EvalDatasetService {
     @Transactional(rollbackFor = Exception.class)
     public void delete(String datasetId) {
         EvalDataset dataset = require(datasetId);
+        // 先按修订号和引用关系取得删除资格；后续级联写入失败时整个事务回滚。
+        requireDeleted(evalDatasetMapper.delete(new LambdaQueryWrapper<EvalDataset>()
+                .eq(EvalDataset::getId, dataset.getId())
+                .eq(EvalDataset::getLockVersion, dataset.getLockVersion())
+                .notExists(DATASET_QUALITY_REFERENCE)));
         List<EvalRun> runs = evalRunMapper.selectList(new LambdaQueryWrapper<EvalRun>()
                 .eq(EvalRun::getDatasetId, datasetId));
         for (EvalRun run : runs) {
@@ -166,7 +177,6 @@ public class EvalDatasetService {
         }
         evalRunMapper.delete(new LambdaQueryWrapper<EvalRun>().eq(EvalRun::getDatasetId, datasetId));
         evalCaseMapper.delete(new LambdaQueryWrapper<EvalCase>().eq(EvalCase::getDatasetId, datasetId));
-        evalDatasetMapper.deleteById(dataset.getId());
         log.info("evaluation data set deleted, datasetId={}, cascadedRuns={}", datasetId, runs.size());
     }
 
@@ -241,9 +251,10 @@ public class EvalDatasetService {
     public void deleteCase(String caseId) {
         EvalCase evalCase = requireCase(caseId);
         EvalDataset dataset = require(evalCase.getDatasetId());
-        requireWritten(evalCaseMapper.delete(new LambdaQueryWrapper<EvalCase>()
+        requireDeleted(evalCaseMapper.delete(new LambdaQueryWrapper<EvalCase>()
                 .eq(EvalCase::getId, evalCase.getId())
-                .eq(EvalCase::getLockVersion, evalCase.getLockVersion())));
+                .eq(EvalCase::getLockVersion, evalCase.getLockVersion())
+                .notExists(CASE_QUALITY_REFERENCE)));
         bumpRevision(dataset, evalCase.getStatus() == CaseStatus.DEPRECATED ? 0 : -1);
         log.info("evaluation case deleted, caseId={}", caseId);
     }
@@ -365,6 +376,13 @@ public class EvalDatasetService {
             throw BizException.notFound("evaluation case not found");
         }
         return evalCase;
+    }
+
+    private void requireDeleted(int written) {
+        if (written != 1) {
+            throw new BizException(ErrorCode.EVAL_DATASET_CONFLICT,
+                    "该评测数据被质量问题引用或已被更新，删除未执行。请刷新后核对。");
+        }
     }
 
     private void validate(EvalCaseCommand command) {
