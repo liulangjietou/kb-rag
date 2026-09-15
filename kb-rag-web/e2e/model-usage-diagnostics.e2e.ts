@@ -1,3 +1,4 @@
+import { THEME_IDS } from './theme-fixture';
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
@@ -78,7 +79,7 @@ for (const remaining of [null, undefined]) {
   });
 }
 
-for (const theme of ['atlas', 'ocean', 'violet', 'cinder', 'moss', 'rose', 'graphite', 'night']) {
+for (const theme of THEME_IDS) {
   test(`用量诊断 · ${theme} · 390px`, async ({ page, api, unexpectedRequests }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.addInitScript(preset => localStorage.setItem('kb-rag-web:theme-preset', preset), theme);

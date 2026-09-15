@@ -36,11 +36,12 @@
 
 .theme-preset-option {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-columns: 16px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   min-width: 210px;
   padding-block: 2px;
+  max-width: min(340px, calc(100vw - 72px));
 }
 
 .theme-preset-option__swatch {
@@ -63,6 +64,16 @@
   color: var(--kb-color-text-secondary);
   font-size: 12px;
   line-height: 1.35;
+}
+
+.theme-preset-option__mode {
+  border: 1px solid var(--kb-color-border-strong);
+  border-radius: 999px;
+  color: var(--kb-color-text-secondary);
+  font-size: 10px;
+  font-weight: 650;
+  padding: 1px 6px;
+  letter-spacing: 0.04em;
 }
 
 .theme-preset-switcher__status {

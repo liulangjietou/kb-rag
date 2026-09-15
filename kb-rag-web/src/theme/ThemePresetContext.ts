@@ -1,13 +1,14 @@
 import { createContext, useContext } from 'react';
 import type { ThemeConfig } from 'antd';
-import type { ThemePreset, ThemePresetId } from './presets';
+import type { ThemePreset } from './presets';
+import type { ThemePreference } from './themePreference';
 
 export interface ThemePresetContextValue {
   preset: ThemePreset;
-  presetId: ThemePresetId;
+  presetId: ThemePreference;
   presets: readonly ThemePreset[];
   antThemeConfig: ThemeConfig;
-  selectPreset: (id: ThemePresetId) => void;
+  selectPreset: (id: ThemePreference) => void;
   cyclePreset: () => void;
 }
 

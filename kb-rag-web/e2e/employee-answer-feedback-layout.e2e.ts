@@ -1,10 +1,11 @@
+import { THEME_IDS } from './theme-fixture';
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from './fixtures';
 import { employeeFixture, employeeUrl } from './employee-workspace-fixture';
 
 test.use({ grantedPermissions: ['app:use'] });
 
-for (const theme of ['atlas', 'ocean', 'violet', 'cinder', 'moss', 'rose', 'graphite', 'night']) {
+for (const theme of THEME_IDS) {
   for (const [width, height] of [[390, 844], [768, 1024], [1280, 720], [1440, 900], [1920, 1080]]) {
     test(`回答反馈 · ${theme} · ${width}px`, async ({ page, unexpectedRequests }, testInfo) => {
       await page.setViewportSize({ width, height });
