@@ -1,0 +1,4 @@
+.source-health-times { margin: 0; font-size: 12px; line-height: 1.8; }
+.source-health-times > div { display: flex; gap: 8px; }
+.source-health-times dt { color: var(--kb-color-text-secondary); flex: 0 0 auto; }
+.source-health-times dd { margin: 0; color: var(--kb-color-text); font-variant-numeric: tabular-nums; }

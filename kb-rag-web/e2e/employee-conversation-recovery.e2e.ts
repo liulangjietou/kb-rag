@@ -11,11 +11,31 @@ test.describe('员工会话阅读与恢复', () => {
     const second = await context.newPage();
     await second.goto(employeeUrl);
     await expect(second.getByRole('textbox', { name: '输入知识问题' })).toBeEnabled();
+    // 两个提交都到达后才放行首个请求，避免切换标签触发的正常刷新先替换发送按钮。
+    let secondSubmitted!: () => void;
+    const bothSubmitted = new Promise<void>((resolve) => { secondSubmitted = resolve; });
+    const submitUrl = '/api/v1/workspace/apps/app_fixture/conversations/conv_fixture/runs';
+    const firstFinished = page.waitForResponse((response) => new URL(response.url()).pathname === submitUrl
+      && response.request().method() === 'POST' && response.status() === 200);
+    const submitPath = `**${submitUrl}`;
+    await page.route(submitPath, async (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      await bothSubmitted;
+      await route.fallback();
+    });
+    await second.route(submitPath, async (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      secondSubmitted();
+      await firstFinished;
+      await route.fallback();
+    });
     await page.getByRole('textbox', { name: '输入知识问题' }).fill('第一条问题');
-    await page.getByRole('button', { name: /发送$/ }).click();
-    await expect(page.getByRole('button', { name: /停止回答$/ })).toBeVisible();
     await second.getByRole('textbox', { name: '输入知识问题' }).fill('第二条问题');
-    await second.getByRole('button', { name: /发送$/ }).click();
+    await Promise.all([
+      page.getByRole('button', { name: /发送$/ }).click(),
+      second.getByRole('button', { name: /发送$/ }).click(),
+    ]);
+    await expect(page.getByRole('button', { name: /停止回答$/ })).toBeVisible();
     await expect(second.getByText('上一条回答仍在执行，请等待或停止后继续')).toBeVisible();
     await expect(second.getByRole('textbox', { name: '输入知识问题' })).toHaveValue('第二条问题');
     await expect(second.getByRole('button', { name: /停止回答$/ })).toBeVisible();

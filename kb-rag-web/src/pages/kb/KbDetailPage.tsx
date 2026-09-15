@@ -22,7 +22,8 @@ import {
   message,
 } from 'antd';
 import type { UploadProps } from 'antd';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { knowledgeTodoTarget } from './knowledgeTodoTarget';
 import {
   approveDocument,
   deleteDocument,
@@ -79,6 +80,8 @@ const DEFAULT_DOC_PAGE_SIZE = 10;
 
 export default function KbDetailPage() {
   const { kbId } = useParams<{ kbId: string }>();
+  const { search } = useLocation();
+  const todoTarget = useMemo(() => knowledgeTodoTarget(search), [search]);
   const navigate = useNavigate();
   const { can } = useAuth();
   // M16: the visibility editor writes through a doc:review endpoint, so only reviewers get it.
@@ -249,20 +252,20 @@ export default function KbDetailPage() {
     if (!kbId) return;
     let mounted = true;
     setPollReady(false);
-    docFiltersRef.current = {};
+    docFiltersRef.current = todoTarget.filters;
     docPageRef.current = 1;
     docPageSizeRef.current = DEFAULT_DOC_PAGE_SIZE;
     docFailures.current = 0;
     rebuildFailures.current = 0;
     prevStaleCountRef.current = null;
-    setDocFiltered(false);
+    setDocFiltered(Object.keys(todoTarget.filters).length > 0);
     setDocError(false);
     setDocUpdatedAt(null);
     setDocuments([]);
     setSelectedDocIds([]);
     setKb(null);
     setRebuildStatus(null);
-    setActiveTab('documents');
+    setActiveTab(todoTarget.tab);
     Promise.all([loadKb(), loadDocuments(), loadRebuildStatus()]).then(() => {
       if (mounted) setPollReady(true);
     });
@@ -272,7 +275,7 @@ export default function KbDetailPage() {
       kbSequence.current += 1;
       rebuildSequence.current += 1;
     };
-  }, [kbId, loadKb, loadDocuments, loadRebuildStatus]);
+  }, [kbId, loadKb, loadDocuments, loadRebuildStatus, todoTarget]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -580,7 +583,8 @@ export default function KbDetailPage() {
             children: (
               <>
                 <DocumentFilterBar
-                  key={kbId}
+                  key={`${kbId}:${todoTarget.kind}`}
+                  initialFilters={todoTarget.filters}
                   onApply={(filters) => {
                     docFiltersRef.current = filters;
                     setDocFiltered(Object.values(filters).some((value) => value !== undefined));
@@ -753,17 +757,19 @@ export default function KbDetailPage() {
             label: '数据来源',
             children: kbId ? (
               <Tabs
+                key={`${kbId}:${todoTarget.kind}`}
+                defaultActiveKey={todoTarget.sourceTab}
                 className="workspace-secondary-tabs"
                 items={[
                   {
                     key: 'webSources',
                     label: '网页导入',
-                    children: <WebSourcesTab kbId={kbId} onSynced={loadDocuments} />,
+                    children: <WebSourcesTab kbId={kbId} onSynced={loadDocuments} initialAttentionOnly={todoTarget.kind === 'WEB_SOURCE_FAILED'} />,
                   },
                   {
                     key: 'extSources',
                     label: '外部数据源',
-                    children: <ExternalSourceTab kbId={kbId} onSynced={loadDocuments} />,
+                    children: <ExternalSourceTab kbId={kbId} onSynced={loadDocuments} initialAttentionOnly={todoTarget.kind === 'EXT_SOURCE_ATTENTION'} />,
                   },
                   ...(canDocWrite
                     ? [

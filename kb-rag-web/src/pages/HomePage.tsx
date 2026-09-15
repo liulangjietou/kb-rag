@@ -21,6 +21,7 @@ import { PERMISSIONS } from '../auth/permissions';
 import { useModelStatus } from '../context/ModelStatusContext';
 import EmployeeHomePanel from './workspace/EmployeeHomePanel';
 import RecentVisitsList from './workspace/RecentVisitsList';
+import KnowledgeTodos from './workspace/KnowledgeTodos';
 import '../styles/home.css';
 
 type LoadState = 'idle' | 'loading' | 'success' | 'error';
@@ -387,6 +388,7 @@ export default function HomePage() {
           </section>
         </div>
         <aside className="home-side-column">
+          <KnowledgeTodos />
           {(canReviewRegistrations || can(PERMISSIONS.EVAL_READ)) && (
             <section className="atlas-panel home-attention">
               <header className="atlas-panel__head">

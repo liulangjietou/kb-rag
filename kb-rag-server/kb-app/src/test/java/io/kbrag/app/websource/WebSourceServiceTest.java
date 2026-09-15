@@ -125,6 +125,46 @@ class WebSourceServiceTest {
     }
 
     @Test
+    void shouldKeepAttemptSuccessAndActualContentChangeIndependent() {
+        WebSource source = boundSource();
+        source.setId(1L);
+        when(webPageFetcher.fetch(fetchOf(URL))).thenReturn(page());
+        UploadOutcome changed = outcome("doc_1");
+        when(documentService.upload(KB_ID, source.getFileName(), BODY)).thenReturn(changed);
+        service.sync(source, TENANT_ID);
+        var firstChange = source.getLastContentChangeAt();
+        assertNotNull(firstChange);
+        assertNotNull(source.getLastSuccessAt());
+        verify(webSourceMapper).advanceHealthTimes(1L, source.getLastSuccessAt(), firstChange);
+
+        // 抓取成功但正文未变，不再次上传，也不伪造一次内容变更。
+        service.sync(source, TENANT_ID);
+        assertEquals(WebSourceFetchStatus.UNCHANGED, source.getLastFetchStatus());
+        assertEquals(firstChange, source.getLastContentChangeAt());
+        var lastSuccess = source.getLastSuccessAt();
+        verify(documentService, times(1)).upload(any(), any(), any());
+
+        when(webPageFetcher.fetch(fetchOf(URL))).thenThrow(new IllegalStateException("offline"));
+        service.sync(source, TENANT_ID);
+        assertEquals(WebSourceFetchStatus.FAILED, source.getLastFetchStatus());
+        assertEquals(lastSuccess, source.getLastSuccessAt());
+        assertEquals(firstChange, source.getLastContentChangeAt());
+    }
+
+    @Test
+    void shouldNotCallDuplicateUploadANewContentChange() {
+        WebSource source = boundSource();
+        when(webPageFetcher.fetch(fetchOf(URL))).thenReturn(page());
+        UploadOutcome existing = outcome("doc_1");
+        when(documentService.upload(KB_ID, source.getFileName(), BODY)).thenReturn(
+                new UploadOutcome(existing.document(), "dv_1", "v1", true, null));
+        service.sync(source, TENANT_ID);
+        assertEquals(WebSourceFetchStatus.SUCCESS, source.getLastFetchStatus());
+        assertNotNull(source.getLastSuccessAt());
+        assertNull(source.getLastContentChangeAt());
+    }
+
+    @Test
     void shouldRegisterAndRunTheFirstFetchThroughTheUploadChain() {
         when(webSourceMapper.selectCount(any())).thenReturn(0L);
         when(webPageFetcher.fetch(fetchOf(URL))).thenReturn(page());

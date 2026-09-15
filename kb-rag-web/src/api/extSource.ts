@@ -21,8 +21,8 @@ export function registerExtSource(kbId: string, payload: RegisterExtSourceReques
 }
 
 /** GET /api/v1/kb/{kbId}/ext-sources (M14 contract section 2.3), most recently registered first. */
-export function listExtSources(kbId: string, page = 1, size = 20): Promise<PageResult<ExtSource>> {
-  return apiGet<PageResult<ExtSource>>(`/kb/${kbId}/ext-sources`, { page, size });
+export function listExtSources(kbId: string, page = 1, size = 20, attentionOnly = false): Promise<PageResult<ExtSource>> {
+  return apiGet<PageResult<ExtSource>>(`/kb/${kbId}/ext-sources`, { page, size, ...(attentionOnly ? { attention_only: true } : {}) });
 }
 
 /**

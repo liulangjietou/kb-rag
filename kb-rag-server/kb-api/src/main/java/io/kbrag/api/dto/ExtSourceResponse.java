@@ -25,6 +25,8 @@ import java.time.LocalDateTime;
  * @param syncEnabled    whether the scheduled pass includes this source
  * @param lastSyncStatus outcome of the last sync pass, {@code null} before the first one
  * @param lastSyncAt     ISO instant of the last sync attempt
+ * @param lastSuccessAt  最近完整扫描成功时间，部分成功不推进
+ * @param lastContentChangeAt 最近实际生成文档或版本时间，历史未知时为空
  * @param lastError      why the last sync failed or was partial, {@code null} on success
  * @param createdAt      ISO registration timestamp
  *
@@ -44,6 +46,8 @@ public record ExtSourceResponse(
         @JsonProperty("sync_enabled") boolean syncEnabled,
         @JsonProperty("last_sync_status") String lastSyncStatus,
         @JsonProperty("last_sync_at") String lastSyncAt,
+        @JsonProperty("last_success_at") String lastSuccessAt,
+        @JsonProperty("last_content_change_at") String lastContentChangeAt,
         @JsonProperty("last_error") String lastError,
         @JsonProperty("created_at") String createdAt) {
 
@@ -73,6 +77,8 @@ public record ExtSourceResponse(
                 entity.getSyncEnabled() != null && entity.getSyncEnabled() == SYNC_ON,
                 entity.getLastSyncStatus() == null ? null : entity.getLastSyncStatus().name(),
                 iso(entity.getLastSyncAt()),
+                iso(entity.getLastSuccessAt()),
+                iso(entity.getLastContentChangeAt()),
                 entity.getLastError(),
                 iso(entity.getCreatedAt()));
     }

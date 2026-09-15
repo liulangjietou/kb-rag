@@ -133,12 +133,18 @@ public class ExtSourceService {
      * @return page of sources
      */
     public IPage<ExtSource> list(String kbId, long page, long size) {
+        return list(kbId, page, size, false);
+    }
+
+    /** 先筛选失败或部分成功再分页，首页数量与详情范围保持同一口径。 */
+    public IPage<ExtSource> list(String kbId, long page, long size, boolean attentionOnly) {
         // The fenced root read is what isolates this listing: t_kb_ext_source carries no tenant_id,
         // so without it a caller naming another tenant's base would page through its registrations,
         // endpoints and access keys included.
         knowledgeBaseService.require(kbId);
         return extSourceMapper.selectPage(new Page<>(page, size), new LambdaQueryWrapper<ExtSource>()
                 .eq(ExtSource::getKbId, kbId)
+                .in(attentionOnly, ExtSource::getLastSyncStatus, ExtSourceSyncStatus.FAILED, ExtSourceSyncStatus.PARTIAL)
                 .orderByDesc(ExtSource::getId));
     }
 
@@ -386,6 +392,7 @@ public class ExtSourceService {
             byte[] body = connector.fetchObject(config, object.key());
             String fileName = uploadFileName(object, bound, keyHash, extension);
             UploadOutcome outcome = documentService.upload(source.getKbId(), fileName, body);
+            if (!outcome.duplicated()) source.contentChanged(LocalDateTime.now());
             // A purge breaks the binding; the upload above then created a fresh document and the
             // item follows it, the same weak binding semantics as the web source contract.
             item.setDocId(outcome.document().getDocId());
@@ -423,9 +430,9 @@ public class ExtSourceService {
     }
 
     private void recordSource(ExtSource source, ExtSourceSyncStatus status, String error) {
-        source.setLastSyncStatus(status);
-        source.setLastError(truncate(error));
+        source.recordOutcome(status, truncate(error), LocalDateTime.now());
         extSourceMapper.updateById(source);
+        extSourceMapper.advanceHealthTimes(source.getId(), source.getLastSuccessAt(), source.getLastContentChangeAt());
         // The one funnel every outcome passes, the same spot the M13 counter sits for web sources.
         kbMetrics.recordExtSourceSync(status);
     }

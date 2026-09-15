@@ -317,3 +317,16 @@
 .home-provenance > .ant-btn {
   justify-self: start;
 }
+/* 待办与现有工作台使用同一主题变量，长名称换行而不挤压数量与动作。 */
+.knowledge-todos__list { list-style: none; margin: 0; padding: 0 16px; }
+.knowledge-todos__list li + li { border-top: 1px solid var(--kb-color-border); }
+.knowledge-todos__list button {
+  display: flex; justify-content: space-between; gap: 16px; width: 100%; padding: 14px 4px;
+  border: 0; background: transparent; color: var(--kb-color-text); cursor: pointer; text-align: left;
+}
+.knowledge-todos__list button:hover { background: var(--kb-color-surface-subtle); }
+.knowledge-todos__list button:focus-visible { outline: 2px solid var(--kb-color-primary); outline-offset: 2px; }
+.knowledge-todos__list strong, .knowledge-todos__list small { display: block; overflow-wrap: anywhere; }
+.knowledge-todos__list small { margin-top: 4px; color: var(--kb-color-text-secondary); }
+.knowledge-todos__count { flex: 0 0 auto; text-align: right; }
+.knowledge-todos__count b { color: var(--kb-color-primary-text); font-size: 20px; }

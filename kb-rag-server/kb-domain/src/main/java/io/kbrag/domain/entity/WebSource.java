@@ -1,6 +1,7 @@
 package io.kbrag.domain.entity;
 
 import com.baomidou.mybatisplus.annotation.TableField;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.TableName;
 import io.kbrag.domain.enums.WebSourceFetchStatus;
 import lombok.Getter;
@@ -67,6 +68,14 @@ public class WebSource extends BaseEntity {
     @TableField("last_fetch_at")
     private LocalDateTime lastFetchAt;
 
+    /** 仅成功或内容不变的完整抓取推进；普通行更新不可覆盖并发任务的较新时间。 */
+    @TableField(value = "last_success_at", updateStrategy = FieldStrategy.NEVER)
+    private LocalDateTime lastSuccessAt;
+
+    /** 仅实际接入新内容时推进，重复内容不计入。 */
+    @TableField(value = "last_content_change_at", updateStrategy = FieldStrategy.NEVER)
+    private LocalDateTime lastContentChangeAt;
+
     /** Outcome of the last sync attempt. */
     @TableField("last_fetch_status")
     private WebSourceFetchStatus lastFetchStatus;
@@ -74,4 +83,18 @@ public class WebSource extends BaseEntity {
     /** Why the last sync failed or was skipped, {@code null} on success. */
     @TableField("last_error")
     private String lastError;
+
+    /** 结果状态属于来源自身，失败和跳过保留之前的成功时间。 */
+    public void recordOutcome(WebSourceFetchStatus status, String error, LocalDateTime completedAt) {
+        lastFetchStatus = status;
+        lastError = error;
+        if (status == WebSourceFetchStatus.SUCCESS || status == WebSourceFetchStatus.UNCHANGED) {
+            if (lastSuccessAt == null || completedAt.isAfter(lastSuccessAt)) lastSuccessAt = completedAt;
+        }
+    }
+
+    /** 文档接入链返回非重复结果后才记录变更，不等同于索引已经可检索。 */
+    public void contentChanged(LocalDateTime changedAt) {
+        if (lastContentChangeAt == null || changedAt.isAfter(lastContentChangeAt)) lastContentChangeAt = changedAt;
+    }
 }

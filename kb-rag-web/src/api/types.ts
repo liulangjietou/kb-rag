@@ -2262,6 +2262,8 @@ export interface WebSourceEntry {
   render_js: boolean;
   last_fetch_status: WebSourceFetchStatus | null;
   last_fetch_at: string | null;
+  last_success_at?: string | null;
+  last_content_change_at?: string | null;
   last_error: string | null;
   created_at: string;
 }
@@ -2365,6 +2367,8 @@ export interface ExtSource {
   sync_enabled: boolean;
   last_sync_status: ExtSourceSyncStatus | null;
   last_sync_at: string | null;
+  last_success_at?: string | null;
+  last_content_change_at?: string | null;
   last_error: string | null;
   created_at: string;
 }
