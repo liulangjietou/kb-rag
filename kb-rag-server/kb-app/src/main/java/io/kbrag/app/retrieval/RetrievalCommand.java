@@ -121,4 +121,7 @@ public class RetrievalCommand {
      * pair, and the retrieval service resolves them as one.
      */
     private final Map<String, List<String>> visibleVersionIdsOverride;
+
+    /** 员工正式运行使用严格快照；禁止缺失快照或空版本集合被静默替换成当前语料。 */
+    private final boolean strictSnapshot;
 }

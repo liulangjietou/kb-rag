@@ -47,7 +47,8 @@ class EmployeeAppCatalogServiceTest {
     private final AppVersionService versionService = mock(AppVersionService.class);
     private final KnowledgeBaseMapper kbs = mock(KnowledgeBaseMapper.class);
     private final EmployeeAppCatalogService service = new EmployeeAppCatalogService(
-            principals, tenants, apps, versions, versionService, kbs);
+            new EmployeeWorkspaceAccess(principals, tenants, apps, versions, versionService, kbs),
+            apps, versions, versionService);
 
     @BeforeEach
     void setUp() {

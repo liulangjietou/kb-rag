@@ -113,4 +113,12 @@ public class Document extends BaseEntity {
     public boolean inTrash() {
         return trashed != null && trashed == TRASHED;
     }
+
+    /** 判断文档治理状态是否允许读取；知识库范围和文档 ACL 由调用服务另行校验。 */
+    public boolean availableForRetrievalAt(LocalDateTime at) {
+        return (getDeleted() == null || getDeleted() == 0) && !inTrash()
+                && (publishStatus == null || publishStatus == PublishStatus.PUBLISHED)
+                && (effectiveAt == null || !effectiveAt.isAfter(at))
+                && (expiresAt == null || expiresAt.isAfter(at));
+    }
 }

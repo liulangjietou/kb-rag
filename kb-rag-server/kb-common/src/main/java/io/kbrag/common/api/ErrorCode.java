@@ -58,6 +58,15 @@ public enum ErrorCode {
      */
     VERSION_NOT_PUBLISHED(409, "application version not published"),
 
+    /** 同一会话已有运行，用户应等待完成或明确停止。 */
+    CONVERSATION_BUSY(409, "conversation already has an active run"),
+
+    /** 相同幂等请求标识携带了不同的问题。 */
+    CONVERSATION_REQUEST_CONFLICT(409, "request id was already used with different content"),
+
+    /** 正式问答所需的冻结索引或可见版本集合已经不可用。 */
+    KNOWLEDGE_SNAPSHOT_UNAVAILABLE(409, "published knowledge snapshot unavailable"),
+
     /** Per key token bucket exhausted; the response carries a {@code Retry-After} header. */
     RATE_LIMITED(429, "rate limit exceeded"),
 
