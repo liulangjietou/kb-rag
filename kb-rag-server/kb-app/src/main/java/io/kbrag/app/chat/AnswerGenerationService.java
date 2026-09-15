@@ -1,20 +1,26 @@
 package io.kbrag.app.chat;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import io.kbrag.app.retrieval.RetrievalNodeView;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.ChatMessage;
 import io.kbrag.domain.model.ChatCancellation;
+import io.kbrag.domain.entity.Document;
+import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ChatProviderFactory;
 import io.kbrag.domain.service.ChatPromptAssembler;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -33,6 +39,7 @@ public class AnswerGenerationService {
 
     private final ChatProviderFactory chatProviderFactory;
     private final ChatPromptAssembler chatPromptAssembler;
+    private final DocumentMapper documents;
 
     /**
      * Generates one final answer.
@@ -109,17 +116,33 @@ public class AnswerGenerationService {
 
     private List<ChatMessage> promptMessages(String query, List<ChatMessage> history,
                                              List<RetrievalNodeView> nodes) {
-        List<String> passages = new ArrayList<>();
+        List<ChatPromptAssembler.SourcePassage> passages = new ArrayList<>();
         if (CollectionUtils.isNotEmpty(nodes)) {
+            Map<String, String> names = sourceNames(nodes);
             for (RetrievalNodeView node : nodes) {
-                passages.add(node.getContent());
+                passages.add(new ChatPromptAssembler.SourcePassage(node.getContent(), names.get(node.getDocId())));
             }
         }
         List<ChatMessage> messages = new ArrayList<>();
         if (CollectionUtils.isNotEmpty(history)) {
             messages.addAll(history);
         }
-        messages.add(ChatMessage.user(chatPromptAssembler.userPrompt(query, passages)));
+        messages.add(ChatMessage.user(chatPromptAssembler.userPromptWithSources(query, passages)));
         return messages;
+    }
+
+    /** 只批量查询本轮已授权节点的文件名，不加载正文、对象地址或未召回文档。 */
+    private Map<String, String> sourceNames(List<RetrievalNodeView> nodes) {
+        List<String> ids = nodes.stream().map(RetrievalNodeView::getDocId)
+                .filter(StringUtils::isNotBlank).distinct().toList();
+        Map<String, String> names = new HashMap<>();
+        if (ids.isEmpty()) return names;
+        for (Document document : documents.selectList(new LambdaQueryWrapper<Document>()
+                .select(Document::getDocId, Document::getFileName).in(Document::getDocId, ids))) {
+            if (StringUtils.isNotBlank(document.getFileName())) {
+                names.put(document.getDocId(), document.getFileName());
+            }
+        }
+        return names;
     }
 }

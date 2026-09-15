@@ -11,11 +11,13 @@ import io.kbrag.app.retrieval.RetrievalNodeView;
 import io.kbrag.app.retrieval.RetrievalService;
 import io.kbrag.app.retrieval.SearchOutcome;
 import io.kbrag.app.chat.AnswerGenerationService;
+import io.kbrag.app.support.MybatisLambdaCache;
 import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.entity.App;
 import io.kbrag.domain.entity.AppVersion;
+import io.kbrag.domain.entity.Document;
 import io.kbrag.domain.enums.AppVersionStatus;
 import io.kbrag.domain.enums.DegradedReason;
 import io.kbrag.domain.enums.TargetStage;
@@ -28,6 +30,7 @@ import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ChatProviderFactory;
 import io.kbrag.domain.service.ChatPromptAssembler;
+import io.kbrag.domain.mapper.DocumentMapper;
 import io.kbrag.domain.service.ContentBudgetTrimmer;
 import io.kbrag.domain.service.RequestOverridePolicy;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -82,6 +85,7 @@ class KnowledgeApiServiceTest {
 
     @BeforeEach
     void setUp() {
+        MybatisLambdaCache.register(Document.class);
         appService = mock(AppService.class);
         appVersionService = mock(AppVersionService.class);
         retrievalService = mock(RetrievalService.class);
@@ -92,7 +96,7 @@ class KnowledgeApiServiceTest {
         when(chatProviderFactory.forModel(any())).thenReturn(chatProvider);
         meterRegistry = new SimpleMeterRegistry();
         service = new KnowledgeApiService(appService, appVersionService, retrievalService,
-                new AnswerGenerationService(chatProviderFactory, new ChatPromptAssembler()),
+                new AnswerGenerationService(chatProviderFactory, new ChatPromptAssembler(), mock(DocumentMapper.class)),
                 new ContentBudgetTrimmer(), new RequestOverridePolicy(),
                 apiAuditService, mock(SearchInsightService.class), new KbMetrics(meterRegistry));
     }

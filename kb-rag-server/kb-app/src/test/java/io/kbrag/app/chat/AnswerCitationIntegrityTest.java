@@ -9,6 +9,7 @@ import io.kbrag.domain.model.ChatMessage;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ChatProviderFactory;
 import io.kbrag.domain.service.ChatPromptAssembler;
+import io.kbrag.domain.mapper.DocumentMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -34,7 +35,7 @@ class AnswerCitationIntegrityTest {
         ChatProviderFactory factory = mock(ChatProviderFactory.class);
         when(factory.forModel(any())).thenReturn(provider);
         when(provider.isConfigured()).thenReturn(true);
-        return new AnswerGenerationService(factory, new ChatPromptAssembler());
+        return new AnswerGenerationService(factory, new ChatPromptAssembler(), mock(DocumentMapper.class));
     }
 
     @Test
