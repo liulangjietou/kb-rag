@@ -42,6 +42,23 @@ test('刷新失败立即清除旧用量，不继续显示旧记录或无调用�
   expect(unexpectedRequests).toEqual([]);
 });
 
+test('超时预占的失败状态与估算口径分别展示', async ({ page, api, unexpectedRequests }) => {
+  await openUsage(page, api);
+  const records = api['/model-usage/records'] as { items: Array<Record<string, unknown>> };
+  records.items[0] = { ...records.items[0], model: 'expired-model', input_tokens: 4096, output_tokens: 0,
+    total_tokens: 4096, estimated: true, error_type: 'RESERVATION_EXPIRED' };
+  api['/model-usage/summary'] = { ...(api['/model-usage/summary'] as Record<string, unknown>), used_tokens: 4096,
+    remaining_tokens: 5404, estimated_calls: 1 };
+  await page.getByRole('button', { name: '刷新用量', exact: true }).click();
+  const row = page.getByRole('row').filter({ hasText: 'expired-model' });
+  await expect(row.getByText('失败', { exact: true })).toBeVisible();
+  await row.getByRole('button', { name: '调用详情', exact: true }).click();
+  await expect(page.getByText('调用未及时完成结算，上游是否已计费无法确认；已按预占上界保守结算，请结合请求标识核对。')).toBeVisible();
+  await expect(page.getByText('估算输入归集', { exact: true })).toBeVisible();
+  await expect(page.getByText('未获得上游准确计数', { exact: true })).toBeVisible();
+  expect(unexpectedRequests).toEqual([]);
+});
+
 test('清空月份时移除上一月份数据，并提示选择有效月份', async ({ page, api, unexpectedRequests }) => {
   await openUsage(page, api);
   await page.getByLabel('用量月份', { exact: true }).fill('');

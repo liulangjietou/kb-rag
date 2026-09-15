@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Author: owlzhangfq@gmail.com
 import { App as AntApp } from 'antd';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { isStrongPassword } from '../utils/registrationPassword';
@@ -55,6 +55,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
@@ -174,6 +175,7 @@ describe('RegisterPage', () => {
   });
 
   it('展示服务端票据剩余时间，到期后清除 ticket 并返回邮箱验证', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
     mocks.verifyRegistrationEmail.mockResolvedValueOnce({
       registration_ticket: 'short-lived-ticket',
       expires_in_seconds: 1,
@@ -187,15 +189,15 @@ describe('RegisterPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '验证邮箱并继续' }));
 
     expect(await screen.findByText(/请在 00:01 内提交/)).toBeTruthy();
-    await waitFor(() => {
-      expect(screen.getByText(/邮箱验证票据已过期/)).toBeTruthy();
-    }, { timeout: 2500 });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByText(/邮箱验证票据已过期/)).toBeTruthy();
     expect(screen.getByPlaceholderText('name@company.com')).toBeTruthy();
     expect(screen.queryByPlaceholderText('你的姓名')).toBeNull();
     expect(mocks.createRegistration).not.toHaveBeenCalled();
   });
 
   it('票据倒计时归零时等待在途提交的服务端结果，不丢成功回执', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
     let resolveSubmission: ((value: unknown) => void) | undefined;
     mocks.verifyRegistrationEmail.mockResolvedValueOnce({
       registration_ticket: 'short-lived-ticket',
@@ -223,7 +225,9 @@ describe('RegisterPage', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '提交注册申请' }));
 
-    expect(await screen.findByText(/请在 00:00 内提交/)).toBeTruthy();
+    await waitFor(() => expect(mocks.createRegistration).toHaveBeenCalledTimes(1));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByText(/请在 00:00 内提交/)).toBeTruthy();
     expect(screen.getByPlaceholderText('你的姓名')).toBeTruthy();
     resolveSubmission?.({
       application_id: 'REG-LATE-SUCCESS',
@@ -237,6 +241,7 @@ describe('RegisterPage', () => {
   });
 
   it('提交响应丢失且票据到期后仍复用提交标识找回服务端回执', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
     let rejectSubmission: ((reason?: unknown) => void) | undefined;
     mocks.verifyRegistrationEmail.mockResolvedValueOnce({
       registration_ticket: 'short-lived-ticket',
@@ -264,7 +269,9 @@ describe('RegisterPage', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '提交注册申请' }));
 
-    expect(await screen.findByText(/请在 00:00 内提交/)).toBeTruthy();
+    await waitFor(() => expect(mocks.createRegistration).toHaveBeenCalledTimes(1));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(screen.getByText(/请在 00:00 内提交/)).toBeTruthy();
     const firstSubmissionId = mocks.createRegistration.mock.calls[0][0].client_submission_id;
     rejectSubmission?.(new Error('response lost after server commit'));
 

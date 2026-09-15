@@ -42,7 +42,10 @@ test.describe('员工会话阅读与恢复', () => {
     expect(state.runs).toHaveLength(1);
     await second.getByRole('button', { name: /停止回答$/ }).click();
     await expect(second.getByText('已停止', { exact: true })).toBeVisible();
+    // 返回原标签后再验收恢复，避免把后台标签的页面加载占位当成终态丢失。
+    await page.bringToFront();
     await page.reload();
+    await expect(page.getByRole('textbox', { name: '输入知识问题' })).toBeVisible();
     await expect(page.getByText('已停止', { exact: true })).toBeVisible();
     expect(state.stops).toHaveLength(1);
     expect(state.submissions).toHaveLength(2);

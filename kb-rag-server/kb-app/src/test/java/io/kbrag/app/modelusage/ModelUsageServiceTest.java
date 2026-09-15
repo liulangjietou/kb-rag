@@ -179,7 +179,8 @@ class ModelUsageServiceTest {
 
         service.reconcileStaleReservations();
 
-        assertEquals(ModelUsageService.STATUS_SUCCEEDED, reserved.getStatus());
+        assertEquals(ModelUsageService.STATUS_FAILED, reserved.getStatus());
+        assertEquals("RESERVATION_EXPIRED", reserved.getErrorType());
         assertEquals(1, reserved.getEstimated());
         verify(monthlyMapper).settle(anyString(), anyString(), anyLong(), anyLong());
         verify(monthlyMapper, never()).release(anyString(), anyString(), anyLong());
