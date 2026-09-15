@@ -51,6 +51,7 @@ import ChatImportWizard from './components/ChatImportWizard';
 import ChunkDrawer from './components/ChunkDrawer';
 import ExternalSourceTab from './components/ExternalSourceTab';
 import FeedbackTab from './components/FeedbackTab';
+import EmployeeFeedbackTab from './quality/EmployeeFeedbackTab';
 import { RejectModal, ValidityModal } from './components/GovernanceModals';
 import GraphTab from './components/GraphTab';
 import IndexConfigDrawer from './components/IndexConfigDrawer';
@@ -783,7 +784,10 @@ export default function KbDetailPage() {
                           ? [{ key: 'issues', label: '质量问题', children: <QualityIssueTab key={kbId} kbId={kbId} refreshKey={qualityRefresh} onOpen={openQualityIssue} /> }]
                           : []),
                         ...(canFeedback
-                          ? [{ key: 'feedback', label: '反馈管理', children: <FeedbackTab kbId={kbId} onOpenIssue={openQualityIssue} /> }]
+                          ? [{ key: 'feedback', label: '反馈管理', children: <Tabs items={[
+                            { key: 'retrieval', label: '检索反馈', children: <FeedbackTab kbId={kbId} onOpenIssue={openQualityIssue} /> },
+                            ...(can(PERMISSIONS.APP_READ) ? [{ key: 'employee', label: '员工问答反馈', children: <EmployeeFeedbackTab kbId={kbId} onOpenIssue={openQualityIssue} /> }] : []),
+                          ]} /> }]
                           : []),
                         ...(canInsight
                           ? [{ key: 'insight', label: '检索洞察', children: <InsightTab kbId={kbId} onOpenIssue={canFeedback ? openQualityIssue : undefined} /> }]

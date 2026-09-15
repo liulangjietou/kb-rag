@@ -33,7 +33,8 @@ public record QualityIssueResponse(
                 ? EvalCaseResponse.from(currentCase == null
                     ? JsonUtil.parse(issue.getExpectedCaseInput(), EvalCaseInput.class).toCase() : currentCase) : null;
         return new QualityIssueResponse(issue.getIssueId(), issue.getKbId(), issue.getSourceType().name(),
-                readable && issue.getSourceType() == QualityIssueSource.BAD_FEEDBACK ? issue.getSourceId() : null,
+                readable && (issue.getSourceType() == QualityIssueSource.BAD_FEEDBACK
+                        || issue.getSourceType() == QualityIssueSource.EMPLOYEE_ANSWER) ? issue.getSourceId() : null,
                 readable ? issue.getSummary() : null, issue.getStatus().name(),
                 issue.getLockVersion(), issue.getOwnerUserId(), issue.getOwnerName(),
                 AccessGuard.currentUserOrNull() != null && java.util.Objects.equals(issue.getOwnerUserId(), AccessGuard.currentUserOrNull().userId()),

@@ -3,7 +3,7 @@ import { apiGet, apiPost } from './request';
 import type { CreateEvalCaseRequest, EvalCase, EvalResult, PageResult } from './types';
 
 export type QualityIssueStatus = 'NEW' | 'IN_PROGRESS' | 'WAITING_REGRESSION' | 'RESOLVED';
-export type QualityIssueSource = 'BAD_FEEDBACK' | 'ZERO_HIT';
+export type QualityIssueSource = 'BAD_FEEDBACK' | 'ZERO_HIT' | 'EMPLOYEE_ANSWER';
 export type QualityIssueReason = 'MISSING_KNOWLEDGE' | 'OUTDATED_KNOWLEDGE' | 'RETRIEVAL_MISS' | 'ANSWER_INCORRECT' | 'QUESTION_UNCLEAR' | 'OTHER';
 export type QualityIssueAction = 'claim' | 'release' | 'notes' | 'resolve' | 'reopen';
 

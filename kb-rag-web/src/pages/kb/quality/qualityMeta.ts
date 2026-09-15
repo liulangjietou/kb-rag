@@ -1,4 +1,8 @@
-import type { QualityIssueReason, QualityIssueStatus, QualityIssueRecord } from '../../../api/qualityIssue';
+import type { QualityIssueReason, QualityIssueStatus, QualityIssueRecord, QualityIssueSource } from '../../../api/qualityIssue';
+
+export const QUALITY_SOURCES: Record<QualityIssueSource, string> = {
+  BAD_FEEDBACK: '负面反馈', ZERO_HIT: '零命中报告', EMPLOYEE_ANSWER: '员工问答反馈',
+};
 
 export const QUALITY_STATUS: Record<QualityIssueStatus, { label: string; color: string }> = {
   NEW: { label: '待领取', color: 'default' }, IN_PROGRESS: { label: '处理中', color: 'processing' },

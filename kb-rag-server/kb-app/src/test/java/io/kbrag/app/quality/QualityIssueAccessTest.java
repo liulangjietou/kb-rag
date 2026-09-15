@@ -41,7 +41,8 @@ class QualityIssueAccessTest {
     private final EvalCaseMapper cases = mock(EvalCaseMapper.class);
     private final AppMapper apps = mock(AppMapper.class);
     private final KbResourceGuard guard = mock(KbResourceGuard.class);
-    private final QualityIssueAccess access = new QualityIssueAccess(bases, documents, chunks, cases, apps, guard, mock(AppVersionService.class));
+    private final EmployeeFeedbackAccess employee = mock(EmployeeFeedbackAccess.class);
+    private final QualityIssueAccess access = new QualityIssueAccess(bases, documents, chunks, cases, apps, guard, mock(AppVersionService.class), employee);
 
     @BeforeEach
     void setUp() {
@@ -52,6 +53,14 @@ class QualityIssueAccessTest {
 
     @AfterEach
     void clear() { UserContextHolder.clear(); }
+
+    @Test
+    void employeeEvidenceRevocationAlsoHidesExistingIssueNotesAndCorrection() {
+        var issue = KnowledgeQualityIssue.open("issue", "kb", io.kbrag.domain.enums.QualityIssueSource.EMPLOYEE_ANSWER, "run", "原问题");
+        doThrow(BizException.forbidden("source revoked")).when(employee).read("kb", "run");
+        assertFalse(access.canReadContent(issue));
+        assertThrows(BizException.class, () -> access.requireContent(issue));
+    }
 
     @Test
     @SuppressWarnings({"unchecked", "rawtypes"})

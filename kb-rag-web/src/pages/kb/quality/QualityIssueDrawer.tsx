@@ -9,7 +9,8 @@ import { useAuth } from '../../../auth/AuthContext';
 import { PERMISSIONS } from '../../../auth/permissions';
 import QualityCorrectionForm from './QualityCorrectionForm';
 import QualityRegressionPanel from './QualityRegressionPanel';
-import { QUALITY_ACTIONS, QUALITY_REASONS, QUALITY_STATUS } from './qualityMeta';
+import { QUALITY_ACTIONS, QUALITY_REASONS, QUALITY_STATUS, QUALITY_SOURCES } from './qualityMeta';
+import EmployeeFeedbackDrawer from './EmployeeFeedbackDrawer';
 
 /** 详情和草稿分开维护，焦点刷新不覆盖编辑；失去资料权限时立即销毁内容与草稿。 */
 export default function QualityIssueDrawer({ kbId, issueId, onClose, onChanged }: {
@@ -27,6 +28,7 @@ export default function QualityIssueDrawer({ kbId, issueId, onClose, onChanged }
   const [editGeneration, setEditGeneration] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [note, setNote] = useState('');
+  const [sourceOpen, setSourceOpen] = useState(false);
   const sequence = useRef(0);
   const pending = useRef(false);
   const alive = useRef(true);
@@ -107,9 +109,12 @@ export default function QualityIssueDrawer({ kbId, issueId, onClose, onChanged }
       action={!error.restricted ? <Button disabled={busy} onClick={loadLatestForEditing}>载入最新内容</Button> : undefined} />}
     {!issue ? (checking ? <Spin /> : !error && <Empty description="问题详情暂不可用" />) : <div style={{ display: checking || error?.uncertain ? 'none' : undefined }}>
       <div className="quality-issue-heading"><Tag color={status?.color}>{status?.label}</Tag>
-        <span className="quality-muted">{issue.source_type === 'BAD_FEEDBACK' ? '来自负面反馈' : '来自零命中报告'}</span>
+        <span className="quality-muted">来自{QUALITY_SOURCES[issue.source_type]}</span>
         <Typography.Title level={3}>{issue.summary || '未提供问题摘要'}</Typography.Title>
+        {issue.source_type === 'EMPLOYEE_ANSWER' && issue.source_id && <Button onClick={() => setSourceOpen(true)}>查看员工原回答</Button>}
       </div>
+      {sourceOpen && !checking && !error && issue.source_type === 'EMPLOYEE_ANSWER' && issue.source_id &&
+        <EmployeeFeedbackDrawer kbId={kbId} runId={issue.source_id} onClose={() => setSourceOpen(false)} />}
       <Descriptions size="small" column={{ xs: 1, sm: 2 }} items={[
         { key: 'owner', label: '负责人', children: issue.owner_name || '尚未领取' },
         { key: 'reason', label: '原因', children: issue.reason ? QUALITY_REASONS[issue.reason] : '待判断' },
