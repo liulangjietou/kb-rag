@@ -7,6 +7,14 @@
 [![Python](https://img.shields.io/badge/Python-3.11-3776AB.svg)](https://www.python.org/downloads/release/python-3110/)
 [![Node.js](https://img.shields.io/badge/Node.js-22-339933.svg)](https://nodejs.org/)
 
+[![MySQL](https://img.shields.io/badge/MySQL-8.0.36-4479A1.svg)](kb-rag-deploy/docker-compose.lite.yml)
+[![MinIO](https://img.shields.io/badge/MinIO-2024.05.10-C72E49.svg)](kb-rag-deploy/docker-compose.lite.yml)
+[![Elasticsearch](https://img.shields.io/badge/Elasticsearch-8.11.4-005571.svg)](kb-rag-deploy/docker-compose.lite.yml)
+[![Qdrant](https://img.shields.io/badge/Qdrant-1.18.3-DC244C.svg)](kb-rag-deploy/docker-compose.yml)
+[![Neo4j](https://img.shields.io/badge/Neo4j-5.20-4581C3.svg)](kb-rag-deploy/docker-compose.lite.yml)
+[![Redis](https://img.shields.io/badge/Redis-7.2.5-DC382D.svg)](kb-rag-deploy/docker-compose.yml)
+[![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED.svg)](kb-rag-deploy/README.md)
+
 可自托管的企业知识库与 RAG 系统，提供文档接入、混合检索、有据问答、评测发布与 Agent 长期记忆。
 管理人员维护知识与应用，员工使用已授权的正式应用，外部系统通过 REST / MCP 接入。
 
