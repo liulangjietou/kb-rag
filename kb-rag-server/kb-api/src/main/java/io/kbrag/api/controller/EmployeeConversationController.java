@@ -11,9 +11,12 @@ import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.api.Result;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.constant.PermissionCodes;
+import io.kbrag.domain.enums.FeedbackVerdict;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +30,7 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -35,6 +39,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
+import org.apache.commons.lang3.StringUtils;
 
 /** 员工正式问答：提交命令与订阅读取分离，刷新连接永不产生新的模型调用。 */
 @RestController
@@ -120,6 +125,14 @@ public class EmployeeConversationController {
         return Result.success(EmployeeRunResponse.from(conversations.stop(appId, conversationId, runId)));
     }
 
+    /** 保存最新评价；客户端必须携带所见修订号，避免不同页面静默覆盖。 */
+    @PutMapping("/{conversationId}/runs/{runId}/feedback")
+    public Result<EmployeeRunResponse> feedback(@PathVariable String appId, @PathVariable String conversationId,
+            @PathVariable String runId, @Valid @RequestBody FeedbackRequest request) {
+        return Result.success(EmployeeRunResponse.from(conversations.feedback(appId, conversationId, runId,
+                request.verdict(), StringUtils.stripToNull(request.note()), request.expectedRevision())));
+    }
+
     /** 连接只发送已提交快照，重连从相同运行恢复；终态提交后才会发送 done。 */
     @GetMapping(value = "/{conversationId}/runs/{runId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter events(@PathVariable String appId, @PathVariable String conversationId, @PathVariable String runId,
@@ -148,4 +161,8 @@ public class EmployeeConversationController {
     /** 模型历史、正式版本、引用及内部配置只能由服务端生成。 */
     public record RunRequest(@JsonProperty("request_id") @NotBlank @Pattern(regexp = "[A-Za-z0-9_-]{8,128}") String requestId,
                              @NotBlank @Size(max = 8000) String query) { }
+
+    /** 说明按用户主动提交记录，版本和运行归属由服务端验证。 */
+    public record FeedbackRequest(@NotNull FeedbackVerdict verdict, @Size(max = 512) String note,
+            @JsonProperty("expected_revision") @NotNull @Min(0) Integer expectedRevision) { }
 }

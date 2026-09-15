@@ -1,0 +1,8 @@
+.answer-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.answer-feedback .workspace-text-action[aria-pressed="true"] { color: var(--kb-color-primary-text); background: var(--kb-color-primary-soft); }
+.answer-feedback > .ant-alert { flex-basis: 100%; }
+.answer-feedback__label { display: block; margin: 16px 0 8px; }
+.answer-feedback__problem { margin-top: 30px; }
+@media (max-width: 600px) {
+  .answer-feedback .workspace-text-action { min-height: 44px; }
+}

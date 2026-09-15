@@ -1631,6 +1631,53 @@ paths:
           $ref: '#/components/responses/PermissionDenied'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/workspace/apps/{appId}/conversations/{conversationId}/runs/{runId}/feedback:
+    parameters:
+    - {name: appId, in: path, required: true, schema: {type: string}}
+    - {name: conversationId, in: path, required: true, schema: {type: string}}
+    - {name: runId, in: path, required: true, schema: {type: string}}
+    put:
+      tags: [app]
+      operationId: employeeAnswerFeedback
+      summary: 保存本人完整回答的最新评价（APP_USE）
+      description: 仅 SUCCEEDED 且当前证据仍可读的本人运行允许评价。相同评价及说明的重试不重复写入；不同评价必须使用最新修订号。反馈不会重新调用模型，不改变会话活动时间，不自动创建评测用例。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [verdict, expected_revision]
+              properties:
+                verdict: {type: string, enum: [GOOD, BAD]}
+                note: {type: string, nullable: true, maxLength: 512, description: 用户主动填写的问题说明，首尾空白会清除}
+                expected_revision: {type: integer, minimum: 0, description: 页面所见运行修订号}
+      responses:
+        '200':
+          description: 当前已授权的运行快照，包含已保存评价，Cache-Control 为 no-store
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/EmployeeRun'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/PermissionDenied'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: FEEDBACK_VERSION_CONFLICT，先读取并核对最新评价再修改
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/workspace/apps/{appId}/conversations/{conversationId}/runs/{runId}/stop:
     parameters:
     - name: appId
@@ -6524,6 +6571,14 @@ components:
           description: 切片顺序，非原文段落号
         inherited:
           type: boolean
+    EmployeeAnswerFeedback:
+      type: object
+      nullable: true
+      required: [verdict, updated_at]
+      properties:
+        verdict: {type: string, enum: [GOOD, BAD]}
+        note: {type: string, nullable: true, maxLength: 512}
+        updated_at: {type: string, description: 服务端本地日期时间，毫秒精度}
     EmployeeRun:
       type: object
       required:
@@ -6586,7 +6641,9 @@ components:
           type: boolean
         restricted:
           type: boolean
-          description: 引用任一依赖已不可读，answer 与 references 被清空，禁止显示旧缓存正文
+          description: 引用任一依赖已不可读，answer、references 和 feedback 被清空，禁止显示旧缓存内容
+        feedback:
+          $ref: '#/components/schemas/EmployeeAnswerFeedback'
         error_code:
           type: string
           nullable: true
@@ -6616,6 +6673,7 @@ components:
       - VERSION_NOT_PUBLISHED
       - CONVERSATION_BUSY
       - CONVERSATION_REQUEST_CONFLICT
+      - FEEDBACK_VERSION_CONFLICT
       - KNOWLEDGE_SNAPSHOT_UNAVAILABLE
       - RATE_LIMITED
       - MODEL_QUOTA_EXCEEDED

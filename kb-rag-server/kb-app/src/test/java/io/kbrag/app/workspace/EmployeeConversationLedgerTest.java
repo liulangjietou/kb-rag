@@ -15,6 +15,7 @@ import io.kbrag.domain.entity.AppVersion;
 import io.kbrag.domain.entity.EmployeeConversationRun;
 import io.kbrag.domain.enums.AppVersionStatus;
 import io.kbrag.domain.enums.ConversationRunStatus;
+import io.kbrag.domain.enums.FeedbackVerdict;
 import io.kbrag.domain.enums.UserSource;
 import io.kbrag.domain.mapper.EmployeeConversationMapper;
 import io.kbrag.domain.mapper.EmployeeConversationRunMapper;
@@ -79,7 +80,8 @@ class EmployeeConversationLedgerTest {
                 : new DriverManagerDataSource(mysqlUrl, System.getenv("KB_CONVERSATION_TEST_USER"),
                     System.getenv("KB_CONVERSATION_TEST_PASSWORD"));
         jdbc = new JdbcTemplate(source);
-        String migration = Files.readString(Path.of("../kb-api/src/main/resources/db/migration/V28__employee_conversations.sql"));
+        String migration = Files.readString(Path.of("../kb-api/src/main/resources/db/migration/V28__employee_conversations.sql"))
+                + Files.readString(Path.of("../kb-api/src/main/resources/db/migration/V29__employee_answer_feedback.sql"));
         // 仅移除 H2 不支持的表级引擎与排序规则，字段、索引和约束继续来自生产迁移。
         String ddl = mysqlUrl == null ? migration.replaceAll("ENGINE = InnoDB[^;]+", "") : migration;
         for (String statement : ddl.split(";")) {
@@ -385,6 +387,68 @@ class EmployeeConversationLedgerTest {
 
     private EmployeeConversationLedger.AcceptedRun accept(String request) {
         return ledger.accept(OWNER, conversationId, request, "报销需要什么？", target("av_original"));
+    }
+
+    @Test
+    void shouldPersistFeedbackWithoutChangingAnswerOrActivityAndReplayIdentically() {
+        String runId = generatingRun();
+        assertTrue(ledger.succeed(OWNER, conversationId, runId, WORKER, 1, "已核实的回答"));
+        var original = get(runId);
+        var activity = ledger.conversation(OWNER, conversationId).getLastActivityAt();
+        var saved = ledger.feedback(OWNER, conversationId, runId, FeedbackVerdict.BAD, "缺少日期依据", original.getLockVersion());
+        var retry = ledger.feedback(OWNER, conversationId, runId, FeedbackVerdict.BAD, "缺少日期依据", original.getLockVersion());
+        assertEquals(saved.getLockVersion(), retry.getLockVersion());
+        assertEquals(saved.getFeedbackUpdatedAt(), retry.getFeedbackUpdatedAt());
+        assertEquals(original.getLockVersion() + 1, saved.getLockVersion());
+        var persisted = get(runId);
+        assertEquals(FeedbackVerdict.BAD, persisted.getFeedbackVerdict());
+        assertEquals("缺少日期依据", persisted.getFeedbackNote());
+        assertEquals(original.getAnswer(), persisted.getAnswer());
+        assertEquals(original.getReferencesJson(), persisted.getReferencesJson());
+        assertEquals(original.getTargetJson(), persisted.getTargetJson());
+        assertEquals(original.getStatus(), persisted.getStatus());
+        assertEquals(activity, ledger.conversation(OWNER, conversationId).getLastActivityAt());
+        var conflict = assertThrows(BizException.class, () -> ledger.feedback(OWNER, conversationId, runId,
+                FeedbackVerdict.GOOD, null, original.getLockVersion()));
+        assertEquals(ErrorCode.FEEDBACK_VERSION_CONFLICT, conflict.getErrorCode());
+        ledger.feedback(OWNER, conversationId, runId, FeedbackVerdict.GOOD, null, saved.getLockVersion());
+        assertNull(get(runId).getFeedbackNote());
+    }
+
+    @Test
+    void shouldRejectFeedbackForUnfinishedForeignAndDeletedRuns() {
+        String runId = generatingRun();
+        assertThrows(BizException.class, () -> ledger.feedback(OWNER, conversationId, runId, FeedbackVerdict.GOOD, null, 0));
+        assertTrue(ledger.succeed(OWNER, conversationId, runId, WORKER, 1, "已保存"));
+        for (var scope : List.of(new EmployeeConversationScope("tenant_b", "user_a", "app_a"),
+                new EmployeeConversationScope("tenant_a", "user_b", "app_a"),
+                new EmployeeConversationScope("tenant_a", "user_a", "app_b"))) {
+            assertThrows(BizException.class, () -> ledger.feedback(scope, conversationId, runId, FeedbackVerdict.GOOD, null, 0));
+        }
+        ledger.delete(OWNER, conversationId);
+        assertThrows(BizException.class, () -> ledger.feedback(OWNER, conversationId, runId, FeedbackVerdict.GOOD, null, 0));
+    }
+
+    @Test
+    void shouldSerializeTwoFeedbackEditsAndRejectTheStaleOne() throws Exception {
+        String runId = generatingRun();
+        assertTrue(ledger.succeed(OWNER, conversationId, runId, WORKER, 1, "已保存"));
+        int revision = get(runId).getLockVersion();
+        Callable<String> good = () -> feedbackOrCode(runId, FeedbackVerdict.GOOD, revision);
+        Callable<String> bad = () -> feedbackOrCode(runId, FeedbackVerdict.BAD, revision);
+        List<String> outcomes = concurrent(good, bad);
+        assertEquals(1, outcomes.stream().filter("saved"::equals).count());
+        assertEquals(1, outcomes.stream().filter(ErrorCode.FEEDBACK_VERSION_CONFLICT.name()::equals).count());
+        assertEquals(revision + 1, get(runId).getLockVersion());
+    }
+
+    private String feedbackOrCode(String runId, FeedbackVerdict verdict, int revision) {
+        try {
+            ledger.feedback(OWNER, conversationId, runId, verdict, null, revision);
+            return "saved";
+        } catch (BizException error) {
+            return error.getErrorCode().name();
+        }
     }
 
     private String acceptOrCode(String request) {

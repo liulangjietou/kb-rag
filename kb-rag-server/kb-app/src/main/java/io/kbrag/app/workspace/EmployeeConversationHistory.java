@@ -6,6 +6,7 @@ import io.kbrag.domain.entity.EmployeeConversationRun;
 import io.kbrag.domain.enums.ConversationRunStage;
 import io.kbrag.domain.enums.ConversationRunStatus;
 import io.kbrag.domain.model.ChatMessage;
+import io.kbrag.domain.model.EmployeeAnswerFeedback;
 import io.kbrag.domain.model.EmployeeCitation;
 import io.kbrag.domain.model.EmployeeConversationScope;
 import io.kbrag.domain.model.EmployeeRunTarget;
@@ -39,7 +40,7 @@ public class EmployeeConversationHistory {
                 restricted ? "" : run.getAnswer(), restricted ? List.of() : sources,
                 run.getStatus(), run.getStage(), target.appVersionId(), target.appVersion(), target.snapshotBound(),
                 run.getLockVersion(), run.getCheckpointSeq(), run.getDegraded(), run.getErrorCode(),
-                run.getErrorMessage(), restricted, run.getCreatedAt(), run.getFinishedAt());
+                run.getErrorMessage(), restricted, run.getCreatedAt(), run.getFinishedAt(), restricted ? null : run.feedback());
     }
 
     /**
@@ -98,5 +99,6 @@ public class EmployeeConversationHistory {
                           List<EmployeeCitation> references, ConversationRunStatus status, ConversationRunStage stage,
                           String appVersionId, String appVersion, boolean snapshotBound, int revision,
                           long checkpointSeq, boolean degraded, String errorCode, String errorMessage,
-                          boolean restricted, LocalDateTime createdAt, LocalDateTime finishedAt) { }
+                          boolean restricted, LocalDateTime createdAt, LocalDateTime finishedAt,
+                          EmployeeAnswerFeedback feedback) { }
 }

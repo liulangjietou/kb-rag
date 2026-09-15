@@ -41,6 +41,7 @@ export interface EmployeeCitation {
 }
 
 export type EmployeeRunStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'INTERRUPTED';
+export type AnswerFeedbackVerdict = 'GOOD' | 'BAD';
 export interface EmployeeRun {
   run_id: string;
   conversation_id: string;
@@ -61,6 +62,7 @@ export interface EmployeeRun {
   restricted: boolean;
   created_at: string;
   finished_at?: string | null;
+  feedback?: { verdict: AnswerFeedbackVerdict; note?: string | null; updated_at: string } | null;
 }
 
 export interface ConversationPage {
@@ -132,6 +134,9 @@ async function request<T>(path: string, method: string, body?: unknown, signal?:
 
 export const employeeWorkspace = {
   overview: (signal?: AbortSignal) => request<EmployeeHomeOverview>('/workspace/overview', 'GET', undefined, signal),
+  feedback: (appId: string, conversationId: string, runId: string, verdict: AnswerFeedbackVerdict,
+    note: string | undefined, expectedRevision: number) => request<EmployeeRun>(`${runPath(appId, conversationId, runId)}/feedback`, 'PUT',
+    { verdict, note, expected_revision: expectedRevision }),
   applications: (signal?: AbortSignal) => request<EmployeeApplication[]>('/workspace/apps', 'GET', undefined, signal),
   conversations: (appId: string, keyword = '', page = 1, signal?: AbortSignal) =>
     request<ConversationPage>(`${conversationPath(appId)}?${new URLSearchParams({ keyword, page: String(page), size: '20' })}`, 'GET', undefined, signal),

@@ -1,6 +1,7 @@
 package io.kbrag.app.workspace;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.kbrag.common.api.ErrorCode;
@@ -8,6 +9,7 @@ import io.kbrag.common.exception.BizException;
 import io.kbrag.common.util.HashUtil;
 import io.kbrag.domain.entity.EmployeeConversation;
 import io.kbrag.domain.entity.EmployeeConversationRun;
+import io.kbrag.domain.enums.FeedbackVerdict;
 import io.kbrag.domain.mapper.EmployeeConversationMapper;
 import io.kbrag.domain.mapper.EmployeeConversationRunMapper;
 import io.kbrag.domain.model.EmployeeConversationScope;
@@ -19,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.apache.commons.lang3.StringUtils;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -213,6 +216,29 @@ public class EmployeeConversationLedger {
     @Transactional
     public boolean interruptOwned(EmployeeConversationScope scope, String conversationId, String runId, String workerId) {
         return mutate(scope, conversationId, runId, run -> run.interruptOwned(workerId, LocalDateTime.now()));
+    }
+
+    /** 反馈只更新评价字段和修订号，不改变回答、运行状态或会话活动时间。 */
+    @Transactional
+    public EmployeeConversationRun feedback(EmployeeConversationScope scope, String conversationId, String runId,
+                                            FeedbackVerdict verdict, String note, int expectedRevision) {
+        lockOwned(scope, conversationId);
+        EmployeeConversationRun run = requireRun(scope, conversationId, runId);
+        // 与 DATETIME(3) 一致，首次响应和幂等重读返回相同的反馈时间。
+        LocalDateTime now = LocalDateTime.now().truncatedTo(ChronoUnit.MILLIS);
+        if (!run.giveFeedback(verdict, note, expectedRevision, now)) return run;
+        int revision = run.getLockVersion();
+        requireWritten(runs.update(null, new LambdaUpdateWrapper<EmployeeConversationRun>()
+                .eq(EmployeeConversationRun::getId, run.getId())
+                .eq(EmployeeConversationRun::getLockVersion, revision)
+                .set(EmployeeConversationRun::getFeedbackVerdict, verdict)
+                .set(EmployeeConversationRun::getFeedbackNote, note)
+                .set(EmployeeConversationRun::getFeedbackUpdatedAt, now)
+                .set(EmployeeConversationRun::getUpdatedAt, now)
+                .set(EmployeeConversationRun::getLockVersion, revision + 1)));
+        run.setUpdatedAt(now);
+        run.setLockVersion(revision + 1);
+        return run;
     }
 
     private boolean mutate(EmployeeConversationScope scope, String conversationId, String runId,
