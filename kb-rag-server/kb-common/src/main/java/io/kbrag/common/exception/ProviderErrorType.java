@@ -25,6 +25,9 @@ public enum ProviderErrorType {
     /** Input exceeded the model token limit. */
     INPUT_TOO_LONG,
 
+    /** 模型达到输出长度上限，已返回内容不代表完整回答。 */
+    OUTPUT_TRUNCATED,
+
     /** Returned vector dimension does not match the configured dimension. */
     DIMENSION_MISMATCH,
 
