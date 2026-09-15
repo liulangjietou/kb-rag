@@ -20,7 +20,7 @@ const METRIC_LABELS: Record<MetricNumberKey, string> = {
   ndcg: 'NDCG',
 };
 
-const GROUP_OPTIONS: MetricGroupKey[] = ['all', 'span', 'document', 'single_turn', 'multi_turn'];
+const GROUP_OPTIONS: MetricGroupKey[] = ['overall', 'span', 'document', 'single_turn', 'multi_turn'];
 
 const ANSWER_ROWS = [
   ['score', '综合分'],
@@ -66,7 +66,7 @@ function ScopedGateCompareDrawer({ version, onClose }: GateCompareDrawerProps) {
   const [comparable, setComparable] = useState(true);
   const [incomparableReason, setIncomparableReason] = useState<string | null>(null);
   const [runs, setRuns] = useState<EvalRun[]>([]);
-  const [group, setGroup] = useState<MetricGroupKey>('all');
+  const [group, setGroup] = useState<MetricGroupKey>('overall');
 
   const runIds = version?.gate_run_ids ?? null;
 
@@ -81,7 +81,7 @@ function ScopedGateCompareDrawer({ version, onClose }: GateCompareDrawerProps) {
     setRuns([]);
     setComparable(true);
     setIncomparableReason(null);
-    setGroup('all');
+    setGroup('overall');
     compareEvalRuns(runIds)
       .then((result) => {
         if (cancelled) return;

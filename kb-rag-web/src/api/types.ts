@@ -1251,7 +1251,7 @@ export type RunStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
 export type EvalMode = 'BM25_ONLY' | 'VECTOR_ONLY' | 'HYBRID' | 'HYBRID_RERANK';
 
 /** Report grouping key (M4b-CONTRACTS.md section 3.3: "分组输出：全体/span级/文档级/单轮/多轮"). */
-export type MetricGroupKey = 'all' | 'span' | 'document' | 'single_turn' | 'multi_turn';
+export type MetricGroupKey = 'overall' | 'span' | 'document' | 'single_turn' | 'multi_turn';
 
 /**
  * t_kb_eval_case.evidences[] element (M4b-CONTRACTS.md section 1): `span` is null/empty when
