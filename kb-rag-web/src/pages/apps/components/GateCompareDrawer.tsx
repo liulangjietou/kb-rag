@@ -1,6 +1,6 @@
 // Author: owlzhangfq@gmail.com
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Descriptions, Drawer, Empty, Radio, Space, Spin, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Descriptions, Drawer, Empty, Radio, Space, Spin, Table, Tag, Typography } from 'antd';
 import { compareEvalRuns } from '../../../api/evalRun';
 import type { EvalRun, KMetricSet, MetricGroupKey, MetricNumberKey } from '../../../api/types';
 import { APP_VERSION_STATUS_META, METRIC_GROUP_META, RUN_STATUS_META, metaOf } from '../../../utils/statusMeta';
@@ -52,7 +52,17 @@ function formatMetricValue(set: KMetricSet | undefined, key: MetricNumberKey): s
  * applied to exactly the two runs the release gate itself created.
  */
 export default function GateCompareDrawer({ version, onClose }: GateCompareDrawerProps) {
+  if (!version) return null;
+  return <ScopedGateCompareDrawer key={`${version.app_version_id}:${version.gate_run_ids?.join(',')}`}
+    version={version} onClose={onClose} />;
+}
+
+/** 门禁版本或双跑记录变化后立即丢弃旧指标，失败不等同于无数据。 */
+function ScopedGateCompareDrawer({ version, onClose }: GateCompareDrawerProps) {
+  const [trigger] = useState(() => document.activeElement instanceof HTMLElement ? document.activeElement : null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [refresh, setRefresh] = useState(0);
   const [comparable, setComparable] = useState(true);
   const [incomparableReason, setIncomparableReason] = useState<string | null>(null);
   const [runs, setRuns] = useState<EvalRun[]>([]);
@@ -67,6 +77,10 @@ export default function GateCompareDrawer({ version, onClose }: GateCompareDrawe
     }
     let cancelled = false;
     setLoading(true);
+    setLoadError(false);
+    setRuns([]);
+    setComparable(true);
+    setIncomparableReason(null);
     setGroup('all');
     compareEvalRuns(runIds)
       .then((result) => {
@@ -76,7 +90,7 @@ export default function GateCompareDrawer({ version, onClose }: GateCompareDrawe
         setRuns(result.comparable ? result.runs : []);
       })
       .catch(() => {
-        if (!cancelled) message.error('门禁双跑结果加载失败');
+        if (!cancelled) setLoadError(true);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -85,7 +99,7 @@ export default function GateCompareDrawer({ version, onClose }: GateCompareDrawe
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runIds?.join(',')]);
+  }, [runIds?.join(','), refresh]);
 
   const kKeys = useMemo(() => {
     const keys = new Set<string>();
@@ -112,14 +126,18 @@ export default function GateCompareDrawer({ version, onClose }: GateCompareDrawe
 
   // ASSUMPTION: gate_run_ids[0] = candidate (this version's config), [1] = baseline (current
   // RELEASED config at gate time) -- see AppVersion.gate_run_ids's doc comment in types.ts.
-  const runLabels = ['本次候选', '对照（当前正式版）'];
+  const runLabels = ['本次候选', '对照（门禁执行时正式版）'];
+  const close = () => {
+    onClose();
+    queueMicrotask(() => { if (trigger?.isConnected) trigger.focus({ preventScroll: true }); });
+  };
 
   return (
     <Drawer
       rootClassName="catalog-eval-drawer"
       title="发布门禁双跑对比"
       open={version !== null}
-      onClose={onClose}
+      onClose={close}
       width={880}
       destroyOnHidden
     >
@@ -143,7 +161,10 @@ export default function GateCompareDrawer({ version, onClose }: GateCompareDrawe
               )}
             </Descriptions>
 
-            {!runIds || runIds.length === 0 ? (
+            {loadError ? (
+              <Alert type="error" showIcon message="门禁双跑结果加载失败" description="请重试后再判断该版本的门禁结果。"
+                action={<Button onClick={() => setRefresh(value => value + 1)}>重试</Button>} />
+            ) : loading ? null : !runIds || runIds.length === 0 ? (
               <Empty description="该版本未绑定门禁评测集，或尚未执行过双跑" />
             ) : !comparable ? (
               <Alert
@@ -180,6 +201,7 @@ export default function GateCompareDrawer({ version, onClose }: GateCompareDrawe
                   rowKey="key"
                   pagination={false}
                   dataSource={metricRows}
+                  locale={{ emptyText: '当前分组没有可比较的检索指标' }}
                   scroll={{ x: true }}
                   columns={[
                     { title: '指标', dataIndex: 'label', fixed: 'left', width: 160 },
@@ -209,13 +231,14 @@ export default function GateCompareDrawer({ version, onClose }: GateCompareDrawe
                           title: '本次候选',
                           render: (_: unknown, row: { key: (typeof ANSWER_ROWS)[number][0] }) => {
                             const value = version.gate_report?.answer_comparison?.candidate[row.key];
+                            if (value === undefined || value === null) return '-';
                             return row.key === 'refusal_accuracy'
-                              ? `${((value ?? 0) * 100).toFixed(1)}%`
-                              : (value ?? 0).toFixed(2);
+                              ? `${(value * 100).toFixed(1)}%`
+                              : value.toFixed(2);
                           },
                         },
                         {
-                          title: '对照（当前正式版）',
+                          title: '对照（门禁执行时正式版）',
                           render: (_: unknown, row: { key: (typeof ANSWER_ROWS)[number][0] }) => {
                             const value = version.gate_report?.answer_comparison?.baseline?.[row.key];
                             if (value === undefined || value === null) return '-';

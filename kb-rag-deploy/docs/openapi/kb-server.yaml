@@ -5690,6 +5690,49 @@ paths:
                 $ref: '#/components/schemas/AppVersionResult'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/app-versions/{appVersionId}/corpus-diff:
+    parameters:
+    - $ref: '#/components/parameters/AppVersionId'
+    get:
+      tags: [app-center]
+      summary: 比较同应用版本的授权资料差异
+      description: >-
+        只读。需要 app:read、kb:read、当前应用数据范围和两侧全部知识库范围。
+        先解析版本的租户根与同应用归属，再按当前文档 ACL 裁剪，最后比较、计数和分页。
+        发布版本使用保存的冻结集合，未发布版本使用当前活动集合；历史快照或文档版本缺失时
+        comparable=false，不返回差异条目或推断零差异。省略 baseline_id 表示明确的空基线。
+        文件名使用当前元数据；不检查物理索引健康，不代表整个发布门禁通过。
+      parameters:
+      - name: baseline_id
+        in: query
+        schema: {type: string, minLength: 1}
+      - name: page
+        in: query
+        schema: {type: integer, minimum: 1, default: 1}
+      - name: page_size
+        in: query
+        schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+      responses:
+        '200':
+          description: 当前授权范围内的资料差异
+          headers:
+            Cache-Control:
+              schema: {type: string, example: no-store}
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/AppCorpusComparison'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/app-versions/{appVersionId}/gate-dataset:
     parameters:
     - $ref: '#/components/parameters/AppVersionId'
@@ -12414,6 +12457,58 @@ components:
           type: string
         version_count:
           type: integer
+    AppCorpusSummary:
+      type: object
+      required: [source, complete]
+      properties:
+        source:
+          type: string
+          enum: [EMPTY, FROZEN, CURRENT, UNAVAILABLE]
+        complete:
+          type: boolean
+        document_count:
+          type: integer
+          nullable: true
+          description: 当前授权范围内的资料数量，信息不完整时为空或省略
+    AppCorpusVersion:
+      type: object
+      required: [version_id, version]
+      properties:
+        version_id: {type: string}
+        version: {type: string}
+    AppCorpusComparison:
+      type: object
+      required: [baseline, candidate, comparable, page, page_size, items]
+      properties:
+        baseline:
+          $ref: '#/components/schemas/AppCorpusSummary'
+        candidate:
+          $ref: '#/components/schemas/AppCorpusSummary'
+        comparable: {type: boolean}
+        total: {type: integer, format: int64, nullable: true}
+        added: {type: integer, format: int64, nullable: true}
+        removed: {type: integer, format: int64, nullable: true}
+        updated: {type: integer, format: int64, nullable: true}
+        page: {type: integer}
+        page_size: {type: integer}
+        items:
+          type: array
+          items:
+            type: object
+            required: [kb_id, doc_id, file_name, change]
+            properties:
+              kb_id: {type: string}
+              doc_id: {type: string}
+              file_name: {type: string}
+              change: {type: string, enum: [ADDED, REMOVED, UPDATED]}
+              baseline:
+                allOf:
+                - $ref: '#/components/schemas/AppCorpusVersion'
+                nullable: true
+              candidate:
+                allOf:
+                - $ref: '#/components/schemas/AppCorpusVersion'
+                nullable: true
     AppVersionResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'
