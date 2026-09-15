@@ -1,0 +1,461 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1920" viewBox="0 0 2560 1920" role="img" aria-labelledby="title description">
+<title id="title">kb-rag 企业知识库与 Agent 全景架构</title>
+<desc id="description">根据 main 3ff85fc 的代码绘制。五栏展示数据接入、文档加工、检索生成、应用与 Agent、质量运营；上下横栏展示安全边界、模型服务、业务闭环、Java 模块依赖和存储部署。可选能力与单实例后台执行边界在图中注明。</desc>
+<metadata>{&quot;baseline&quot;: &quot;3ff85fc757dd975582ffba1672b2d859dd357062&quot;, &quot;checked_at&quot;: &quot;2026-09-15&quot;, &quot;sources&quot;: [&quot;kb-rag-server/kb-app/src/main/java/io/kbrag/app/index/IndexPipelineService.java&quot;, &quot;kb-rag-server/kb-app/src/main/java/io/kbrag/app/retrieval/RetrievalService.java&quot;, &quot;kb-rag-server/kb-app/src/main/java/io/kbrag/app/appcenter/ReleaseGateService.java&quot;, &quot;kb-rag-server/kb-app/src/main/java/io/kbrag/app/workspace/EmployeeRunCoordinator.java&quot;, &quot;kb-rag-server/kb-app/src/main/java/io/kbrag/app/memory/MemoryApiService.java&quot;, &quot;kb-rag-server/kb-app/src/main/java/io/kbrag/app/quality/KnowledgeQualityIssueService.java&quot;, &quot;kb-rag-server/kb-api/src/main/java/io/kbrag/api/config/ConsoleSessionConfig.java&quot;, &quot;kb-rag-deploy/.env.example&quot;, &quot;.github/workflows/ci.yml&quot;]}</metadata>
+<defs><marker id="blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#1989bf"/></marker><marker id="green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="#16936e"/></marker></defs>
+<g font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Arial, sans-serif">
+<rect x="0" y="0" width="2560" height="1920" rx="0" fill="#ffffff" stroke="none" stroke-width="1.5"/>
+<text x="40" y="77" font-size="57" font-weight="750" fill="#163365" text-anchor="start">kb-rag  企业知识库与 Agent 全景架构</text>
+<text x="42" y="115" font-size="26" font-weight="450" fill="#526782" text-anchor="start">数据接入 → 知识加工 → 混合检索 → 有据问答 → 反馈与回归</text>
+<text x="2520" y="50" font-size="19" font-weight="600" fill="#526782" text-anchor="end">实现架构 · main 3ff85fc</text>
+<text x="2520" y="81" font-size="18" font-weight="400" fill="#526782" text-anchor="end">代码核对：2026-09-15</text>
+<text x="2520" y="112" font-size="17" font-weight="400" fill="#526782" text-anchor="end">实线为处理方向 · 可选能力单独注明</text>
+<rect x="32" y="140" width="2496" height="92" rx="6" fill="#edf5ff" stroke="#bed4ec" stroke-width="1.5"/>
+<g transform="translate(54 166) scale(1.25)" fill="none" stroke="#163365" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M16 1L29 7v11c0 8-13 16-13 16S3 26 3 18V7z M9 17l5 5 10-11"/>
+</g>
+<text x="110" y="179" font-size="26" font-weight="700" fill="#163365" text-anchor="start">安全与治理</text>
+<text x="110" y="209" font-size="17" font-weight="500" fill="#526782" text-anchor="start">贯穿全部业务入口</text>
+<rect x="363" y="151" width="1" height="68" rx="0" fill="#bfd3ec" stroke="none" stroke-width="1.5"/>
+<text x="381" y="176" font-size="21" font-weight="700" fill="#163365" text-anchor="start">身份与会话</text>
+<text x="381" y="201" font-size="17" font-weight="400" fill="#163365" text-anchor="start">LDAP / OIDC / SAML / CAS</text>
+<text x="381" y="222" font-size="16" font-weight="400" fill="#526782" text-anchor="start">邮箱注册 → 管理员审核</text>
+<rect x="794" y="151" width="1" height="68" rx="0" fill="#bfd3ec" stroke="none" stroke-width="1.5"/>
+<text x="812" y="176" font-size="21" font-weight="700" fill="#163365" text-anchor="start">租户与资源授权</text>
+<text x="812" y="201" font-size="17" font-weight="400" fill="#163365" text-anchor="start">RBAC · 知识库 / 应用范围</text>
+<text x="812" y="222" font-size="16" font-weight="400" fill="#526782" text-anchor="start">文档 ACL · 当前权限重验</text>
+<rect x="1225" y="151" width="1" height="68" rx="0" fill="#bfd3ec" stroke="none" stroke-width="1.5"/>
+<text x="1243" y="176" font-size="21" font-weight="700" fill="#163365" text-anchor="start">三条凭据链</text>
+<text x="1243" y="201" font-size="17" font-weight="400" fill="#163365" text-anchor="start">控制台 satoken · 知识库 API Key</text>
+<text x="1243" y="222" font-size="16" font-weight="400" fill="#526782" text-anchor="start">记忆库 Memory Key · 独立边界</text>
+<rect x="1656" y="151" width="1" height="68" rx="0" fill="#bfd3ec" stroke="none" stroke-width="1.5"/>
+<text x="1674" y="176" font-size="21" font-weight="700" fill="#163365" text-anchor="start">内容与接入防护</text>
+<text x="1674" y="201" font-size="17" font-weight="400" fill="#163365" text-anchor="start">文件校验 · SSRF 防护 · 凭据加密</text>
+<text x="1674" y="222" font-size="16" font-weight="400" fill="#526782" text-anchor="start">审核 / 有效期 / 脱敏 / 回收站</text>
+<rect x="2087" y="151" width="1" height="68" rx="0" fill="#bfd3ec" stroke="none" stroke-width="1.5"/>
+<text x="2105" y="176" font-size="21" font-weight="700" fill="#163365" text-anchor="start">用量与审计</text>
+<text x="2105" y="201" font-size="17" font-weight="400" fill="#163365" text-anchor="start">请求追踪 · 操作 / 开放调用审计</text>
+<text x="2105" y="222" font-size="16" font-weight="400" fill="#526782" text-anchor="start">Token 月配额 · 用量预占与结算</text>
+<rect x="32" y="256" width="480" height="1100" rx="6" fill="#ffffff" stroke="#217eb475" stroke-width="1.5"/>
+<rect x="32" y="256" width="480" height="94" rx="6" fill="#217eb4" stroke="none" stroke-width="1.5"/>
+<rect x="47" y="274" width="49" height="55" rx="5" fill="#ffffff" stroke="none" stroke-width="1.5"/>
+<text x="71.5" y="314" font-size="39" font-weight="750" fill="#217eb4" text-anchor="middle">1</text>
+<text x="110" y="294" font-size="30" font-weight="700" fill="#ffffff" text-anchor="start">数据源与接入</text>
+<text x="110" y="329" font-size="19" font-weight="400" fill="#ffffff" text-anchor="start">文件 · 网页 · 外部连接器</text>
+<path d="M514,304 L534,304" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<rect x="536" y="256" width="480" height="1100" rx="6" fill="#ffffff" stroke="#168b9a75" stroke-width="1.5"/>
+<rect x="536" y="256" width="480" height="94" rx="6" fill="#168b9a" stroke="none" stroke-width="1.5"/>
+<rect x="551" y="274" width="49" height="55" rx="5" fill="#ffffff" stroke="none" stroke-width="1.5"/>
+<text x="575.5" y="314" font-size="39" font-weight="750" fill="#168b9a" text-anchor="middle">2</text>
+<text x="614" y="294" font-size="30" font-weight="700" fill="#ffffff" text-anchor="start">文档加工与索引</text>
+<text x="614" y="329" font-size="19" font-weight="400" fill="#ffffff" text-anchor="start">解析契约 · 生命周期 · 派生索引</text>
+<path d="M1018,304 L1038,304" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<rect x="1040" y="256" width="480" height="1100" rx="6" fill="#ffffff" stroke="#7a60b275" stroke-width="1.5"/>
+<rect x="1040" y="256" width="480" height="94" rx="6" fill="#7a60b2" stroke="none" stroke-width="1.5"/>
+<rect x="1055" y="274" width="49" height="55" rx="5" fill="#ffffff" stroke="none" stroke-width="1.5"/>
+<text x="1079.5" y="314" font-size="39" font-weight="750" fill="#7a60b2" text-anchor="middle">3</text>
+<text x="1118" y="294" font-size="30" font-weight="700" fill="#ffffff" text-anchor="start">检索与生成</text>
+<text x="1118" y="329" font-size="19" font-weight="400" fill="#ffffff" text-anchor="start">多路召回 · 排序 · 有据回答</text>
+<path d="M1522,304 L1542,304" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<rect x="1544" y="256" width="480" height="1100" rx="6" fill="#ffffff" stroke="#42864775" stroke-width="1.5"/>
+<rect x="1544" y="256" width="480" height="94" rx="6" fill="#428647" stroke="none" stroke-width="1.5"/>
+<rect x="1559" y="274" width="49" height="55" rx="5" fill="#ffffff" stroke="none" stroke-width="1.5"/>
+<text x="1583.5" y="314" font-size="39" font-weight="750" fill="#428647" text-anchor="middle">4</text>
+<text x="1622" y="294" font-size="30" font-weight="700" fill="#ffffff" text-anchor="start">应用与 Agent</text>
+<text x="1622" y="329" font-size="19" font-weight="400" fill="#ffffff" text-anchor="start">管理台 · 员工入口 · REST / MCP</text>
+<path d="M2026,304 L2046,304" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<rect x="2048" y="256" width="480" height="1100" rx="6" fill="#ffffff" stroke="#df841c75" stroke-width="1.5"/>
+<rect x="2048" y="256" width="480" height="94" rx="6" fill="#df841c" stroke="none" stroke-width="1.5"/>
+<rect x="2063" y="274" width="49" height="55" rx="5" fill="#ffffff" stroke="none" stroke-width="1.5"/>
+<text x="2087.5" y="314" font-size="39" font-weight="750" fill="#df841c" text-anchor="middle">5</text>
+<text x="2126" y="294" font-size="30" font-weight="700" fill="#ffffff" text-anchor="start">质量与运营</text>
+<text x="2126" y="329" font-size="19" font-weight="400" fill="#ffffff" text-anchor="start">评测发布 · 问题回归 · 成本观测</text>
+<g data-card="文件与会话资料" data-left="50" data-right="494" data-top="366" data-bottom="592">
+<rect x="50" y="366" width="444" height="226" rx="6" fill="#f0f8fd" stroke="#217eb455" stroke-width="1.5"/>
+<rect x="50" y="366" width="444" height="51" rx="6" fill="#217eb412" stroke="none" stroke-width="1.5"/>
+<g transform="translate(66 376) scale(0.83)" fill="none" stroke="#217eb4" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M5 2h15l7 7v23H5z M20 2v8h7 M10 16h12 M10 22h12 M10 28h8"/>
+</g>
+<text x="105" y="400" font-size="23" font-weight="700" fill="#163365" text-anchor="start">文件与会话资料</text>
+<text x="68" y="450" font-size="19" font-weight="400" fill="#163365" text-anchor="start">PDF / DOCX / TXT / Markdown / SQL</text>
+<text x="68" y="481" font-size="19" font-weight="400" fill="#163365" text-anchor="start">XLSX / CSV / HTML · 常见图片</text>
+<text x="68" y="512" font-size="19" font-weight="400" fill="#163365" text-anchor="start">聊天记录导入与字段映射</text>
+<text x="68" y="543" font-size="19" font-weight="400" fill="#163365" text-anchor="start">原件、图片、解析产物统一留存</text>
+<text x="68" y="575" font-size="16" font-weight="500" fill="#526782" text-anchor="start">文件上传包含扩展名、大小与内容校验</text>
+</g>
+<g data-card="网页来源" data-left="50" data-right="494" data-top="608" data-bottom="826">
+<rect x="50" y="608" width="444" height="218" rx="6" fill="#f0f8fd" stroke="#217eb455" stroke-width="1.5"/>
+<rect x="50" y="608" width="444" height="51" rx="6" fill="#217eb412" stroke="none" stroke-width="1.5"/>
+<g transform="translate(66 618) scale(0.83)" fill="none" stroke="#217eb4" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M8 28C-2 28-2 13 8 13 8-1 28-1 28 13c12 0 12 15 1 15z"/>
+</g>
+<text x="105" y="642" font-size="23" font-weight="700" fill="#163365" text-anchor="start">网页来源</text>
+<text x="68" y="692" font-size="19" font-weight="400" fill="#163365" text-anchor="start">URL 登记 → 抓取 → 普通文档入库</text>
+<text x="68" y="723" font-size="19" font-weight="400" fill="#163365" text-anchor="start">静态 HTML / 可选浏览器渲染</text>
+<text x="68" y="754" font-size="19" font-weight="400" fill="#163365" text-anchor="start">登录站点凭据与增量内容识别</text>
+<text x="68" y="785" font-size="19" font-weight="400" fill="#163365" text-anchor="start">手动或定时同步 · 明确失败状态</text>
+</g>
+<g data-card="外部数据源连接器" data-left="50" data-right="494" data-top="842" data-bottom="1066">
+<rect x="50" y="842" width="444" height="224" rx="6" fill="#f0f8fd" stroke="#217eb455" stroke-width="1.5"/>
+<rect x="50" y="842" width="444" height="51" rx="6" fill="#217eb412" stroke="none" stroke-width="1.5"/>
+<g transform="translate(66 852) scale(0.83)" fill="none" stroke="#217eb4" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M7 9l18 15 M8 27L25 9"/><circle cx="6" cy="6" r="5"/><circle cx="27" cy="6" r="5"/><circle cx="6" cy="29" r="5"/><circle cx="27" cy="28" r="5"/>
+</g>
+<text x="105" y="876" font-size="23" font-weight="700" fill="#163365" text-anchor="start">外部数据源连接器</text>
+<text x="68" y="926" font-size="19" font-weight="400" fill="#163365" text-anchor="start">S3 / OSS 对象存储</text>
+<text x="68" y="957" font-size="19" font-weight="400" fill="#163365" text-anchor="start">Confluence Cloud 页面与版本</text>
+<text x="68" y="988" font-size="19" font-weight="400" fill="#163365" text-anchor="start">对象清单 → 增量同步 → 文档版本</text>
+<text x="68" y="1019" font-size="19" font-weight="400" fill="#163365" text-anchor="start">失败项筛选、原因查看与定向重试</text>
+<text x="68" y="1049" font-size="16" font-weight="500" fill="#526782" text-anchor="start">失败重试复用入库链；保留已完成逐项结果</text>
+</g>
+<g data-card="来源健康与知识待办" data-left="50" data-right="494" data-top="1082" data-bottom="1334">
+<rect x="50" y="1082" width="444" height="252" rx="6" fill="#f0f8fd" stroke="#217eb455" stroke-width="1.5"/>
+<rect x="50" y="1082" width="444" height="51" rx="6" fill="#217eb412" stroke="none" stroke-width="1.5"/>
+<g transform="translate(66 1092) scale(0.83)" fill="none" stroke="#217eb4" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M3 2v30h28 M9 25V17h4v8 M18 25V10h4v15 M27 25V4h4v21"/>
+</g>
+<text x="105" y="1116" font-size="23" font-weight="700" fill="#163365" text-anchor="start">来源健康与知识待办</text>
+<text x="68" y="1166" font-size="19" font-weight="400" fill="#163365" text-anchor="start">区分最近检查 / 完整成功 / 内容变化</text>
+<text x="68" y="1197" font-size="19" font-weight="400" fill="#163365" text-anchor="start">文档待确认 / 待审核</text>
+<text x="68" y="1228" font-size="19" font-weight="400" fill="#163365" text-anchor="start">网页失败 / 外部来源需关注</text>
+<text x="68" y="1259" font-size="19" font-weight="400" fill="#163365" text-anchor="start">首页聚合 → 带筛选进入处理页</text>
+<text x="68" y="1290" font-size="19" font-weight="400" fill="#163365" text-anchor="start">授权知识库范围内聚合与最近访问</text>
+<text x="68" y="1317" font-size="16" font-weight="500" fill="#526782" text-anchor="start">来源同步完成与文档索引就绪分别展示</text>
+</g>
+<g data-card="解析服务 · 二选一部署" data-left="554" data-right="998" data-top="366" data-bottom="592">
+<rect x="554" y="366" width="444" height="226" rx="6" fill="#effafb" stroke="#168b9a55" stroke-width="1.5"/>
+<rect x="554" y="366" width="444" height="51" rx="6" fill="#168b9a12" stroke="none" stroke-width="1.5"/>
+<g transform="translate(570 376) scale(0.83)" fill="none" stroke="#168b9a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M11 7L2 17l9 10 M23 7l9 10-9 10 M20 3l-8 29"/>
+</g>
+<text x="609" y="400" font-size="23" font-weight="700" fill="#163365" text-anchor="start">解析服务 · 二选一部署</text>
+<text x="572" y="450" font-size="18" font-weight="400" fill="#163365" text-anchor="start">Java 17 / Spring Boot / PDFBox / POI</text>
+<text x="572" y="481" font-size="18" font-weight="400" fill="#163365" text-anchor="start">Python 3.11 / FastAPI / PyMuPDF</text>
+<text x="572" y="512" font-size="18" font-weight="400" fill="#163365" text-anchor="start">HTTP :20001 → Markdown / 页 / 图片</text>
+<text x="572" y="543" font-size="18" font-weight="400" fill="#163365" text-anchor="start">共用解析契约 · 可选本地 OCR</text>
+<text x="572" y="575" font-size="16" font-weight="500" fill="#526782" text-anchor="start">kb-rag-parse-java / kb-rag-parser；不调用大模型</text>
+</g>
+<g data-card="内容加工管线" data-left="554" data-right="998" data-top="608" data-bottom="826">
+<rect x="554" y="608" width="444" height="218" rx="6" fill="#effafb" stroke="#168b9a55" stroke-width="1.5"/>
+<rect x="554" y="608" width="444" height="51" rx="6" fill="#168b9a12" stroke="none" stroke-width="1.5"/>
+<g transform="translate(570 618) scale(0.83)" fill="none" stroke="#168b9a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M7 9l18 15 M8 27L25 9"/><circle cx="6" cy="6" r="5"/><circle cx="27" cy="6" r="5"/><circle cx="6" cy="29" r="5"/><circle cx="27" cy="28" r="5"/>
+</g>
+<text x="609" y="642" font-size="23" font-weight="700" fill="#163365" text-anchor="start">内容加工管线</text>
+<text x="572" y="692" font-size="19" font-weight="400" fill="#163365" text-anchor="start">清洗 / 脱敏 → 图片 VLM 文本代理</text>
+<text x="572" y="723" font-size="19" font-weight="400" fill="#163365" text-anchor="start">解析预览与人工确认（按库配置）</text>
+<text x="572" y="754" font-size="19" font-weight="400" fill="#163365" text-anchor="start">策略切分 → 父子分片 / 聊天滑窗</text>
+<text x="572" y="785" font-size="19" font-weight="400" fill="#163365" text-anchor="start">文本 / 多模态嵌入；缺 Key 跳过</text>
+</g>
+<g data-card="文档与版本生命周期" data-left="554" data-right="998" data-top="842" data-bottom="1066">
+<rect x="554" y="842" width="444" height="224" rx="6" fill="#effafb" stroke="#168b9a55" stroke-width="1.5"/>
+<rect x="554" y="842" width="444" height="51" rx="6" fill="#168b9a12" stroke="none" stroke-width="1.5"/>
+<g transform="translate(570 852) scale(0.83)" fill="none" stroke="#168b9a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M5 2h15l7 7v23H5z M20 2v8h7 M10 16h12 M10 22h12 M10 28h8"/>
+</g>
+<text x="609" y="876" font-size="23" font-weight="700" fill="#163365" text-anchor="start">文档与版本生命周期</text>
+<text x="572" y="926" font-size="19" font-weight="400" fill="#163365" text-anchor="start">版本登记 · 指纹复用 · 归档与回滚</text>
+<text x="572" y="957" font-size="19" font-weight="400" fill="#163365" text-anchor="start">草稿 → 待审 → 发布或驳回</text>
+<text x="572" y="988" font-size="19" font-weight="400" fill="#163365" text-anchor="start">生效 / 过期控制 · 回收站恢复</text>
+<text x="572" y="1019" font-size="19" font-weight="400" fill="#163365" text-anchor="start">上传批次、失败定位与手动重试</text>
+<text x="572" y="1049" font-size="16" font-weight="500" fill="#526782" text-anchor="start">解析、审核、索引状态各自有明确语义</text>
+</g>
+<g data-card="事实源与索引一致性" data-left="554" data-right="998" data-top="1082" data-bottom="1334">
+<rect x="554" y="1082" width="444" height="252" rx="6" fill="#effafb" stroke="#168b9a55" stroke-width="1.5"/>
+<rect x="554" y="1082" width="444" height="51" rx="6" fill="#168b9a12" stroke="none" stroke-width="1.5"/>
+<g transform="translate(570 1092) scale(0.83)" fill="none" stroke="#168b9a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<ellipse cx="16" cy="6" rx="13" ry="5"/><path d="M3 6v23c0 7 26 7 26 0V6 M3 17c0 7 26 7 26 0"/>
+</g>
+<text x="609" y="1116" font-size="23" font-weight="700" fill="#163365" text-anchor="start">事实源与索引一致性</text>
+<text x="572" y="1166" font-size="19" font-weight="400" fill="#163365" text-anchor="start">分片先落 MySQL 事实源</text>
+<text x="572" y="1197" font-size="19" font-weight="400" fill="#163365" text-anchor="start">写入 ES；full 模式追加 Qdrant</text>
+<text x="572" y="1228" font-size="19" font-weight="400" fill="#163365" text-anchor="start">同步状态 → 定时补偿 / 索引重建</text>
+<text x="572" y="1259" font-size="19" font-weight="400" fill="#163365" text-anchor="start">索引就绪后激活文档版本</text>
+<text x="572" y="1290" font-size="19" font-weight="400" fill="#163365" text-anchor="start">图与多模态索引按配置生成</text>
+<text x="572" y="1317" font-size="16" font-weight="500" fill="#526782" text-anchor="start">原文件在 MinIO；检索引擎承载派生数据</text>
+</g>
+<g data-card="查询准备与知识库路由" data-left="1058" data-right="1502" data-top="366" data-bottom="592">
+<rect x="1058" y="366" width="444" height="226" rx="6" fill="#f6f2fc" stroke="#7a60b255" stroke-width="1.5"/>
+<rect x="1058" y="366" width="444" height="51" rx="6" fill="#7a60b212" stroke="none" stroke-width="1.5"/>
+<g transform="translate(1074 376) scale(0.83)" fill="none" stroke="#7a60b2" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<circle cx="14" cy="14" r="11"/><path d="M23 23l10 10"/>
+</g>
+<text x="1113" y="400" font-size="23" font-weight="700" fill="#163365" text-anchor="start">查询准备与知识库路由</text>
+<text x="1076" y="450" font-size="19" font-weight="400" fill="#163365" text-anchor="start">文字 / 图片 query → 图像分路</text>
+<text x="1076" y="481" font-size="19" font-weight="400" fill="#163365" text-anchor="start">Query 改写（可选，失败用原问题）</text>
+<text x="1076" y="512" font-size="19" font-weight="400" fill="#163365" text-anchor="start">多库路由：LLM 提议 + 白名单裁决</text>
+<text x="1076" y="543" font-size="19" font-weight="400" fill="#163365" text-anchor="start">解析实时 / 发布快照与可见版本</text>
+<text x="1076" y="575" font-size="16" font-weight="500" fill="#526782" text-anchor="start">知识库 / 文档范围、enabled 与元数据约束</text>
+</g>
+<g data-card="多路召回" data-left="1058" data-right="1502" data-top="608" data-bottom="826">
+<rect x="1058" y="608" width="444" height="218" rx="6" fill="#f6f2fc" stroke="#7a60b255" stroke-width="1.5"/>
+<rect x="1058" y="608" width="444" height="51" rx="6" fill="#7a60b212" stroke="none" stroke-width="1.5"/>
+<g transform="translate(1074 618) scale(0.83)" fill="none" stroke="#7a60b2" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M7 9l18 15 M8 27L25 9"/><circle cx="6" cy="6" r="5"/><circle cx="27" cy="6" r="5"/><circle cx="6" cy="29" r="5"/><circle cx="27" cy="28" r="5"/>
+</g>
+<text x="1113" y="642" font-size="23" font-weight="700" fill="#163365" text-anchor="start">多路召回</text>
+<text x="1076" y="692" font-size="19" font-weight="400" fill="#163365" text-anchor="start">BM25：Elasticsearch 全文检索</text>
+<text x="1076" y="723" font-size="19" font-weight="400" fill="#163365" text-anchor="start">向量：ES kNN 或 Qdrant</text>
+<text x="1076" y="754" font-size="19" font-weight="400" fill="#163365" text-anchor="start">可选：Neo4j 图召回 / 图片检索</text>
+<text x="1076" y="785" font-size="19" font-weight="400" fill="#163365" text-anchor="start">无嵌入 Key：降级为 BM25 单路</text>
+</g>
+<g data-card="融合、重排与证据装配" data-left="1058" data-right="1502" data-top="842" data-bottom="1066">
+<rect x="1058" y="842" width="444" height="224" rx="6" fill="#f6f2fc" stroke="#7a60b255" stroke-width="1.5"/>
+<rect x="1058" y="842" width="444" height="51" rx="6" fill="#7a60b212" stroke="none" stroke-width="1.5"/>
+<g transform="translate(1074 852) scale(0.83)" fill="none" stroke="#7a60b2" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M3 2v30h28 M9 25V17h4v8 M18 25V10h4v15 M27 25V4h4v21"/>
+</g>
+<text x="1113" y="876" font-size="23" font-weight="700" fill="#163365" text-anchor="start">融合、重排与证据装配</text>
+<text x="1076" y="926" font-size="19" font-weight="400" fill="#163365" text-anchor="start">库内 RRF / 加权融合 → 跨库 RRF</text>
+<text x="1076" y="957" font-size="19" font-weight="400" fill="#163365" text-anchor="start">聊天近重复归并 → rerank 重排</text>
+<text x="1076" y="988" font-size="19" font-weight="400" fill="#163365" text-anchor="start">父子归并 → 禁用内容处理</text>
+<text x="1076" y="1019" font-size="19" font-weight="400" fill="#163365" text-anchor="start">分数阈值 → top_n → 证据与诊断</text>
+<text x="1076" y="1049" font-size="16" font-weight="500" fill="#526782" text-anchor="start">degraded 原因码与 score_type 随结果返回</text>
+</g>
+<g data-card="RAG 回答与模型调用" data-left="1058" data-right="1502" data-top="1082" data-bottom="1334">
+<rect x="1058" y="1082" width="444" height="252" rx="6" fill="#f6f2fc" stroke="#7a60b255" stroke-width="1.5"/>
+<rect x="1058" y="1082" width="444" height="51" rx="6" fill="#7a60b212" stroke="none" stroke-width="1.5"/>
+<g transform="translate(1074 1092) scale(0.83)" fill="none" stroke="#7a60b2" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M5 2h15l7 7v23H5z M20 2v8h7 M10 16h12 M10 22h12 M10 28h8"/>
+</g>
+<text x="1113" y="1116" font-size="23" font-weight="700" fill="#163365" text-anchor="start">RAG 回答与模型调用</text>
+<text x="1076" y="1166" font-size="19" font-weight="400" fill="#163365" text-anchor="start">检索证据 + 可读历史 → Prompt</text>
+<text x="1076" y="1197" font-size="19" font-weight="400" fill="#163365" text-anchor="start">模型生成 → 回答正文 + 引用来源</text>
+<text x="1076" y="1228" font-size="19" font-weight="400" fill="#163365" text-anchor="start">非流式响应 / SSE 流式输出</text>
+<text x="1076" y="1259" font-size="19" font-weight="400" fill="#163365" text-anchor="start">原文版本、引用片段与真实页码</text>
+<text x="1076" y="1290" font-size="19" font-weight="400" fill="#163365" text-anchor="start">零 Key 可检索；生成需要对话模型</text>
+<text x="1076" y="1317" font-size="16" font-weight="500" fill="#526782" text-anchor="start">模型能力：嵌入、重排、对话与视觉</text>
+</g>
+<g data-card="React 管理台与员工入口" data-left="1562" data-right="2006" data-top="366" data-bottom="592">
+<rect x="1562" y="366" width="444" height="226" rx="6" fill="#f1f8f0" stroke="#42864755" stroke-width="1.5"/>
+<rect x="1562" y="366" width="444" height="51" rx="6" fill="#42864712" stroke="none" stroke-width="1.5"/>
+<g transform="translate(1578 376) scale(0.83)" fill="none" stroke="#428647" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M11 7L2 17l9 10 M23 7l9 10-9 10 M20 3l-8 29"/>
+</g>
+<text x="1617" y="400" font-size="23" font-weight="700" fill="#163365" text-anchor="start">React 管理台与员工入口</text>
+<text x="1580" y="450" font-size="19" font-weight="400" fill="#163365" text-anchor="start">/home：知识待办 / 最近访问</text>
+<text x="1580" y="481" font-size="19" font-weight="400" fill="#163365" text-anchor="start">管理：文档 / 应用 / 评测 / 记忆</text>
+<text x="1580" y="512" font-size="19" font-weight="400" fill="#163365" text-anchor="start">/workspace：可用应用与本人会话</text>
+<text x="1580" y="543" font-size="19" font-weight="400" fill="#163365" text-anchor="start">角色权限入口 · 多主题与响应式</text>
+<text x="1580" y="575" font-size="16" font-weight="500" fill="#526782" text-anchor="start">React 18 + TypeScript + Ant Design 5；:20002</text>
+</g>
+<g data-card="应用版本与发布" data-left="1562" data-right="2006" data-top="608" data-bottom="826">
+<rect x="1562" y="608" width="444" height="218" rx="6" fill="#f1f8f0" stroke="#42864755" stroke-width="1.5"/>
+<rect x="1562" y="608" width="444" height="51" rx="6" fill="#42864712" stroke="none" stroke-width="1.5"/>
+<g transform="translate(1578 618) scale(0.83)" fill="none" stroke="#428647" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M7 9l18 15 M8 27L25 9"/><circle cx="6" cy="6" r="5"/><circle cx="27" cy="6" r="5"/><circle cx="6" cy="29" r="5"/><circle cx="27" cy="28" r="5"/>
+</g>
+<text x="1617" y="642" font-size="23" font-weight="700" fill="#163365" text-anchor="start">应用版本与发布</text>
+<text x="1580" y="692" font-size="18.5" font-weight="400" fill="#163365" text-anchor="start">草稿 → 测试 → 发布门禁</text>
+<text x="1580" y="723" font-size="18.5" font-weight="400" fill="#163365" text-anchor="start">配置比较 · 检索 / 答案评测</text>
+<text x="1580" y="754" font-size="18.5" font-weight="400" fill="#163365" text-anchor="start">冻结索引与版本可见集 → RELEASED</text>
+<text x="1580" y="785" font-size="18.5" font-weight="400" fill="#163365" text-anchor="start">正式版本唯一 · 历史快照回滚</text>
+</g>
+<g data-card="员工持久问答运行" data-left="1562" data-right="2006" data-top="842" data-bottom="1066">
+<rect x="1562" y="842" width="444" height="224" rx="6" fill="#f1f8f0" stroke="#42864755" stroke-width="1.5"/>
+<rect x="1562" y="842" width="444" height="51" rx="6" fill="#42864712" stroke="none" stroke-width="1.5"/>
+<g transform="translate(1578 852) scale(0.83)" fill="none" stroke="#428647" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M5 2h15l7 7v23H5z M20 2v8h7 M10 16h12 M10 22h12 M10 28h8"/>
+</g>
+<text x="1617" y="876" font-size="23" font-weight="700" fill="#163365" text-anchor="start">员工持久问答运行</text>
+<text x="1580" y="926" font-size="19" font-weight="400" fill="#163365" text-anchor="start">app:use + 应用范围 + 知识库权限</text>
+<text x="1580" y="957" font-size="19" font-weight="400" fill="#163365" text-anchor="start">request_id 幂等 → 会话 / 运行账本</text>
+<text x="1580" y="988" font-size="19" font-weight="400" fill="#163365" text-anchor="start">检索生成 → 正文检查点 → 持久终态</text>
+<text x="1580" y="1019" font-size="19" font-weight="400" fill="#163365" text-anchor="start">GET / SSE 重连读取同一运行</text>
+<text x="1580" y="1049" font-size="16" font-weight="500" fill="#526782" text-anchor="start">明确停止才取消；读取与生成期间重验权限</text>
+</g>
+<g data-card="Agent 记忆与开放接口" data-left="1562" data-right="2006" data-top="1082" data-bottom="1334">
+<rect x="1562" y="1082" width="444" height="252" rx="6" fill="#f1f8f0" stroke="#42864755" stroke-width="1.5"/>
+<rect x="1562" y="1082" width="444" height="51" rx="6" fill="#42864712" stroke="none" stroke-width="1.5"/>
+<g transform="translate(1578 1092) scale(0.83)" fill="none" stroke="#428647" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M7 9l18 15 M8 27L25 9"/><circle cx="6" cy="6" r="5"/><circle cx="27" cy="6" r="5"/><circle cx="6" cy="29" r="5"/><circle cx="27" cy="28" r="5"/>
+</g>
+<text x="1617" y="1116" font-size="23" font-weight="700" fill="#163365" text-anchor="start">Agent 记忆与开放接口</text>
+<text x="1580" y="1166" font-size="18" font-weight="400" fill="#163365" text-anchor="start">知识库 API Key：search / chat / MCP</text>
+<text x="1580" y="1197" font-size="18" font-weight="400" fill="#163365" text-anchor="start">Memory Key：独立 REST / MCP 入口</text>
+<text x="1580" y="1228" font-size="18" font-weight="400" fill="#163365" text-anchor="start">messages 抽取 / custom_content 直写</text>
+<text x="1580" y="1259" font-size="18" font-weight="400" fill="#163365" text-anchor="start">长期记忆 + 画像；kNN / BM25 检索</text>
+<text x="1580" y="1290" font-size="18" font-weight="400" fill="#163365" text-anchor="start">library_id + user_id + 有效期隔离</text>
+<text x="1580" y="1317" font-size="16" font-weight="500" fill="#526782" text-anchor="start">MCP 工具复用业务服务；兼容新旧协议</text>
+</g>
+<g data-card="评测与发布门禁" data-left="2066" data-right="2510" data-top="366" data-bottom="592">
+<rect x="2066" y="366" width="444" height="226" rx="6" fill="#fff7ed" stroke="#df841c55" stroke-width="1.5"/>
+<rect x="2066" y="366" width="444" height="51" rx="6" fill="#df841c12" stroke="none" stroke-width="1.5"/>
+<g transform="translate(2082 376) scale(0.83)" fill="none" stroke="#df841c" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M3 2v30h28 M9 25V17h4v8 M18 25V10h4v15 M27 25V4h4v21"/>
+</g>
+<text x="2121" y="400" font-size="23" font-weight="700" fill="#163365" text-anchor="start">评测与发布门禁</text>
+<text x="2084" y="450" font-size="19" font-weight="400" fill="#163365" text-anchor="start">检索：Recall / Precision / MRR</text>
+<text x="2084" y="481" font-size="19" font-weight="400" fill="#163365" text-anchor="start">Hit Rate / NDCG · 评测矩阵与报告</text>
+<text x="2084" y="512" font-size="19" font-weight="400" fill="#163365" text-anchor="start">答案：正确性 / 忠实性 / 完整性</text>
+<text x="2084" y="543" font-size="19" font-weight="400" fill="#163365" text-anchor="start">引用正确性 / 完整性 · 期望拒答</text>
+<text x="2084" y="575" font-size="16" font-weight="500" fill="#526782" text-anchor="start">候选与当前正式版双跑；三态裁决、强制留痕</text>
+</g>
+<g data-card="知识质量问题回归" data-left="2066" data-right="2510" data-top="608" data-bottom="826">
+<rect x="2066" y="608" width="444" height="218" rx="6" fill="#fff7ed" stroke="#df841c55" stroke-width="1.5"/>
+<rect x="2066" y="608" width="444" height="51" rx="6" fill="#df841c12" stroke="none" stroke-width="1.5"/>
+<g transform="translate(2082 618) scale(0.83)" fill="none" stroke="#df841c" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M5 2h15l7 7v23H5z M20 2v8h7 M10 16h12 M10 22h12 M10 28h8"/>
+</g>
+<text x="2121" y="642" font-size="23" font-weight="700" fill="#163365" text-anchor="start">知识质量问题回归</text>
+<text x="2084" y="692" font-size="18.5" font-weight="400" fill="#163365" text-anchor="start">BAD 检索反馈 / 零命中 → 建问题</text>
+<text x="2084" y="723" font-size="18.5" font-weight="400" fill="#163365" text-anchor="start">领取 → 标准答案与正确证据</text>
+<text x="2084" y="754" font-size="18.5" font-weight="400" fill="#163365" text-anchor="start">实际评测 → 人工核验 → 确认解决</text>
+<text x="2084" y="785" font-size="18.5" font-weight="400" fill="#163365" text-anchor="start">处理记录、修订冲突与重新打开</text>
+<text x="2084" y="809" font-size="16" font-weight="500" fill="#526782" text-anchor="start">员工答案评价另存，尚未自动转为质量问题</text>
+</g>
+<g data-card="模型用量与租户配额" data-left="2066" data-right="2510" data-top="842" data-bottom="1066">
+<rect x="2066" y="842" width="444" height="224" rx="6" fill="#fff7ed" stroke="#df841c55" stroke-width="1.5"/>
+<rect x="2066" y="842" width="444" height="51" rx="6" fill="#df841c12" stroke="none" stroke-width="1.5"/>
+<g transform="translate(2082 852) scale(0.83)" fill="none" stroke="#df841c" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M3 2v30h28 M9 25V17h4v8 M18 25V10h4v15 M27 25V4h4v21"/>
+</g>
+<text x="2121" y="876" font-size="23" font-weight="700" fill="#163365" text-anchor="start">模型用量与租户配额</text>
+<text x="2084" y="926" font-size="19" font-weight="400" fill="#163365" text-anchor="start">出站调用前原子预占 Token 配额</text>
+<text x="2084" y="957" font-size="19" font-weight="400" fill="#163365" text-anchor="start">真实 / 估算用量结算 · 价格快照</text>
+<text x="2084" y="988" font-size="19" font-weight="400" fill="#163365" text-anchor="start">租户月配额 · 按模型与用途查看</text>
+<text x="2084" y="1019" font-size="19" font-weight="400" fill="#163365" text-anchor="start">超时预占补偿与失败诊断</text>
+<text x="2084" y="1049" font-size="16" font-weight="500" fill="#526782" text-anchor="start">模型请求经过统一计量与用量恢复逻辑</text>
+</g>
+<g data-card="运行观测与恢复" data-left="2066" data-right="2510" data-top="1082" data-bottom="1334">
+<rect x="2066" y="1082" width="444" height="252" rx="6" fill="#fff7ed" stroke="#df841c55" stroke-width="1.5"/>
+<rect x="2066" y="1082" width="444" height="51" rx="6" fill="#df841c12" stroke="none" stroke-width="1.5"/>
+<g transform="translate(2082 1092) scale(0.83)" fill="none" stroke="#df841c" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M16 1L29 7v11c0 8-13 16-13 16S3 26 3 18V7z M9 17l5 5 10-11"/>
+</g>
+<text x="2121" y="1116" font-size="23" font-weight="700" fill="#163365" text-anchor="start">运行观测与恢复</text>
+<text x="2084" y="1166" font-size="19" font-weight="400" fill="#163365" text-anchor="start">检索 / 问答诊断 · 审计与告警</text>
+<text x="2084" y="1197" font-size="19" font-weight="400" fill="#163365" text-anchor="start">Prometheus 指标 · 任务积压</text>
+<text x="2084" y="1228" font-size="19" font-weight="400" fill="#163365" text-anchor="start">索引补偿、重建与来源失败重试</text>
+<text x="2084" y="1259" font-size="19" font-weight="400" fill="#163365" text-anchor="start">员工运行中断标记与过期扫描</text>
+<text x="2084" y="1290" font-size="19" font-weight="400" fill="#163365" text-anchor="start">备份恢复 · Flyway 增量迁移</text>
+<text x="2084" y="1317" font-size="16" font-weight="500" fill="#526782" text-anchor="start">后台执行采用单实例基线；不自动重放问答</text>
+</g>
+<rect x="32" y="1372" width="1640" height="72" rx="6" fill="#edf6ff" stroke="#b9d3e9" stroke-width="1.5"/>
+<g transform="translate(52 1390) scale(1.1)" fill="none" stroke="#2371ad" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M7 9l18 15 M8 27L25 9"/><circle cx="6" cy="6" r="5"/><circle cx="27" cy="6" r="5"/><circle cx="6" cy="29" r="5"/><circle cx="27" cy="28" r="5"/>
+</g>
+<text x="107" y="1401" font-size="23" font-weight="700" fill="#163365" text-anchor="start">模型 Provider（主服务统一调用）</text>
+<text x="107" y="1429" font-size="20" font-weight="400" fill="#163365" text-anchor="start">DashScope：文本 / 多模态嵌入 · rerank · Chat / Judge · VLM；可配置模型与端点</text>
+<rect x="1688" y="1372" width="840" height="72" rx="6" fill="#f0f8f5" stroke="#b9dbca" stroke-width="1.5"/>
+<text x="1708" y="1401" font-size="23" font-weight="700" fill="#163365" text-anchor="start">管理与业务端口隔离</text>
+<text x="1708" y="1429" font-size="20" font-weight="400" fill="#163365" text-anchor="start">业务 :20000  |  管理 :20003（默认 127.0.0.1）</text>
+<rect x="32" y="1460" width="2496" height="128" rx="6" fill="#fbfdff" stroke="#adbed3" stroke-width="1.5"/>
+<text x="51" y="1490" font-size="25" font-weight="700" fill="#163365" text-anchor="start">业务闭环：从一份文档到可追溯的知识服务</text>
+<rect x="51" y="1508" width="290" height="60" rx="4" fill="#ffffff" stroke="#c6d7e8" stroke-width="1.5"/>
+<rect x="60" y="1520" width="27" height="28" rx="14" fill="#2578b4" stroke="none" stroke-width="1.5"/>
+<text x="73.5" y="1541" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+<text x="97" y="1531" font-size="21" font-weight="700" fill="#163365" text-anchor="start">接入资料</text>
+<text x="97" y="1555" font-size="16.5" font-weight="400" fill="#526782" text-anchor="start">上传 / 来源同步</text>
+<path d="M343,1539 L358,1539" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<rect x="360" y="1508" width="290" height="60" rx="4" fill="#ffffff" stroke="#c6d7e8" stroke-width="1.5"/>
+<rect x="369" y="1520" width="27" height="28" rx="14" fill="#2578b4" stroke="none" stroke-width="1.5"/>
+<text x="382.5" y="1541" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+<text x="406" y="1531" font-size="21" font-weight="700" fill="#163365" text-anchor="start">加工与索引</text>
+<text x="406" y="1555" font-size="16.5" font-weight="400" fill="#526782" text-anchor="start">解析 / 确认 / 入库</text>
+<path d="M652,1539 L667,1539" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<rect x="669" y="1508" width="290" height="60" rx="4" fill="#ffffff" stroke="#c6d7e8" stroke-width="1.5"/>
+<rect x="678" y="1520" width="27" height="28" rx="14" fill="#2578b4" stroke="none" stroke-width="1.5"/>
+<text x="691.5" y="1541" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+<text x="715" y="1531" font-size="21" font-weight="700" fill="#163365" text-anchor="start">配置应用</text>
+<text x="715" y="1555" font-size="16.5" font-weight="400" fill="#526782" text-anchor="start">知识库与检索策略</text>
+<path d="M961,1539 L976,1539" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<rect x="978" y="1508" width="290" height="60" rx="4" fill="#ffffff" stroke="#c6d7e8" stroke-width="1.5"/>
+<rect x="987" y="1520" width="27" height="28" rx="14" fill="#2578b4" stroke="none" stroke-width="1.5"/>
+<text x="1000.5" y="1541" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+<text x="1024" y="1531" font-size="21" font-weight="700" fill="#163365" text-anchor="start">评测与发布</text>
+<text x="1024" y="1555" font-size="16.5" font-weight="400" fill="#526782" text-anchor="start">门禁 / 冻结快照</text>
+<path d="M1270,1539 L1285,1539" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<rect x="1287" y="1508" width="290" height="60" rx="4" fill="#ffffff" stroke="#c6d7e8" stroke-width="1.5"/>
+<rect x="1296" y="1520" width="27" height="28" rx="14" fill="#2578b4" stroke="none" stroke-width="1.5"/>
+<text x="1309.5" y="1541" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+<text x="1333" y="1531" font-size="21" font-weight="700" fill="#163365" text-anchor="start">提供知识服务</text>
+<text x="1333" y="1555" font-size="16.5" font-weight="400" fill="#526782" text-anchor="start">员工问答 / REST / MCP</text>
+<path d="M1579,1539 L1594,1539" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<rect x="1596" y="1508" width="290" height="60" rx="4" fill="#ffffff" stroke="#c6d7e8" stroke-width="1.5"/>
+<rect x="1605" y="1520" width="27" height="28" rx="14" fill="#2578b4" stroke="none" stroke-width="1.5"/>
+<text x="1618.5" y="1541" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
+<text x="1642" y="1531" font-size="21" font-weight="700" fill="#163365" text-anchor="start">记录问题</text>
+<text x="1642" y="1555" font-size="16.5" font-weight="400" fill="#526782" text-anchor="start">检索反馈 / 零命中</text>
+<path d="M1888,1539 L1903,1539" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<rect x="1905" y="1508" width="290" height="60" rx="4" fill="#ffffff" stroke="#c6d7e8" stroke-width="1.5"/>
+<rect x="1914" y="1520" width="27" height="28" rx="14" fill="#2578b4" stroke="none" stroke-width="1.5"/>
+<text x="1927.5" y="1541" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
+<text x="1951" y="1531" font-size="21" font-weight="700" fill="#163365" text-anchor="start">纠正与回归</text>
+<text x="1951" y="1555" font-size="16.5" font-weight="400" fill="#526782" text-anchor="start">证据 / 答案 / 实测</text>
+<path d="M2197,1539 L2212,1539" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<rect x="2214" y="1508" width="290" height="60" rx="4" fill="#ffffff" stroke="#c6d7e8" stroke-width="1.5"/>
+<rect x="2223" y="1520" width="27" height="28" rx="14" fill="#2578b4" stroke="none" stroke-width="1.5"/>
+<text x="2236.5" y="1541" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">8</text>
+<text x="2260" y="1531" font-size="21" font-weight="700" fill="#163365" text-anchor="start">再次发布</text>
+<text x="2260" y="1555" font-size="16.5" font-weight="400" fill="#526782" text-anchor="start">人工核验 / 版本更新</text>
+<rect x="32" y="1604" width="2496" height="132" rx="6" fill="#f3f6fc" stroke="#c3cfe1" stroke-width="1.5"/>
+<g transform="translate(53 1646) scale(1.15)" fill="none" stroke="#163365" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<path d="M11 7L2 17l9 10 M23 7l9 10-9 10 M20 3l-8 29"/>
+</g>
+<text x="108" y="1646" font-size="25" font-weight="700" fill="#163365" text-anchor="start">Java 模块依赖</text>
+<text x="108" y="1676" font-size="18" font-weight="400" fill="#526782" text-anchor="start">Java 17 / Spring Boot 3</text>
+<text x="108" y="1705" font-size="17" font-weight="400" fill="#526782" text-anchor="start">箭头指向所依赖模块</text>
+<rect x="440" y="1626" width="345" height="53" rx="6" fill="#ffffff" stroke="#aebfd8" stroke-width="1.5"/>
+<text x="612.5" y="1650" font-size="22" font-weight="700" fill="#163365" text-anchor="middle">kb-api</text>
+<text x="612.5" y="1673" font-size="16.5" font-weight="400" fill="#526782" text-anchor="middle">HTTP 边界 / 唯一装配点</text>
+<rect x="829" y="1626" width="395" height="53" rx="6" fill="#ffffff" stroke="#aebfd8" stroke-width="1.5"/>
+<text x="1026.5" y="1650" font-size="22" font-weight="700" fill="#163365" text-anchor="middle">kb-app</text>
+<text x="1026.5" y="1673" font-size="16.5" font-weight="400" fill="#526782" text-anchor="middle">应用服务与业务编排</text>
+<rect x="1430" y="1626" width="420" height="87" rx="6" fill="#ffffff" stroke="#aebfd8" stroke-width="1.5"/>
+<text x="1640.0" y="1650" font-size="22" font-weight="700" fill="#163365" text-anchor="middle">kb-domain</text>
+<text x="1640.0" y="1673" font-size="16.5" font-weight="400" fill="#526782" text-anchor="middle">实体 / Mapper / 算法 / 出站端口</text>
+<rect x="1955" y="1626" width="510" height="87" rx="6" fill="#ffffff" stroke="#aebfd8" stroke-width="1.5"/>
+<text x="2210.0" y="1650" font-size="22" font-weight="700" fill="#163365" text-anchor="middle">kb-common</text>
+<text x="2210.0" y="1673" font-size="16.5" font-weight="400" fill="#526782" text-anchor="middle">统一结果 / 错误码 / JSON / 工具</text>
+<rect x="829" y="1691" width="395" height="32" rx="6" fill="#e6effb" stroke="#aebfd8" stroke-width="1.5"/>
+<text x="1026.5" y="1713" font-size="16.5" font-weight="600" fill="#163365" text-anchor="middle">kb-infrastructure · 存储 / 引擎 / Provider 实现</text>
+<path d="M787,1652 L824,1652" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<path d="M1226,1652 L1425,1652" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<path d="M1852,1669 L1950,1669" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<path d="M613 1681 V1707 H824" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<path d="M1226 1707 H1327 V1690 H1425" fill="none" stroke="#1989bf" stroke-width="2.5" marker-end="url(#blue)"/>
+<rect x="32" y="1752" width="2496" height="116" rx="6" fill="#edf9fc" stroke="#afd2de" stroke-width="1.5"/>
+<text x="52" y="1782" font-size="25" font-weight="700" fill="#163365" text-anchor="start">存储与部署</text>
+<text x="52" y="1814" font-size="18" font-weight="400" fill="#526782" text-anchor="start">Docker Compose</text>
+<text x="52" y="1843" font-size="17" font-weight="400" fill="#526782" text-anchor="start">lite / full + 可选组件</text>
+<rect x="329" y="1771" width="347" height="78" rx="6" fill="#ffffff" stroke="#bedde5" stroke-width="1.5"/>
+<g transform="translate(341 1790) scale(0.78)" fill="none" stroke="#317a94" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<ellipse cx="16" cy="6" rx="13" ry="5"/><path d="M3 6v23c0 7 26 7 26 0V6 M3 17c0 7 26 7 26 0"/>
+</g>
+<text x="379" y="1801" font-size="21" font-weight="700" fill="#163365" text-anchor="start">MySQL</text>
+<text x="379" y="1830" font-size="17" font-weight="400" fill="#526782" text-anchor="start">业务事实 / 权限 / 账本</text>
+<rect x="692" y="1771" width="347" height="78" rx="6" fill="#ffffff" stroke="#bedde5" stroke-width="1.5"/>
+<g transform="translate(704 1790) scale(0.78)" fill="none" stroke="#317a94" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<ellipse cx="16" cy="6" rx="13" ry="5"/><path d="M3 6v23c0 7 26 7 26 0V6 M3 17c0 7 26 7 26 0"/>
+</g>
+<text x="742" y="1801" font-size="21" font-weight="700" fill="#163365" text-anchor="start">MinIO</text>
+<text x="742" y="1830" font-size="17" font-weight="400" fill="#526782" text-anchor="start">原件 / 解析产物 / 归档</text>
+<rect x="1055" y="1771" width="347" height="78" rx="6" fill="#ffffff" stroke="#bedde5" stroke-width="1.5"/>
+<g transform="translate(1067 1790) scale(0.78)" fill="none" stroke="#317a94" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<ellipse cx="16" cy="6" rx="13" ry="5"/><path d="M3 6v23c0 7 26 7 26 0V6 M3 17c0 7 26 7 26 0"/>
+</g>
+<text x="1105" y="1801" font-size="21" font-weight="700" fill="#163365" text-anchor="start">Elasticsearch</text>
+<text x="1105" y="1830" font-size="17" font-weight="400" fill="#526782" text-anchor="start">BM25；lite 兼向量</text>
+<rect x="1418" y="1771" width="347" height="78" rx="6" fill="#ffffff" stroke="#bedde5" stroke-width="1.5"/>
+<g transform="translate(1430 1790) scale(0.78)" fill="none" stroke="#317a94" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<ellipse cx="16" cy="6" rx="13" ry="5"/><path d="M3 6v23c0 7 26 7 26 0V6 M3 17c0 7 26 7 26 0"/>
+</g>
+<text x="1468" y="1801" font-size="21" font-weight="700" fill="#163365" text-anchor="start">Qdrant · full</text>
+<text x="1468" y="1830" font-size="17" font-weight="400" fill="#526782" text-anchor="start">知识库向量索引</text>
+<rect x="1781" y="1771" width="347" height="78" rx="6" fill="#ffffff" stroke="#bedde5" stroke-width="1.5"/>
+<g transform="translate(1793 1790) scale(0.78)" fill="none" stroke="#317a94" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<ellipse cx="16" cy="6" rx="13" ry="5"/><path d="M3 6v23c0 7 26 7 26 0V6 M3 17c0 7 26 7 26 0"/>
+</g>
+<text x="1831" y="1801" font-size="21" font-weight="700" fill="#163365" text-anchor="start">Neo4j · 可选</text>
+<text x="1831" y="1830" font-size="17" font-weight="400" fill="#526782" text-anchor="start">实体关系 / 图召回</text>
+<rect x="2144" y="1771" width="347" height="78" rx="6" fill="#ffffff" stroke="#bedde5" stroke-width="1.5"/>
+<g transform="translate(2156 1790) scale(0.78)" fill="none" stroke="#317a94" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+<ellipse cx="16" cy="6" rx="13" ry="5"/><path d="M3 6v23c0 7 26 7 26 0V6 M3 17c0 7 26 7 26 0"/>
+</g>
+<text x="2194" y="1801" font-size="21" font-weight="700" fill="#163365" text-anchor="start">Redis · 可选</text>
+<text x="2194" y="1830" font-size="17" font-weight="400" fill="#526782" text-anchor="start">共享会话 + 权限缓存</text>
+<text x="38" y="1901" font-size="18" font-weight="450" fill="#526782" text-anchor="start">部署模板 KB_CACHE_PROVIDER=local：MySQL 会话 + 进程内权限缓存；Redis 共享状态不等于后台任务接管。</text>
+<text x="2522" y="1901" font-size="18" font-weight="500" fill="#526782" text-anchor="end">github.com/liulangjietou/kb-rag  ·  SVG 源图 / PNG 高清导出</text>
+</g></svg>
