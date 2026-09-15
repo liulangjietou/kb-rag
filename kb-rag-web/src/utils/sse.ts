@@ -1,60 +1,72 @@
 // Author: owlzhangfq@gmail.com
 
-/** One parsed Server-Sent Event frame: an optional named event type plus its raw data payload. */
+/** 一条完整 SSE 事件，包含事件名和原始数据。 */
 export interface SseEvent {
   event: string;
   data: string;
 }
 
 /**
- * Reads a fetch Response body as an SSE stream and invokes onEvent for every complete frame as
- * soon as it arrives (M4c-CONTRACTS.md section 3 external chat framing: message_delta* ->
- * references -> done -> 或 error). Frames are separated by a blank line; each frame may carry one
- * `event:` line (defaults to 'message' per the SSE spec when omitted) and one or more `data:`
- * lines joined by \n.
+ * 按 SSE 协议读取完整事件，支持 LF、CRLF、CR 及跨网络块的 UTF-8 字符。
+ * 消费方返回 false 时主动结束读取；EOF 未以空行结束的事件必须丢弃，业务终态由调用方判断。
  */
-export async function consumeSse(response: Response, onEvent: (evt: SseEvent) => void): Promise<void> {
+export async function consumeSse(response: Response, onEvent: (evt: SseEvent) => unknown): Promise<void> {
   if (!response.body) {
     throw new Error('SSE response has no body');
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-    buffer += decoder.decode(value, { stream: true });
-    let separatorIndex = buffer.indexOf('\n\n');
-    while (separatorIndex !== -1) {
-      const rawFrame = buffer.slice(0, separatorIndex);
-      buffer = buffer.slice(separatorIndex + 2);
-      const frame = parseFrame(rawFrame);
-      if (frame) {
-        onEvent(frame);
+  let line = '';
+  let lines: string[] = [];
+  let skipLf = false;
+  let ended = false;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      ended = done;
+      const text = decoder.decode(value, { stream: !done });
+      for (const character of text) {
+        // CR 已结束上一行；紧邻的 LF 即使落在下一个网络块也不能再产生空行。
+        if (skipLf && character === '\n') {
+          skipLf = false;
+          continue;
+        }
+        skipLf = character === '\r';
+        if (character !== '\r' && character !== '\n') {
+          line += character;
+          continue;
+        }
+        if (line === '') {
+          const frame = parseFrame(lines);
+          lines = [];
+          if (frame && onEvent(frame) === false) return;
+        } else {
+          lines.push(line);
+          line = '';
+        }
       }
-      separatorIndex = buffer.indexOf('\n\n');
+      if (done) return;
     }
-  }
-  const trailing = buffer.trim();
-  if (trailing) {
-    const frame = parseFrame(trailing);
-    if (frame) {
-      onEvent(frame);
+  } finally {
+    try {
+      if (!ended) await reader.cancel();
+    } finally {
+      reader.releaseLock();
     }
   }
 }
 
-function parseFrame(rawFrame: string): SseEvent | null {
+function parseFrame(lines: string[]): SseEvent | null {
   let event = 'message';
   const dataLines: string[] = [];
-  for (const line of rawFrame.split('\n')) {
-    if (line.startsWith('event:')) {
-      event = line.slice(6).trim();
-    } else if (line.startsWith('data:')) {
-      dataLines.push(line.slice(5).trim());
-    }
+  for (const line of lines) {
+    const colon = line.indexOf(':');
+    const field = colon === -1 ? line : line.slice(0, colon);
+    const rawValue = colon === -1 ? '' : line.slice(colon + 1);
+    // 协议只移除冒号后的一个空格，正文的缩进和末尾空格属于数据。
+    const value = rawValue.startsWith(' ') ? rawValue.slice(1) : rawValue;
+    if (field === 'event') event = value || 'message';
+    else if (field === 'data') dataLines.push(value);
   }
   if (dataLines.length === 0) {
     return null;

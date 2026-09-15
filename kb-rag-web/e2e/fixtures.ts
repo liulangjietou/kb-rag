@@ -100,6 +100,9 @@ export const test = base.extend<{
       '/kb/kb_fixture/documents': pageData(documents),
       '/kb/kb_fixture/rebuild-status': { stale_count: 1, in_progress_count: 0, failed_count: 0 },
       '/apps': [app],
+      '/app-previews': [{ app_id: app.app_id, name: app.name, versions: [
+        { app_version_id: 'v13', version: 'v1.3', status: 'RELEASED' },
+      ] }],
       '/apps/app_fixture': app,
       '/apps/app_fixture/versions': [],
       '/memory-libraries': pageData([memory]),

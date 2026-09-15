@@ -4118,6 +4118,51 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '404':
           $ref: '#/components/responses/NotFound'
+  /api/v1/app-previews:
+    get:
+      tags:
+      - app-center
+      summary: 可调试应用与版本目录
+      description: >-
+        需要 app:read 或 search:debug。先限定当前租户的应用，再返回关联知识库全部在当前用户范围内的版本，
+        每个应用的版本按创建顺序倒序。仅包含选择器摘要，不包含配置、提示词或门禁详情；
+        实际预览仍重新检查应用、版本归属及知识库权限。没有可预览版本的应用不返回。
+      responses:
+        '200':
+          description: 可调试应用摘要列表，可能为空
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ResultEnvelope'
+                - type: object
+                  properties:
+                    data:
+                      type: array
+                      items:
+                        type: object
+                        required: [app_id, name, versions]
+                        properties:
+                          app_id:
+                            type: string
+                          name:
+                            type: string
+                          versions:
+                            type: array
+                            items:
+                              type: object
+                              required: [app_version_id, version, status]
+                              properties:
+                                app_version_id:
+                                  type: string
+                                version:
+                                  type: string
+                                status:
+                                  type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /api/v1/apps:
     post:
       tags:
@@ -4250,8 +4295,10 @@ paths:
       tags:
       - app-center
       summary: 控制台内 chat 预览
-      description: '经管理台登录鉴权，复用对外 chat 编排；可预览未发布版本（app_version_id 缺省取最新
-        版本，不区分是否已发布）。stream 决定响应走 JSON 还是 SSE，事件契约与对外 /api/v1/knowledge/chat
+      description: '经管理台登录鉴权，需要 app:read 或 search:debug，复用对外 chat 编排；可预览未发布版本
+        （app_version_id 缺省取最新版本，不区分是否已发布）。指定 ID 必须属于路径应用和当前租户；
+        配置使用所选版本，语料始终为当前活动文档，不读取发布时冻结快照。app_version 不用于选择预览版本。
+        stream=true 必须携带 Accept: text/event-stream。事件契约与对外 /api/v1/knowledge/chat
         完全一致（M4c-CONTRACTS.md §2/§6 主会话定版）。'
       requestBody:
         required: true
@@ -10450,6 +10497,7 @@ components:
           default: false
           description: chat 接口生效，search 接口忽略
     ChatPreviewRequest:
+      description: 管理预览选择器为 app_version_id；app_id 由路径提供，app_version 不用于版本选择。
       allOf:
       - $ref: '#/components/schemas/KnowledgeCallRequest'
       - type: object

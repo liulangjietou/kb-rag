@@ -4,6 +4,7 @@ import { SESSION_HEADER, getToken } from './authStorage';
 import { apiDelete, apiGet, apiPost, apiPut } from './request';
 import type {
   AppVersion,
+  AppPreviewOption,
   BindGateDatasetRequest,
   ChatPreviewRequest,
   ChatResponse,
@@ -19,6 +20,11 @@ import type {
 
 export function listApps(): Promise<KbApp[]> {
   return apiGet<KbApp[]>('/apps');
+}
+
+/** 调试权限可访问的摘要目录，独立于应用管理列表。 */
+export function listPreviewApps(): Promise<AppPreviewOption[]> {
+  return apiGet<AppPreviewOption[]>('/app-previews');
 }
 
 export function getApp(appId: string): Promise<KbApp> {
@@ -92,11 +98,8 @@ export function bindGateDataset(appVersionId: string, payload: BindGateDatasetRe
 // ---------------------------------------------------------------------------
 
 /**
- * POST /api/v1/apps/{appId}/chat-preview (AppController#chatPreview). The external
- * `/api/v1/knowledge/chat` is API-Key-gated by its own filter chain (section 3: "独立过滤器链") and
- * cannot double as the admin-auth preview path, so the server exposes this same-shape sibling
- * under the admin-auth `/apps` resource -- verified, including the optional app_version override
- * both call sites share via ChatPreviewRequest.
+ * 管理端问答预览通过会话鉴权，app_version_id 选择配置版本，语料使用当前活动版本。
+ * 对外接口的 app_version 是公开版本标签，不能混用。
  */
 export function chatPreview(appId: string, payload: ChatPreviewRequest): Promise<ChatResponse> {
   return apiPost<ChatResponse>(`/apps/${appId}/chat-preview`, { ...payload, stream: false });
@@ -109,5 +112,5 @@ export function chatPreview(appId: string, payload: ChatPreviewRequest): Promise
 export function streamChatPreview(appId: string, payload: ChatPreviewRequest, handlers: ChatStreamHandlers, signal?: AbortSignal): Promise<void> {
   const token = getToken();
   const headers: Record<string, string> = token ? { [SESSION_HEADER]: token } : {};
-  return streamChat(`/api/v1/apps/${appId}/chat-preview`, headers, { ...payload, app_id: appId }, handlers, signal);
+  return streamChat(`/api/v1/apps/${appId}/chat-preview`, headers, payload, handlers, signal);
 }
