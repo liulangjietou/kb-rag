@@ -1,10 +1,11 @@
+import { THEME_IDS } from './theme-fixture';
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect, app } from './fixtures';
 import { employeeConversation } from './employee-workspace-fixture';
 
 test.use({ grantedPermissions: ['app:use'] });
 
-for (const theme of ['atlas', 'ocean', 'violet', 'cinder', 'moss', 'rose', 'graphite', 'night']) {
+for (const theme of THEME_IDS) {
   for (const [width, height] of [[390, 844], [768, 1024], [1280, 720], [1440, 900], [1920, 1080]]) {
     test(`员工首页 · ${theme} · ${width}px`, async ({ page, api, unexpectedRequests }, testInfo) => {
       const errors: string[] = [];

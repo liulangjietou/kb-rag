@@ -1,3 +1,4 @@
+import { THEME_IDS } from './theme-fixture';
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from './fixtures';
 import type { Page } from '@playwright/test';
@@ -91,7 +92,7 @@ test('历史门禁不可比提示关闭后恢复到原按钮', async ({ page, ap
   expect(unexpectedRequests).toEqual([]);
 });
 
-for (const theme of ['atlas', 'ocean', 'violet', 'cinder', 'moss', 'rose', 'graphite', 'night']) {
+for (const theme of THEME_IDS) {
   for (const width of [390, 768, 1280, 1440, 1920]) {
     test(`版本差异 · ${theme} · ${width}px`, async ({ page, api, unexpectedRequests }) => {
       await page.setViewportSize({ width, height: 900 });

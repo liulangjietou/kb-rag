@@ -1,3 +1,4 @@
+import { THEME_IDS } from './theme-fixture';
 import { test, expect, pageData } from './fixtures';
 import { fixture } from './quality-issues-fixture';
 import AxeBuilder from '@axe-core/playwright';
@@ -74,7 +75,7 @@ test.describe('缺少应用读取权限', () => {
   });
 });
 
-for (const theme of ['atlas', 'ocean', 'violet', 'cinder', 'moss', 'rose', 'graphite', 'night']) {
+for (const theme of THEME_IDS) {
   test(`员工反馈长内容与引用 · ${theme} · 390px`, async ({ page, api, unexpectedRequests }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.addInitScript(preset => localStorage.setItem('kb-rag-web:theme-preset', preset), theme);

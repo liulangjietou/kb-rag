@@ -54,15 +54,15 @@ describe('ThemePresetSwitcher', () => {
 
     fireEvent.click(chooser);
     const menu = await screen.findByRole('menu');
-    expect(within(menu).getAllByRole('menuitem')).toHaveLength(8);
+    expect(within(menu).getAllByRole('menuitem')).toHaveLength(13);
     expect(chooser.getAttribute('aria-controls')).toBe(menu.id);
     expect(chooser.getAttribute('aria-expanded')).toBe('true');
 
-    fireEvent.click(within(menu).getByRole('menuitem', { name: /Graphite 墨岩/ }));
+    fireEvent.click(within(menu).getByText('Graphite 墨岩', { exact: true }));
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe('graphite'));
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('graphite');
     expect(screen.getByRole('status').textContent).toContain('Graphite 墨岩');
-    expect(screen.getByRole('button', { name: '当前为 Graphite 墨岩，切换到 Night 夜航' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '当前为 Graphite 墨岩，切换到 Atlas 翡翠' })).toBeTruthy();
     await waitFor(() => expect(chooser.getAttribute('aria-expanded')).toBe('false'));
 
     unmount();
@@ -71,10 +71,10 @@ describe('ThemePresetSwitcher', () => {
   });
 
   it('cycles from the final preset back to Atlas', async () => {
-    window.localStorage.setItem(THEME_STORAGE_KEY, 'night');
+    window.localStorage.setItem(THEME_STORAGE_KEY, 'graphite');
     renderSwitcher();
 
-    fireEvent.click(screen.getByRole('button', { name: '当前为 Night 夜航，切换到 Atlas 翡翠' }));
+    fireEvent.click(screen.getByRole('button', { name: '当前为 Graphite 墨岩，切换到 Atlas 翡翠' }));
     await waitFor(() => expect(document.documentElement.dataset.theme).toBe('atlas'));
     expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('atlas');
   });

@@ -1,27 +1,26 @@
 import {
   DEFAULT_THEME_PRESET_ID,
   THEME_STORAGE_KEY,
-  resolveThemePresetId,
-  type ThemePresetId,
 } from './presets';
+import { resolveThemePreference, type ThemePreference } from './themePreference';
 
 export interface ThemeStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
 }
 
-export function readStoredThemePreset(storage?: ThemeStorage | null): ThemePresetId {
+export function readStoredThemePreset(storage?: ThemeStorage | null): ThemePreference {
   if (!storage) {
     return DEFAULT_THEME_PRESET_ID;
   }
   try {
-    return resolveThemePresetId(storage.getItem(THEME_STORAGE_KEY));
+    return resolveThemePreference(storage.getItem(THEME_STORAGE_KEY));
   } catch {
     return DEFAULT_THEME_PRESET_ID;
   }
 }
 
-export function writeStoredThemePreset(storage: ThemeStorage | null | undefined, id: ThemePresetId): void {
+export function writeStoredThemePreset(storage: ThemeStorage | null | undefined, id: ThemePreference): void {
   if (!storage) {
     return;
   }
@@ -35,11 +34,11 @@ export function writeStoredThemePreset(storage: ThemeStorage | null | undefined,
 export function resolveThemePresetStorageChange(
   key: string | null,
   newValue: string | null,
-): ThemePresetId | undefined {
+): ThemePreference | undefined {
   if (key !== THEME_STORAGE_KEY && key !== null) {
     return undefined;
   }
-  return resolveThemePresetId(newValue);
+  return resolveThemePreference(newValue);
 }
 
 export function getBrowserThemeStorage(): ThemeStorage | undefined {

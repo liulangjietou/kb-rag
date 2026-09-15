@@ -1,3 +1,4 @@
+import { THEME_IDS } from './theme-fixture';
 import { test, expect } from './fixtures';
 import AxeBuilder from '@axe-core/playwright';
 import type { Page, Route } from '@playwright/test';
@@ -85,7 +86,7 @@ test('停止等待保留浏览器测量，不显示成功或伪造首段', async
   expect(unexpectedRequests).toEqual([]);
 });
 
-for (const theme of ['atlas', 'ocean', 'violet', 'cinder', 'moss', 'rose', 'graphite', 'night']) {
+for (const theme of THEME_IDS) {
   for (const width of [390, 768, 1280, 1440, 1920]) {
     test(`问答耗时诊断 · ${theme} · ${width}px`, async ({ page, unexpectedRequests }) => {
       await page.setViewportSize({ width, height: 900 });

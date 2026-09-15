@@ -59,7 +59,7 @@ for (const [id, name] of [
       await expect(second.locator('html')).toHaveAttribute('data-theme', 'ocean');
     }
     await page.getByRole('button', { name: '选择界面主题' }).click();
-    await page.getByRole('menuitem', { name: new RegExp(name) }).click();
+    await page.getByRole('menu').getByText(name, { exact: true }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', id);
     await second.bringToFront();
     await expect(second.locator('html')).toHaveAttribute('data-theme', id);

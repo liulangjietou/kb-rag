@@ -1,3 +1,4 @@
+import { DARK_THEME_IDS, THEME_IDS } from './theme-fixture';
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from './fixtures';
 
@@ -19,7 +20,7 @@ test('1280×720 注册验证和资料提交的主要动作保持首屏可见', a
   expect(unexpectedRequests).toEqual([]);
 });
 
-for (const theme of ['atlas', 'ocean', 'violet', 'cinder', 'moss', 'rose', 'graphite', 'night']) {
+for (const theme of THEME_IDS) {
   for (const width of [390, 768, 1280, 1440, 1920]) {
     test(`注册两步 · ${theme} · ${width}px`, async ({ page, unexpectedRequests }, testInfo) => {
       await page.setViewportSize({ width, height: width >= 1280 ? 720 : 844 });
@@ -44,7 +45,7 @@ for (const theme of ['atlas', 'ocean', 'violet', 'cinder', 'moss', 'rose', 'grap
       if (width >= 1280) {
         await expect(page.getByRole('button', { name: '提交注册申请' })).toBeInViewport({ ratio: 1 });
       }
-      if (width === 1280 || (theme === 'night' && width === 390)) {
+      if (width === 1280 || (DARK_THEME_IDS.includes(theme) && width === 390)) {
         const secondStep = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
         expect(secondStep.violations.map(({ id, nodes }) => ({ id, nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })) }))).toEqual([]);
       }

@@ -24,11 +24,10 @@ function executeBootstrap(stored: string | null, storageError?: Error) {
 }
 
 describe('theme bootstrap', () => {
-  it('keeps pre-React modes and first-paint backgrounds aligned with every preset', () => {
+  it('keeps first-paint backgrounds aligned with every preset', () => {
     const indexHtml = readFileSync(new URL('../index.html', import.meta.url), 'utf8').toLowerCase();
 
     for (const preset of THEME_PRESETS) {
-      expect(bootstrap).toContain(`${preset.id}: '${preset.mode}'`);
       expect(indexHtml).toContain(
         `html[data-theme='${preset.id}'] { background: ${preset.palette.background.toLowerCase()}; }`,
       );

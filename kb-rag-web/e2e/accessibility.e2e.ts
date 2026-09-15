@@ -1,7 +1,8 @@
+import { THEME_IDS } from './theme-fixture';
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from './fixtures';
 
-for (const theme of ['atlas', 'ocean', 'violet', 'cinder', 'moss', 'rose', 'graphite', 'night']) {
+for (const theme of THEME_IDS) {
   for (const route of ['/home', '/kb/kb_fixture', '/apps/app_fixture', '/search', '/chat']) {
     test(`${route} · ${theme} 可访问性`, async ({ page, unexpectedRequests }) => {
       await page.addInitScript((preset) => localStorage.setItem('kb-rag-web:theme-preset', preset), theme);
