@@ -21,13 +21,18 @@ const client = axios.create({
   timeout: 30_000,
 });
 
-client.interceptors.request.use((config) => {
-  const token = getToken();
-  if (token) {
-    config.headers.set(SESSION_HEADER, token);
-  }
-  return config;
-});
+// 同步读取请求发起时的凭证，避免退出登录清空存储后，异步拦截器才读取凭证。
+client.interceptors.request.use(
+  (config) => {
+    const token = getToken();
+    if (token) {
+      config.headers.set(SESSION_HEADER, token);
+    }
+    return config;
+  },
+  undefined,
+  { synchronous: true },
+);
 
 client.interceptors.response.use(
   (response) => response,
