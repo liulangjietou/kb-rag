@@ -163,8 +163,10 @@ public class ModelProviderConfig {
         // Temperature 0 regardless of kb.chat.temperature, requirement section 4.6: a judge score has to
         // be reproducible across two runs of the same configuration, which a creative rewrite model need
         // not be.
-        KbProperties.Chat judgeConfig = withModelAndZeroTemperature(chatConfig, effectiveModel);
-        log.info("judge chat provider configured, model={}", judgeConfig.getModel());
+        KbProperties.Chat judgeConfig = withModelAndZeroTemperature(chatConfig, effectiveModel,
+                properties.getEval().getJudgeMaxTokens());
+        log.info("judge chat provider configured, model={}, maxTokens={}",
+                judgeConfig.getModel(), judgeConfig.getMaxTokens());
         return new DashScopeChatProvider(judgeConfig, modelCallMeter);
     }
 
@@ -227,14 +229,14 @@ public class ModelProviderConfig {
     }
 
     /**
-     * Copies a chat configuration substituting the model and forcing temperature to zero, so the judge
-     * provider can point at a different, reproducible model without a second credential set.
+     * 复制评分模型配置，固定温度并使用独立输出预算，保留部署的凭据、连接与生成超时。
      *
-     * @param source configuration to copy
-     * @param model  model name to substitute
-     * @return copy carrying the substituted model and zero temperature
+     * @param source 原始聊天配置
+     * @param model 评分模型
+     * @param maxTokens 评分 JSON 输出上限
+     * @return 独立的评分配置，不修改查询改写配置
      */
-    private KbProperties.Chat withModelAndZeroTemperature(KbProperties.Chat source, String model) {
+    private KbProperties.Chat withModelAndZeroTemperature(KbProperties.Chat source, String model, int maxTokens) {
         KbProperties.Chat copy = new KbProperties.Chat();
         copy.setProvider(source.getProvider());
         copy.setModel(model);
@@ -243,7 +245,7 @@ public class ModelProviderConfig {
         copy.setTimeoutMs(source.getTimeoutMs());
         copy.setGenerateTimeoutMs(source.getGenerateTimeoutMs());
         copy.setTemperature(0.0d);
-        copy.setMaxTokens(source.getMaxTokens());
+        copy.setMaxTokens(maxTokens);
         return copy;
     }
 

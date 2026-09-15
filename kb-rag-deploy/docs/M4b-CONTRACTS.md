@@ -80,7 +80,7 @@
 
 ### 3.5 LLM-as-judge 规约（需求 §4.6）
 - 评分维度：正确性 / 引用忠实度 / 完整性，各 1-5 分制，每档附锚定描述；固定英文 prompt 并**版本化**（常量 `JUDGE_PROMPT_VERSION`）
-- `temperature=0`；judge 模型**独立配置**（`EVAL_JUDGE_MODEL`，默认取 ChatProvider 模型但可覆盖），run 记录 `judge_model` 与 `judge_prompt_version`
+- `temperature=0`；judge 模型**独立配置**（`EVAL_JUDGE_MODEL`，默认取 ChatProvider 模型但可覆盖），run 记录 `judge_model` 与 `judge_prompt_version`。检索评分和最终答案评分使用独立输出预算 `EVAL_JUDGE_MAX_TOKENS`（默认 2048），避免继承查询改写的 128 token 上限而截断评分 JSON；实际长度截断仍记为评分失败，不接受残缺结果。
 - 仅相同 judge 配置的 run 之间允许分数对比，`compare` 端点对不同 judge 配置标注"不可比"
 - judge 分**不参与门禁**（M4c 门禁只用检索指标）
 - judge 需要 expected_answer 与生成答案：M4b 无 chat 生成端点（属 M4c），**judge 本期仅在 case 有 `expected_answer` 时对"召回内容能否支撑该答案"打分**，prompt 明确这一语义
