@@ -5,6 +5,7 @@ import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.model.AppConfigSnapshot;
 import io.kbrag.domain.model.ChatMessage;
+import io.kbrag.domain.model.ChatCancellation;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ChatProviderFactory;
 import io.kbrag.domain.service.ChatPromptAssembler;
@@ -60,9 +61,16 @@ public class AnswerGenerationService {
      */
     public void stream(AppConfigSnapshot snapshot, String query, List<ChatMessage> history,
                        List<RetrievalNodeView> nodes, Consumer<String> onDelta) {
+        stream(snapshot, query, history, nodes, onDelta, ChatCancellation.NONE);
+    }
+
+    /** 将请求取消信号传到模型适配器，提示词装配仍复用普通生成路径。 */
+    public void stream(AppConfigSnapshot snapshot, String query, List<ChatMessage> history,
+                       List<RetrievalNodeView> nodes, Consumer<String> onDelta, ChatCancellation cancellation) {
+        cancellation.throwIfCancelled();
         ChatProvider provider = requireProvider(snapshot);
         provider.stream(chatPromptAssembler.systemPrompt(snapshot.promptOrDefaults()),
-                promptMessages(query, history, nodes), onDelta);
+                promptMessages(query, history, nodes), onDelta, cancellation);
     }
 
     /**

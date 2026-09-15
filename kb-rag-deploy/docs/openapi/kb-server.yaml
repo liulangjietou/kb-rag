@@ -6859,7 +6859,7 @@ components:
         provider: {type: string}
         capability: {$ref: '#/components/schemas/ModelCapability'}
         model: {type: string}
-        status: {type: string, enum: [RESERVED, SUCCEEDED, FAILED]}
+        status: {type: string, enum: [RESERVED, SUCCEEDED, FAILED, CANCELLED]}
         reserved_tokens: {type: integer, format: int64}
         input_tokens: {type: integer, format: int64}
         output_tokens: {type: integer, format: int64}

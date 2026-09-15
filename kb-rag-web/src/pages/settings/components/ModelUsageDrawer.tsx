@@ -11,6 +11,12 @@ interface Props {
 }
 
 const PAGE_SIZE = 20;
+const USAGE_STATUS: Record<ModelUsageRecord['status'], { label: string; color: string }> = {
+  RESERVED: { label: '已预占', color: 'processing' },
+  SUCCEEDED: { label: '已完成', color: 'success' },
+  FAILED: { label: '失败', color: 'error' },
+  CANCELLED: { label: '已停止', color: 'default' },
+};
 
 function shanghaiMonth(): string {
   const parts = new Intl.DateTimeFormat('en', {
@@ -103,7 +109,7 @@ export default function ModelUsageDrawer({ tenant, onClose }: Props) {
       dataIndex: 'status',
       width: 110,
       render: (value: ModelUsageRecord['status']) => (
-        <Tag color={value === 'SUCCEEDED' ? 'success' : value === 'FAILED' ? 'error' : 'processing'}>{value}</Tag>
+        <Tag color={USAGE_STATUS[value]?.color}>{USAGE_STATUS[value]?.label ?? value}</Tag>
       ),
     },
     {
