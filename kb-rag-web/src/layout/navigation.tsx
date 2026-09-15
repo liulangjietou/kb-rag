@@ -45,6 +45,7 @@ export const NAV_SECTIONS: Array<{ key: NavSection; label: string }> = [
 
 export const NAV_ENTRIES: NavEntry[] = [
   { key: '/home', icon: <HomeOutlined />, label: '工作概览', section: 'overview', anyOf: [] },
+  { key: '/workspace', icon: <MessageOutlined />, label: '知识问答', section: 'overview', anyOf: [PERMISSIONS.APP_USE] },
   { key: '/kb', icon: <DatabaseOutlined />, label: '知识库', section: 'assets', anyOf: [PERMISSIONS.KB_READ] },
   { key: '/apps', icon: <AppstoreOutlined />, label: '应用中心', section: 'build', anyOf: [PERMISSIONS.APP_READ] },
   { key: '/search', icon: <SearchOutlined />, label: '检索调试', section: 'build', anyOf: [PERMISSIONS.SEARCH_DEBUG] },
