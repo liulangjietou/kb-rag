@@ -16,9 +16,9 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 
 /** 同一份当前证据授权同时约束界面历史和模型上下文。 */
 @Service
@@ -71,16 +71,19 @@ public class EmployeeConversationHistory {
         return new ModelContext(List.copyOf(messages), mergeSources(dependencies, List.of()));
     }
 
-    /** 当前检索证据优先保留显示信息，历史依赖仍参与后续所有权限重验。 */
+    /** 本轮条目与模型 prompt 保持相同顺序和数量，历史独有依赖追加在后参与权限重验。 */
     public List<EmployeeCitation> mergeSources(List<EmployeeCitation> inherited, List<EmployeeCitation> current) {
-        Map<List<String>, EmployeeCitation> unique = new LinkedHashMap<>();
-        for (var source : inherited) {
-            unique.put(List.of(source.docId(), source.documentVersionId(), source.chunkId()), source.asInherited());
-        }
+        List<EmployeeCitation> merged = new ArrayList<>(current);
+        Set<List<String>> included = new LinkedHashSet<>();
         for (var source : current) {
-            unique.put(List.of(source.docId(), source.documentVersionId(), source.chunkId()), source);
+            included.add(List.of(source.docId(), source.documentVersionId(), source.chunkId()));
         }
-        return List.copyOf(unique.values());
+        for (var source : inherited) {
+            if (included.add(List.of(source.docId(), source.documentVersionId(), source.chunkId()))) {
+                merged.add(source.asInherited());
+            }
+        }
+        return List.copyOf(merged);
     }
 
     private List<EmployeeCitation> sources(EmployeeConversationRun run) {
