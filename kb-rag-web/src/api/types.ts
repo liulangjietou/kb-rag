@@ -176,6 +176,8 @@ export interface RoleSummary {
   kb_scope_all: boolean;
   kb_ids: string[];
   permission_codes: string[];
+  app_scope_all: boolean;
+  app_ids: string[];
 }
 
 export interface SaveRoleRequest {
@@ -186,6 +188,14 @@ export interface SaveRoleRequest {
   kb_scope_all: boolean;
   kb_ids: string[];
   permission_codes: string[];
+  app_scope_all?: boolean;
+  app_ids?: string[];
+}
+
+/** 角色所属租户的应用候选项，不提供应用配置。 */
+export interface RoleAppOption {
+  app_id: string;
+  name: string;
 }
 
 /** One entry of GET /roles/permissions, the catalogue the role editor renders grouped by module. */

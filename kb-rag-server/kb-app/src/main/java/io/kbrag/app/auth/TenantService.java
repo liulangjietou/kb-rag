@@ -189,6 +189,8 @@ public class TenantService {
             role.setDescription(template.getDescription());
             role.setBuiltin(BUILTIN);
             role.setKbScopeAll(template.getKbScopeAll());
+            // 只复制范围模式，不复制默认租户的应用 ID。
+            role.setAppScopeAll(template.appScopeAll());
             roleMapper.insert(role);
 
             List<String> codes = rolePermissionMapper.selectList(

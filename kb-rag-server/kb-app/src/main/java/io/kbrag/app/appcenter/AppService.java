@@ -7,6 +7,7 @@ import io.kbrag.domain.entity.App;
 import io.kbrag.domain.entity.AppVersion;
 import io.kbrag.domain.mapper.AppMapper;
 import io.kbrag.domain.mapper.AppVersionMapper;
+import io.kbrag.domain.mapper.RoleAppScopeMapper;
 import io.kbrag.domain.service.BizIdGenerator;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +34,7 @@ public class AppService {
     private final AppMapper appMapper;
     private final AppVersionMapper appVersionMapper;
     private final BizIdGenerator bizIdGenerator;
+    private final RoleAppScopeMapper roleAppScopeMapper;
 
     /**
      * Creates an application.
@@ -136,6 +138,7 @@ public class AppService {
         App app = require(appId);
         appVersionMapper.delete(new LambdaQueryWrapper<AppVersion>().eq(AppVersion::getAppId, appId));
         appMapper.deleteById(app.getId());
+        roleAppScopeMapper.deleteByAppId(appId);
         log.info("application deleted, appId={}", appId);
     }
 }

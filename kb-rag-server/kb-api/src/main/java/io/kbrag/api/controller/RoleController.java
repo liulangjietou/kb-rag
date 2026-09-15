@@ -4,7 +4,10 @@ import io.kbrag.api.annotation.AuditedOperation;
 import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.PermissionResponse;
 import io.kbrag.api.dto.RoleResponse;
+import io.kbrag.api.dto.RoleAppOptionResponse;
 import io.kbrag.api.dto.SaveRoleRequest;
+import io.kbrag.app.auth.AccessGuard;
+import io.kbrag.app.auth.RoleAppScopeService;
 import io.kbrag.app.auth.RoleService;
 import io.kbrag.common.api.Result;
 import io.kbrag.domain.constant.PermissionCodes;
@@ -19,6 +22,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -39,6 +43,7 @@ import java.util.List;
 public class RoleController {
 
     private final RoleService roleService;
+    private final RoleAppScopeService appScopeService;
 
     /**
      * Lists every role with its grants and its scope, built in ones first.
@@ -53,10 +58,12 @@ public class RoleController {
     @RequiresPermission({PermissionCodes.ROLE_MANAGE, PermissionCodes.USER_MANAGE,
             PermissionCodes.DOC_REVIEW})
     public Result<List<RoleResponse>> list() {
-        return Result.success(roleService.list().stream()
+        List<Role> roles = roleService.list();
+        var appScopes = appScopeService.scopesOf(roles.stream().map(Role::getRoleId).toList());
+        return Result.success(roles.stream()
                 .map(role -> RoleResponse.from(role,
                         roleService.permissionCodesOf(role.getRoleId()),
-                        roleService.kbScopeOf(role.getRoleId())))
+                        roleService.kbScopeOf(role.getRoleId()), appScopes.get(role.getRoleId())))
                 .toList());
     }
 
@@ -72,6 +79,16 @@ public class RoleController {
                 .toList());
     }
 
+    /** 只列出已授权角色所属租户的应用；新角色使用当前用户租户。 */
+    @GetMapping("/app-options")
+    public Result<List<RoleAppOptionResponse>> appOptions(
+            @RequestParam(value = "role_id", required = false) String roleId) {
+        String tenantId = roleId == null ? AccessGuard.currentUser().tenantId()
+                : roleService.get(roleId).getTenantId();
+        return Result.success(appScopeService.optionsInTenant(tenantId).stream()
+                .map(app -> new RoleAppOptionResponse(app.getAppId(), app.getName())).toList());
+    }
+
     /**
      * Loads one role.
      *
@@ -81,9 +98,7 @@ public class RoleController {
     @GetMapping("/{roleId}")
     public Result<RoleResponse> get(@PathVariable String roleId) {
         Role role = roleService.get(roleId);
-        return Result.success(RoleResponse.from(role,
-                roleService.permissionCodesOf(roleId),
-                roleService.kbScopeOf(roleId)));
+        return Result.success(responseOf(role));
     }
 
     /**
@@ -97,10 +112,9 @@ public class RoleController {
             targetId = "#result.data.roleId")
     public Result<RoleResponse> create(@Valid @RequestBody SaveRoleRequest request) {
         Role role = roleService.create(request.code(), request.name(), request.description(),
-                request.kbScopeAll(), request.kbIds(), request.permissionCodes());
-        return Result.success(RoleResponse.from(role,
-                roleService.permissionCodesOf(role.getRoleId()),
-                roleService.kbScopeOf(role.getRoleId())));
+                request.kbScopeAll(), request.kbIds(), request.permissionCodes(),
+                request.appScopeAll(), request.appIds());
+        return Result.success(responseOf(role));
     }
 
     /**
@@ -115,11 +129,10 @@ public class RoleController {
     public Result<RoleResponse> update(@PathVariable String roleId,
                                       @Valid @RequestBody SaveRoleRequest request) {
         roleService.update(roleId, request.name(), request.description(),
-                request.kbScopeAll(), request.kbIds(), request.permissionCodes());
+                request.kbScopeAll(), request.kbIds(), request.permissionCodes(),
+                request.appScopeAll(), request.appIds());
         Role role = roleService.get(roleId);
-        return Result.success(RoleResponse.from(role,
-                roleService.permissionCodesOf(roleId),
-                roleService.kbScopeOf(roleId)));
+        return Result.success(responseOf(role));
     }
 
     /**
@@ -133,5 +146,11 @@ public class RoleController {
     public Result<Void> delete(@PathVariable String roleId) {
         roleService.delete(roleId);
         return Result.success(null);
+    }
+
+    private RoleResponse responseOf(Role role) {
+        String roleId = role.getRoleId();
+        return RoleResponse.from(role, roleService.permissionCodesOf(roleId),
+                roleService.kbScopeOf(roleId), appScopeService.scopesOf(List.of(roleId)).get(roleId));
     }
 }

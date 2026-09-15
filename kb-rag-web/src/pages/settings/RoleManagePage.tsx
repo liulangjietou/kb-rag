@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
+  Alert,
   Button,
   Card,
   Checkbox,
@@ -21,9 +22,9 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { listKnowledgeBases } from '../../api/kb';
-import { createRole, deleteRole, listPermissionCatalogue, listRoles, updateRole } from '../../api/role';
+import { createRole, deleteRole, listPermissionCatalogue, listRoleAppOptions, listRoles, updateRole } from '../../api/role';
 import { listTenants } from '../../api/tenant';
-import type { KnowledgeBase, PermissionCatalogueItem, RoleSummary, TenantSummary } from '../../api/types';
+import type { KnowledgeBase, PermissionCatalogueItem, RoleAppOption, RoleSummary, TenantSummary } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { PERMISSIONS } from '../../auth/permissions';
 import PageHeader from '../../components/PageHeader';
@@ -35,6 +36,8 @@ interface RoleFormValues {
   kb_scope_all: boolean;
   kb_ids?: string[];
   permission_codes?: string[];
+  app_scope_all: boolean;
+  app_ids?: string[];
 }
 
 /**
@@ -62,9 +65,27 @@ export default function RoleManagePage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<RoleSummary | null>(null);
   const [scopeAll, setScopeAll] = useState(true);
+  const [appScopeAll, setAppScopeAll] = useState(false);
+  const [apps, setApps] = useState<RoleAppOption[]>([]);
+  const [appsLoading, setAppsLoading] = useState(false);
+  const [appsError, setAppsError] = useState(false);
+  const [appsRetry, setAppsRetry] = useState(0);
   // 每次打开抽屉自增，作为表单的 key，强制重建一份干净的表单实例，见 formInitialValues 的说明。
   const [formSeq, setFormSeq] = useState(0);
   const [form] = Form.useForm<RoleFormValues>();
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    let active = true;
+    setAppsLoading(true);
+    setAppsError(false);
+    setApps([]);
+    listRoleAppOptions(editing?.role_id)
+      .then((items) => { if (active) setApps(items); })
+      .catch(() => { if (active) setAppsError(true); })
+      .finally(() => { if (active) setAppsLoading(false); });
+    return () => { active = false; };
+  }, [drawerOpen, editing?.role_id, formSeq, appsRetry]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -127,14 +148,19 @@ export default function RoleManagePage() {
             kb_scope_all: editing.kb_scope_all,
             kb_ids: editing.kb_ids ?? [],
             permission_codes: editing.permission_codes ?? [],
+            app_scope_all: editing.app_scope_all ?? false,
+            app_ids: editing.app_ids ?? [],
           }
-        : { code: '', name: '', kb_scope_all: true, kb_ids: [], permission_codes: [] },
+        : { code: '', name: '', kb_scope_all: true, kb_ids: [], permission_codes: [],
+            app_scope_all: false, app_ids: [] },
     [editing],
   );
 
   const openCreate = () => {
     setEditing(null);
     setScopeAll(true);
+    setAppScopeAll(false);
+    setAppsLoading(true);
     setFormSeq((seq) => seq + 1);
     setDrawerOpen(true);
   };
@@ -142,11 +168,14 @@ export default function RoleManagePage() {
   const openEdit = (record: RoleSummary) => {
     setEditing(record);
     setScopeAll(record.kb_scope_all);
+    setAppScopeAll(record.app_scope_all ?? false);
+    setAppsLoading(true);
     setFormSeq((seq) => seq + 1);
     setDrawerOpen(true);
   };
 
   const submit = async (values: RoleFormValues) => {
+    if (submitting || appsLoading || appsError) return;
     setSubmitting(true);
     try {
       const payload = {
@@ -157,16 +186,20 @@ export default function RoleManagePage() {
         // the next time somebody narrowed the role back down.
         kb_ids: values.kb_scope_all ? [] : values.kb_ids ?? [],
         permission_codes: values.permission_codes ?? [],
+        app_scope_all: values.app_scope_all,
+        app_ids: values.app_scope_all ? [] : values.app_ids ?? [],
       };
       if (editing) {
         await updateRole(editing.role_id, payload);
-        message.success('角色已更新，持有该角色的账号下次请求即生效');
+        message.success('角色已更新');
       } else {
         await createRole({ ...payload, code: values.code });
         message.success('角色已创建');
       }
       setDrawerOpen(false);
       load();
+    } catch {
+      // 请求层已展示错误；保留当前表单和选择，供用户检查后重试。
     } finally {
       setSubmitting(false);
     }
@@ -212,6 +245,14 @@ export default function RoleManagePage() {
         ),
     },
     {
+      title: '应用使用范围',
+      key: 'app_scope',
+      render: (_, record) => !record.permission_codes?.includes('app:use')
+        ? <Typography.Text type="secondary">未授予使用权限</Typography.Text>
+        : record.app_scope_all ? <Tag color="blue">本租户全部应用</Tag>
+          : <Typography.Text>{record.app_ids?.length ? `指定 ${record.app_ids.length} 个应用` : '尚未选择应用'}</Typography.Text>,
+    },
+    {
       title: '权限数',
       key: 'permissions',
       render: (_, record) => `${record.permission_codes?.length ?? 0} 项`,
@@ -249,7 +290,7 @@ export default function RoleManagePage() {
       <PageHeader
         eyebrow="ROLE GOVERNANCE"
         title="角色与权限"
-        description="将功能权限与知识库数据范围分别建模，明确每个角色能做什么、能看到哪些知识。"
+        description="分别设置功能权限、知识库范围和应用使用范围，明确每个角色可访问的内容。"
         actions={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load}>
@@ -269,19 +310,22 @@ export default function RoleManagePage() {
         columns={columns}
         dataSource={roles}
         pagination={false}
-        scroll={{ x: 960 }}
+        scroll={{ x: 1120 }}
       />
 
       <Drawer
         open={drawerOpen}
         width={720}
         title={editing ? `编辑角色 - ${editing.name}` : '新建角色'}
-        onClose={() => setDrawerOpen(false)}
+        onClose={() => { if (!submitting) setDrawerOpen(false); }}
+        closable={!submitting}
+        keyboard={!submitting}
+        maskClosable={!submitting}
         destroyOnHidden
         extra={
           <Space>
-            <Button onClick={() => setDrawerOpen(false)}>取消</Button>
-            <Button type="primary" loading={submitting} onClick={() => form.submit()}>
+            <Button disabled={submitting} onClick={() => setDrawerOpen(false)}>取消</Button>
+            <Button type="primary" loading={submitting} disabled={appsLoading || appsError} onClick={() => form.submit()}>
               保存
             </Button>
           </Space>
@@ -299,6 +343,7 @@ export default function RoleManagePage() {
           onFinish={submit}
           initialValues={formInitialValues}
           preserve={false}
+          disabled={submitting}
         >
           <Form.Item
             name="code"
@@ -337,6 +382,30 @@ export default function RoleManagePage() {
               <Select mode="multiple" options={kbOptions} placeholder="可多选" />
             </Form.Item>
           )}
+
+          <Divider orientation="left" plain>
+            应用使用范围
+          </Divider>
+          <Typography.Paragraph type="secondary">
+            同时授予“使用已发布的应用”权限后生效；应用只可使用本租户内、已发布且知识库范围允许的版本。
+          </Typography.Paragraph>
+          {appsError && <Alert type="error" showIcon message="应用列表加载失败，已保留当前授权选择"
+            action={<Button size="small" onClick={() => setAppsRetry((value) => value + 1)}>重试加载</Button>}
+            style={{ marginBottom: 16 }} />}
+          <Form.Item name="app_scope_all" label="可使用的应用">
+            <Radio.Group onChange={(event) => setAppScopeAll(event.target.value as boolean)}>
+              <Space direction="vertical">
+                <Radio value={false}>指定应用（未选择时不可使用任何应用）</Radio>
+                <Radio value={true}>本租户全部应用（含此后新建的）</Radio>
+              </Space>
+            </Radio.Group>
+          </Form.Item>
+          {!appScopeAll && <Form.Item name="app_ids" label="指定应用"
+            extra="可以留空。授权应用不包含编辑、发布和调试权限。">
+            <Select mode="multiple" loading={appsLoading} disabled={submitting || appsLoading || appsError}
+              options={apps.map((app) => ({ value: app.app_id, label: app.name }))}
+              optionFilterProp="label" placeholder="搜索并选择应用" notFoundContent={appsLoading ? '加载中…' : '暂无可选应用'} />
+          </Form.Item>}
 
           <Divider orientation="left" plain>
             功能权限

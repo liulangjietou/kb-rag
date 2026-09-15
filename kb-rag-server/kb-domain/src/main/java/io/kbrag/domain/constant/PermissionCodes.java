@@ -59,6 +59,9 @@ public final class PermissionCodes {
      */
     public static final String EVAL_RUN = "eval:run";
 
+    /** 员工使用已授权的正式应用，不授予配置读取、编辑或发布权。 */
+    public static final String APP_USE = "app:use";
+
     /** Read applications and their versions. */
     public static final String APP_READ = "app:read";
 

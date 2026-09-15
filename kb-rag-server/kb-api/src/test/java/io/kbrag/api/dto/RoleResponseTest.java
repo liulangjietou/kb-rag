@@ -23,21 +23,24 @@ class RoleResponseTest {
     @Test
     void shouldCarryTheOwningTenantSoTheOperatorCanTellRepeatedBuiltinRolesApart() {
         RoleResponse first = RoleResponse.from(role("role_1", "tenant_default", "KB_ADMIN"),
-                List.of("kb:read"), List.of());
+                List.of("kb:read"), List.of(), List.of("app_1"));
         RoleResponse second = RoleResponse.from(role("role_2", "tenant_acme", "KB_ADMIN"),
-                List.of("kb:read"), List.of());
+                List.of("kb:read"), List.of(), List.of());
 
         assertEquals(first.code(), second.code());
         assertEquals("tenant_default", first.tenantId());
         assertEquals("tenant_acme", second.tenantId());
+        assertEquals(List.of("app_1"), first.appIds());
     }
 
     @Test
     void shouldTurnMissingGrantsIntoEmptyListsRatherThanNulls() {
-        RoleResponse response = RoleResponse.from(role("role_1", "tenant_default", "VIEWER"), null, null);
+        RoleResponse response = RoleResponse.from(role("role_1", "tenant_default", "VIEWER"),
+                null, null, null);
 
         assertTrue(response.permissionCodes().isEmpty());
         assertTrue(response.kbIds().isEmpty());
+        assertTrue(response.appIds().isEmpty());
     }
 
     private static Role role(String roleId, String tenantId, String code) {
