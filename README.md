@@ -265,7 +265,7 @@ MCP 客户端配置见 [MCP 接入指南](docs/MCP接入指南.md)，记忆抽�
 | 知识运营 | [首页与来源健康](kb-rag-deploy/docs/HOME-SOURCE-HEALTH.md) · [失败项重试](kb-rag-deploy/docs/EXTERNAL-SOURCE-FAILED-RETRY.md) · [质量问题回归](kb-rag-deploy/docs/KNOWLEDGE-QUALITY-ISSUES.md) |
 | 诊断与版本 | [问答诊断](docs/CHAT-DIAGNOSTICS.md) · [版本比较](docs/APP-VERSION-DIFF.md) · [模型用量诊断](docs/MODEL-USAGE-DIAGNOSTICS.md) |
 | 开放契约 | [服务端 OpenAPI](kb-rag-deploy/docs/openapi/kb-server.yaml) · [解析 OpenAPI](kb-rag-deploy/docs/openapi/kb-parser.yaml) · [MCP](docs/MCP接入指南.md) · [记忆库](docs/记忆库接入指南.md) |
-| 需求与开发 | [需求文档](docs/知识库需求文档.md) · [RAG 工程知识点](docs/RAG面试八股.md) · [贡献说明](CONTRIBUTING.md) · [里程碑契约目录](kb-rag-deploy/docs/) |
+| 需求与开发 | [需求文档](docs/知识库需求文档.md) · [RAG 工程知识点](docs/RAG面试八股.md) · [面试题库](docs/interview/README.md) · [贡献说明](CONTRIBUTING.md) · [里程碑契约目录](kb-rag-deploy/docs/) |
 
 ## 安全与许可
 
