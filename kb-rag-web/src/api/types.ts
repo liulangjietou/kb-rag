@@ -2490,7 +2490,7 @@ export interface ModelUsageSummary {
   costs: ModelCostTotal[];
 }
 
-export type ModelCapability = 'CHAT' | 'EMBEDDING' | 'RERANK' | 'VISION' | 'MULTIMODAL_EMBEDDING';
+export type ModelCapability = 'CHAT' | 'EMBEDDING' | 'RERANK' | 'VISION' | 'MULTIMODAL_EMBEDDING' | 'DECISION';
 
 export interface ModelUsageRecord {
   usage_id: string;

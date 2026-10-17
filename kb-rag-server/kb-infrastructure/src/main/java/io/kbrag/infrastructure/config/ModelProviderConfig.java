@@ -3,20 +3,24 @@ package io.kbrag.infrastructure.config;
 import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ChatProviderFactory;
+import io.kbrag.domain.port.DecisionProvider;
 import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.MultimodalEmbeddingProvider;
 import io.kbrag.domain.port.ModelCallMeter;
 import io.kbrag.domain.port.RerankProvider;
 import io.kbrag.domain.port.VisionProvider;
 import io.kbrag.infrastructure.provider.UnconfiguredChatProvider;
+import io.kbrag.infrastructure.provider.UnconfiguredDecisionProvider;
 import io.kbrag.infrastructure.provider.UnconfiguredRerankProvider;
 import io.kbrag.infrastructure.provider.UnconfiguredVisionProvider;
 import io.kbrag.infrastructure.provider.chat.DashScopeChatProvider;
 import io.kbrag.infrastructure.provider.chat.ModelChatProviderFactory;
+import io.kbrag.infrastructure.provider.decision.TypeSafeDecisionProvider;
 import io.kbrag.infrastructure.provider.embedding.DashScopeEmbeddingProvider;
 import io.kbrag.infrastructure.provider.embedding.DashScopeMultimodalEmbeddingProvider;
 import io.kbrag.infrastructure.provider.embedding.NoopMultimodalEmbeddingProvider;
 import io.kbrag.infrastructure.provider.rerank.DashScopeRerankProvider;
+import io.kbrag.infrastructure.provider.rerank.DecisionRerankProvider;
 import io.kbrag.infrastructure.provider.embedding.UnconfiguredEmbeddingProvider;
 import io.kbrag.infrastructure.provider.vision.DashScopeVisionProvider;
 import lombok.extern.slf4j.Slf4j;
@@ -91,8 +95,19 @@ public class ModelProviderConfig {
      * @return configured provider, or the unconfigured placeholder
      */
     @Bean
-    public RerankProvider rerankProvider(KbProperties properties, ModelCallMeter modelCallMeter) {
+    public RerankProvider rerankProvider(KbProperties properties, ModelCallMeter modelCallMeter,
+                                         DecisionProvider decisionProvider) {
         KbProperties.Rerank config = properties.getRerank();
+        // 选用决策模型重排时凭据归 kb.decision 管，kb.rerank.api-key 不参与判断
+        if (DecisionRerankProvider.PROVIDER_NAME.equalsIgnoreCase(config.getProvider())) {
+            if (!decisionProvider.isConfigured()) {
+                log.info("rerank provider set to typesafe without a decision credential, rerank stage disabled");
+                return new UnconfiguredRerankProvider();
+            }
+            log.info("rerank provider configured, provider={}, model={}, timeoutMs={}",
+                    DecisionRerankProvider.PROVIDER_NAME, decisionProvider.model(), config.getTimeoutMs());
+            return new DecisionRerankProvider(decisionProvider, properties);
+        }
         if (config.getApiKey() == null || config.getApiKey().isBlank()) {
             log.info("rerank provider not configured, rerank stage disabled");
             return new UnconfiguredRerankProvider();
@@ -100,6 +115,27 @@ public class ModelProviderConfig {
         log.info("rerank provider configured, provider={}, model={}, timeoutMs={}",
                 config.getProvider(), config.getModel(), config.getTimeoutMs());
         return new DashScopeRerankProvider(properties, modelCallMeter);
+    }
+
+    /**
+     * 选择结构化决策模型实现（TypeSafe Jev）。
+     *
+     * <p>可选组件，默认关闭：Key 为空时装配占位实现，路由与重排维持原有路径。它是 SaaS，打开即意味着问题与
+     * 文档片段会发往 TypeSafe，所以不继承 DashScope 的共享 Key，必须单独配置。
+     *
+     * @param properties bound configuration
+     * @return configured provider, or the unconfigured placeholder
+     */
+    @Bean
+    public DecisionProvider decisionProvider(KbProperties properties, ModelCallMeter modelCallMeter) {
+        KbProperties.Decision config = properties.getDecision();
+        if (config.getApiKey() == null || config.getApiKey().isBlank()) {
+            log.info("decision provider not configured, decision routing and decision rerank disabled");
+            return new UnconfiguredDecisionProvider();
+        }
+        log.info("decision provider configured, provider={}, model={}, routingEnabled={}",
+                config.getProvider(), config.getModel(), config.isRoutingEnabled());
+        return new TypeSafeDecisionProvider(config, modelCallMeter);
     }
 
     /**

@@ -20,7 +20,7 @@ interface PriceFormValues {
   enabled: boolean;
 }
 
-const CAPABILITIES: ModelCapability[] = ['CHAT', 'EMBEDDING', 'RERANK', 'VISION', 'MULTIMODAL_EMBEDDING'];
+const CAPABILITIES: ModelCapability[] = ['CHAT', 'EMBEDDING', 'RERANK', 'VISION', 'MULTIMODAL_EMBEDDING', 'DECISION'];
 const MICROS_PER_CURRENCY = 1_000_000;
 
 /** Global price configuration. Historical ledger rows keep the price snapshot they were settled with. */

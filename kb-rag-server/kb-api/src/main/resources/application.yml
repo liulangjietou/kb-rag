@@ -236,6 +236,19 @@ kb:
     # Generation budget of the open chat endpoint; max-tokens above sizes a one line query rewrite and would
     # cut every answer off mid sentence.
     answer-max-tokens: ${CHAT_ANSWER_MAX_TOKENS:1024}
+  # 结构化决策模型（TypeSafe Jev），可选组件、默认关闭。它是 SaaS：打开后问题与文档片段会发往 TypeSafe，
+  # 因此不继承 DASHSCOPE_API_KEY，必须单独配置 TYPESAFE_API_KEY。路由需再打开 DECISION_ROUTING_ENABLED，
+  # 重排需把 RERANK_PROVIDER 设为 typesafe（此时 RERANK_TIMEOUT_MS 建议调到 3000 以上）。
+  decision:
+    provider: ${DECISION_PROVIDER:typesafe}
+    # 固定版本而非 jev-latest：别名随发版漂移，会让调好的阈值和评测对比悄悄失效
+    model: ${DECISION_MODEL:jev-1.13.0}
+    api-key: ${TYPESAFE_API_KEY:}
+    base-url: ${DECISION_BASE_URL:https://api.typesafe.ai}
+    timeout-ms: ${DECISION_TIMEOUT_MS:3000}
+    routing-enabled: ${DECISION_ROUTING_ENABLED:false}
+    routing-threshold: ${DECISION_ROUTING_THRESHOLD:0.5}
+    max-request-chars: ${DECISION_MAX_REQUEST_CHARS:40000}
   vision:
     provider: ${VISION_PROVIDER:dashscope}
     model: ${VISION_MODEL:qwen-vl-max}

@@ -22,6 +22,8 @@ public record ModelCallSpec(String provider, String capability, String model, lo
     public static final String VISION = "VISION";
     /** Multimodal embedding. */
     public static final String MULTIMODAL_EMBEDDING = "MULTIMODAL_EMBEDDING";
+    /** 结构化决策（TypeSafe Jev 等 System One 模型）。 */
+    public static final String DECISION = "DECISION";
 
     public ModelCallSpec {
         reservedTokens = Math.max(1L, reservedTokens);

@@ -6,11 +6,13 @@ import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.enums.DegradedReason;
 import io.kbrag.domain.port.ChatProvider;
+import io.kbrag.domain.port.DecisionProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -18,7 +20,9 @@ import java.util.concurrent.RejectedExecutionException;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -42,12 +46,15 @@ class RoutingServiceTest {
     private static final String KB_C = "kb_faq";
 
     private ChatProvider chatProvider;
+    private DecisionProvider decisionProvider;
     private KbProperties properties;
     private Executor executor;
 
     @BeforeEach
     void setUp() {
         chatProvider = mock(ChatProvider.class);
+        // 默认未配置决策模型，既有用例全部走聊天模型路径
+        decisionProvider = mock(DecisionProvider.class);
         properties = new KbProperties();
         properties.getChat().setTimeoutMs((int) TIMEOUT_MS);
         executor = Executors.newCachedThreadPool();
@@ -250,6 +257,70 @@ class RoutingServiceTest {
         assertNull(outcome.getDegradedReason());
     }
 
+    @Test
+    void decisionRoutingShouldSelectBasesAboveThresholdInDeclarationOrder() {
+        givenDecision(Map.of(KB_A, 0.91d, KB_B, 0.12d, KB_C, 0.5d));
+
+        RoutingOutcome outcome = newService().route(candidates(KB_A, KB_B, KB_C), QUERY, true, null);
+
+        // 阈值 0.5 含边界；聊天模型一次都不应被调用
+        assertEquals(List.of(KB_A, KB_C), outcome.getKbIds());
+        assertNull(outcome.getDegradedReason());
+        verify(chatProvider, never()).complete(anyString(), anyList());
+    }
+
+    @Test
+    void decisionRoutingShouldSearchEveryBaseWhenNoCandidateReachesThreshold() {
+        givenDecision(Map.of(KB_A, 0.2d, KB_B, 0.1d));
+
+        RoutingOutcome outcome = newService().route(candidates(KB_A, KB_B), QUERY, true, null);
+
+        assertEquals(List.of(KB_A, KB_B), outcome.getKbIds());
+        assertEquals(DegradedReason.ROUTE_FALLBACK_ALL.code(), outcome.getDegradedReason());
+    }
+
+    @Test
+    void decisionRoutingShouldSearchEveryBaseWhenTheCallFails() {
+        givenDecision(Map.of());
+        when(decisionProvider.evaluateNouls(any(), anyMap())).thenThrow(
+                new ProviderException("typesafe", ProviderErrorType.QUOTA_EXCEEDED, "429"));
+
+        RoutingOutcome outcome = newService().route(candidates(KB_A, KB_B), QUERY, true, null);
+
+        assertEquals(List.of(KB_A, KB_B), outcome.getKbIds());
+        assertEquals(DegradedReason.ROUTE_FALLBACK_ALL.code(), outcome.getDegradedReason());
+    }
+
+    @Test
+    void customPromptShouldStayOnTheChatModelEvenWhenDecisionRoutingIsOn() {
+        givenDecision(Map.of(KB_A, 0.9d, KB_B, 0.9d));
+        givenAnswer("[\"" + KB_B + "\"]");
+
+        RoutingOutcome outcome = newService().route(candidates(KB_A, KB_B), QUERY, true, "operator wording");
+
+        assertEquals(List.of(KB_B), outcome.getKbIds());
+        verify(decisionProvider, never()).evaluateNouls(any(), anyMap());
+    }
+
+    @Test
+    void decisionRoutingShouldStayOffUntilExplicitlyEnabled() {
+        givenDecision(Map.of(KB_A, 0.9d, KB_B, 0.1d));
+        properties.getDecision().setRoutingEnabled(false);
+        givenAnswer("[\"" + KB_B + "\"]");
+
+        RoutingOutcome outcome = newService().route(candidates(KB_A, KB_B), QUERY, true, null);
+
+        assertEquals(List.of(KB_B), outcome.getKbIds());
+        verify(decisionProvider, never()).evaluateNouls(any(), anyMap());
+    }
+
+    private void givenDecision(Map<String, Double> nouls) {
+        properties.getDecision().setRoutingEnabled(true);
+        when(decisionProvider.isConfigured()).thenReturn(true);
+        when(decisionProvider.model()).thenReturn("jev-1.13.0");
+        when(decisionProvider.evaluateNouls(any(), anyMap())).thenReturn(nouls);
+    }
+
     private void givenAnswer(String answer) {
         when(chatProvider.isConfigured()).thenReturn(true);
         when(chatProvider.complete(anyString(), anyList())).thenReturn(answer);
@@ -266,6 +337,6 @@ class RoutingServiceTest {
     }
 
     private RoutingService newService() {
-        return new RoutingService(chatProvider, properties, executor);
+        return new RoutingService(chatProvider, decisionProvider, properties, executor);
     }
 }

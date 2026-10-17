@@ -45,6 +45,9 @@ public class KbProperties {
     /** Chat provider configuration, currently only consumed by the query rewrite stage. */
     private Chat chat = new Chat();
 
+    /** 结构化决策模型配置（TypeSafe Jev），可选组件，API Key 为空即整体关闭。 */
+    private Decision decision = new Decision();
+
     /** Vision provider configuration, consumed by the image asset stage. */
     private Vision vision = new Vision();
 
@@ -491,6 +494,46 @@ public class KbProperties {
 
         /** Maximum candidates submitted to one rerank call. */
         private int candidateLimit = 50;
+    }
+
+    /**
+     * 结构化决策模型配置（TypeSafe Jev System One）。
+     *
+     * <p>决策模型不生成文本，只对「状态 + 带类型的问题」返回概率，适合路由、重排这类窄判断。它是 SaaS，
+     * 问题与文档片段会发往 TypeSafe，因此默认关闭：只有配置了 API Key 才会装配真实实现，路由还需额外打开
+     * {@link #routingEnabled}，重排需把 {@code kb.rerank.provider} 设为 {@code typesafe}。
+     */
+    @Getter
+    @Setter
+    @ToString(exclude = "apiKey")
+    public static class Decision {
+
+        /** 提供方名称，同时作为计量账单的 provider。 */
+        private String provider = "typesafe";
+
+        /** 模型版本；固定到具体版本而非 jev-latest，别名漂移会让阈值与评测对比失效。 */
+        private String model = "jev-1.13.0";
+
+        /** 凭据，为空则决策能力整体关闭。 */
+        private String apiKey = "";
+
+        /** 服务地址。 */
+        private String baseUrl = "https://api.typesafe.ai";
+
+        /** 单次请求超时（毫秒）；路由另受 {@code kb.chat.timeout-ms} 的阶段预算约束。 */
+        private int timeoutMs = 3000;
+
+        /** 是否用决策模型做多库路由；关闭时路由仍走聊天模型。 */
+        private boolean routingEnabled = false;
+
+        /** 知识库被选中的最低「是」概率，取值 (0,1)。 */
+        private double routingThreshold = 0.5d;
+
+        /**
+         * 单次重排请求携带的段落字符上限。Jev 单请求上限 64k token（状态加全部问题），中文约一字一 token，
+         * 留出指令与 JSON 结构的余量后取 40000；超出即拆成多次请求，避免整批被打成 INPUT_TOO_LONG。
+         */
+        private int maxRequestChars = 40000;
     }
 
     /**

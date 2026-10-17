@@ -11,6 +11,7 @@ import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.entity.KnowledgeBase;
 import io.kbrag.domain.model.ChatMessage;
 import io.kbrag.domain.port.ChatProvider;
+import io.kbrag.domain.port.DecisionProvider;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -18,13 +19,16 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * Picks the knowledge bases one query is searched in, requirement section 4.9 "routing".
@@ -52,6 +56,11 @@ import java.util.concurrent.TimeoutException;
  * <p>The cache is keyed on the question, the candidate set and the effective prompt, all three of which
  * change the answer. It is short lived on purpose: it absorbs an agent retrying the same question, not a
  * shift in what the bases contain.
+ *
+ * <p><b>决策模型路由（可选）。</b>配置了 {@code kb.decision} 且打开 {@code routing-enabled} 时，每个候选库是一个
+ * Noul 问题，「是」的概率达到 {@code routing-threshold} 即选中，不再解析模型文本。应用自定义了路由提示词时仍走
+ * 聊天模型：那份提示词是按「输出 JSON 数组」写给生成模型的，换引擎会静默丢掉运营的配置。白名单与「失败即全搜」
+ * 两条原则对两种引擎一视同仁。
  *
  * @author owlzhangfq@gmail.com
  */
@@ -91,17 +100,33 @@ public class RoutingService {
     private static final char ARRAY_OPEN = '[';
     private static final char ARRAY_CLOSE = ']';
 
+    /** 决策模型路由的问题文本；库信息放进问题对象本身，避免「按下标回指状态」这类 Jev 不擅长的间接引用。 */
+    private static final String DECISION_QUESTION =
+            "Is this knowledge base likely to contain material that answers the user question in the state?";
+    private static final String FIELD_QUESTION = "question";
+    private static final String FIELD_KNOWLEDGE_BASE = "knowledge_base";
+    private static final String FIELD_USER_QUESTION = "user_question";
+    private static final String FIELD_ID = "id";
+    private static final String FIELD_NAME = "name";
+    private static final String FIELD_DESCRIPTION = "description";
+    private static final String DECISION_CACHE_MARKER = "decision:";
+
     private final ChatProvider chatProvider;
+    private final DecisionProvider decisionProvider;
     private final KbProperties.Chat chatConfig;
+    private final KbProperties.Decision decisionConfig;
     private final KbProperties.Eval evalConfig;
     private final Executor executor;
     private final Cache<String, List<String>> cache;
 
     public RoutingService(ChatProvider chatProvider,
+                          DecisionProvider decisionProvider,
                           KbProperties properties,
                           @Qualifier(AsyncConfig.RETRIEVAL_EXECUTOR) Executor executor) {
         this.chatProvider = chatProvider;
+        this.decisionProvider = decisionProvider;
         this.chatConfig = properties.getChat();
+        this.decisionConfig = properties.getDecision();
         this.evalConfig = properties.getEval();
         this.executor = executor;
         this.cache = Caffeine.newBuilder()
@@ -125,6 +150,10 @@ public class RoutingService {
             // Nothing to decide, or nobody asked for a decision: both are supported configurations.
             return RoutingOutcome.skipped(allKbIds);
         }
+        boolean customPrompt = prompt != null && !prompt.isBlank();
+        if (!customPrompt && decisionConfig.isRoutingEnabled() && decisionProvider.isConfigured()) {
+            return routeByDecision(candidates, query, allKbIds);
+        }
         if (!chatProvider.isConfigured()) {
             log.info("knowledge base routing requested without a chat model, searching every linked base,"
                     + " candidates={}", allKbIds.size());
@@ -140,7 +169,9 @@ public class RoutingService {
 
         long timeoutMs = effectiveTimeoutMs();
         try {
-            String raw = callWithTimeout(systemPrompt, userMessage(candidates, query), timeoutMs);
+            String userMessage = userMessage(candidates, query);
+            String raw = callWithTimeout(
+                    () -> chatProvider.complete(systemPrompt, List.of(ChatMessage.user(userMessage))), timeoutMs);
             List<String> selected = intersect(parse(raw), allKbIds);
             if (CollectionUtils.isEmpty(selected)) {
                 // Either the answer named no candidate at all or it named ids nobody linked; the two are
@@ -166,21 +197,80 @@ public class RoutingService {
     }
 
     /**
+     * 用决策模型做路由：每个候选库一个 Noul，概率达到阈值即选中，按声明顺序返回。
+     *
+     * <p>失败语义与聊天模型路径一致：超时、调用失败、无一达标都退回全部库并打 {@code route_fallback_all}。
+     *
+     * @param candidates 应用关联的知识库
+     * @param query      已改写的查询
+     * @param allKbIds   全部候选 id，声明顺序
+     * @return 路由结果
+     */
+    private RoutingOutcome routeByDecision(List<KnowledgeBase> candidates, String query, List<String> allKbIds) {
+        String cacheKey = cacheKey(query, allKbIds, DECISION_CACHE_MARKER + decisionProvider.model());
+        List<String> cached = cache.getIfPresent(cacheKey);
+        if (cached != null) {
+            return RoutingOutcome.routed(cached);
+        }
+        Map<String, Object> questions = new LinkedHashMap<>(candidates.size() * 2);
+        for (KnowledgeBase candidate : candidates) {
+            Map<String, Object> knowledgeBase = new LinkedHashMap<>();
+            knowledgeBase.put(FIELD_ID, candidate.getKbId());
+            knowledgeBase.put(FIELD_NAME, candidate.getName());
+            knowledgeBase.put(FIELD_DESCRIPTION, candidate.getDescription() == null
+                    || candidate.getDescription().isBlank() ? NO_DESCRIPTION : candidate.getDescription());
+            Map<String, Object> instructions = new LinkedHashMap<>();
+            instructions.put(FIELD_QUESTION, DECISION_QUESTION);
+            instructions.put(FIELD_KNOWLEDGE_BASE, knowledgeBase);
+            // 问题 id 用库 id 本身，答案回填时天然对齐，也无须再做白名单交集之外的映射
+            questions.put(candidate.getKbId(), instructions);
+        }
+        Map<String, Object> state = Map.of(FIELD_USER_QUESTION, query);
+        long timeoutMs = effectiveTimeoutMs();
+        try {
+            Map<String, Double> nouls = callWithTimeout(
+                    () -> decisionProvider.evaluateNouls(state, questions), timeoutMs);
+            List<String> selected = new ArrayList<>(allKbIds.size());
+            for (String kbId : allKbIds) {
+                Double noul = nouls.get(kbId);
+                if (noul != null && noul >= decisionConfig.getRoutingThreshold()) {
+                    selected.add(kbId);
+                }
+            }
+            if (CollectionUtils.isEmpty(selected)) {
+                log.info("decision routing matched no candidate above threshold {}, searching every linked base,"
+                        + " candidates={}", decisionConfig.getRoutingThreshold(), allKbIds.size());
+                return RoutingOutcome.fallbackAll(allKbIds);
+            }
+            cache.put(cacheKey, selected);
+            log.info("decision routing selected {} of {} bases, routed={}, model={}",
+                    selected.size(), allKbIds.size(), selected, decisionProvider.model());
+            return RoutingOutcome.routed(selected);
+        } catch (TimeoutException e) {
+            log.info("decision routing timed out after {}ms, searching every linked base", timeoutMs);
+            return RoutingOutcome.fallbackAll(allKbIds);
+        } catch (Exception e) {
+            log.error("decision routing failed, errorCode={}, candidates={}",
+                    ErrorCode.UPSTREAM_MODEL_ERROR, allKbIds.size(), e);
+            return RoutingOutcome.fallbackAll(allKbIds);
+        }
+    }
+
+    /**
      * Issues the provider call under a hard timeout.
      *
      * <p>The provider read timeout alone is not enough: a connection that is established but never
      * answers elapses outside it, and routing sits in front of recall, so an unbounded wait here would
      * delay the whole search rather than just this stage.
      *
-     * @param systemPrompt effective routing instruction
-     * @param userMessage  candidate list plus the question
-     * @param timeoutMs    budget for this call
-     * @return raw model answer
+     * @param call      provider call, chat or decision
+     * @param timeoutMs budget for this call
+     * @param <T>       answer type
+     * @return provider answer
      * @throws Exception timeout, interruption or provider failure
      */
-    private String callWithTimeout(String systemPrompt, String userMessage, long timeoutMs) throws Exception {
-        CompletableFuture<String> future = CompletableFuture.supplyAsync(
-                () -> chatProvider.complete(systemPrompt, List.of(ChatMessage.user(userMessage))), executor);
+    private <T> T callWithTimeout(Supplier<T> call, long timeoutMs) throws Exception {
+        CompletableFuture<T> future = CompletableFuture.supplyAsync(call, executor);
         try {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {

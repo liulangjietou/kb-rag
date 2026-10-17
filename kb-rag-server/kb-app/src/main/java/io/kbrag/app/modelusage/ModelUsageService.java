@@ -440,7 +440,7 @@ public class ModelUsageService implements ModelCallMeter {
 
     private void requireCapability(String capability) {
         if (!List.of(ModelCallSpec.CHAT, ModelCallSpec.EMBEDDING, ModelCallSpec.RERANK,
-                ModelCallSpec.VISION, ModelCallSpec.MULTIMODAL_EMBEDDING).contains(capability)) {
+                ModelCallSpec.VISION, ModelCallSpec.MULTIMODAL_EMBEDDING, ModelCallSpec.DECISION).contains(capability)) {
             throw BizException.invalidParam("不支持的模型能力: " + capability);
         }
     }
