@@ -87,6 +87,14 @@ public class VersionFingerprintFactory {
                     || config.getSplitHeadingLevel() > HeadingTextSplitter.MAX_HEADING_LEVEL
                     ? HeadingTextSplitter.DEFAULT_HEADING_LEVEL : config.getSplitHeadingLevel();
             segments.add("split_heading_level=" + level);
+        } else if (EmbeddingSemanticTextSplitter.STRATEGY_CODE.equals(config.getSplitStrategy())) {
+            double threshold = config.getSplitSemanticDropThreshold() <= 0
+                    || config.getSplitSemanticDropThreshold() > 1
+                    ? 0.35d : config.getSplitSemanticDropThreshold();
+            segments.add("split_semantic_drop_threshold=" + threshold);
+        }
+        if (!config.normalizedSplitStrategyByExt().isEmpty()) {
+            segments.add("split_strategy_by_ext=" + config.normalizedSplitStrategyByExt());
         }
         // Appended only when on, for the same compatibility reason as the metadata rules: a knowledge
         // base that never turned multimodal indexing on keeps the exact fingerprint it had before M14,

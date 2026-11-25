@@ -5,8 +5,11 @@ import io.kbrag.api.annotation.RequiresPermission;
 import io.kbrag.api.dto.AlertConfigResponse;
 import io.kbrag.api.dto.DemoStatusResponse;
 import io.kbrag.api.dto.ModelStatusResponse;
+import io.kbrag.api.dto.QualityAutomationConfigResponse;
 import io.kbrag.api.dto.UpdateAlertConfigRequest;
+import io.kbrag.api.dto.UpdateQualityAutomationConfigRequest;
 import io.kbrag.app.alert.AlertConfigService;
+import io.kbrag.app.quality.QualityAutomationConfigService;
 import io.kbrag.app.alert.AlertService;
 import io.kbrag.app.system.DemoImportService;
 import io.kbrag.app.system.ModelStatusService;
@@ -44,6 +47,7 @@ public class SystemController {
     private final AlertConfigService alertConfigService;
     private final AlertService alertService;
     private final DemoImportService demoImportService;
+    private final QualityAutomationConfigService qualityAutomationConfigService;
 
     /**
      * Reports which model capabilities are configured and which engine backs the vector route.
@@ -83,6 +87,21 @@ public class SystemController {
         AlertConfig updated = alertConfigService.update(
                 request.toAlertConfig(alertConfigService.current()));
         return Result.success(AlertConfigResponse.from(updated));
+    }
+
+    @GetMapping("/quality-automation-config")
+    @RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
+    public Result<QualityAutomationConfigResponse> qualityAutomationConfig() {
+        return Result.success(QualityAutomationConfigResponse.from(qualityAutomationConfigService.current()));
+    }
+
+    @PutMapping("/quality-automation-config")
+    @RequiresPermission(PermissionCodes.SYSTEM_CONFIG)
+    @AuditedOperation(module = "SYSTEM", action = "UPDATE_QUALITY_AUTOMATION", targetType = "SYSTEM_CONFIG")
+    public Result<QualityAutomationConfigResponse> updateQualityAutomationConfig(
+            @Valid @RequestBody UpdateQualityAutomationConfigRequest request) {
+        return Result.success(QualityAutomationConfigResponse.from(
+                qualityAutomationConfigService.update(request.toConfig())));
     }
 
     /**

@@ -23,8 +23,11 @@ import io.kbrag.domain.model.KbIndexConfig;
 import io.kbrag.domain.model.KbRetrievalConfig;
 import io.kbrag.domain.model.ParentChildParams;
 import io.kbrag.domain.port.ChatProvider;
+import io.kbrag.domain.port.EmbeddingProvider;
 import io.kbrag.domain.port.GraphStore;
 import io.kbrag.domain.port.VisionProvider;
+import io.kbrag.domain.service.EmbeddingSemanticTextSplitter;
+import io.kbrag.domain.service.TableRowTextSplitter;
 import io.kbrag.domain.service.BizIdGenerator;
 import io.kbrag.domain.service.FixedLengthTextSplitter;
 import io.kbrag.domain.service.GraphFusionPolicy;
@@ -75,6 +78,7 @@ public class KnowledgeBaseService {
     private final VersionFingerprintFactory fingerprintFactory;
     private final VisionProvider visionProvider;
     private final ChatProvider chatProvider;
+    private final EmbeddingProvider embeddingProvider;
     private final GraphFusionPolicy graphFusionPolicy;
     private final GraphStore graphStore;
     private final RoleService roleService;
@@ -402,6 +406,10 @@ public class KnowledgeBaseService {
             throw BizException.invalidParam(
                     "the LLM semantic split strategy requires a configured chat model");
         }
+        if (strategy == SplitStrategy.EMBEDDING_SEMANTIC && !embeddingProvider.isConfigured()) {
+            throw BizException.invalidParam(
+                    "the embedding semantic split strategy requires a configured embedding model");
+        }
     }
 
     /**
@@ -426,7 +434,14 @@ public class KnowledgeBaseService {
     private KbIndexConfig defaultIndexConfig() {
         KbProperties.Split split = properties.getSplit();
         KbIndexConfig config = new KbIndexConfig();
-        config.setSplitStrategy(FixedLengthTextSplitter.STRATEGY_CODE);
+        config.setSplitStrategy(embeddingProvider.isConfigured()
+                ? EmbeddingSemanticTextSplitter.STRATEGY_CODE
+                : FixedLengthTextSplitter.STRATEGY_CODE);
+        Map<String, String> formatStrategies = new HashMap<>(3);
+        formatStrategies.put("xlsx", TableRowTextSplitter.STRATEGY_CODE);
+        formatStrategies.put("xls", TableRowTextSplitter.STRATEGY_CODE);
+        formatStrategies.put("csv", TableRowTextSplitter.STRATEGY_CODE);
+        config.setSplitStrategyByExt(formatStrategies);
         config.setChunkMaxTokens(split.getMaxTokens());
         config.setChunkOverlap(split.getOverlapTokens());
         config.setEmbeddingModel(properties.getEmbedding().getModel());

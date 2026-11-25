@@ -259,7 +259,8 @@ class EmployeeRunHttpIntegrationTest {
                 return null;
             }).when(knowledge).employeeStream(any(), any(), any(), any(), any());
             coordinator = new EmployeeRunCoordinator(ledger, access, history, evidence, knowledge, runs, worker);
-            var conversations = new EmployeeConversationService(access, ledger, history, coordinator);
+            var conversations = new EmployeeConversationService(access, ledger, history, coordinator,
+                    org.mockito.Mockito.mock(io.kbrag.app.quality.EmployeeFeedbackQualityAutomation.class));
             subscriptions = new EmployeeRunSubscriptions(conversations, access);
             tomcatDirectory = Files.createTempDirectory("kb-employee-http-");
             web.register(WebConfiguration.class);

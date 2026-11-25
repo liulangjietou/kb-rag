@@ -10,6 +10,7 @@ import type {
   IkDictType,
   ModelStatus,
   PageResult,
+  QualityAutomationConfig,
   UpdateAlertConfigRequest,
 } from './types';
 
@@ -59,6 +60,14 @@ export function updateAlertConfig(payload: UpdateAlertConfigRequest): Promise<vo
 /** POST /api/v1/system/alert-config/test: sends a test message to the configured webhook. */
 export function testAlertConfig(): Promise<void> {
   return apiPost<void>('/system/alert-config/test');
+}
+
+export function getQualityAutomationConfig(): Promise<QualityAutomationConfig> {
+  return apiGet<QualityAutomationConfig>('/system/quality-automation-config');
+}
+
+export function updateQualityAutomationConfig(payload: QualityAutomationConfig): Promise<QualityAutomationConfig> {
+  return apiPut<QualityAutomationConfig>('/system/quality-automation-config', payload);
 }
 
 /** GET /api/v1/system/demo/status (M3-CONTRACTS.md section 3.7); drives the KB list empty-state button. */

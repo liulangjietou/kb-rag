@@ -143,6 +143,14 @@ class RetrievalServiceTest {
                 .thenAnswer(invocation -> RewriteOutcome.skipped(invocation.getArgument(0)));
         when(rerankService.isAvailable()).thenReturn(false);
         when(rerankService.candidateLimit()).thenReturn(50);
+        when(rerankService.effectiveCandidateLimit(anyInt(), anyBoolean())).thenAnswer(invocation -> {
+            int topN = invocation.getArgument(0);
+            boolean parentChild = invocation.getArgument(1);
+            if (!parentChild) {
+                return 50;
+            }
+            return Math.min(Math.max(50, topN * 5), 100);
+        });
         when(rerankService.rerank(anyString(), anyList(), eq(false))).thenReturn(RerankOutcome.skipped());
         when(graphRetrievalService.recall(anyString(), any(), anyInt()))
                 .thenReturn(GraphRouteOutcome.skipped());
@@ -739,7 +747,7 @@ class RetrievalServiceTest {
     void shouldCutEachBaseToItsWeightedQuotaBeforeMerging() {
         givenTwoBases();
         // A four candidate budget split three to one: 4*3/4 = 3 and 4*1/4 = 1, nothing left over.
-        when(rerankService.candidateLimit()).thenReturn(4);
+        when(rerankService.effectiveCandidateLimit(anyInt(), anyBoolean())).thenReturn(4);
         when(fulltextStore.searchBm25(eq(FULLTEXT_ALIAS), any())).thenReturn(List.of(
                 new ScoredChunk("ck_a1", 9.0d, RetrievalSource.BM25),
                 new ScoredChunk("ck_a2", 8.0d, RetrievalSource.BM25),

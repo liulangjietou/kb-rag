@@ -5,6 +5,7 @@ import { updateIndexConfig } from '../../../api/kb';
 import type { ChatAggregationConfig, CleanRules, IndexConfig, MetadataRule, SplitStrategy } from '../../../api/types';
 import { useModelStatus } from '../../../context/ModelStatusContext';
 import {
+  EMBEDDING_SPLIT_REQUIRES_EMBEDDING,
   LLM_SPLIT_REQUIRES_CHAT_MODEL,
   PARENT_CHILD_REQUIRES_FIXED_LENGTH,
   SPLIT_STRATEGY_META,
@@ -39,6 +40,7 @@ const DEFAULT_HIDE_PARENT_WITH_DISABLED_CHILD = false;
 const DEFAULT_INHERIT_DISABLE_ANNOTATION = true;
 // Server default when a knowledge base has never had a strategy written (KnowledgeBaseService).
 const DEFAULT_SPLIT_STRATEGY: SplitStrategy = 'fixed_length';
+const DEFAULT_SEMANTIC_DROP_THRESHOLD = 0.35;
 // M14 contract section 4 splitter fallbacks: 0 lets each strategy pick its own default.
 const DEFAULT_SPLIT_HEADING_LEVEL = 0;
 // M14 contract section 3.1: the console mirrors the server MetadataRule.KEY_PATTERN so an illegal
@@ -57,13 +59,24 @@ function splitStrategyHint(strategy: SplitStrategy): string {
       return '按 Markdown 标题层级切块，适合层级清晰的结构化文档';
     case 'page':
       return '每个源文档页面独立成片，适合页面边界即语义边界的文档';
+    case 'embedding_semantic':
+      return '按句向量化，在相邻句相似度骤降处切分；需配置向量模型，长文索引成本高于定长';
+    case 'table_row':
+      return '表格类文档每行一片；可与下方「按扩展名覆盖」为 xlsx/csv 单独指定';
     default:
       return '按 token 长度顺序切分，配合下方重叠长度使用';
   }
 }
 
+interface SplitStrategyByExtRow {
+  ext: string;
+  strategy: SplitStrategy;
+}
+
 interface IndexConfigFormValues {
   split_strategy: SplitStrategy;
+  split_semantic_drop_threshold?: number;
+  split_strategy_by_ext_rows: SplitStrategyByExtRow[];
   split_separator?: string;
   split_separator_is_regex: boolean;
   split_heading_level: number;
@@ -91,9 +104,33 @@ interface IndexConfigDrawerProps {
   onSaved: () => void;
 }
 
+function toSplitStrategyByExtRows(map?: Record<string, SplitStrategy>): SplitStrategyByExtRow[] {
+  if (!map) {
+    return [];
+  }
+  return Object.entries(map).map(([ext, strategy]) => ({ ext, strategy }));
+}
+
+function fromSplitStrategyByExtRows(rows: SplitStrategyByExtRow[] | undefined): Record<string, SplitStrategy> | undefined {
+  if (!rows?.length) {
+    return undefined;
+  }
+  const result: Record<string, SplitStrategy> = {};
+  for (const row of rows) {
+    const ext = row.ext?.trim().replace(/^\./, '').toLowerCase();
+    if (!ext) {
+      continue;
+    }
+    result[ext] = row.strategy;
+  }
+  return Object.keys(result).length ? result : undefined;
+}
+
 function toFormValues(config: IndexConfig | null): IndexConfigFormValues {
   return {
     split_strategy: config?.split_strategy ?? DEFAULT_SPLIT_STRATEGY,
+    split_semantic_drop_threshold: config?.split_semantic_drop_threshold ?? DEFAULT_SEMANTIC_DROP_THRESHOLD,
+    split_strategy_by_ext_rows: toSplitStrategyByExtRows(config?.split_strategy_by_ext),
     split_separator: config?.split_separator ?? undefined,
     split_separator_is_regex: config?.split_separator_is_regex ?? false,
     split_heading_level: config?.split_heading_level ?? DEFAULT_SPLIT_HEADING_LEVEL,
@@ -135,6 +172,7 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
   // letting the save round-trip into an INVALID_PARAM.
   const { modelStatus } = useModelStatus();
   const chatConfigured = modelStatus?.chat_configured ?? false;
+  const embeddingConfigured = modelStatus?.embedding_configured ?? false;
   // F5 (M14 contract section 6.2): the multimodal switch stores regardless, but without a provider
   // indexing is skipped, so the console greys it out and says why rather than silently no-op.
   const multimodalConfigured = modelStatus?.multimodal_configured ?? false;
@@ -153,6 +191,9 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
         // The server replaces the whole index_config object from this body, so every key the kb
         // already has must be present here -- including the ones this drawer has no control for.
         split_strategy: values.split_strategy,
+        split_semantic_drop_threshold:
+          values.split_strategy === 'embedding_semantic' ? values.split_semantic_drop_threshold : undefined,
+        split_strategy_by_ext: fromSplitStrategyByExtRows(values.split_strategy_by_ext_rows),
         // M14 section 4: only meaningful to the matching strategy, ignored by the others, but sent
         // every time so the server keeps a coherent record instead of a half-updated object.
         split_separator: values.split_separator?.trim() || undefined,
@@ -227,12 +268,16 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
               // 这里同步禁用，避免用户填完整个表单才在保存时撞上报错。
               disabled:
                 (code === 'llm_semantic' && !chatConfigured) ||
+                (code === 'embedding_semantic' && !embeddingConfigured) ||
                 (parentChildEnabled && code !== 'fixed_length'),
             }))}
           />
         </Form.Item>
         {!chatConfigured && (
           <Alert type="warning" showIcon message={LLM_SPLIT_REQUIRES_CHAT_MODEL} style={{ marginBottom: 16 }} />
+        )}
+        {!embeddingConfigured && (
+          <Alert type="warning" showIcon message={EMBEDDING_SPLIT_REQUIRES_EMBEDDING} style={{ marginBottom: 16 }} />
         )}
         {parentChildEnabled && splitStrategy !== 'fixed_length' && (
           <Alert
@@ -275,15 +320,94 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
             style={{ marginBottom: 16 }}
           />
         )}
+        {splitStrategy === 'embedding_semantic' && (
+          <Form.Item
+            name="split_semantic_drop_threshold"
+            label="语义骤降阈值"
+            extra="相邻句向量余弦相似度相对降幅超过该值时切分；0 或留空使用默认 0.35"
+            rules={[
+              {
+                validator(_, value: number | undefined) {
+                  if (value == null || value === 0 || (value > 0 && value <= 1)) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error('阈值须在 (0, 1] 之间'));
+                },
+              },
+            ]}
+          >
+            <InputNumber min={0} max={1} step={0.05} style={{ width: '100%' }} />
+          </Form.Item>
+        )}
+        {splitStrategy === 'table_row' && (
+          <Alert
+            type="info"
+            showIcon
+            message="行级切分：可在「清洗规则」中开启 excel 表头拼接，使每行携带列标题上下文"
+            style={{ marginBottom: 16 }}
+          />
+        )}
+
+        <Typography.Title level={5}>按扩展名覆盖切分策略</Typography.Title>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+          可选：为特定后缀指定不同于默认的切分方式（不含点号，如 xlsx、csv）。未列出的扩展名仍走上方默认策略。
+        </Typography.Paragraph>
+        <Form.List name="split_strategy_by_ext_rows">
+          {(fields, { add, remove }) => (
+            <>
+              {fields.map(({ key, name, ...restField }) => (
+                <Space key={key} align="baseline" style={{ display: 'flex', marginBottom: 8 }}>
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'ext']}
+                    rules={[{ required: true, message: '扩展名' }]}
+                  >
+                    <Input placeholder="xlsx" style={{ width: 100 }} />
+                  </Form.Item>
+                  <Form.Item
+                    {...restField}
+                    name={[name, 'strategy']}
+                    rules={[{ required: true, message: '策略' }]}
+                  >
+                    <Select
+                      style={{ width: 200 }}
+                      options={(Object.keys(SPLIT_STRATEGY_META) as SplitStrategy[]).map((code) => ({
+                        value: code,
+                        label: SPLIT_STRATEGY_META[code].label,
+                        disabled:
+                          (code === 'llm_semantic' && !chatConfigured) ||
+                          (code === 'embedding_semantic' && !embeddingConfigured),
+                      }))}
+                    />
+                  </Form.Item>
+                  <Button type="link" danger onClick={() => remove(name)}>
+                    删除
+                  </Button>
+                </Space>
+              ))}
+              <Button type="dashed" block onClick={() => add({ strategy: 'table_row' })} style={{ marginBottom: 16 }}>
+                添加扩展名覆盖
+              </Button>
+            </>
+          )}
+        </Form.List>
 
         <Typography.Title level={5}>分段参数</Typography.Title>
         <Form.Item
           name="chunk_max_tokens"
-          label={splitStrategy === 'llm_semantic' ? '分段长度上限（token）' : '分段长度（token）'}
+          label={
+            splitStrategy === 'llm_semantic' || splitStrategy === 'embedding_semantic' || splitStrategy === 'table_row'
+              ? '分段长度上限（token）'
+              : '分段长度（token）'
+          }
           tooltip={
             splitStrategy === 'llm_semantic'
               ? 'LLM 语义切分下作为兜底上限：模型输出非法或超长时按此长度降级切分'
-              : undefined
+              : splitStrategy === 'embedding_semantic'
+                ? '单块超过该上限时再按定长兜底切分'
+                : splitStrategy === 'table_row'
+                  ? '单行过长时按该上限继续切分'
+                  : undefined
           }
           rules={[{ required: true, message: '请输入分段长度' }]}
         >

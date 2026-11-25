@@ -1,6 +1,7 @@
 package io.kbrag.app.workspace;
 
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import io.kbrag.app.quality.EmployeeFeedbackQualityAutomation;
 import io.kbrag.domain.entity.EmployeeConversation;
 import io.kbrag.common.exception.BizException;
 import io.kbrag.domain.enums.FeedbackVerdict;
@@ -19,6 +20,7 @@ public class EmployeeConversationService {
     private final EmployeeConversationLedger ledger;
     private final EmployeeConversationHistory history;
     private final EmployeeRunCoordinator coordinator;
+    private final EmployeeFeedbackQualityAutomation feedbackQualityAutomation;
 
     /** 列出当前员工在该应用中的私有会话。 */
     public IPage<EmployeeConversation> list(String appId, String keyword, long page, long size) {
@@ -88,7 +90,9 @@ public class EmployeeConversationService {
         if (history.present(principal, ledger.get(scope, conversationId, runId)).restricted()) {
             throw BizException.forbidden("资料权限或状态已变化，请重新读取回答后再评价");
         }
-        return history.present(principal, ledger.feedback(scope, conversationId, runId, verdict, note, expectedRevision));
+        var saved = ledger.feedback(scope, conversationId, runId, verdict, note, expectedRevision);
+        feedbackQualityAutomation.onFeedbackSaved(saved);
+        return history.present(principal, saved);
     }
 
     /** 按轮次分页返回经过当前证据权限过滤的历史。 */

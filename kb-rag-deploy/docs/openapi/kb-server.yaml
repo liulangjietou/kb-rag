@@ -281,8 +281,17 @@ info:
 
     审核的事务才创建正式账号并分配租户/角色；申请提交成功不签发登录会话。详见 M26-CONTRACTS.md。
 
+
+    0.29.0-split-quality 增量：①`SplitStrategy` 增 `embedding_semantic`（句级向量相似度切分，
+
+    要求已配置嵌入模型）与 `table_row`（表格逐行切分）；`IndexConfig` 增 `split_semantic_drop_threshold`、
+
+    `split_strategy_by_ext`（扩展名覆盖，计入配置指纹）；②`GET/PUT /api/v1/system/quality-automation-config`
+
+    控制员工「需改进」评价是否自动创建质量问题（`auto_issue_from_employee_bad`，默认 false）。
+
     '
-  version: 0.28.0-m26
+  version: 0.29.0-split-quality
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -3972,6 +3981,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AlertTestResult'
+        '400':
+          $ref: '#/components/responses/InvalidParam'
+  /api/v1/system/quality-automation-config:
+    get:
+      tags:
+      - system
+      summary: 获取质量自动化配置
+      description: 配置存 t_kb_system_config（键 quality.auto_issue_employee_bad）。控制员工工作台
+        提交「需改进」评价时是否为应用关联的每个知识库自动创建员工问答类质量问题；默认关闭。
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityAutomationConfigResult'
+    put:
+      tags:
+      - system
+      summary: 更新质量自动化配置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QualityAutomationConfig'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityAutomationConfigResult'
         '400':
           $ref: '#/components/responses/InvalidParam'
   /api/v1/system/demo/import:
@@ -10126,9 +10168,13 @@ components:
       type: string
       description: '切分策略。fixed_length=按 token 长度顺切（M1 默认）；llm_semantic=对话模型只输出
 
-        切割点、结果落库缓存，**要求已配置对话模型**；separator=按字面量/正则分隔符切段后贪心装包
+        切割点、结果落库缓存，**要求已配置对话模型**；embedding_semantic=句级嵌入向量，在相邻句余弦
 
-        （M14，配 split_separator/split_separator_is_regex）；heading=按 markdown 标题层级开新段
+        相似度骤降处切分（配 split_semantic_drop_threshold，**要求已配置嵌入模型**）；table_row=表格
+
+        类逐行切分（常与 split_strategy_by_ext 为 xlsx/csv 指定）；separator=按字面量/正则分隔符切段后
+
+        贪心装包（M14，配 split_separator/split_separator_is_regex）；heading=按 markdown 标题层级开新段
 
         （M14，配 split_heading_level，全文无标题回落 fixed_length）；page=按解析产物分页边界切分
 
@@ -10143,6 +10189,8 @@ components:
         （校验先于写入，取值集合即本枚举）。'
       enum:
       - fixed_length
+      - embedding_semantic
+      - table_row
       - llm_semantic
       - separator
       - heading
@@ -10182,6 +10230,22 @@ components:
           maximum: 6
           default: 2
           description: 'M14 heading 策略的 markdown 标题层级（1-6，默认 2）；其余策略忽略此字段。'
+        split_semantic_drop_threshold:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          default: 0
+          description: 'embedding_semantic 策略：相邻句向量余弦相似度相对前一对相邻句的降幅超过该值
+
+            时开新段；0 或未设置使用默认 0.35。其余策略忽略。计入配置指纹。'
+        split_strategy_by_ext:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/SplitStrategy'
+          description: '按源文件扩展名（小写、不含点，如 xlsx、csv）覆盖默认 split_strategy；
+
+            未列出的扩展名仍走 split_strategy。键与取值均校验为合法 SplitStrategy；计入配置指纹。'
         metadata_rules:
           type: array
           nullable: true
@@ -10207,7 +10271,7 @@ components:
           type: integer
           default: 600
           minimum: 1
-          description: 定长切分的分段长度；LLM 语义切分下作为模型输出非法/超长时的降级兜底上限
+          description: 定长切分的分段长度；llm_semantic / embedding_semantic / table_row 下作为单块超长时的降级上限
         chunk_overlap:
           type: integer
           default: 100
@@ -10714,6 +10778,25 @@ components:
         properties:
           data:
             $ref: '#/components/schemas/AlertConfig'
+    QualityAutomationConfig:
+      type: object
+      description: '员工问答质量自动化开关，存 t_kb_system_config。开启后员工提交需改进评价时，
+
+        为应用关联知识库各创建一条员工问答类质量问题（同摘要已存在则跳过）；不含员工身份信息。'
+      required:
+      - auto_issue_from_employee_bad
+      properties:
+        auto_issue_from_employee_bad:
+          type: boolean
+          default: false
+          description: 是否在员工差评（需改进）时自动创建质量问题；默认 false。
+    QualityAutomationConfigResult:
+      allOf:
+      - $ref: '#/components/schemas/ResultEnvelope'
+      - type: object
+        properties:
+          data:
+            $ref: '#/components/schemas/QualityAutomationConfig'
     AlertTestResult:
       allOf:
       - $ref: '#/components/schemas/ResultEnvelope'

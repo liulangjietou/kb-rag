@@ -8,7 +8,12 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.ToString;
 
+import io.kbrag.domain.service.FixedLengthTextSplitter;
+
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * Typed view of the {@code t_kb_knowledge_base.index_config} JSON column.
@@ -97,6 +102,18 @@ public class KbIndexConfig {
      */
     @JsonProperty("split_heading_level")
     private int splitHeadingLevel;
+
+    /**
+     * Similarity drop threshold of the embedding semantic strategy; {@code 0} keeps the strategy default.
+     */
+    @JsonProperty("split_semantic_drop_threshold")
+    private double splitSemanticDropThreshold;
+
+    /**
+     * Per file extension split overrides, for example {@code {"xlsx":"table_row"}}.
+     */
+    @JsonProperty("split_strategy_by_ext")
+    private Map<String, String> splitStrategyByExt;
 
     /**
      * Turns on the multimodal vector route for this knowledge base, the M14 contract section 6.2.
@@ -206,6 +223,51 @@ public class KbIndexConfig {
      */
     public SplitParams splitParams(SplitParams.CacheContext cacheContext) {
         return SplitParams.of(chunkMaxTokens, chunkOverlap, cacheContext, splitSeparator,
-                splitSeparatorIsRegex, splitHeadingLevel);
+                splitSeparatorIsRegex, splitHeadingLevel, splitSemanticDropThreshold,
+                cleanRulesOrDefaults().isExcelHeaderJoin(), 0);
+    }
+
+    /**
+     * Resolves the extension map, never {@code null}.
+     *
+     * @return configured overrides, empty when never set
+     */
+    public Map<String, String> splitStrategyByExtOrEmpty() {
+        return splitStrategyByExt == null ? Map.of() : splitStrategyByExt;
+    }
+
+    /**
+     * Chooses the split strategy for one document extension.
+     *
+     * @param fileExt lower case extension without a dot, may be {@code null}
+     * @return persisted strategy code
+     */
+    public String resolveSplitStrategy(String fileExt) {
+        if (fileExt != null && !fileExt.isBlank() && splitStrategyByExt != null) {
+            String override = splitStrategyByExt.get(fileExt.toLowerCase(Locale.ROOT));
+            if (override != null && !override.isBlank()) {
+                return override.trim().toLowerCase(Locale.ROOT);
+            }
+        }
+        if (splitStrategy == null || splitStrategy.isBlank()) {
+            return FixedLengthTextSplitter.STRATEGY_CODE;
+        }
+        return splitStrategy.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * Normalised copy of the extension strategy map for fingerprints.
+     *
+     * @return sorted extension to strategy entries
+     */
+    public Map<String, String> normalizedSplitStrategyByExt() {
+        Map<String, String> normalized = new LinkedHashMap<>();
+        splitStrategyByExtOrEmpty().forEach((ext, strategy) -> {
+            if (ext == null || ext.isBlank() || strategy == null || strategy.isBlank()) {
+                return;
+            }
+            normalized.put(ext.toLowerCase(Locale.ROOT), strategy.trim().toLowerCase(Locale.ROOT));
+        });
+        return normalized;
     }
 }

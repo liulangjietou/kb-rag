@@ -109,6 +109,8 @@ export const GRAPH_FUSION_MUTEX_HINT = '开启图路的知识库库内融合强�
  */
 export const SPLIT_STRATEGY_META: Record<SplitStrategy, TagMeta> = {
   fixed_length: { color: 'default', label: '定长切分' },
+  embedding_semantic: { color: 'gold', label: '智能切分（嵌入）' },
+  table_row: { color: 'lime', label: '表格行级切分' },
   llm_semantic: { color: 'purple', label: 'LLM 语义切分' },
   separator: { color: 'blue', label: '分隔符切分' },
   heading: { color: 'geekblue', label: '标题层级切分' },
@@ -117,6 +119,9 @@ export const SPLIT_STRATEGY_META: Record<SplitStrategy, TagMeta> = {
 
 /** Shown wherever 「LLM 语义切分」 has to be greyed out for want of a chat model. */
 export const LLM_SPLIT_REQUIRES_CHAT_MODEL = 'LLM 语义切分需要已配置对话模型，请先在系统设置中配置';
+
+/** Shown wherever 「智能切分（嵌入）」 has to be greyed out for want of an embedding model. */
+export const EMBEDDING_SPLIT_REQUIRES_EMBEDDING = '智能切分需要已配置向量模型，请先在系统设置中配置';
 
 /** Shown wherever the picker has to be confined to 定长切分 because 父子分片 is on. */
 export const PARENT_CHILD_REQUIRES_FIXED_LENGTH =
