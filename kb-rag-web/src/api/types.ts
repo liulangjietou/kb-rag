@@ -221,7 +221,14 @@ export interface PermissionCatalogueItem {
  * `llm_semantic` requires a configured chat model; saving it without one is rejected server-side
  * with INVALID_PARAM ("the LLM semantic split strategy requires a configured chat model").
  */
-export type SplitStrategy = 'fixed_length' | 'llm_semantic' | 'separator' | 'heading' | 'page';
+export type SplitStrategy =
+  | 'fixed_length'
+  | 'embedding_semantic'
+  | 'llm_semantic'
+  | 'separator'
+  | 'heading'
+  | 'page'
+  | 'table_row';
 
 /** M2-CONTRACTS.md section 1.4: parent/child two-level chunking switch and lengths. */
 export interface ParentChildConfig {
@@ -317,6 +324,8 @@ export interface IndexConfig {
    * rejected with INVALID_PARAM rather than silently ignored.
    */
   split_strategy?: SplitStrategy;
+  split_semantic_drop_threshold?: number;
+  split_strategy_by_ext?: Record<string, SplitStrategy>;
   /**
    * M14 contract section 4: block delimiter of the `separator` strategy. null/absent lets the
    * strategy fall back to its own default; ignored by every other strategy.
@@ -1019,6 +1028,10 @@ export interface AlertConfig {
 }
 
 export type UpdateAlertConfigRequest = AlertConfig;
+
+export interface QualityAutomationConfig {
+  auto_issue_from_employee_bad: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Demo one-click import (M3-CONTRACTS.md section 3.7)

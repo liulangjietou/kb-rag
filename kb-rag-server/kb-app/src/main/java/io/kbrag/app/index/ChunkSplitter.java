@@ -1,6 +1,7 @@
 package io.kbrag.app.index;
 
 import io.kbrag.common.util.JsonUtil;
+import io.kbrag.domain.config.KbProperties;
 import io.kbrag.domain.constant.ChunkMetadataKeys;
 import io.kbrag.domain.entity.Chunk;
 import io.kbrag.domain.entity.Document;
@@ -66,6 +67,7 @@ public class ChunkSplitter {
     private final ImageChunkLinker imageChunkLinker;
     private final BizIdGenerator bizIdGenerator;
     private final ChunkMapper chunkMapper;
+    private final KbProperties properties;
 
     /**
      * One version's text together with every strategy question the pipeline already settled.
@@ -109,10 +111,11 @@ public class ChunkSplitter {
     private List<Chunk> splitSingleLevel(SplitRequest request) {
         KbIndexConfig config = request.config();
         ProxiedContent proxied = request.proxied();
-        SplitParams params = config.splitParams(cacheContextOf(request.document(), request.version()));
+        SplitParams params = splitParamsOf(request);
+        String strategy = config.resolveSplitStrategy(request.document().getFileExt());
         List<SplitChunk> splitChunks = request.pageStrategy()
                 ? pageSplitter.split(proxied.getMarkdown(), request.pageRanges(), params)
-                : splitterRouter.resolve(config.getSplitStrategy()).split(proxied.getMarkdown(), params);
+                : splitterRouter.resolve(strategy).split(proxied.getMarkdown(), params);
         Map<Integer, List<String>> imagesByChunk = imageChunkLinker.link(proxied.getMarkdown(),
                 proxied.getPlacements(), splitChunks.stream().map(SplitChunk::getContent).toList());
         List<MetadataRuleExtractor.PreparedRule> rules =
@@ -193,6 +196,16 @@ public class ChunkSplitter {
             metadata.putAll(splitChunk.getMetadata());
         }
         return metadata.isEmpty() ? null : JsonUtil.toJson(metadata);
+    }
+
+    private SplitParams splitParamsOf(SplitRequest request) {
+        KbIndexConfig config = request.config();
+        SplitParams base = config.splitParams(cacheContextOf(request.document(), request.version()));
+        return SplitParams.of(base.getMaxTokens(), base.getOverlapTokens(), base.getCacheContext(),
+                base.getSeparator(), base.isSeparatorIsRegex(), base.getHeadingLevel(),
+                config.getSplitSemanticDropThreshold(),
+                config.cleanRulesOrDefaults().isExcelHeaderJoin(),
+                properties.getSplit().getTableRowMaxChunks());
     }
 
     /**

@@ -1076,6 +1076,9 @@ public class KbProperties {
 
         /** Default overlap in estimated tokens between two children. */
         private int childOverlap = 50;
+
+        /** Maximum chunks produced by {@code table_row}, requirement section 4.2. */
+        private int tableRowMaxChunks = 5000;
     }
 
     /**
@@ -1167,6 +1170,15 @@ public class KbProperties {
 
         /** Lower bound of the parent candidate target. */
         private int parentCandidateFloor = 20;
+
+        /**
+         * When parent-child splitting is on, the rerank candidate cap lifts to
+         * {@code max(candidate-limit, top_n * multiplier)}, requirement section 4.4.
+         */
+        private int rerankCandidateTopNMultiplier = 5;
+
+        /** Hard ceiling on the lifted rerank candidate cap, requirement section 4.4. */
+        private int rerankCandidateHardCap = 100;
 
         /**
          * Images one call may attach to its query, requirement section 4.8.

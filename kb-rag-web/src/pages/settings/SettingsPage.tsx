@@ -2,6 +2,7 @@ import { Card, Grid, Tabs, Typography } from 'antd';
 import { useModelStatus } from '../../context/ModelStatusContext';
 import PageHeader from '../../components/PageHeader';
 import AlertConfigTab from './components/AlertConfigTab';
+import QualityAutomationTab from './components/QualityAutomationTab';
 import ApiKeyTab from './components/ApiKeyTab';
 import AuditLogTab from './components/AuditLogTab';
 import IkDictTab from './components/IkDictTab';
@@ -89,6 +90,15 @@ export default function SettingsPage() {
             children: (
               <Card className="settings-panel">
                 <AlertConfigTab />
+              </Card>
+            ),
+          },
+          {
+            key: 'quality-automation',
+            label: <span className="settings-nav-label"><small>运行管理</small>质量自动化</span>,
+            children: (
+              <Card className="settings-panel">
+                <QualityAutomationTab />
               </Card>
             ),
           },

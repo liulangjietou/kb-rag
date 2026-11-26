@@ -22,8 +22,14 @@ public enum SplitStrategy {
     /** Fixed length splitting with overlap, the M1 default. */
     FIXED_LENGTH("fixed_length"),
 
+    /** Embedding semantic splitting, requirement section 4.3 strategy 1. */
+    EMBEDDING_SEMANTIC("embedding_semantic"),
+
     /** LLM judged semantic splitting, requirement section 4.3 strategy 7. */
     LLM_SEMANTIC("llm_semantic"),
+
+    /** Table row splitting for spreadsheet markdown, requirement section 4.3 strategy 6. */
+    TABLE_ROW("table_row"),
 
     /** Literal or regular expression delimiter, the M14 contract section 4. */
     SEPARATOR("separator"),

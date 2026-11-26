@@ -2,7 +2,10 @@ package io.kbrag.domain.enums;
 
 import io.kbrag.domain.port.ChatProvider;
 import io.kbrag.domain.port.ObjectStorage;
+import io.kbrag.domain.port.EmbeddingProvider;
+import io.kbrag.domain.service.EmbeddingSemanticTextSplitter;
 import io.kbrag.domain.service.FixedLengthTextSplitter;
+import io.kbrag.domain.service.TableRowTextSplitter;
 import io.kbrag.domain.service.HeadingTextSplitter;
 import io.kbrag.domain.service.LlmSemanticTextSplitter;
 import io.kbrag.domain.service.PageSplitter;
@@ -17,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Covers the correspondence this enum exists to enforce: the codes an operator may save and the
@@ -45,12 +49,15 @@ class SplitStrategyTest {
         assertNotNull(SplitStrategy.from(SeparatorTextSplitter.STRATEGY_CODE));
         assertNotNull(SplitStrategy.from(HeadingTextSplitter.STRATEGY_CODE));
         assertNotNull(SplitStrategy.from(PageSplitter.STRATEGY_CODE));
+        assertNotNull(SplitStrategy.from(EmbeddingSemanticTextSplitter.STRATEGY_CODE));
+        assertNotNull(SplitStrategy.from(TableRowTextSplitter.STRATEGY_CODE));
     }
 
     @Test
     void shouldResolveEveryConfigurableCodeToItsOwnSplitter() {
         SplitterRouter router = new SplitterRouter(
-                List.of(fixedLength, llmSemantic(), separator(), heading()), fixedLength);
+                List.of(fixedLength, llmSemantic(), separator(), heading(), embeddingSemantic(), tableRow()),
+                fixedLength);
 
         for (SplitStrategy strategy : SplitStrategy.values()) {
             if (strategy == SplitStrategy.PAGE) {
@@ -70,7 +77,6 @@ class SplitStrategyTest {
         // parent_child is the case worth naming: it is a two level mode switched on by its own flag, not
         // a code an operator selects, and no TextSplitter answers to it.
         assertNull(SplitStrategy.from("parent_child"));
-        assertNull(SplitStrategy.from("table_row"));
         assertNull(SplitStrategy.from(""));
         assertNull(SplitStrategy.from(null));
     }
@@ -94,5 +100,16 @@ class SplitStrategyTest {
 
     private HeadingTextSplitter heading() {
         return new HeadingTextSplitter(fixedLength);
+    }
+
+    private EmbeddingSemanticTextSplitter embeddingSemantic() {
+        EmbeddingProvider embedding = mock(EmbeddingProvider.class);
+        when(embedding.isConfigured()).thenReturn(true);
+        when(embedding.maxBatchSize()).thenReturn(32);
+        return new EmbeddingSemanticTextSplitter(embedding, fixedLength);
+    }
+
+    private TableRowTextSplitter tableRow() {
+        return new TableRowTextSplitter(fixedLength);
     }
 }

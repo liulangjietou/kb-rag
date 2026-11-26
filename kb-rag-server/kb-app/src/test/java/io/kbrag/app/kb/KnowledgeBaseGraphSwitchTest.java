@@ -57,7 +57,8 @@ class KnowledgeBaseGraphSwitchTest {
                 mock(DocumentVersionMapper.class), mock(ChunkMapper.class), mock(BizIdGenerator.class),
                 mock(IndexAliasManager.class), mock(EngineChunkCleaner.class), mock(IndexCleanupService.class),
                 mock(VersionFingerprintFactory.class), mock(VisionProvider.class), mock(ChatProvider.class),
-                new GraphFusionPolicy(), graphStore, mock(RoleService.class), new KbProperties());
+                mock(io.kbrag.domain.port.EmbeddingProvider.class), new GraphFusionPolicy(), graphStore,
+                mock(RoleService.class), new KbProperties());
     }
 
     @Test

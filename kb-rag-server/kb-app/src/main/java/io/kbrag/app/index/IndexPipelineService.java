@@ -481,7 +481,7 @@ public class IndexPipelineService {
      * @return {@code true} when the page strategy applies
      */
     private boolean usesPageStrategy(Document document, KbIndexConfig config) {
-        return PageSplitter.STRATEGY_CODE.equals(config.getSplitStrategy())
+        return PageSplitter.STRATEGY_CODE.equals(config.resolveSplitStrategy(document.getFileExt()))
                 && !imageAssetService.isStandaloneImage(document.getFileExt());
     }
 

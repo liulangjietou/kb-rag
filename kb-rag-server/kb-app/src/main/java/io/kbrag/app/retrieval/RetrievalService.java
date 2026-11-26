@@ -235,14 +235,15 @@ public class RetrievalService {
         // one conversation live in one knowledge base by definition, but the ranking that decides which of
         // them survives is the one the caller is served, and judging them per base would let the cross base
         // fusion reintroduce the loser.
+        boolean parentChildEnabled = selected.stream()
+                .anyMatch(target -> target.indexConfig().parentChildEnabled());
         NearDuplicateWindowMerger.Outcome nearDuplicates =
-                nearDuplicateWindowMerger.merge(mergeAcrossKbs(rankedByKb, kbRefs, settings), chunkById);
+                nearDuplicateWindowMerger.merge(
+                        mergeAcrossKbs(rankedByKb, kbRefs, settings, parentChildEnabled), chunkById);
         List<FusedChunk> merged = nearDuplicates.kept();
         // Cross base merging is reciprocal rank fusion whatever the in base strategy was, so the score the
         // ranking is built on - and therefore the score type a node reports - changes with the base count.
         FusionMode orderingMode = rankedByKb.size() > 1 ? FusionMode.RRF : settings.getFusion().getMode();
-        boolean parentChildEnabled = selected.stream()
-                .anyMatch(target -> target.indexConfig().parentChildEnabled());
 
         List<RetrievalCandidate> candidates = selectCandidates(merged, chunkById, parentChildEnabled,
                 settings, graphEvidence);
@@ -446,15 +447,16 @@ public class RetrievalService {
      * @return unified candidate order
      */
     private List<FusedChunk> mergeAcrossKbs(Map<String, List<FusedChunk>> rankedByKb, List<KbRef> kbRefs,
-                                            RetrievalSettings settings) {
+                                            RetrievalSettings settings, boolean parentChildEnabled) {
         if (rankedByKb.isEmpty()) {
             return List.of();
         }
         if (rankedByKb.size() == 1) {
             return rankedByKb.values().iterator().next();
         }
+        int rerankBudget = rerankService.effectiveCandidateLimit(settings.getTopN(), parentChildEnabled);
         Map<String, Integer> quotas = kbQuotaAllocator.allocate(
-                contributingRefs(kbRefs, rankedByKb.keySet()), rerankService.candidateLimit());
+                contributingRefs(kbRefs, rankedByKb.keySet()), rerankBudget);
         Map<String, List<FusedChunk>> withinQuota = new LinkedHashMap<>(rankedByKb.size());
         for (Map.Entry<String, List<FusedChunk>> entry : rankedByKb.entrySet()) {
             int quota = quotas.getOrDefault(entry.getKey(), 0);
@@ -644,7 +646,8 @@ public class RetrievalService {
     private List<RetrievalCandidate> selectCandidates(List<FusedChunk> live, Map<String, Chunk> chunkById,
                                                       boolean parentChildEnabled, RetrievalSettings settings,
                                                       Map<String, GraphChunkRelevance> graphEvidence) {
-        int maxCandidates = Math.min(rerankService.candidateLimit(), live.size());
+        int maxCandidates = Math.min(
+                rerankService.effectiveCandidateLimit(settings.getTopN(), parentChildEnabled), live.size());
         int count = maxCandidates;
         if (parentChildEnabled) {
             KbProperties.Retrieval retrieval = properties.getRetrieval();

@@ -40,7 +40,8 @@ class EmployeeAnswerFeedbackServiceTest {
     private final EmployeeEvidenceService evidence = mock(EmployeeEvidenceService.class);
     private final EmployeeRunCoordinator coordinator = mock(EmployeeRunCoordinator.class);
     private final EmployeeConversationHistory history = new EmployeeConversationHistory(ledger, evidence);
-    private final EmployeeConversationService service = new EmployeeConversationService(access, ledger, history, coordinator);
+    private final EmployeeConversationService service = new EmployeeConversationService(
+            access, ledger, history, coordinator, mock(io.kbrag.app.quality.EmployeeFeedbackQualityAutomation.class));
     private EmployeeConversationRun run;
 
     @BeforeEach

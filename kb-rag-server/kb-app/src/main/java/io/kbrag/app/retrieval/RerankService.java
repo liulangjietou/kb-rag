@@ -41,6 +41,7 @@ public class RerankService {
 
     private final RerankProvider rerankProvider;
     private final KbProperties.Rerank config;
+    private final KbProperties.Retrieval retrievalConfig;
     private final KbProperties.Eval evalConfig;
     private final Executor executor;
 
@@ -49,6 +50,7 @@ public class RerankService {
                          @Qualifier(AsyncConfig.RETRIEVAL_EXECUTOR) Executor executor) {
         this.rerankProvider = rerankProvider;
         this.config = properties.getRerank();
+        this.retrievalConfig = properties.getRetrieval();
         this.evalConfig = properties.getEval();
         this.executor = executor;
     }
@@ -69,6 +71,22 @@ public class RerankService {
      */
     public int candidateLimit() {
         return config.getCandidateLimit();
+    }
+
+    /**
+     * Effective rerank candidate cap for one search.
+     *
+     * @param topN               final {@code top_n} of the call
+     * @param parentChildEnabled {@code true} when at least one searched base uses two level splitting
+     * @return cap, lifted to {@code max(base, top_n × multiplier)} but never above the hard ceiling
+     */
+    public int effectiveCandidateLimit(int topN, boolean parentChildEnabled) {
+        int base = config.getCandidateLimit();
+        if (!parentChildEnabled || topN <= 0) {
+            return base;
+        }
+        int linked = Math.max(base, topN * retrievalConfig.getRerankCandidateTopNMultiplier());
+        return Math.min(linked, retrievalConfig.getRerankCandidateHardCap());
     }
 
     /**

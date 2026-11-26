@@ -51,14 +51,27 @@ public final class SplitParams {
      */
     private final int headingLevel;
 
+    /** Drop threshold of the embedding semantic strategy, {@code 0} keeps the strategy default. */
+    private final double semanticDropThreshold;
+
+    /** Whether table row chunks repeat the markdown header block. */
+    private final boolean tablePrependHeader;
+
+    /** Maximum chunks for {@code table_row}, {@code 0} disables the cap. */
+    private final int tableRowMaxChunks;
+
     private SplitParams(int maxTokens, int overlapTokens, CacheContext cacheContext,
-                        String separator, boolean separatorIsRegex, int headingLevel) {
+                        String separator, boolean separatorIsRegex, int headingLevel,
+                        double semanticDropThreshold, boolean tablePrependHeader, int tableRowMaxChunks) {
         this.maxTokens = maxTokens;
         this.overlapTokens = overlapTokens;
         this.cacheContext = cacheContext;
         this.separator = separator;
         this.separatorIsRegex = separatorIsRegex;
         this.headingLevel = headingLevel;
+        this.semanticDropThreshold = semanticDropThreshold;
+        this.tablePrependHeader = tablePrependHeader;
+        this.tableRowMaxChunks = tableRowMaxChunks;
     }
 
     /**
@@ -109,7 +122,17 @@ public final class SplitParams {
             throw new IllegalArgumentException("overlapTokens must be within [0, maxTokens)");
         }
         return new SplitParams(maxTokens, overlapTokens, cacheContext, separator, separatorIsRegex,
-                headingLevel);
+                headingLevel, 0, false, 0);
+    }
+
+    /**
+     * Resolves the semantic drop threshold.
+     *
+     * @return configured value, or {@code 0.35} when unset
+     */
+    public double semanticDropThresholdOrDefault() {
+        return semanticDropThreshold <= 0 || semanticDropThreshold > 1
+                ? 0.35d : semanticDropThreshold;
     }
 
     /**
@@ -118,7 +141,36 @@ public final class SplitParams {
      * @return 600 token chunks with 100 token overlap
      */
     public static SplitParams defaults() {
-        return new SplitParams(DEFAULT_MAX_TOKENS, DEFAULT_OVERLAP_TOKENS, null, null, false, 0);
+        return new SplitParams(DEFAULT_MAX_TOKENS, DEFAULT_OVERLAP_TOKENS, null, null, false, 0, 0,
+                false, 0);
+    }
+
+    /**
+     * Builds the parameter set with strategy specific options.
+     *
+     * @param maxTokens              maximum estimated tokens per chunk
+     * @param overlapTokens          overlap in estimated tokens
+     * @param cacheContext           LLM cache coordinates, may be {@code null}
+     * @param separator              separator strategy delimiter, may be {@code null}
+     * @param separatorIsRegex       whether the delimiter is a regex
+     * @param headingLevel           heading strategy depth, {@code 0} keeps the default
+     * @param semanticDropThreshold  embedding semantic drop threshold, {@code 0} keeps the default
+     * @param tablePrependHeader     whether table rows include the markdown header block
+     * @param tableRowMaxChunks      table row chunk cap, {@code 0} disables the cap
+     * @return validated parameters
+     */
+    public static SplitParams of(int maxTokens, int overlapTokens, CacheContext cacheContext,
+                                 String separator, boolean separatorIsRegex, int headingLevel,
+                                 double semanticDropThreshold, boolean tablePrependHeader,
+                                 int tableRowMaxChunks) {
+        if (maxTokens <= 0) {
+            throw new IllegalArgumentException("maxTokens must be positive");
+        }
+        if (overlapTokens < 0 || overlapTokens >= maxTokens) {
+            throw new IllegalArgumentException("overlapTokens must be within [0, maxTokens)");
+        }
+        return new SplitParams(maxTokens, overlapTokens, cacheContext, separator, separatorIsRegex,
+                headingLevel, semanticDropThreshold, tablePrependHeader, tableRowMaxChunks);
     }
 
     /**
