@@ -1,7 +1,7 @@
 # kb-rag 架构文档
 
 
-> 版本：v3.2（文档对齐：数据模型补登 Flyway V26–V34、切分策略补 `embedding_semantic` / `table_row` 与按扩展名覆盖、端口与表数按代码实测订正，2026-11-27；v3.1 基线 = v3.0 + 权限缓存抽出端口、随 cache.provider 与会话同步切换，多副本部署由此就绪，2026-09-03；v3.0 基线为控制台会话底座换 Sa-Token，其余历史见 Git）
+> 版本：v3.3（父子分片约束覆盖 `split_strategy_by_ext`、索引配置 PUT 补收扩展名覆盖与语义阈值，2026-11-27；v3.2 基线 = 文档对齐：数据模型补登 Flyway V26–V34、切分策略补 `embedding_semantic` / `table_row` 与按扩展名覆盖、端口与表数按代码实测订正，2026-11-27；v3.1 基线 = v3.0 + 权限缓存抽出端口、随 cache.provider 与会话同步切换，多副本部署由此就绪，2026-09-03；v3.0 基线为控制台会话底座换 Sa-Token，其余历史见 Git）
 > 日期：2026-11-27
 > 作者：RichardFyoung / Claude
 >
@@ -178,7 +178,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 - **上传事务只持久化事实**（MinIO 原件 + document/version 行），管线经 `TransactionSynchronization.afterCommit` 提交异步执行——异步 worker 用独立连接读版本行，事务内触发会产生提交竞态（M1 联调发现的真实缺陷，全仓仅 `DocumentService` 与 `EngineChunkCleaner` 两处使用该手法）。
 - `IndexPipelineService` 是管线主编排，五个 `@Async(INDEX_EXECUTOR)` 入口：`submit`（新上传）/ `submit(versionId, reuse)`（指纹复用）/ `submitRestore`（归档版重建）/ `submitRebuild`（配置重建）/ `submitConfirm`（预览确认后续跑）。
-- 阶段：解析（parser HTTP）→ 清洗/脱敏（`DocumentCleaner`/`TextDesensitizer`；按页切分的库走 `PagedContentAssembler` 逐页清洗后拼回并记录页区间）→ 图片资产与 VLM 文本代理插回（`ImageAssetService`/`ImagePlaceholderResolver`，单图失败不失败整篇）→ 切分（`ChunkSplitter` 统一承担：先按 `KbIndexConfig#resolveSplitStrategy(扩展名)` 取策略——`split_strategy_by_ext` 覆盖优先、其次库级 `split_strategy`、都缺省为 `fixed_length`；`SplitterRouter` 策略路由，未知 code 回落定长；`embedding_semantic` 逐句嵌入、在相邻句相似度骤降处切分（未配嵌入模型时保存即 INVALID_PARAM），`table_row` 按 markdown 表格行成片、超过 `kb.split.table-row-max-chunks`（默认 5000）整篇报错；`page` 策略分流到 `PageSplitter`，因它还需要页区间；父子两级切分 `ParentChildSplitter`，仅与定长策略组合。“是否单图 / 是否页策略”由管线判定后随请求传入，切分器不重复推导——两处各自判断会让页策略静默退化为定长）→ 嵌入（`ChunkEmbedder`，零 Key 全部 SKIPPED）→ 双写（`ChunkIndexWriter`：**先写 PENDING 同步行、再调引擎、再更新状态**——补偿扫描的唯一证据链）。
+- 阶段：解析（parser HTTP）→ 清洗/脱敏（`DocumentCleaner`/`TextDesensitizer`；按页切分的库走 `PagedContentAssembler` 逐页清洗后拼回并记录页区间）→ 图片资产与 VLM 文本代理插回（`ImageAssetService`/`ImagePlaceholderResolver`，单图失败不失败整篇）→ 切分（`ChunkSplitter` 统一承担：先按 `KbIndexConfig#resolveSplitStrategy(扩展名)` 取策略——`split_strategy_by_ext` 覆盖优先、其次库级 `split_strategy`、都缺省为 `fixed_length`；`SplitterRouter` 策略路由，未知 code 回落定长；`embedding_semantic` 逐句嵌入、在相邻句相似度骤降处切分（未配嵌入模型时保存即 INVALID_PARAM），`table_row` 按 markdown 表格行成片、超过 `kb.split.table-row-max-chunks`（默认 5000）整篇报错；`page` 策略分流到 `PageSplitter`，因它还需要页区间；父子两级切分 `ParentChildSplitter`，仅与定长策略组合——两级路线既不看库级策略也不看扩展名覆盖，所以写配置的入口（`UpdateIndexConfigRequest` 组合校验 + `KnowledgeBaseService` 策略可用性）对「库级策略 ∪ 全部覆盖值」（`KbIndexConfig#configuredSplitStrategies`）统一判定：父子分片下全部只能是 `fixed_length`，覆盖值用到的 separator/heading/语义阈值参数照样校验并计入指纹；否则会出现指纹记 `table_row`、实际跑定长的配置。“是否单图 / 是否页策略”由管线判定后随请求传入，切分器不重复推导——两处各自判断会让页策略静默退化为定长）→ 嵌入（`ChunkEmbedder`，零 Key 全部 SKIPPED）→ 双写（`ChunkIndexWriter`：**先写 PENDING 同步行、再调引擎、再更新状态**——补偿扫描的唯一证据链）。
 - **指纹复用**：`VersionFingerprintFactory` 产出 content_hash/解析指纹/分片指纹/嵌入版本，`VersionArtifactReuser` 在全匹配时复制上一构建的 chunk 行（新 ID、重写父链），跳过解析与切分。
 - **版本机制**：`DocumentVersionPlanner` 一次回答重复判定/版本号（major.minor）/可否复用；`DocumentVersionActivator` 激活时旧 active 退回 READY（支持秒级回滚）；`VersionRetentionService` 异步清理超保留窗口（默认 3）的旧版 chunk（保留原件与解析产物）；`AppVersionPinChecker` 保护被快照引用的版本不被清理。
 - **编排与执行分离**：`IndexPipelineService` 只保留阶段顺序与失败归类，三类执行下沉——`ChunkSplitter`（切分与分片落库）、`IndexTaskLifecycle`（`t_kb_task` 状态机：开始/进度/成功/失败，重试复用同一行并累加 `retry_count`）、`VersionActivationHandler`（激活及其全部后续：标注继承 → 评测用例置陈旧 → 保留窗口清理 → 图谱失效）。后者刻意区别于 `DocumentVersionActivator`：激活器只守“单一 active 版本”不变式，聊天导入与手工回滚也复用它，那条不变式不能依赖任何后续步骤成功。

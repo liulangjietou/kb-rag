@@ -92,6 +92,12 @@
 - **`page` 策略消费的是清洗后的正文（v1.1 修订）**：初版契约写的"从 parsed.json 取分页文本"已作废——`pages[].text` 是解析原文，既不含图片占位符行，也从未经过清洗四步，照此实现会让按页切分的知识库把未脱敏的 PII 直接写进索引、且每个分片的 `image_urls` 恒空。现行链路：parser 侧 `pages[].markdown` 返回该页对应的 markdown 切片（含 `## Page N` 标题与 `[[IMAGE:id]]` 占位符行，旧产物为 null 时回退 `text`）→ server 侧 `PagedContentAssembler` 逐页跑清洗四步（页眉页脚用**全文档**检出的行集，水印/正则/脱敏逐页应用）与占位符替换，再按 `\n\n` 拼回整篇并记录每页区间 `PageRange{page_no,start,end}` → `PageSplitter` 按区间切。**无清洗规则时逐页拼接结果与 parser 的 `markdown` 逐字符相等**，即按页切分与定长切分吃的是同一份正文；区间随预览产物落 `page_ranges`，确认入库时按存档区间切，不重算；
 - **超长兜底统一**：三个策略产出的任何超过 `chunk_max_tokens` 的段落，回落 fixed_length 二次切分（LLM 语义切分已有同款先例）；
 - **父子分片组合限制（v1.1 收窄）**：`parent_child_enabled=true` 时 `split_strategy` **仅允许 `fixed_length`**，其余一律 INVALID_PARAM（Controller 单点）。初版写的"允许 `fixed_length`/`llm_semantic`"是失实的：`ParentChildSplitter` 是把定长策略与自身组合两遍，并不按 `split_strategy` 取策略，配 `llm_semantic` 时实际跑的是定长，而分片指纹记的却是 `llm_semantic`——配置读起来是一回事、索引出来是另一回事。此处与 M4b-CONTRACTS.md §4「父子 + LLM_SEMANTIC 本期不支持」口径统一；页/标题边界与"父长子短两级预算"语义天然冲突，同样不做貌合神离的组合；
+- **按扩展名覆盖同受父子分片约束（v1.2 补齐）**：`split_strategy_by_ext`（后续特性加入的扩展名 → 策略映射）的每个取值都会被切分路由读到，因此上面的约束、模型可用性检查与参数校验一律对「库级策略 ∪ 全部覆盖值」生效，而不只看 `split_strategy`：
+  - 父子分片开启时覆盖值也必须全是 `fixed_length`，否则 INVALID_PARAM（Controller 单点，消息带出违规扩展名）。此前该校验只看库级策略，新建库默认的 `xlsx/xls/csv → table_row` 在开启父子分片后照样能保存，表格文件实际按定长两级切分、指纹却记着 table_row，与上条是同一类"配置与实际不符"；
+  - 覆盖值必须是已知策略码，`llm_semantic` / `embedding_semantic` 要求对应模型已配置（服务层单点，与库级策略同一道检查）；
+  - `separator` / `heading` 的参数在任一覆盖值用到时即校验、即计入指纹（此前只在库级策略用到时才计入，改分隔符不会让 txt 文档标记过期）；没有覆盖的库指纹逐字节不变；
+  - PUT 请求体缺省 `split_strategy_by_ext` / `split_semantic_drop_threshold` 时保留已存值，`split_strategy_by_ext: {}` 清空；键去空白转小写、不得含点。此前请求体根本不接收这两个字段，每次保存都把它们重置为空，控制台编辑的覆盖从未生效；
+  - 部署默认开启父子分片（`SPLIT_PARENT_CHILD_ENABLED=true`）时，新建库默认 `fixed_length` 且不写入覆盖映射。**已落库的不一致配置不做迁移**：它们在下次保存时被拒，需先删除覆盖或改为 `fixed_length`；
 - 新策略均不产 title/summary/keywords 元数据（那是 LLM 策略的伴生物）；`page` 策略 chunk metadata 增 `page_no`（进 ChunkMetadataKeys 声明，镜像引擎可过滤）。
 
 ## 5. F4 Rerank 混合模式

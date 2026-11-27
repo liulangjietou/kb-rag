@@ -127,6 +127,10 @@ export const EMBEDDING_SPLIT_REQUIRES_EMBEDDING = '智能切分需要已配置�
 export const PARENT_CHILD_REQUIRES_FIXED_LENGTH =
   '父子分片当前仅支持定长切分：父片与子片均由定长策略切出，请先关闭父子分片再选择其他切分方式';
 
+/** Shown under the extension overrides when 父子分片 is on and a row still names another strategy. */
+export const PARENT_CHILD_REQUIRES_FIXED_LENGTH_BY_EXT =
+  '父子分片下按扩展名覆盖也只能是定长切分：请删除这些覆盖或改为定长切分，否则保存会被拒绝';
+
 export const IK_DICT_TYPE_META: Record<IkDictType, { color: string; label: string }> = {
   EXT: { color: 'success', label: '扩展词' },
   STOP: { color: 'default', label: '停用词' },

@@ -78,16 +78,20 @@ public class VersionFingerprintFactory {
         // Only the strategy that reads a parameter folds it in, for the same reason: a fixed length or
         // llm_semantic base never carried these keys, so adding them unconditionally would rebuild every
         // pre-M14 knowledge base for a value it does not use.
-        if (SeparatorTextSplitter.STRATEGY_CODE.equals(config.getSplitStrategy())) {
+        // "读这个参数的策略"包括扩展名覆盖：txt 走 separator 时改分隔符会重切 txt，必须标记过期。
+        // 三个分支互不排斥；没有覆盖的库最多命中一个，与修复前的指纹逐字节一致。
+        if (config.usesSplitStrategy(SeparatorTextSplitter.STRATEGY_CODE)) {
             String separator = config.getSplitSeparator() == null || config.getSplitSeparator().isEmpty()
                     ? SeparatorTextSplitter.DEFAULT_SEPARATOR : config.getSplitSeparator();
             segments.add("split_separator=" + separator + ";is_regex=" + config.isSplitSeparatorIsRegex());
-        } else if (HeadingTextSplitter.STRATEGY_CODE.equals(config.getSplitStrategy())) {
+        }
+        if (config.usesSplitStrategy(HeadingTextSplitter.STRATEGY_CODE)) {
             int level = config.getSplitHeadingLevel() < HeadingTextSplitter.MIN_HEADING_LEVEL
                     || config.getSplitHeadingLevel() > HeadingTextSplitter.MAX_HEADING_LEVEL
                     ? HeadingTextSplitter.DEFAULT_HEADING_LEVEL : config.getSplitHeadingLevel();
             segments.add("split_heading_level=" + level);
-        } else if (EmbeddingSemanticTextSplitter.STRATEGY_CODE.equals(config.getSplitStrategy())) {
+        }
+        if (config.usesSplitStrategy(EmbeddingSemanticTextSplitter.STRATEGY_CODE)) {
             double threshold = config.getSplitSemanticDropThreshold() <= 0
                     || config.getSplitSemanticDropThreshold() > 1
                     ? 0.35d : config.getSplitSemanticDropThreshold();

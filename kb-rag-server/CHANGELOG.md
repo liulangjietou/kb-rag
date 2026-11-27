@@ -25,6 +25,17 @@
 
 ### 修复
 
+- **父子分片下按扩展名覆盖的切分策略被静默忽略、却仍写进配置指纹**：两级切分只做定长、不看
+  `split_strategy_by_ext`，而"父子分片仅允许 `fixed_length`"的校验只查库级策略。根因有三处：
+  ① `UpdateIndexConfigRequest` 根本没有 `split_strategy_by_ext` / `split_semantic_drop_threshold` 两个字段，
+  PUT 每次都把它们重置为空——控制台编辑的扩展名覆盖从未生效，存量库一保存就丢掉默认的 `table_row` 映射；
+  ② 策略约束、模型可用性检查与参数校验只看库级 `split_strategy`；③ 部署默认开启父子分片时，新建库仍写入
+  `embedding_semantic` 与 `xlsx/xls/csv → table_row`，建好即是"指纹记一种、实际跑定长"的配置。
+  现在请求体接收两个字段（缺省保留已存值，`{}` 清空，键去空白转小写、不得含点）；新增
+  `KbIndexConfig#configuredSplitStrategies`（库级策略 ∪ 全部覆盖值），父子分片约束、未知码与缺模型检查、
+  separator/heading/阈值参数校验和指纹参数折叠都以它为准；部署默认开启父子分片时新建库为 `fixed_length`
+  且不写覆盖。没有扩展名覆盖的库指纹逐字节不变（有兼容性单测钉住）。**已落库的不一致配置不做迁移**，
+  下次保存会被拒，需删除覆盖或改为 `fixed_length`。单测 1925 → 1941（新增 16 例）。
 - **差评自动建单失败的日志级别与内容**：此前以 `warn` 记录且只带异常消息，不带错误码与堆栈；
   现改为 `error`，输出 `errorCode`、`kbId`、`runId` 与完整异常栈。反馈在建单前已独立事务提交，
   建单失败不影响反馈本身，也不影响其余知识库继续建单（行为不变，仅可观测性修正）。
