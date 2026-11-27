@@ -2,6 +2,14 @@
 
 本项目的版本记录遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 约定，按里程碑分节记录（对应 `kb-rag-deploy/docs/M1~M15-CONTRACTS.md`）。
 
+## [Unreleased]
+
+### Added
+
+- 索引配置抽屉支持 `embedding_semantic`、`table_row` 两个切分策略及按扩展名覆盖（`IndexConfigDrawer.tsx`）。
+- 系统设置新增「质量自动化」页（`QualityAutomationTab`），控制员工「需改进」评价是否自动创建质量问题，默认关闭；
+  配套 Vitest 用例 `QualityAutomationTab.test.tsx`。
+
 ## [1.1.0] - 2026-09-03
 
 > **⚠️ 破坏性变更（升级必读）**：管理台会话请求头由 `Authorization: Bearer <token>` 改为
