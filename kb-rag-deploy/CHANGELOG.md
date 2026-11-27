@@ -32,8 +32,12 @@
   版本号不变；部署 README 的 ik 词典示例改用控制台请求头 `satoken`，并注明命令行取 token 需先在浏览器登录
   （登录要滑块验证码）；`ARCHITECTURE.md` 升至 v3.2，数据模型补登 Flyway V26–V34；
   需求文档升至 v1.26，标注 `embedding_semantic` / `table_row` 已落地。
-- **已知问题**：`scripts/benchmark.sh` 仍以 `Authorization: Bearer` 发送控制台 token，
-  自 v1.1.0 起控制台只认 `satoken` 请求头，压测请求会全部返回 401，待脚本修复。
+- **`scripts/benchmark.sh` 压测请求全部 401**：v1.1.0 把控制台会话请求头由 `Authorization: Bearer`
+  改为 `satoken`，压测脚本漏改，对控制台检索 `/api/v1/kb/{kbId}/search` 的请求因此一律被拒，
+  M2 压测在 v1.1.0 上无法得出任何延迟数据。脚本现以 `satoken: <TOKEN>` 发送；头注释补充 token
+  取法（登录需滑块验证码，命令行无法直接登录，需浏览器登录控制台后读 localStorage 的
+  `kb-rag-web:auth-token`）。新增 `tests/test_benchmark.py`，以只认 `satoken` 的本地桩服务回归。
+  无 Flyway、无新配置键、无对外行为变更，`TOKEN` 等参数用法不变，**升级零操作**。
 
 ## [1.1.0] - 2026-09-03
 
