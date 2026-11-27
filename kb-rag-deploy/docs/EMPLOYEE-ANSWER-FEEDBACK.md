@@ -8,6 +8,8 @@
 
 请求携带 `expected_revision`。相同评价及说明的重试直接返回原结果；不同内容若使用旧修订号，返回 `409 FEEDBACK_VERSION_CONFLICT`。页面保留编辑内容，用户载入并核对最新反馈后再修改，避免多标签静默覆盖。评价只更新反馈字段、更新时间和行修订号，不修改答案、引用、运行状态、会话活动时间或模型上下文。
 
+评价默认只保存在运行上。管理员可在「系统设置 → 质量自动化」（`GET/PUT /api/v1/system/quality-automation-config`，权限 `system:config`）开启 `auto_issue_from_employee_bad`，开关存 `t_kb_system_config` 键 `quality.auto_issue_employee_bad`，默认关闭。开启后，评价保存为「需改进」时按该运行应用快照关联的每个知识库各建一条来源为 `EMPLOYEE_ANSWER` 的知识质量问题，同一运行与知识库只建一次；评价先独立提交，建单失败记 error 日志并继续其余知识库，不影响评价结果。处理流程见 [知识质量问题处理](KNOWLEDGE-QUALITY-ISSUES.md)。
+
 HTTP 和 SSE 的运行视图共用当前证据授权，受限视图的 `feedback` 为空，响应继续禁用缓存。JSON 格式或字段类型错误在统一异常翻译层返回 `400 INVALID_PARAM`；日志不记录解析异常中可能携带的用户字段值。
 
 部署先应用 V29 的三个可空字段并更新服务端，再更新前端。V29 为增量迁移，不删除或重写历史运行。回滚代码时保留这三个字段和反馈数据；回滚旧前端后反馈入口消失，旧服务端仍使用原有列。不得通过删除反馈列执行代码回滚。

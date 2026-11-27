@@ -3,6 +3,32 @@
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 与语义化版本。
 标注 `[schema]` 的条目包含数据库迁移脚本，升级时会自动执行 Flyway。
 
+## [Unreleased]
+
+### 新增（切分策略扩展、重排候选联动、员工差评自动建单；无 Flyway）
+
+- **两个切分策略**：`embedding_semantic`（按相邻句嵌入相似度骤降处切分，阈值 `split_semantic_drop_threshold`，
+  缺省 0.35）与 `table_row`（xlsx/xls/csv 按行成片，单文档上限 `kb.split.table-row-max-chunks`，默认 5000）。
+  知识库索引配置新增 `split_strategy_by_ext`（按扩展名覆盖策略），并计入配置指纹。
+  选用 `embedding_semantic` 时若未配置嵌入模型，保存即以 `INVALID_PARAM` 拒绝。
+- **父子分片下的重排候选上限联动**：候选上限抬升为 `max(candidate-limit, top_n × multiplier)`，不超过硬上限。
+  新增配置 `kb.retrieval.rerank-candidate-top-n-multiplier`（默认 5）与 `rerank-candidate-hard-cap`（默认 100），
+  暂无环境变量映射，需要时在 `application.yml` 补。
+- **员工差评自动建单（默认关闭）**：`GET/PUT /api/v1/system/quality-automation-config`（权限 `system:config`，PUT 进操作审计），
+  开关存 `t_kb_system_config`，键 `quality.auto_issue_employee_bad`。开启后员工提交「需改进」评价时，
+  按应用快照关联的每个知识库各建一条质量问题，同一 run 与知识库幂等。
+
+### 变更
+
+- **新建知识库的默认索引配置变化**：已配置嵌入模型时默认切分策略为 `embedding_semantic`（否则仍为 `fixed_length`），
+  xlsx/xls/csv 默认走 `table_row`。**既有知识库不受影响**。
+
+### 修复
+
+- **差评自动建单失败的日志级别与内容**：此前以 `warn` 记录且只带异常消息，不带错误码与堆栈；
+  现改为 `error`，输出 `errorCode`、`kbId`、`runId` 与完整异常栈。反馈在建单前已独立事务提交，
+  建单失败不影响反馈本身，也不影响其余知识库继续建单（行为不变，仅可观测性修正）。
+
 ## [1.1.0] - 2026-09-03
 
 > **⚠️ 破坏性变更（升级必读）**：管理台会话请求头由 `Authorization: Bearer <token>` 改为

@@ -1,16 +1,16 @@
 # M1 开发契约（v1.0 · 由需求文档 v1.8 派生）
 
 > 本文件是 M1 各仓库实现的**唯一共同契约**。与需求文档冲突时以需求文档为准并回报修订。
-> 需求文档：/Users/zhangfuqiang/AI/知识库需求文档.md（v1.8）
+> 需求文档：`kb-rag-deploy/docs/知识库需求文档.md`（v1.8）
 
 ## 0. 全局约定
 
 - 端口：kb-rag-server **20000**、kb-rag-parser **20001**、kb-rag-web dev **20002**（proxy /api 与 /actuator → 20000）
-- JDK 17（本机 JAVA_HOME=/Users/zhangfuqiang/Library/Java/JavaVirtualMachines/corretto-17.0.16/Contents/Home）、Spring Boot 3.3.x、MyBatis-Plus 3.5.x、Flyway；Python 3.11+/FastAPI；React18+TS+Vite+AntD5
+- JDK 17、Spring Boot 3.3.x、MyBatis-Plus 3.5.x、Flyway；Python 3.11+/FastAPI；React18+TS+Vite+AntD5
 - **每个类/模块必须标注作者**：Java 类级 Javadoc 末尾加 `@author owlzhangfq@gmail.com`；Python 模块 docstring 末尾加 `Author: owlzhangfq@gmail.com`。**新建类同样适用，无例外**
 - **代码注释与 Javadoc/docstring 一律英文**（D15）；日志仅 info/error、英文、error 带错误码占位符，如 `log.error("parse document failed, errorCode={}, docId={}", ErrorCode.PARSE_FAILED, docId, e)`
 - Java：lombok、CollectionUtils 判空、无魔法值（常量/枚举）、fast-fail 防御式编程全链路只做一处（Controller 入参层）
-- **红线**：严禁复制 /Users/zhangfuqiang/engineer/AIGC/LLMentor 的任何代码片段（该项目非开源，本项目 Apache-2.0），只允许自己实现
+- **红线**：严禁复制 LLMentor 的任何代码片段（该项目非开源，本项目 Apache-2.0），只允许自己实现
 - 每仓库根目录：LICENSE(Apache-2.0)、README.md（中文）、CHANGELOG.md、.gitignore；deploy 仓另有 SECURITY.md、CONTRIBUTING.md、NOTICE（含 MinerU 使用声明预留）
 - 不要执行 git commit（由主会话审查后统一提交）
 

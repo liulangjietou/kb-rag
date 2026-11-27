@@ -10,8 +10,28 @@
 
 ## [Unreleased]
 
+### Added
+
+- **切分策略扩展、重排候选联动与员工差评自动建单**：OpenAPI `kb-server.yaml` 升至 `0.29.0-split-quality`，
+  新增 `embedding_semantic` / `table_row` 切分策略、`split_strategy_by_ext` 与
+  `GET/PUT /api/v1/system/quality-automation-config`。**无 Flyway、无新增环境变量**；新增三个配置键
+  `kb.split.table-row-max-chunks`（5000）、`kb.retrieval.rerank-candidate-top-n-multiplier`（5）、
+  `kb.retrieval.rerank-candidate-hard-cap`（100）使用代码默认值，`.env.example` 暂未暴露。
+  自动建单开关默认关闭，升级后行为不变。
+
+### Changed
+
+- **新建知识库的默认索引配置变化**：已配置嵌入模型时默认 `embedding_semantic`，xlsx/xls/csv 默认 `table_row`。
+  既有知识库保持原配置，升级零操作。
+
 ### Fixed
 
+- 员工差评自动建单失败时由 `warn`（仅消息）改为 `error`（含错误码与异常栈），便于运维按错误日志告警；
+  对外行为不变，升级零操作。
+- **文档与代码对齐**（纯文档，升级零操作）：OpenAPI 补登既有端点 `POST /api/v1/auth/logout`，
+  版本号不变；部署 README 的 ik 词典示例改用控制台请求头 `satoken`，并注明命令行取 token 需先在浏览器登录
+  （登录要滑块验证码）；`ARCHITECTURE.md` 升至 v3.2，数据模型补登 Flyway V26–V34；
+  需求文档升至 v1.26，标注 `embedding_semantic` / `table_row` 已落地。
 - **`scripts/benchmark.sh` 压测请求全部 401**：v1.1.0 把控制台会话请求头由 `Authorization: Bearer`
   改为 `satoken`，压测脚本漏改，对控制台检索 `/api/v1/kb/{kbId}/search` 的请求因此一律被拒，
   M2 压测在 v1.1.0 上无法得出任何延迟数据。脚本现以 `satoken: <TOKEN>` 发送；头注释补充 token
