@@ -26,6 +26,13 @@
 
 ### Fixed
 
+- **父子分片下按扩展名覆盖的切分策略被静默忽略、却仍写进配置指纹**：开启父子分片的知识库，表格文件实际按
+  定长两级切分，配置与指纹却记着 `table_row`；同时 `PUT /api/v1/kb/{kbId}/index-config` 此前不接收
+  `split_strategy_by_ext` / `split_semantic_drop_threshold`，每次保存都把二者清空。修复后：父子分片开启时
+  扩展名覆盖也只能是 `fixed_length`（否则 `INVALID_PARAM`），两个字段缺省时保留已存值；
+  `SPLIT_PARENT_CHILD_ENABLED=true` 的部署新建库不再写入扩展名覆盖。**无 Flyway、无新配置键、OpenAPI
+  仅订正描述（版本号不变）**。对外行为变更：已开启父子分片且存有非定长扩展名覆盖的库，下次保存索引配置会被拒，
+  需在控制台删除这些覆盖或改为定长切分；其余库升级零操作。
 - 员工差评自动建单失败时由 `warn`（仅消息）改为 `error`（含错误码与异常栈），便于运维按错误日志告警；
   对外行为不变，升级零操作。
 - **文档与代码对齐**（纯文档，升级零操作）：OpenAPI 补登既有端点 `POST /api/v1/auth/logout`，

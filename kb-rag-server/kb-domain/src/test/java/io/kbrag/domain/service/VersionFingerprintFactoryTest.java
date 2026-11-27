@@ -1,8 +1,11 @@
 package io.kbrag.domain.service;
 
+import io.kbrag.common.util.HashUtil;
 import io.kbrag.domain.model.KbIndexConfig;
 import io.kbrag.domain.model.ParentChildParams;
 import org.junit.jupiter.api.Test;
+
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -98,6 +101,29 @@ class VersionFingerprintFactoryTest {
         // answering with a plausible value would make a half built document look up to date.
         assertNull(factory.versionFingerprint(null, "chunk"));
         assertNull(factory.versionFingerprint("parse", null));
+    }
+
+    @Test
+    void shouldFoldTheSeparatorInWhenOnlyAnExtensionOverrideReadsIt() {
+        // txt 走 separator：改分隔符会重切 txt，却因库级策略是定长而不进指纹，文档不会被标记过期
+        KbIndexConfig blankLine = config(FixedLengthTextSplitter.STRATEGY_CODE);
+        blankLine.setSplitStrategyByExt(Map.of("txt", SeparatorTextSplitter.STRATEGY_CODE));
+        KbIndexConfig rule = config(FixedLengthTextSplitter.STRATEGY_CODE);
+        rule.setSplitStrategyByExt(Map.of("txt", SeparatorTextSplitter.STRATEGY_CODE));
+        rule.setSplitSeparator("---");
+
+        assertNotEquals(factory.chunkFingerprint(blankLine), factory.chunkFingerprint(rule));
+    }
+
+    @Test
+    void shouldKeepTheFingerprintOfABaseWithoutOverridesUnchanged() {
+        // 兼容性钉子：没有扩展名覆盖的库，指纹必须与修复前逐字节一致，否则升级会把全部文档标记过期
+        KbIndexConfig config = config(SeparatorTextSplitter.STRATEGY_CODE);
+        config.setSplitSeparator("---");
+
+        assertEquals(HashUtil.sha256Hex(String.join("|", "strategy=separator", "chunk_max_tokens=600",
+                        "chunk_overlap=100", "parent_child=off", "split_separator=---;is_regex=false")),
+                factory.chunkFingerprint(config));
     }
 
     private KbIndexConfig config(String strategy) {

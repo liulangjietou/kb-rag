@@ -14,9 +14,13 @@ import io.kbrag.domain.service.HeadingTextSplitter;
 import io.kbrag.domain.service.SeparatorTextSplitter;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -54,6 +58,10 @@ import java.util.regex.PatternSyntaxException;
  *                             stored value
  * @param splitHeadingLevel    markdown heading depth of the {@code heading} strategy, {@code null}
  *                             keeps the stored value
+ * @param splitSemanticDropThreshold similarity drop threshold of the {@code embedding_semantic}
+ *                             strategy, {@code null} keeps the stored value, {@code 0} the default
+ * @param splitStrategyByExt   per extension strategy overrides, {@code null} keeps the stored map, an
+ *                             empty map clears it; keys and values are trimmed and lower cased
  * @param multimodalEnabled    multimodal page index switch, {@code null} keeps the stored value; the
  *                             switch is stored whatever the provider state is, the pipeline decides
  *                             at build time whether the vectors can be produced (M14 contract 6.2)
@@ -75,6 +83,8 @@ public record UpdateIndexConfigRequest(
         @JsonProperty("split_separator") String splitSeparator,
         @JsonProperty("split_separator_is_regex") Boolean splitSeparatorIsRegex,
         @JsonProperty("split_heading_level") Integer splitHeadingLevel,
+        @JsonProperty("split_semantic_drop_threshold") Double splitSemanticDropThreshold,
+        @JsonProperty("split_strategy_by_ext") Map<String, String> splitStrategyByExt,
         @JsonProperty("multimodal_enabled") Boolean multimodalEnabled,
         @JsonProperty("retrieval_config") KbRetrievalConfig retrievalConfig) {
 
@@ -135,6 +145,12 @@ public record UpdateIndexConfigRequest(
                 ? current.isSplitSeparatorIsRegex() : splitSeparatorIsRegex);
         config.setSplitHeadingLevel(splitHeadingLevel == null
                 ? current.getSplitHeadingLevel() : splitHeadingLevel);
+        // 这两个字段随 embedding_semantic / table_row 一起加入索引配置，却一直没进请求体：
+        // 每次保存都被重置成空，控制台编辑的扩展名覆盖从未生效，存量库一保存就丢了默认的 table_row 映射。
+        config.setSplitSemanticDropThreshold(splitSemanticDropThreshold == null
+                ? current.getSplitSemanticDropThreshold() : splitSemanticDropThreshold);
+        config.setSplitStrategyByExt(splitStrategyByExt == null
+                ? current.getSplitStrategyByExt() : normalizedOverrides());
         config.setMultimodalEnabled(multimodalEnabled == null
                 ? current.isMultimodalEnabled() : multimodalEnabled);
         validate(config);
@@ -155,6 +171,31 @@ public record UpdateIndexConfigRequest(
         params.setChildMaxTokens(orDefault(parentChild.childMaxTokens(), current.getChildMaxTokens()));
         params.setChildOverlap(orDefault(parentChild.childOverlap(), current.getChildOverlap()));
         return params;
+    }
+
+    /**
+     * 归一化扩展名覆盖：键值去空白转小写，与 {@link KbIndexConfig#resolveSplitStrategy} 的查找口径一致。
+     *
+     * <p>空键、空值和带点的键在这里直接拒绝：它们要么查不到任何文档，要么回落库级策略，
+     * 都是"界面显示已配置、实际从不生效"。取值是否为已知策略、所需模型是否可用由服务层判定。
+     *
+     * @return 按请求体顺序保存的覆盖映射
+     */
+    private Map<String, String> normalizedOverrides() {
+        Map<String, String> normalized = new LinkedHashMap<>();
+        splitStrategyByExt.forEach((ext, strategy) -> {
+            if (StringUtils.isBlank(ext) || StringUtils.isBlank(strategy)) {
+                throw BizException.invalidParam("split_strategy_by_ext entries need a non blank extension "
+                        + "and strategy");
+            }
+            String key = ext.trim().toLowerCase(Locale.ROOT);
+            if (key.contains(".")) {
+                throw BizException.invalidParam("split_strategy_by_ext keys are extensions without a dot, not "
+                        + ext);
+            }
+            normalized.put(key, strategy.trim().toLowerCase(Locale.ROOT));
+        });
+        return normalized;
     }
 
     private void validate(KbIndexConfig config) {
@@ -222,22 +263,39 @@ public record UpdateIndexConfigRequest(
      * here until that divergence was found; the other strategies cut on a boundary the parent pass
      * cannot honour anyway. The combination is refused rather than silently degraded.
      *
-     * <p>The separator and heading parameters are range checked here so a splitter never meets a length
-     * or a depth it would have to clamp.
+     * <p><b>扩展名覆盖同样受此约束。</b>两级切分也不看 {@code split_strategy_by_ext}，开启父子分片后
+     * 每篇文档都走定长；放行一条 {@code xlsx -> table_row}，指纹记的是 table_row，实际跑的是定长，
+     * 与上面库级策略是同一类"配置与实际不符"。因此父子分片下覆盖值也必须全是 {@code fixed_length}。
+     *
+     * <p>The separator, heading and threshold parameters are range checked here whenever any configured
+     * strategy reads them, extension overrides included, so a splitter never meets a value it would have
+     * to clamp.
      *
      * @param config configuration being written
      */
     private void validateSplitStrategy(KbIndexConfig config) {
         String strategy = config.getSplitStrategy();
-        if (config.parentChildOrDisabled().isEnabled()
-                && !FixedLengthTextSplitter.STRATEGY_CODE.equals(strategy)) {
-            throw BizException.invalidParam("parent_child splitting supports only the fixed_length "
-                    + "strategy, not " + strategy);
+        if (config.parentChildOrDisabled().isEnabled()) {
+            if (!FixedLengthTextSplitter.STRATEGY_CODE.equals(strategy)) {
+                throw BizException.invalidParam("parent_child splitting supports only the fixed_length "
+                        + "strategy, not " + strategy);
+            }
+            config.splitStrategyByExtOrEmpty().forEach((ext, override) -> {
+                if (!FixedLengthTextSplitter.STRATEGY_CODE.equals(override)) {
+                    throw BizException.invalidParam("parent_child splitting supports only the fixed_length "
+                            + "strategy, not " + override + " in split_strategy_by_ext for " + ext);
+                }
+            });
         }
-        if (SeparatorTextSplitter.STRATEGY_CODE.equals(strategy)) {
+        if (config.usesSplitStrategy(SeparatorTextSplitter.STRATEGY_CODE)) {
             validateSeparator(config);
-        } else if (HeadingTextSplitter.STRATEGY_CODE.equals(strategy)) {
+        }
+        if (config.usesSplitStrategy(HeadingTextSplitter.STRATEGY_CODE)) {
             validateHeadingLevel(config);
+        }
+        double threshold = config.getSplitSemanticDropThreshold();
+        if (threshold < 0 || threshold > 1) {
+            throw BizException.invalidParam("split_semantic_drop_threshold must be between 0 and 1");
         }
     }
 

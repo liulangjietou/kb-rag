@@ -387,21 +387,32 @@ public class KnowledgeBaseService {
      * for this rule: nothing downstream - the splitter, the pipeline - re-checks it, so a knowledge
      * base can never end up configured for a strategy its deployment cannot run.
      *
+     * <p>扩展名覆盖里的每个取值走同一道检查：覆盖值同样会被切分路由读到，未知码会静默回落定长，
+     * 缺模型的语义策略会在后台建索引时才失败，两者都是"界面显示已配置、实际不按它跑"。
+     *
      * @param config index configuration being written
      */
     private void requireSplitStrategyUsable(KbIndexConfig config) {
-        if (config.getSplitStrategy() == null || config.getSplitStrategy().isBlank()) {
-            return;
+        if (config.getSplitStrategy() != null && !config.getSplitStrategy().isBlank()) {
+            // Normalize before persisting. The column stores the raw string, so an uppercase or unknown
+            // code written verbatim would silently bypass this gate and later fall through the splitter
+            // router - the strategy would look configured while never running.
+            config.setSplitStrategy(requireUsable(config.getSplitStrategy()).code());
         }
-        // Normalize before persisting. The column stores the raw string, so an uppercase or unknown
-        // code written verbatim would silently bypass this gate and later fall through the splitter
-        // router - the strategy would look configured while never running.
-        SplitStrategy strategy = SplitStrategy.from(config.getSplitStrategy());
+        config.splitStrategyByExtOrEmpty().values().forEach(this::requireUsable);
+    }
+
+    /**
+     * Resolves one strategy code and checks the model it needs is configured.
+     *
+     * @param code strategy code as written by the caller
+     * @return resolved strategy
+     */
+    private SplitStrategy requireUsable(String code) {
+        SplitStrategy strategy = SplitStrategy.from(code);
         if (strategy == null) {
-            throw BizException.invalidParam(
-                    "unknown split strategy: " + config.getSplitStrategy());
+            throw BizException.invalidParam("unknown split strategy: " + code);
         }
-        config.setSplitStrategy(strategy.code());
         if (strategy == SplitStrategy.LLM_SEMANTIC && !chatProvider.isConfigured()) {
             throw BizException.invalidParam(
                     "the LLM semantic split strategy requires a configured chat model");
@@ -410,6 +421,7 @@ public class KnowledgeBaseService {
             throw BizException.invalidParam(
                     "the embedding semantic split strategy requires a configured embedding model");
         }
+        return strategy;
     }
 
     /**
@@ -434,14 +446,19 @@ public class KnowledgeBaseService {
     private KbIndexConfig defaultIndexConfig() {
         KbProperties.Split split = properties.getSplit();
         KbIndexConfig config = new KbIndexConfig();
-        config.setSplitStrategy(embeddingProvider.isConfigured()
+        // 部署默认开启父子分片时，两级切分只做定长，不看库级策略也不看扩展名覆盖：
+        // 再写入语义切分和 table_row 映射，新库一建好指纹记的就不是实际跑的切分。
+        boolean twoLevel = split.isParentChildEnabled();
+        config.setSplitStrategy(embeddingProvider.isConfigured() && !twoLevel
                 ? EmbeddingSemanticTextSplitter.STRATEGY_CODE
                 : FixedLengthTextSplitter.STRATEGY_CODE);
-        Map<String, String> formatStrategies = new HashMap<>(3);
-        formatStrategies.put("xlsx", TableRowTextSplitter.STRATEGY_CODE);
-        formatStrategies.put("xls", TableRowTextSplitter.STRATEGY_CODE);
-        formatStrategies.put("csv", TableRowTextSplitter.STRATEGY_CODE);
-        config.setSplitStrategyByExt(formatStrategies);
+        if (!twoLevel) {
+            Map<String, String> formatStrategies = new HashMap<>(3);
+            formatStrategies.put("xlsx", TableRowTextSplitter.STRATEGY_CODE);
+            formatStrategies.put("xls", TableRowTextSplitter.STRATEGY_CODE);
+            formatStrategies.put("csv", TableRowTextSplitter.STRATEGY_CODE);
+            config.setSplitStrategyByExt(formatStrategies);
+        }
         config.setChunkMaxTokens(split.getMaxTokens());
         config.setChunkOverlap(split.getOverlapTokens());
         config.setEmbeddingModel(properties.getEmbedding().getModel());
