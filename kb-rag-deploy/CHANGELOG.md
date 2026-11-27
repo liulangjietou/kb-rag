@@ -8,6 +8,17 @@
 其不兼容变更在 MINOR 版本中发布，但一律在该版本条目顶部以醒目块标注，并同步写入
 [UPGRADING.md](UPGRADING.md)。
 
+## [Unreleased]
+
+### Fixed
+
+- **`scripts/benchmark.sh` 压测请求全部 401**：v1.1.0 把控制台会话请求头由 `Authorization: Bearer`
+  改为 `satoken`，压测脚本漏改，对控制台检索 `/api/v1/kb/{kbId}/search` 的请求因此一律被拒，
+  M2 压测在 v1.1.0 上无法得出任何延迟数据。脚本现以 `satoken: <TOKEN>` 发送；头注释补充 token
+  取法（登录需滑块验证码，命令行无法直接登录，需浏览器登录控制台后读 localStorage 的
+  `kb-rag-web:auth-token`）。新增 `tests/test_benchmark.py`，以只认 `satoken` 的本地桩服务回归。
+  无 Flyway、无新配置键、无对外行为变更，`TOKEN` 等参数用法不变，**升级零操作**。
+
 ## [1.1.0] - 2026-09-03
 
 > **⚠️ 破坏性变更（升级必读）**：管理台会话请求头由 `Authorization: Bearer <token>` 改为

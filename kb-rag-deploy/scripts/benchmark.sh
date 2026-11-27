@@ -16,8 +16,12 @@
 #
 # 参数（均为环境变量，可选项已标注默认值）：
 #   BASE_URL      kb-rag-server 地址，默认 http://127.0.0.1:20000
-#   TOKEN         登录 Bearer Token（POST /api/v1/auth/login 获取）；留空则请求会
-#                 收到 401，属于真实信号而非脚本 bug，不在此拦截
+#   TOKEN         控制台会话 token，以 `satoken: <token>` 请求头发送（v1.1.0 起控制台会话
+#                 只认该请求头，见 UPGRADING.md）。登录接口 POST /api/v1/auth/login 要求
+#                 滑块验证码换来的一次性 captcha_proof，命令行无法直接登录；取法：浏览器
+#                 登录控制台后，在开发者工具 Console 执行
+#                 localStorage.getItem('kb-rag-web:auth-token')。
+#                 留空则请求会收到 401，属于真实信号而非脚本 bug，不在此拦截
 #   KB_ID         必填，压测目标知识库业务主键
 #   QUERY_FILE    每行一条查询的 UTF-8 文本文件；不提供则使用脚本内置 10 条中文查询
 #   TOTAL         压测总请求数，默认 200
@@ -139,7 +143,7 @@ run_one() {
     -w '%{http_code} %{time_total}' \
     -X POST "${SEARCH_URL}" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${TOKEN}" \
+    -H "satoken: ${TOKEN}" \
     -d "{\"query\":\"${escaped_query}\"}" 2>/dev/null)"
 
   # 极端情况（curl 内部错误导致 -w 都没输出）兜底，避免下游统计因空行崩溃
