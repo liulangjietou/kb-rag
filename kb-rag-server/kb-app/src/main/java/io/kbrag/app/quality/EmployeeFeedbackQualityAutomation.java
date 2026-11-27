@@ -1,6 +1,7 @@
 package io.kbrag.app.quality;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import io.kbrag.common.api.ErrorCode;
 import io.kbrag.common.util.JsonUtil;
 import io.kbrag.domain.entity.EmployeeConversationRun;
 import io.kbrag.domain.enums.FeedbackVerdict;
@@ -29,8 +30,9 @@ public class EmployeeFeedbackQualityAutomation {
             try {
                 issueCreator.createIfAbsent(run, kbId, target.appVersionId());
             } catch (RuntimeException failure) {
-                log.warn("auto employee quality issue skipped, kbId={}, runId={}, reason={}",
-                        kbId, run.getRunId(), failure.getMessage());
+                // 反馈已先行提交，单个知识库建单失败不应影响反馈结果和其他知识库，记录 error 与异常栈后继续
+                log.error("auto employee quality issue creation failed, errorCode={}, kbId={}, runId={}",
+                        ErrorCode.INTERNAL_ERROR, kbId, run.getRunId(), failure);
             }
         }
     }

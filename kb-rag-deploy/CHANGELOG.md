@@ -8,6 +8,27 @@
 其不兼容变更在 MINOR 版本中发布，但一律在该版本条目顶部以醒目块标注，并同步写入
 [UPGRADING.md](UPGRADING.md)。
 
+## [Unreleased]
+
+### Added
+
+- **切分策略扩展、重排候选联动与员工差评自动建单**：OpenAPI `kb-server.yaml` 升至 `0.29.0-split-quality`，
+  新增 `embedding_semantic` / `table_row` 切分策略、`split_strategy_by_ext` 与
+  `GET/PUT /api/v1/system/quality-automation-config`。**无 Flyway、无新增环境变量**；新增三个配置键
+  `kb.split.table-row-max-chunks`（5000）、`kb.retrieval.rerank-candidate-top-n-multiplier`（5）、
+  `kb.retrieval.rerank-candidate-hard-cap`（100）使用代码默认值，`.env.example` 暂未暴露。
+  自动建单开关默认关闭，升级后行为不变。
+
+### Changed
+
+- **新建知识库的默认索引配置变化**：已配置嵌入模型时默认 `embedding_semantic`，xlsx/xls/csv 默认 `table_row`。
+  既有知识库保持原配置，升级零操作。
+
+### Fixed
+
+- 员工差评自动建单失败时由 `warn`（仅消息）改为 `error`（含错误码与异常栈），便于运维按错误日志告警；
+  对外行为不变，升级零操作。
+
 ## [1.1.0] - 2026-09-03
 
 > **⚠️ 破坏性变更（升级必读）**：管理台会话请求头由 `Authorization: Bearer <token>` 改为
