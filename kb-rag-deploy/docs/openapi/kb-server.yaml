@@ -290,6 +290,15 @@ info:
 
     控制员工「需改进」评价是否自动创建质量问题（`auto_issue_from_employee_bad`，默认 false）。
 
+
+    0.29.0-split-quality 订正（行为对齐描述，schema 与版本号不变）：`PUT /api/v1/kb/{kbId}/index-config`
+
+    此前不接收 `split_strategy_by_ext` / `split_semantic_drop_threshold`，每次保存都把二者重置为空；现按
+
+    IndexConfig 描述接收，缺省保留已存值。父子分片开启时 `split_strategy_by_ext` 的取值也必须全是
+
+    `fixed_length`，否则 INVALID_PARAM。
+
     '
   version: 0.29.0-split-quality
   license:
@@ -2425,6 +2434,15 @@ paths:
         展示“N 篇文档使用旧配置”提示 + 重建入口）。仅更新配置元数据，**不会**立即
 
         触发重建，重建需显式调用 `POST /api/v1/kb/{kbId}/rebuild`。
+
+
+        切分策略的约束对「库级 split_strategy ∪ split_strategy_by_ext 的全部取值」生效：父子分片开启时
+
+        二者都只能是 fixed_length；未知策略码、缺模型的语义策略、用到却非法的 separator/heading 参数一律
+
+        INVALID_PARAM，且在任何写入之前判定。请求体缺省 split_strategy_by_ext / split_semantic_drop_threshold
+
+        时保留已存值，`split_strategy_by_ext: {}` 清空。
 
         '
       requestBody:
@@ -10195,7 +10213,9 @@ components:
 
         （M14，无 pages 的格式整文一页；切的是逐页清洗并插回图片代理后的正文，与其他策略同一份，
 
-        页区间随预览产物落 page_ranges）。**parent_child_enabled=true 时仅允许 fixed_length**，
+        页区间随预览产物落 page_ranges）。**parent_child_enabled=true 时仅允许 fixed_length**
+
+        （split_strategy 与 split_strategy_by_ext 的每个取值同受此约束），
 
         含 llm_semantic 在内的其余取值一律 INVALID_PARAM——两级切分是定长策略与自身组合，
 
@@ -10253,14 +10273,22 @@ components:
           default: 0
           description: 'embedding_semantic 策略：相邻句向量余弦相似度相对前一对相邻句的降幅超过该值
 
-            时开新段；0 或未设置使用默认 0.35。其余策略忽略。计入配置指纹。'
+            时开新段；0 或未设置使用默认 0.35，超出 [0, 1] 为 INVALID_PARAM。PUT 缺省时保留已存值。
+
+            库级策略或任一扩展名覆盖用到 embedding_semantic 时计入配置指纹，其余情况忽略。'
         split_strategy_by_ext:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/SplitStrategy'
           description: '按源文件扩展名（小写、不含点，如 xlsx、csv）覆盖默认 split_strategy；
 
-            未列出的扩展名仍走 split_strategy。键与取值均校验为合法 SplitStrategy；计入配置指纹。'
+            未列出的扩展名仍走 split_strategy。键与取值去空白转小写，空键/空值/含点的键 INVALID_PARAM；
+
+            取值须为合法 SplitStrategy 且所需模型已配置；**parent_child_enabled=true 时取值只能是
+
+            fixed_length**（两级切分不看本字段）。PUT 缺省时保留已存映射，传 {} 清空。计入配置指纹，
+
+            覆盖值用到的 separator/heading/embedding_semantic 参数一并计入。'
         metadata_rules:
           type: array
           nullable: true

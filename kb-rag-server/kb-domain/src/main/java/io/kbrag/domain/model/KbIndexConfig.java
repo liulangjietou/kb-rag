@@ -11,9 +11,11 @@ import lombok.ToString;
 import io.kbrag.domain.service.FixedLengthTextSplitter;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Typed view of the {@code t_kb_knowledge_base.index_config} JSON column.
@@ -258,7 +260,10 @@ public class KbIndexConfig {
     /**
      * Normalised copy of the extension strategy map for fingerprints.
      *
-     * @return sorted extension to strategy entries
+     * <p>按存储顺序输出，不排序：存量库的默认映射是按 HashMap 迭代顺序写入的，改为排序会让它们的指纹
+     * 整体变化、全部文档被误标过期。配置写入口按请求体顺序保存，控制台原样回传读到的顺序，因此稳定。
+     *
+     * @return extension to strategy entries in stored order
      */
     public Map<String, String> normalizedSplitStrategyByExt() {
         Map<String, String> normalized = new LinkedHashMap<>();
@@ -269,5 +274,31 @@ public class KbIndexConfig {
             normalized.put(ext.toLowerCase(Locale.ROOT), strategy.trim().toLowerCase(Locale.ROOT));
         });
         return normalized;
+    }
+
+    /**
+     * 本库文档实际可能被切分时用到的全部策略：库级默认策略，加上每条扩展名覆盖。
+     *
+     * <p>校验、模型可用性检查和指纹的参数折叠都必须以这个集合为准。只看库级 {@code split_strategy}
+     * 时，一条 {@code txt -> separator} 覆盖读到的分隔符既不被校验也不进指纹；一条
+     * {@code xlsx -> table_row} 覆盖在父子分片下也躲过了"仅允许 fixed_length"的拦截。
+     *
+     * @return 归一化后的策略码，库级默认策略排在首位
+     */
+    public Set<String> configuredSplitStrategies() {
+        Set<String> strategies = new LinkedHashSet<>();
+        strategies.add(resolveSplitStrategy(null));
+        strategies.addAll(normalizedSplitStrategyByExt().values());
+        return strategies;
+    }
+
+    /**
+     * Tells whether any document of this knowledge base may be split with the given strategy.
+     *
+     * @param strategyCode persisted strategy code
+     * @return {@code true} when the default strategy or an extension override names it
+     */
+    public boolean usesSplitStrategy(String strategyCode) {
+        return configuredSplitStrategies().contains(strategyCode);
     }
 }

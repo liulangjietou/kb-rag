@@ -8,6 +8,7 @@ import {
   EMBEDDING_SPLIT_REQUIRES_EMBEDDING,
   LLM_SPLIT_REQUIRES_CHAT_MODEL,
   PARENT_CHILD_REQUIRES_FIXED_LENGTH,
+  PARENT_CHILD_REQUIRES_FIXED_LENGTH_BY_EXT,
   SPLIT_STRATEGY_META,
 } from '../../../utils/statusMeta';
 import CleanRulesFields from './CleanRulesFields';
@@ -111,19 +112,17 @@ function toSplitStrategyByExtRows(map?: Record<string, SplitStrategy>): SplitStr
   return Object.entries(map).map(([ext, strategy]) => ({ ext, strategy }));
 }
 
-function fromSplitStrategyByExtRows(rows: SplitStrategyByExtRow[] | undefined): Record<string, SplitStrategy> | undefined {
-  if (!rows?.length) {
-    return undefined;
-  }
+// 始终返回对象：服务端把缺省视为"保留已存映射"，删光所有行时必须发空对象才能真正清空。
+function fromSplitStrategyByExtRows(rows: SplitStrategyByExtRow[] | undefined): Record<string, SplitStrategy> {
   const result: Record<string, SplitStrategy> = {};
-  for (const row of rows) {
+  for (const row of rows ?? []) {
     const ext = row.ext?.trim().replace(/^\./, '').toLowerCase();
     if (!ext) {
       continue;
     }
     result[ext] = row.strategy;
   }
-  return Object.keys(result).length ? result : undefined;
+  return result;
 }
 
 function toFormValues(config: IndexConfig | null): IndexConfigFormValues {
@@ -168,6 +167,11 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
   const [submitting, setSubmitting] = useState(false);
   const parentChildEnabled = Form.useWatch('parent_child_enabled', form) ?? false;
   const splitStrategy = Form.useWatch('split_strategy', form) ?? DEFAULT_SPLIT_STRATEGY;
+  const splitStrategyByExtRows = Form.useWatch('split_strategy_by_ext_rows', form) ?? [];
+  // 两级切分同样不看扩展名覆盖，后端会拒绝父子分片下的非定长覆盖（如新建库默认的 xlsx → table_row）。
+  const hasNonFixedExtOverride = splitStrategyByExtRows.some(
+    (row: SplitStrategyByExtRow | undefined) => row?.strategy && row.strategy !== 'fixed_length',
+  );
   // 'llm_semantic' is refused server-side without a chat model; disable the option rather than
   // letting the save round-trip into an INVALID_PARAM.
   const { modelStatus } = useModelStatus();
@@ -376,7 +380,8 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
                         label: SPLIT_STRATEGY_META[code].label,
                         disabled:
                           (code === 'llm_semantic' && !chatConfigured) ||
-                          (code === 'embedding_semantic' && !embeddingConfigured),
+                          (code === 'embedding_semantic' && !embeddingConfigured) ||
+                          (parentChildEnabled && code !== 'fixed_length'),
                       }))}
                     />
                   </Form.Item>
@@ -385,7 +390,20 @@ export default function IndexConfigDrawer({ kbId, open, indexConfig, onClose, on
                   </Button>
                 </Space>
               ))}
-              <Button type="dashed" block onClick={() => add({ strategy: 'table_row' })} style={{ marginBottom: 16 }}>
+              {parentChildEnabled && hasNonFixedExtOverride && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={PARENT_CHILD_REQUIRES_FIXED_LENGTH_BY_EXT}
+                  style={{ marginBottom: 8 }}
+                />
+              )}
+              <Button
+                type="dashed"
+                block
+                onClick={() => add({ strategy: parentChildEnabled ? 'fixed_length' : 'table_row' })}
+                style={{ marginBottom: 16 }}
+              >
                 添加扩展名覆盖
               </Button>
             </>

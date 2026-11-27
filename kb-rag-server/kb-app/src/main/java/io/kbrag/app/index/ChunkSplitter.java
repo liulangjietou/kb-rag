@@ -93,6 +93,9 @@ public class ChunkSplitter {
      * <p>A standalone image never takes the two level route: the document is a single picture whose whole
      * text came from the vision model, so there is no structure for a parent to group.
      *
+     * <p>两级路线既不看库级策略也不看 {@code split_strategy_by_ext}：写配置的入口已保证父子分片下
+     * 两者都只能是 {@code fixed_length}，所以这里按定长切与指纹记录的配置一致。
+     *
      * @param request text to cut and the strategy flags it is cut under
      * @return chunks that have to reach the engines, parents excluded
      */

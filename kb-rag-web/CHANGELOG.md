@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 索引配置抽屉删光扩展名覆盖行时发送 `split_strategy_by_ext: {}`（此前发 `undefined`，服务端会保留旧映射，无法清空）；
+  开启父子分片时扩展名覆盖的策略下拉只允许定长切分，残留非定长覆盖时给出提示，避免保存时才撞上 `INVALID_PARAM`。
+
 ### Added
 
 - 索引配置抽屉支持 `embedding_semantic`、`table_row` 两个切分策略及按扩展名覆盖（`IndexConfigDrawer.tsx`）。
