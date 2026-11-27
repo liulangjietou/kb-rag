@@ -2,7 +2,7 @@
 
 企业级 RAG 知识库系统的 Java 主服务。负责知识库与文档的生命周期管理、索引管线编排、检索融合、标注与评测、应用发布与对外 API，以及全部大模型调用（嵌入 / 重排 / 对话 / 视觉四类能力统一走 Provider 抽象）。
 
-文档解析由 Python 服务 `kb-rag-parser` 承担，本服务通过 HTTP 调用；管理台为 `kb-rag-web`；一键起环境与跨仓文档在 `kb-rag-deploy`。
+文档解析由独立解析服务承担（Java 实现 `kb-rag-parse-java` 与 Python 实现 `kb-rag-parser` 二选一部署，共用 `kb-parser.yaml` 契约），本服务经 `DocumentParserClient` 端口通过 HTTP 调用；管理台为 `kb-rag-web`；一键起环境与跨仓文档在 `kb-rag-deploy`。
 
 ## 模块划分
 
@@ -12,8 +12,9 @@ kb-rag-server            # parent，统一依赖版本
 ├── kb-domain            # 实体 + Mapper + 枚举 + 纯领域算法（切分、融合、指纹、评测指标、门禁裁决）+ 出站端口接口
 ├── kb-infrastructure    # 端口实现：Elasticsearch、Qdrant、Neo4j、MinIO、模型 Provider、parser 客户端、Webhook
 ├── kb-app               # 应用编排：kb / document / index / retrieval / graph / annotation / eval /
-│                        #           appcenter / openapi / chat / alert / dict / auth / system / config /
-│                        #           feedback / insight / governance / websource / modelusage / metrics
+│                        #           appcenter / openapi / chat / alert / dict / auth / identity / registration /
+│                        #           system / config / audit / feedback / insight / quality / governance /
+│                        #           websource / extsource / memory / workspace / modelusage / metrics
 └── kb-api               # Controller + DTO + 过滤器 + 健康探针 + Flyway 脚本 + 启动类
 ```
 
@@ -50,6 +51,8 @@ kb-infrastructure 实现 kb-domain 定义的端口接口，kb-app 只依赖端�
 | M22 | MCP `2026-07-28` 逐请求元数据协议与旧 initialize 双协议兼容 |
 | M23 | Confluence Cloud 连接器：Space cursor 分页、页面版本增量同步、复用普通入库链 |
 | M24 | 模型 Token 台账与租户月配额：出站原子预占、真实/估算结算、价格快照与管理端查询 |
+| M26 | 邮箱注册与管理员审核、企业知识首页 |
+| M26 之后 | 员工工作台（应用授权、持久会话与运行恢复、答案评价）、知识质量问题回归、首页来源健康、切分策略 `embedding_semantic` / `table_row`、员工差评自动建单（默认关）；见 `kb-rag-deploy/docs/` 下各专题文档与 CHANGELOG |
 
 ## 环境要求
 
@@ -117,7 +120,7 @@ Redis 容器在 `kb-rag-deploy` 里是 `profile: optional`，需显式 `--profil
 
 ```
 Query 改写 → 多库路由 → 双路/三路召回（子片粒度）→ 库内融合（RRF | 加权）→ 跨库 RRF
-           → 近重复窗口归并 → 重排（候选 ≤50）→ 父子归并 → 阈值过滤 → top_n
+           → 近重复窗口归并 → 重排（候选默认 ≤50；父子分片时联动 max(50, top_n×5)，硬上限 100）→ 父子归并 → 阈值过滤 → top_n
 ```
 
 - 单库调用就是「一个库的多库调用」：库内部分（召回、库内融合、事实源复核）按库跑一遍，之后的阶段在合并候选集上跑一次。管理台调试页与应用生产流量因此走同一份代码
@@ -127,7 +130,7 @@ Query 改写 → 多库路由 → 双路/三路召回（子片粒度）→ 库�
 - **强制过滤不可绕过**：各路召回必须在引擎侧过滤版本可见集与 `enabled=1`，由链路构建、请求参数碰不到；图路回溯的 chunk 在 MySQL 事实源二次复核同一谓词
 - **MySQL 是事实源**：正文一律从库里读，不从引擎读。引擎命中但事实源行已不存在 → 丢弃并异步自愈删除；行存在但被禁用 → 只从排序剔除，绝不删除
 
-`degraded` 取值见 `DegradedReason` 枚举，共 12 个：`query_rewrite_timeout` / `query_rewrite_error` / `query_rewrite_unavailable`、`rerank_timeout` / `rerank_error` / `rerank_unavailable`、`vector_route_unavailable`、`route_fallback_all`、`threshold_inactive`、`snapshot_index_missing`、`graph_route_unavailable`、`image_understanding_unavailable`。
+`degraded` 取值见 `DegradedReason` 枚举，共 14 个：`query_rewrite_timeout` / `query_rewrite_error` / `query_rewrite_unavailable`、`rerank_timeout` / `rerank_error` / `rerank_unavailable`、`vector_route_unavailable`、`route_fallback_all`、`threshold_inactive`、`snapshot_index_missing`、`graph_route_unavailable`、`image_understanding_unavailable`、`mm_route_skipped`、`mm_route_unavailable`。
 
 ## 索引命名与发布快照
 
@@ -183,8 +186,8 @@ TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128     # 可提供 X-Forwarded-For 的代�
 | `kb.vector` / `kb.es` / `kb.qdrant` / `kb.minio` / `kb.graph` | 中间件连接与索引参数（分片副本数、分词器、预签名 TTL、图谱跳数与抽取并发） |
 | `kb.embedding` / `kb.rerank` / `kb.chat` / `kb.vision` | 四类模型的 provider / 模型名 / 凭据 / 端点 / 超时 |
 | `kb.parser` / `kb.upload` / `kb.image` | parser 地址与超时、上传体积与扩展名白名单、单文档图片上限 |
-| `kb.split` / `kb.doc.version` | 切分参数（定长与父子两级）与文档版本保留数 |
-| `kb.retrieval` | 检索全链路参数：RRF k、召回与 top_n 上下限、融合模式与权重、改写与重排开关及超时、多库上限与各类缓存、图片 query 上限 |
+| `kb.split` / `kb.doc.version` | 切分参数（定长与父子两级、`table-row-max-chunks` 表格行上限）与文档版本保留数 |
+| `kb.retrieval` | 检索全链路参数：RRF k、召回与 top_n 上下限、融合模式与权重、改写与重排开关及超时、父子分片下重排候选联动（`rerank-candidate-top-n-multiplier` / `rerank-candidate-hard-cap`，暂无环境变量映射）、多库上限与各类缓存、图片 query 上限 |
 | `kb.eval` / `kb.gate` | 评测并发与离线超时、命中重叠阈值、judge 模型；门禁最小 case 数、容差、待复核占比上限 |
 | `kb.app` / `kb.open-api` | 发布快照保留数与清理调度；对外 API 默认限流、审计保留天数与归档调度 |
 | `kb.sync` / `kb.alert` / `kb.annotation` / `kb.chat-import` / `kb.demo` | 双写补偿扫描、告警窗口与阈值、标注迁移最低分、聊天导入默认档案与脱敏、Demo 素材目录 |
@@ -205,7 +208,7 @@ mvn -B -ntp -DskipTests package
 java -jar kb-api/target/kb-rag-server.jar
 ```
 
-启动时 Flyway 自动执行迁移（当前 V1–V25，48 张业务表）。数据库中没有管理员账号时会创建 `admin` 并把随机密码打印到启动日志（只打印一次），首次登录强制改密。
+启动时 Flyway 自动执行迁移（当前 V1–V34，60 张业务表）。数据库中没有管理员账号时会创建 `admin` 并把随机密码打印到启动日志（只打印一次），首次登录强制改密。
 
 跑测试：
 
@@ -220,7 +223,7 @@ CI 配置见仓库根目录 `../.github/workflows/ci.yml`（Temurin 17）。
 
 ## 接口
 
-接口清单不在本文件维护，以 OpenAPI 契约为准：`kb-rag-deploy/docs/openapi/kb-server.yaml`（92 条路径 / 111 个操作）。契约先行——改动端点或 DTO 时先改 yaml 再改代码。
+接口清单不在本文件维护，以 OpenAPI 契约为准：`kb-rag-deploy/docs/openapi/kb-server.yaml`（2026-11-27 实测 189 条路径 / 240 个操作）。契约先行——改动端点或 DTO 时先改 yaml 再改代码。
 
 鉴权分两条完全独立的链路，凭据从请求头就开始分家：
 
@@ -257,7 +260,7 @@ micrometer 的 Prometheus registry，`/actuator/prometheus` 可直接抓取：�
 |---|---|
 | `ARCHITECTURE.md` | 四仓总体架构；§3 是本服务的模块、端口、检索链路、索引管线、异步与数据模型 |
 | `FLOWS.md` | 端到端流程时序（上传入库、检索、发布、评测、导入） |
-| `M1~M24-CONTRACTS.md` | 各里程碑的开发契约与「实现期修订」——实现与契约的偏离都记在这里 |
+| `M*-CONTRACTS.md`（M1–M26） | 各里程碑的开发契约与「实现期修订」——实现与契约的偏离都记在这里 |
 | `openapi/kb-server.yaml` | 本服务的 API 契约 |
 | `openapi/kb-parser.yaml` | parser 服务的 API 契约 |
 | [`ACTUATOR-SECURITY.md`](../kb-rag-deploy/docs/ACTUATOR-SECURITY.md) | Actuator 独立管理端口与远程 Prometheus 安全部署指南 |

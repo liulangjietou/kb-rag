@@ -28,6 +28,12 @@
 
 - 员工差评自动建单失败时由 `warn`（仅消息）改为 `error`（含错误码与异常栈），便于运维按错误日志告警；
   对外行为不变，升级零操作。
+- **文档与代码对齐**（纯文档，升级零操作）：OpenAPI 补登既有端点 `POST /api/v1/auth/logout`，
+  版本号不变；部署 README 的 ik 词典示例改用控制台请求头 `satoken`，并注明命令行取 token 需先在浏览器登录
+  （登录要滑块验证码）；`ARCHITECTURE.md` 升至 v3.2，数据模型补登 Flyway V26–V34；
+  需求文档升至 v1.26，标注 `embedding_semantic` / `table_row` 已落地。
+- **已知问题**：`scripts/benchmark.sh` 仍以 `Authorization: Bearer` 发送控制台 token，
+  自 v1.1.0 起控制台只认 `satoken` 请求头，压测请求会全部返回 401，待脚本修复。
 
 ## [1.1.0] - 2026-09-03
 

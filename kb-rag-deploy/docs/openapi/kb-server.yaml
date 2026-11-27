@@ -493,6 +493,21 @@ paths:
           $ref: '#/components/responses/InvalidParam'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/v1/auth/logout:
+    post:
+      tags:
+      - auth
+      summary: 退出登录，注销当前控制台会话
+      description: 吊销请求头 satoken 携带的当前会话；其他会话不受影响。会话已失效或缺失时返回 401。
+      responses:
+        '200':
+          description: 已注销
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmptyResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /api/v1/auth/me:
     get:
       tags:

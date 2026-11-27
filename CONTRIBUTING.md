@@ -14,11 +14,13 @@ monorepo；各子目录的 `CONTRIBUTING.md` 继续描述本模块特有约束�
 ## 本地质量门禁
 
 根目录 `.github/workflows/ci.yml` 是 GitHub Actions 唯一入口，本地提交前应执行对应模块的同一组命令。
-也可在仓库根目录运行 `./scripts/dev-gate.sh`（全模块）或 `./scripts/dev-gate.sh server web`（子集）：
+也可在仓库根目录运行 `./scripts/dev-gate.sh`（全模块）或 `./scripts/dev-gate.sh server web`（子集）；它覆盖下面这组命令，
+不含 CI 中的 web e2e（`npm run test:e2e`）与部署契约的 Compose / OpenAPI / Shell 校验：
 
 ```bash
 (cd kb-rag-server && mvn -B -ntp verify -DexcludedGroups=browser)
 (cd kb-rag-parser && pytest -q)
+(cd kb-rag-parse-java && mvn -B -ntp verify)
 (cd kb-rag-web && npm test && npm run lint && npm run build)
 (cd kb-rag-deploy && python3 -m unittest discover -s tests -p 'test_*.py')
 (cd kb-rag-deploy && python3 scripts/validate_config.py)
