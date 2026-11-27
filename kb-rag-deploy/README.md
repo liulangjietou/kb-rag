@@ -273,9 +273,6 @@ kb-rag-es` 排查 `remote_ext_dict` 拉取失败的日志（多数是上一小�
 KB_ID=<目标知识库 kb_id> TOKEN=<登录 token> ./scripts/benchmark.sh
 ```
 
-> **已知问题**：`benchmark.sh` 目前以 `Authorization: Bearer` 发送 `TOKEN`，而控制台检索
-> `/api/v1/kb/{kbId}/search` 自 v1.1.0 起只认 `satoken` 请求头，脚本修复前请求会全部返回 401。
-
 对指定知识库并发跑检索请求（默认 200 次、并发 5，query 从内置 10 条中文查询轮换，
 可用 `QUERY_FILE` 换成自定义语料），统计并输出 P50/P95/P99 延迟与错误数。
 **验收口径（需求文档 §5，M2 定版）：基础链路（多路召回+融合+重排，不含改写）
