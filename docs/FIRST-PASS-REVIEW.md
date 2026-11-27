@@ -17,7 +17,7 @@
 1. **单实例调度假设**：后台任务默认同进程竞争；多副本需配合 `KB_CACHE_PROVIDER=redis` 与运维文档中的调度边界（见 `DURABLE-SCHEDULING-DECISION.md`）。扩容前需复核 `@Scheduled` 与锁实现。
 2. **员工反馈自动建单**：`EmployeeFeedbackQualityAutomation` 对单库失败以 error 级别记录（含错误码与异常栈）并继续；运营侧需知部分 KB 可能未建单（已有单测约束扇出与吞错行为）。
 3. **前端 Fast Refresh 警告**：`AuthContext` 等文件 export 非组件符号，`oxlint` 仅 warning；不影响生产构建，拆分文件可改善 DX。
-4. **自测文档路径**：`docs/自测步骤.md` 含历史绝对路径示例；新同学优先用根 README + 相对路径 `kb-rag-deploy`。
+4. **自测文档路径**：`docs/自测步骤.md` 已改为从仓库根目录出发的相对路径，并按 Sa-Token 与滑块验证码更新取 token 方式。
 
 ## 低优先级 / 观察项
 

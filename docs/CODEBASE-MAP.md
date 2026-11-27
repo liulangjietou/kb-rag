@@ -8,8 +8,8 @@
 | --- | --- | --- |
 | `kb-rag-server/kb-api` | HTTP 入口、鉴权过滤器、Controller | 新 REST、契约 DTO、SSE 端点 |
 | `kb-rag-server/kb-app` | 业务编排（索引、检索、员工问答、质量运营） | 服务类、定时任务、OpenAPI 实现 |
-| `kb-rag-server/kb-domain` | 实体、Mapper、领域模型与纯逻辑 | 表映射、切分/检索参数模型 |
-| `kb-rag-server/kb-infrastructure` | ES/Qdrant/MinIO/模型 Provider 适配 | 外部系统客户端、流式订阅 |
+| `kb-rag-server/kb-domain` | 实体、Mapper、领域模型、纯逻辑与出站端口（`domain.port`） | 表映射、切分/检索参数模型、端口接口 |
+| `kb-rag-server/kb-infrastructure` | 端口实现：ES/Qdrant/Neo4j/MinIO/模型 Provider/parser 客户端 | 外部系统客户端、流式订阅 |
 | `kb-rag-server/kb-common` | 异常、工具类 | 横切工具 |
 | `kb-rag-parser` / `kb-rag-parse-java` | 文档解析（二选一部署） | 解析契约、版面规则 |
 | `kb-rag-web` | React 管理台 + 员工工作台 | 页面、API 封装 |
@@ -21,40 +21,43 @@
 浏览器 / 外部客户端
   → kb-rag-web (dev :20002, 代理 /api)
   → KbRagServerApplication (kb-api :20000)
-       → Sa-Token 会话 / API Key 过滤器
+       → AuthInterceptor / PermissionInterceptor（控制台 Sa-Token 会话）
+         或 ApiKeyAuthFilter / MemoryKeyAuthFilter（开放 API）
        → *Controller (kb-api)
        → *Service (kb-app)
-       → Mapper / RetrievalEngine / ModelProvider (kb-domain + kb-infrastructure)
+       → Mapper (kb-domain) / 出站端口 VectorStore、FulltextStore、GraphStore、
+         ChatProvider、EmbeddingProvider、RerankProvider… (kb-domain.port，kb-infrastructure 实现)
   → 中间件：MySQL（事实）、MinIO（原件）、ES/Qdrant/Neo4j（检索派生）
 
-文档入库旁路：kb-app IndexPipelineService → HTTP → kb-rag-parser :20001
+文档入库旁路：kb-app IndexPipelineService → DocumentParserClient（HttpDocumentParserClient）→ HTTP :20001
+            → kb-rag-parse-java 或 kb-rag-parser（二选一，同一契约）
 ```
 
-**本地最短链路**：见根 [`README.md`](../README.md)「快速启动」；端到端验收见 [`自测步骤.md`](自测步骤.md)。一键跑齐 CI 同级检查：仓库根目录 `./scripts/dev-gate.sh`。
+**本地最短链路**：见根 [`README.md`](../README.md)「快速启动」；端到端验收见 [`自测步骤.md`](自测步骤.md)。本地跑主要门禁：仓库根目录 `./scripts/dev-gate.sh`（覆盖五个模块的单测/构建与部署配置校验；不含 web e2e、Compose 组合与 OpenAPI/Shell 语法校验，这些只在 CI 跑）。
 
 ## 3. 核心数据流（改功能前先对号入座）
 
 ### 3.1 文档入库
 
-`DocumentController` / 来源同步 → `IndexPipelineService` → `ParserClient` → `ChunkSplitter` → 嵌入任务 → `IndexSync` 写 ES/Qdrant。
+`DocumentController` / 来源同步 → `IndexPipelineService` → `DocumentParserClient` → 清洗/脱敏 → `ChunkSplitter`（`SplitterRouter` 按 `resolveSplitStrategy(扩展名)` 选策略）→ `ChunkEmbedder` → `ChunkIndexWriter` 写 ES/Qdrant（同步行 `t_kb_chunk_index_sync`，失败由 `IndexSyncCompensationService` 补偿）→ `VersionActivationHandler` 激活文档版本。
 
-单测锚点：`IndexPipelineServiceTest`（管线阶段）、`ChunkSplitter`（经管线 mock 或后续独立测）、domain 层 `*SplitterTest`。
+单测锚点：`IndexPipelineServiceTest`（管线阶段）、`IndexSyncCompensationServiceTest`、domain 层 `*SplitterTest`（如 `EmbeddingSemanticTextSplitterTest`、`TableRowTextSplitterTest`）。
 
 ### 3.2 检索与开放 API
 
-`KnowledgeApiService` / `RetrievalService` → `RoutingService` → 多引擎召回 → 融合重排 → 引用组装。
+`KnowledgeApiService` / `RetrievalService` → `RewriteService` → `RoutingService` → 多路召回（`VectorStore` / `FulltextStore` / `GraphRetrievalService` / `MultimodalRetrievalService`）→ `FusionRouter` + `CrossKbRrfFusion` → `RerankService` → `ParentChildMerger` → `RetrievalNodeAssembler`。
 
-单测锚点：`RetrievalServiceTest`、`RoutingServiceTest`、`RerankServiceTest`；契约测在 `kb-api/.../ContractTest`。
+单测锚点：`RetrievalServiceTest`、`RoutingServiceTest`、`RerankServiceTest`；契约测在 `kb-api/src/test` 的 `*ContractTest`。
 
 ### 3.3 员工问答（SSE）
 
-`EmployeeRunController` → `EmployeeRunCoordinator` → 检索 + `ChatStream`；反馈 `EmployeeConversationService` → 可选 `EmployeeFeedbackQualityAutomation`。
+`EmployeeConversationController`（`/api/v1/workspace/apps/{appId}/conversations/{id}/runs`，SSE 订阅 `.../runs/{runId}/events` 走 `EmployeeRunSubscriptions`）→ `EmployeeConversationService` → `EmployeeRunCoordinator` → `KnowledgeApiService`（检索 + `ChatStreamListener` 流式生成）；评价 `PUT .../runs/{runId}/feedback` → `EmployeeConversationService#feedback` → `EmployeeFeedbackQualityAutomation`（开关关闭时直接返回）。
 
-单测锚点：`EmployeeRunCoordinatorTest`、`EmployeeAnswerFeedbackServiceTest`、`EmployeeFeedbackQualityAutomationTest`。
+单测锚点：`EmployeeRunCoordinatorTest`、`EmployeeAnswerFeedbackServiceTest`、`EmployeeFeedbackQualityAutomationTest`；HTTP/SSE 集成测 `EmployeeRunHttpIntegrationTest`。
 
 ### 3.4 质量运营
 
-控制台质量问题、`EmployeeFeedback` 列表、**系统设置 → 质量自动化**（`QualityAutomationConfigService`）。
+控制台质量问题（`KnowledgeQualityIssueController` → `KnowledgeQualityIssueService`）、员工负面反馈列表（`EmployeeFeedbackController` → `EmployeeFeedbackService`）、**系统设置 → 质量自动化**（`SystemController` → `QualityAutomationConfigService`）。
 
 单测锚点：`KnowledgeQualityIssueServiceTest`、`QualityAutomationConfigServiceTest`、前端 `QualityAutomationTab.test.tsx`。
 
@@ -72,7 +75,7 @@
 
 ## 5. 配置与环境
 
-- 运行期配置：`kb-rag-deploy/.env`（从 `.env.example` 复制），Java 通过 `spring.config.import` 或进程环境加载。
+- 运行期配置：`kb-rag-deploy/.env`（从 `.env.example` 复制）。服务端不会自己读取该文件：命令行用 `set -a; source .env; set +a` 注入进程环境，IDE 启动可加参数 `--spring.config.import=optional:file:<绝对路径>/kb-rag-deploy/.env[.properties]`。
 - 系统级开关（非 `.env`）：`t_kb_system_config`，读写经 `SystemConfigService`。
 - 应用版本快照：`AppConfigSnapshot`（发布门禁冻结，**不做缺省回落**）。
 

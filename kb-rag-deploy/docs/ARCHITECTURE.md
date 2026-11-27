@@ -1,13 +1,13 @@
 # kb-rag 架构文档
 
 
-> 版本：v3.1（基线 = v3.0 + 权限缓存抽出端口、随 cache.provider 与会话同步切换，多副本部署由此就绪，2026-09-03；v3.0 基线为控制台会话底座换 Sa-Token，其余历史见 Git）
-> 日期：2026-09-02
+> 版本：v3.2（文档对齐：数据模型补登 Flyway V26–V34、切分策略补 `embedding_semantic` / `table_row` 与按扩展名覆盖、端口与表数按代码实测订正，2026-11-27；v3.1 基线 = v3.0 + 权限缓存抽出端口、随 cache.provider 与会话同步切换，多副本部署由此就绪，2026-09-03；v3.0 基线为控制台会话底座换 Sa-Token，其余历史见 Git）
+> 日期：2026-11-27
 > 作者：RichardFyoung / Claude
 >
 > **文档定位**：本文描述系统的实际实现架构（以代码为准），与以下文档互补——
 > - `知识库需求文档.md`：需求与设计决策的唯一事实源（"为什么做、做什么"）
-> - `M1~M24-CONTRACTS.md`：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
+> - `M*-CONTRACTS.md`（M1–M26，无独立的 M18/M25 文件）及员工工作台等专题文档：各里程碑的实现契约与已接受偏离（"每一期怎么做的"）
 > - `openapi/kb-server.yaml`、`openapi/kb-parser.yaml`：HTTP 接口的唯一契约源
 > - `FLOWS.md`：核心流程图（与本文配套阅读）
 
@@ -95,7 +95,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | 模块 | 职责 | 关键内容 |
 |---|---|---|
 | **kb-common** | 无 Spring 依赖的基础件 | `Result` 统一响应信封、`ErrorCode`、`BizException`/`ProviderException`、`JsonUtil`/`HashUtil`、`RequestIdHolder`、`KbConstants`（业务 ID 前缀与 `kb-sk-` Key 前缀） |
-| **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 46 张业务表对应）、30+ 枚举、60+ 领域模型、**22 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
+| **kb-domain** | 实体 + 端口 + 纯领域算法 | MyBatis-Plus 实体/Mapper（与 60 张业务表对应）、30+ 枚举、60+ 领域模型、**24 个出站端口接口**（`domain.port`）、无状态领域服务（切分/融合/指纹/评测指标/门禁裁决/标注迁移相似度等纯函数）、`KbProperties`（`@ConfigurationProperties(prefix="kb")`，二十余个嵌套段） |
 | **kb-infrastructure** | 端口实现，按外部依赖分包 | `search.es` / `search.qdrant` / `graph` / `provider.{chat,embedding,rerank,vision}` / `connector` / `storage` / `parser` / `notify` / `web` / `auth`（LDAP/OIDC/SAML/CAS）/ `config` |
 | **kb-app** | 应用编排层（架构主体） | 24 个业务域包：既有索引/检索/评测/开放平台等 23 域 + `modelusage` 用量编排 |
 | **kb-api** | HTTP 边界与装配点 | 36 个 Controller、过滤器/拦截器、SSE、MCP 协议层（`api.mcp`，§3.9）、健康探针、`application.yml`、Flyway 脚本；`@SpringBootApplication(scanBasePackages="io.kbrag")` 为唯一装配点 |
@@ -178,7 +178,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 
 - **上传事务只持久化事实**（MinIO 原件 + document/version 行），管线经 `TransactionSynchronization.afterCommit` 提交异步执行——异步 worker 用独立连接读版本行，事务内触发会产生提交竞态（M1 联调发现的真实缺陷，全仓仅 `DocumentService` 与 `EngineChunkCleaner` 两处使用该手法）。
 - `IndexPipelineService` 是管线主编排，五个 `@Async(INDEX_EXECUTOR)` 入口：`submit`（新上传）/ `submit(versionId, reuse)`（指纹复用）/ `submitRestore`（归档版重建）/ `submitRebuild`（配置重建）/ `submitConfirm`（预览确认后续跑）。
-- 阶段：解析（parser HTTP）→ 清洗/脱敏（`DocumentCleaner`/`TextDesensitizer`；按页切分的库走 `PagedContentAssembler` 逐页清洗后拼回并记录页区间）→ 图片资产与 VLM 文本代理插回（`ImageAssetService`/`ImagePlaceholderResolver`，单图失败不失败整篇）→ 切分（`ChunkSplitter` 统一承担：`SplitterRouter` 策略路由，未知 code 回落定长；`page` 策略分流到 `PageSplitter`，因它还需要页区间；父子两级切分 `ParentChildSplitter`，仅与定长策略组合。“是否单图 / 是否页策略”由管线判定后随请求传入，切分器不重复推导——两处各自判断会让页策略静默退化为定长）→ 嵌入（`ChunkEmbedder`，零 Key 全部 SKIPPED）→ 双写（`ChunkIndexWriter`：**先写 PENDING 同步行、再调引擎、再更新状态**——补偿扫描的唯一证据链）。
+- 阶段：解析（parser HTTP）→ 清洗/脱敏（`DocumentCleaner`/`TextDesensitizer`；按页切分的库走 `PagedContentAssembler` 逐页清洗后拼回并记录页区间）→ 图片资产与 VLM 文本代理插回（`ImageAssetService`/`ImagePlaceholderResolver`，单图失败不失败整篇）→ 切分（`ChunkSplitter` 统一承担：先按 `KbIndexConfig#resolveSplitStrategy(扩展名)` 取策略——`split_strategy_by_ext` 覆盖优先、其次库级 `split_strategy`、都缺省为 `fixed_length`；`SplitterRouter` 策略路由，未知 code 回落定长；`embedding_semantic` 逐句嵌入、在相邻句相似度骤降处切分（未配嵌入模型时保存即 INVALID_PARAM），`table_row` 按 markdown 表格行成片、超过 `kb.split.table-row-max-chunks`（默认 5000）整篇报错；`page` 策略分流到 `PageSplitter`，因它还需要页区间；父子两级切分 `ParentChildSplitter`，仅与定长策略组合。“是否单图 / 是否页策略”由管线判定后随请求传入，切分器不重复推导——两处各自判断会让页策略静默退化为定长）→ 嵌入（`ChunkEmbedder`，零 Key 全部 SKIPPED）→ 双写（`ChunkIndexWriter`：**先写 PENDING 同步行、再调引擎、再更新状态**——补偿扫描的唯一证据链）。
 - **指纹复用**：`VersionFingerprintFactory` 产出 content_hash/解析指纹/分片指纹/嵌入版本，`VersionArtifactReuser` 在全匹配时复制上一构建的 chunk 行（新 ID、重写父链），跳过解析与切分。
 - **版本机制**：`DocumentVersionPlanner` 一次回答重复判定/版本号（major.minor）/可否复用；`DocumentVersionActivator` 激活时旧 active 退回 READY（支持秒级回滚）；`VersionRetentionService` 异步清理超保留窗口（默认 3）的旧版 chunk（保留原件与解析产物）；`AppVersionPinChecker` 保护被快照引用的版本不被清理。
 - **编排与执行分离**：`IndexPipelineService` 只保留阶段顺序与失败归类，三类执行下沉——`ChunkSplitter`（切分与分片落库）、`IndexTaskLifecycle`（`t_kb_task` 状态机：开始/进度/成功/失败，重试复用同一行并累加 `retry_count`）、`VersionActivationHandler`（激活及其全部后续：标注继承 → 评测用例置陈旧 → 保留窗口清理 → 图谱失效）。后者刻意区别于 `DocumentVersionActivator`：激活器只守“单一 active 版本”不变式，聊天导入与手工回滚也复用它，那条不变式不能依赖任何后续步骤成功。
@@ -232,7 +232,7 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 通用持久化任务调度当前仍不投入：`t_kb_task` 是状态事实而非竞争消费队列，其他定时器在多实例下也没有
 统一 lease/owner/heartbeat 语义。量化立项门槛和未来最小协议见 `DURABLE-SCHEDULING-DECISION.md`。
 
-### 3.8 数据模型（46 张业务表，Flyway V1-V24）
+### 3.8 数据模型（60 张业务表，Flyway V1-V34）
 
 全部 InnoDB，统一 `id / created_at / updated_at / lock_version / deleted`，审计字段由 `AuditFieldFiller` 填充，业务 ID 带类型前缀（kb/doc/dv/ck/task/img/upt/an/evds/evc/evr/evre/app/av/ak/aud/smp/rfb/si/ws/wcred/exts/usr/role/tnt/opa/ml/mfr/mpr/mn/mak）。
 
@@ -263,6 +263,15 @@ kb-api ──► kb-app ──► kb-domain ──► kb-common
 | V23（M21） | 最终答案评测字段：`t_kb_eval_case.expected_refusal`；`t_kb_eval_run` 增应用配置快照、答案 Judge 身份与聚合指标；`t_kb_eval_result` 增生成答案、生成耗时、五维评分、答/拒结果与失败原因。全部新列可空或有兼容默认值，存量 run 不回填 |
 | V24（M24） | `t_kb_tenant.monthly_token_quota`（0=不限）；`t_kb_model_usage_monthly`（租户+月份原子 used/reserved 计数器）；`t_kb_model_usage`（不含客户内容的调用台账与价格快照）；`t_kb_model_price`（provider+capability+model 唯一价格） |
 | V25（会话底座换 Sa-Token） | `t_kb_auth_session`（Sa-Token 的通用 KV 表，`cache.provider=local` 时的会话底座，不带 `lock_version`/`deleted`——会话是易失数据）；`t_kb_sso_state`（单点登录一次性 state，从 `t_kb_auth_token` 搬出，仍只存 SHA-256 摘要）。**只加表不删表**：`t_kb_auth_token` 此后无读者但保留，以维持 UPGRADING.md 的回退承诺 |
+| V26（M26） | 邮箱注册与管理员审核：`t_kb_registration_application` / `t_kb_registration_application_role` / `t_kb_registration_submission_claim` / `t_kb_email_verification` / `t_kb_email_identity_claim` / `t_kb_mail_outbox` |
+| V27（员工应用授权） | `t_kb_role` 加 `app_scope_all`；`t_kb_role_app`（角色可用应用范围，仍需 `app:use`） |
+| V28（员工持久会话） | `t_kb_conversation` / `t_kb_conversation_run`（会话与运行账本，见 `EMPLOYEE-CONVERSATION-LEDGER.md`） |
+| V29（员工答案评价） | `t_kb_conversation_run` 加 `feedback_verdict` / `feedback_note` / `feedback_updated_at` |
+| V30（评测输入快照） | `t_kb_eval_run` 加 `case_inputs`（提交时一致读取的用例输入，旧运行为空） |
+| V31（知识质量问题） | `t_kb_quality_issue` / `t_kb_quality_issue_record` |
+| V32（质量问题引用索引） | `t_kb_quality_issue` 加 `(dataset_id, deleted)`、`(case_id, deleted)` 索引 |
+| V33（最近访问） | `t_kb_resource_visit`（首页最近访问） |
+| V34（来源健康） | `t_kb_web_source` / `t_kb_ext_source` 加 `last_success_at` / `last_content_change_at` |
 
 引擎侧可过滤字段全集（Qdrant 标量 / ES filter，建索引时显式声明）：`kb_id`、`doc_id`、`document_version_id`、`enabled`、`parent_id`、`chunk_type`、`tag_ids`、`session_id`、`sender`、`msg_time`、`chunk_seq`；其余 metadata 只存 MySQL。新增可过滤维度视为 schema 变更，走索引重建迁移。
 
@@ -332,7 +341,7 @@ server 侧 `HttpDocumentParserClient`（`kb-infrastructure`）经 `PARSER_BASE_U
 
 ### 5.1 技术栈
 
-Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；lint 用 oxlint。无状态库（React Context：`AuthContext` / `ModelStatusContext`）。dev 端口 20002，`/api` 与 `/actuator` 代理到 20000。
+Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 7 + axios；lint 用 oxlint。无状态库（React Context：`AuthContext` / `ModelStatusContext`）。dev 端口 20002，`/api` 与 `/actuator` 代理到 20000。
 
 ### 5.2 路由与页面
 
@@ -377,7 +386,7 @@ Vite 8 + React 18 + TypeScript 6 + Ant Design 5 + react-router-dom 6 + axios；l
 | `scripts/benchmark.sh` | 纯 bash+curl 压测（P50/P95/P99），验收口径 P95<2s；`seed-bench.py` 零 Key 直灌 10 万分片种子数据 |
 | `demo/` | 4 篇原创文档（md/docx/pdf/xlsx 各一，字节级可复现生成）+ `eval-cases.json`（10 条，含文档级锚定图片 case，按文件名+content_hash 关联导入） |
 | `mappings/` | 聊天记录列名映射模板分发（memotrace 等） |
-| `docs/` | 需求文档、M1-M24 契约、OpenAPI（`kb-server.yaml` 0.26.0-m24 / `kb-parser.yaml` 0.12.0-m12）、持久化调度投入决策、备份恢复手册、本文档与 `FLOWS.md`；调用方接入文档另见主仓 `docs/MCP接入指南.md` |
+| `docs/` | 需求文档、M1-M26 契约与专题文档、OpenAPI（`kb-server.yaml` 0.29.0-split-quality / `kb-parser.yaml` 0.14.0-m14）、持久化调度投入决策、备份恢复手册、本文档与 `FLOWS.md`；调用方接入文档另见主仓 `docs/MCP接入指南.md` |
 
 ---
 

@@ -9,7 +9,7 @@ OpenAPI 接口契约、备份/预检脚本与总体文档。
 React 管理台，三者围绕 MySQL（事实源）/ Elasticsearch 与 Qdrant（检索引擎）/
 MinIO（对象存储）/ Neo4j（可选，图检索）构建，全部通过 docker-compose 一键拉起中间件。**
 
-> 本仓库当前状态：**M1-M24 已实现**；其中 M15/M16 为权限与企业化，M17/M18 为网页抓取增强，
+> 本仓库当前状态：**M1-M24 与 M26 已实现**（M26 为邮箱注册、管理员审核与企业知识首页），其后的员工工作台与知识运营能力见各专题文档；其中 M15/M16 为权限与企业化，M17/M18 为网页抓取增强，
 > M19 为 Agent 长期记忆，M20 为 MCP 工具层，M21 为最终答案质量门禁，M22 为 MCP 双协议兼容，
 > M23 为 Confluence Cloud 数据源连接器，M24 为模型 Token 成本台账与租户配额。
 > 一期交付上传解析→混合检索（向量+BM25+图路三路融合）→分片标注→评测闭环→应用发布→
@@ -249,9 +249,10 @@ M2 阶段仍跑在宿主机 20000 端口，见 M1-CONTRACTS.md §0）：
 curl -i http://127.0.0.1:20000/internal/dict/ik/ext.txt
 # 期望：200，响应头含 Last-Modified / ETag，body 是一行一词的纯文本扩展词表
 
-# 2) 管理台新增一个扩展词条（TOKEN 来自 POST /api/v1/auth/login）
+# 2) 管理台新增一个扩展词条。控制台会话走 satoken 请求头（不是 Authorization）；登录需滑块验证码，
+#    命令行取 TOKEN 的办法：浏览器登录管理台后，在开发者工具读 localStorage 的 kb-rag-web:auth-token
 curl -s -X POST http://127.0.0.1:20000/api/v1/dict/ik \
-  -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+  -H "satoken: ${TOKEN}" -H "Content-Type: application/json" \
   -d '{"word":"知识库检索","dict_type":"EXT"}'
 
 # 3) 再次拉取热更新端点：新词已出现，且 Last-Modified/ETag 已变化
@@ -271,6 +272,9 @@ kb-rag-es` 排查 `remote_ext_dict` 拉取失败的日志（多数是上一小�
 ```bash
 KB_ID=<目标知识库 kb_id> TOKEN=<登录 token> ./scripts/benchmark.sh
 ```
+
+> **已知问题**：`benchmark.sh` 目前以 `Authorization: Bearer` 发送 `TOKEN`，而控制台检索
+> `/api/v1/kb/{kbId}/search` 自 v1.1.0 起只认 `satoken` 请求头，脚本修复前请求会全部返回 401。
 
 对指定知识库并发跑检索请求（默认 200 次、并发 5，query 从内置 10 条中文查询轮换，
 可用 `QUERY_FILE` 换成自定义语料），统计并输出 P50/P95/P99 延迟与错误数。
@@ -543,6 +547,6 @@ python3 -c "import yaml, sys; yaml.safe_load(open(sys.argv[1]))" docs/openapi/kb
 - [知识库需求文档（v1.25，唯一事实源）](docs/知识库需求文档.md)
 - [系统架构总览（ARCHITECTURE.md）](docs/ARCHITECTURE.md) /
   [核心流程图（FLOWS.md）](docs/FLOWS.md)
-- [M1](docs/M1-CONTRACTS.md) ~ [M24 开发契约](docs/M24-CONTRACTS.md)（按里程碑记录
+- [M1](docs/M1-CONTRACTS.md) ~ [M26 开发契约](docs/M26-CONTRACTS.md)（按里程碑记录
   实现细节与已接受偏离）
 - [OpenAPI 定义](docs/openapi/)

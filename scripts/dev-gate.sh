@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
 # 本地质量门禁：对齐 CONTRIBUTING.md / CI 的常用命令。
+# 不含 CI 中的 web e2e、Compose 组合校验与 OpenAPI / Shell 语法校验（见 .github/workflows/ci.yml）。
 # 用法：
 #   ./scripts/dev-gate.sh                 # 全部模块
 #   ./scripts/dev-gate.sh server web      # 子集：server | parser | parse-java | web | deploy
@@ -11,8 +12,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODULES=("$@")
 [[ ${#MODULES[@]} -eq 0 ]] && MODULES=(server parser parse-java web deploy)
 
-if [[ -z "${JAVA_HOME:-}" ]] && [[ -d /Library/Java/JavaVirtualMachines/jdk-17.0.1.jdk/Contents/Home ]]; then
-  export JAVA_HOME="/Library/Java/JavaVirtualMachines/jdk-17.0.1.jdk/Contents/Home"
+# 未显式设置 JAVA_HOME 时，macOS 上借系统的 java_home 选 JDK 17；其他平台沿用 PATH 中的 java
+if [[ -z "${JAVA_HOME:-}" ]] && [[ -x /usr/libexec/java_home ]]; then
+  if jdk17_home="$(/usr/libexec/java_home -v 17 2>/dev/null)"; then
+    export JAVA_HOME="${jdk17_home}"
+  fi
 fi
 
 run_server() {
